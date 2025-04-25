@@ -18,11 +18,22 @@ export default function CameraCapture({ onImageCapture, side }: CameraCapturePro
     try {
       setErrorMessage(null);
       const mediaStream = await navigator.mediaDevices.getUserMedia({ 
-        video: { facingMode: 'environment' } 
+        video: { 
+          facingMode: 'environment',
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        },
+        audio: false
       });
       
       if (videoRef.current) {
         videoRef.current.srcObject = mediaStream;
+        videoRef.current.onloadedmetadata = () => {
+          videoRef.current?.play().catch(err => {
+            console.error('Error playing video:', err);
+            setErrorMessage('Error starting video stream. Please refresh and try again.');
+          });
+        };
         setStream(mediaStream);
         setIsCameraActive(true);
       }
@@ -68,7 +79,7 @@ export default function CameraCapture({ onImageCapture, side }: CameraCapturePro
 
   return (
     <div className="rounded-lg overflow-hidden border border-slate-300 mb-3">
-      <div className="camera-container flex items-center justify-center bg-slate-200 relative" style={{ minHeight: "200px" }}>
+      <div className="camera-container flex items-center justify-center bg-slate-200 relative" style={{ minHeight: "300px", maxHeight: "400px" }}>
         {errorMessage && (
           <div className="text-center text-red-500 p-4">
             <p>{errorMessage}</p>
@@ -96,7 +107,9 @@ export default function CameraCapture({ onImageCapture, side }: CameraCapturePro
             ref={videoRef}
             autoPlay
             playsInline
+            muted
             className="w-full h-full object-cover"
+            style={{ height: "280px", width: "100%" }}
           />
         )}
         
@@ -104,6 +117,7 @@ export default function CameraCapture({ onImageCapture, side }: CameraCapturePro
           <canvas
             ref={canvasRef}
             className="w-full h-full object-contain"
+            style={{ height: "280px", width: "100%" }}
           />
         )}
       </div>
