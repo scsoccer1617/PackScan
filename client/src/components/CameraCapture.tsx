@@ -145,17 +145,18 @@ export default function CameraCapture({ onImageCapture, side }: CameraCapturePro
             <p className="text-slate-500 mt-2">Capture {side} of card using camera or select from your gallery</p>
             <div className="flex flex-col sm:flex-row gap-2 mt-4 justify-center">
               <Button 
-                onClick={startCamera}
+                onClick={() => {
+                  // Show options when Add Image is clicked
+                  const selectMethod = window.confirm("Select an option:\n\n• OK - Take a picture with camera\n• Cancel - Select from gallery");
+                  if (selectMethod) {
+                    startCamera();
+                  } else {
+                    fileInputRef.current?.click();
+                  }
+                }}
                 className="bg-primary-600 hover:bg-primary-700 text-white"
               >
-                Start Camera
-              </Button>
-              <Button 
-                onClick={() => fileInputRef.current?.click()}
-                variant="outline"
-                className="border-slate-300 bg-white text-slate-700"
-              >
-                Upload Image
+                Add Image
               </Button>
               <input 
                 type="file"
@@ -199,19 +200,19 @@ export default function CameraCapture({ onImageCapture, side }: CameraCapturePro
           {!isCameraActive && !hasCapture && (
             <div className="flex gap-2">
               <Button 
-                onClick={() => fileInputRef.current?.click()}
-                variant="outline"
-                className="border-slate-300 bg-white hover:bg-slate-100 text-slate-700"
-                size="sm"
-              >
-                Upload
-              </Button>
-              <Button 
-                onClick={startCamera}
+                onClick={() => {
+                  // Show options when Add Image is clicked
+                  const selectMethod = window.confirm("Select an option:\n\n• OK - Take a picture with camera\n• Cancel - Select from gallery");
+                  if (selectMethod) {
+                    startCamera();
+                  } else {
+                    fileInputRef.current?.click();
+                  }
+                }}
                 className="bg-primary-600 hover:bg-primary-700 text-white"
                 size="sm"
               >
-                Camera
+                Add Image
               </Button>
             </div>
           )}
