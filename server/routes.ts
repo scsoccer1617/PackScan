@@ -7,6 +7,7 @@ import multer from "multer";
 import path from "path";
 import fs from "fs";
 import { v4 as uuidv4 } from "uuid";
+import { analyzeSportsCardImage } from "./openai";
 
 // Google Sheets variables
 const googleSheetsInstance = global.googleSheetsInstance;
@@ -375,6 +376,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error fetching top cards:', error);
       res.status(500).json({ message: 'Failed to fetch top cards' });
+    }
+  });
+
+  // OCR endpoint to analyze card images
+  app.post(`${apiPrefix}/analyze-card-image`, upload.single('image'), async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ message: 'No image provided' });
+      }
+
+      // Convert buffer to base64
+      const base64Image = req.file.buffer.toString('base64');
+      
+      // Run OCR on the image
+      const cardInfo = await analyzeSportsCardImage(base64Image);
+      
+      res.json({
+        success: true,
+        data: cardInfo
+      });
+    } catch (error) {
+      console.error('Error analyzing card image:', error);
+      res.status(500).json({ 
+        success: false, 
+        message: 'Failed to analyze card image',
+        error: error.message 
+      });
     }
   });
 
