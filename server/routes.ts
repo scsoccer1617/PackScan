@@ -7,7 +7,7 @@ import multer from "multer";
 import path from "path";
 import fs from "fs";
 import { v4 as uuidv4 } from "uuid";
-import { analyzeSportsCardImage } from "./googleVision";
+import { analyzeSportsCardImage } from "./googleVisionFetch";
 
 // Google Sheets variables
 const googleSheetsInstance = global.googleSheetsInstance;
@@ -386,11 +386,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: 'No image provided' });
       }
 
+      console.log('Received image file:', req.file.originalname, 'size:', req.file.size);
+      
       // Convert buffer to base64
       const base64Image = req.file.buffer.toString('base64');
+      console.log('Processing image with Google Cloud Vision API...');
       
       // Run OCR on the image
       const cardInfo = await analyzeSportsCardImage(base64Image);
+      console.log('OCR results:', JSON.stringify(cardInfo, null, 2));
       
       res.json({
         success: true,

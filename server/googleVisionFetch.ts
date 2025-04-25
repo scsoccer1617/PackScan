@@ -1,51 +1,71 @@
-import { ImageAnnotatorClient } from '@google-cloud/vision';
 import { CardFormValues } from '../shared/schema';
 
-// Initialize the client with API key
-const visionClient = new ImageAnnotatorClient({
-  keyFilename: undefined, // Not using service account JSON
-  apiEndpoint: 'https://vision.googleapis.com',
-  auth: {
-    apiKey: process.env.GOOGLE_CLOUD_VISION_API_KEY || '',
-  },
-});
-
 /**
- * Extract text from image using Google Cloud Vision API
+ * Extract text from image using Google Cloud Vision API via direct fetch
  * @param base64Image Base64 encoded image
- * @returns Extracted text and detected text blocks
+ * @returns Extracted text
  */
-export async function extractTextFromImage(base64Image: string): Promise<{
-  fullText: string;
-  textBlocks: { text: string; confidence: number }[];
-}> {
+export async function extractTextFromImage(base64Image: string): Promise<string> {
   try {
-    console.log('Using Vision API with key:', process.env.GOOGLE_CLOUD_VISION_API_KEY ? 'API key provided' : 'No API key found');
+    console.log('Using Google Cloud Vision API with direct fetch method');
+    const apiKey = process.env.GOOGLE_CLOUD_VISION_API_KEY;
     
-    // Perform text detection on the image
-    console.log('Sending request to Google Cloud Vision API...');
-    const [result] = await visionClient.textDetection({
-      image: {
-        content: Buffer.from(base64Image, 'base64')
-      }
-    });
-    console.log('Received response from Google Cloud Vision API');
-
-    // Get full text annotation
-    const fullText = result.fullTextAnnotation?.text || '';
-    console.log('Extracted full text:', fullText);
+    if (!apiKey) {
+      throw new Error('Google Cloud Vision API key is missing');
+    }
     
-    // Get individual text annotations with confidence
-    const textBlocks = result.textAnnotations?.slice(1).map(annotation => ({
-      text: annotation.description || '',
-      confidence: annotation.confidence || 0
-    })) || [];
-    console.log(`Found ${textBlocks.length} text blocks`);
-
-    return {
-      fullText,
-      textBlocks
+    const endpoint = `https://vision.googleapis.com/v1/images:annotate?key=${apiKey}`;
+    
+    // Prepare request body for text detection
+    const requestBody = {
+      requests: [
+        {
+          image: {
+            content: base64Image
+          },
+          features: [
+            {
+              type: 'TEXT_DETECTION',
+              maxResults: 50
+            }
+          ]
+        }
+      ]
     };
+    
+    // Send request to Google Cloud Vision API
+    console.log('Sending request to Vision API endpoint');
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestBody)
+    });
+    
+    // Check if request was successful
+    if (!response.ok) {
+      const errorData = await response.json();
+      console.error('Vision API error:', errorData);
+      throw new Error(`Google Vision API error: ${response.status} ${response.statusText}`);
+    }
+    
+    // Parse response
+    const data = await response.json();
+    console.log('Received Vision API response');
+    
+    // Extract text from response
+    const textAnnotations = data.responses[0]?.textAnnotations;
+    if (!textAnnotations || textAnnotations.length === 0) {
+      console.log('No text detected in the image');
+      return '';
+    }
+    
+    // The first element contains the entire text from the image
+    const fullText = textAnnotations[0].description || '';
+    console.log('Extracted text:', fullText);
+    
+    return fullText;
   } catch (error: any) {
     console.error('Error in Google Vision API:', error);
     throw new Error(`Failed to analyze image with Google Vision: ${error.message || 'Unknown error'}`);
@@ -60,7 +80,7 @@ export async function extractTextFromImage(base64Image: string): Promise<{
 export async function analyzeSportsCardImage(base64Image: string): Promise<Partial<CardFormValues>> {
   try {
     // Extract text from image
-    const { fullText, textBlocks } = await extractTextFromImage(base64Image);
+    const fullText = await extractTextFromImage(base64Image);
     
     // Initialize result
     const result: Partial<CardFormValues> = {};
