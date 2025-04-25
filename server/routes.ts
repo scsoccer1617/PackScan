@@ -7,7 +7,7 @@ import multer from "multer";
 import path from "path";
 import fs from "fs";
 import { v4 as uuidv4 } from "uuid";
-import { analyzeSportsCardImage } from "./googleVisionFetch";
+import { analyzeSportsCardImage } from "./googleVisionServiceAccount";
 
 // Google Sheets variables
 const googleSheetsInstance = global.googleSheetsInstance;
@@ -407,12 +407,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let userMessage = 'Failed to analyze card image';
       
       // Check for common API errors
-      if (error.message && (
-          error.message.includes('quota exceeded') || 
-          error.message.includes('rate limit') || 
-          error.message.includes('insufficient_quota'))) {
-        statusCode = 429;
-        userMessage = 'OpenAI API quota exceeded. Please try again later or contact support for assistance. You can still manually enter card details.';
+      if (error.message) {
+        if (error.message.includes('quota exceeded') || 
+            error.message.includes('rate limit') || 
+            error.message.includes('insufficient_quota')) {
+          statusCode = 429;
+          userMessage = 'API quota exceeded. Please try again later or contact support for assistance. You can still manually enter card details.';
+        } else if (error.message.includes('PERMISSION_DENIED') || 
+                  error.message.includes('403') || 
+                  error.message.includes('not enabled') || 
+                  error.message.includes('disabled')) {
+          statusCode = 403;
+          userMessage = 'The Vision API service is not properly configured or permission was denied. Please check your Google Cloud settings.';
+        } else if (error.message.includes('credentials') || 
+                  error.message.includes('authentication')) {
+          statusCode = 401;
+          userMessage = 'Authentication failed with the Vision API. Please check your service account credentials.';
+        }
       }
       
       res.status(statusCode).json({ 
