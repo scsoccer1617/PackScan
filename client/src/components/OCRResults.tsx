@@ -22,12 +22,12 @@ export default function OCRResults({ loading, error, data, onApply, onCancel }: 
             Analyzing Card Image
           </CardTitle>
           <CardDescription>
-            Using AI to extract information from your card...
+            Using Tesseract OCR to extract information from your card...
           </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="h-16 flex items-center justify-center">
-            <p className="text-slate-500">This may take a few seconds</p>
+            <p className="text-slate-500">This may take a few seconds. All processing happens locally in your browser.</p>
           </div>
         </CardContent>
       </Card>
@@ -35,26 +35,21 @@ export default function OCRResults({ loading, error, data, onApply, onCancel }: 
   }
   
   if (error) {
-    const isQuotaError = error.includes('quota') || error.includes('API usage limits');
-    
     return (
-      <Alert variant={isQuotaError ? ("warning" as any) : "destructive"} className="mt-4">
-        {isQuotaError ? <AlertTriangle className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
-        <AlertTitle>{isQuotaError ? "API Usage Limit Reached" : "Error Analyzing Image"}</AlertTitle>
+      <Alert variant="destructive" className="mt-4">
+        <AlertCircle className="h-4 w-4" />
+        <AlertTitle>Error Analyzing Image</AlertTitle>
         <AlertDescription>
-          {isQuotaError ? (
-            <div>
-              <p>{error}</p>
-              <p className="mt-2">This is happening because the OpenAI API usage limit has been reached. You can:</p>
-              <ul className="list-disc pl-5 mt-1 space-y-1">
-                <li>Wait for the quota to reset (usually within 24 hours)</li>
-                <li>Verify your billing information is complete in your OpenAI account</li>
-                <li>Manually enter the card details below</li>
-              </ul>
-            </div>
-          ) : (
-            error
-          )}
+          <div>
+            <p>{error}</p>
+            <p className="mt-2">This could be due to:</p>
+            <ul className="list-disc pl-5 mt-1 space-y-1">
+              <li>Poor image quality or lighting</li>
+              <li>Text on card not clearly visible</li>
+              <li>Card at an angle making text recognition difficult</li>
+            </ul>
+            <p className="mt-2">You can try again with a clearer image or manually enter the card details.</p>
+          </div>
         </AlertDescription>
         <div className="mt-4">
           <Button variant="outline" size="sm" onClick={onCancel}>
