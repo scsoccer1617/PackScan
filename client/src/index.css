@@ -1,0 +1,58 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply font-sans antialiased bg-slate-100 text-slate-800;
+  }
+  
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 215 25% 27%;
+    --card: 0 0% 100%;
+    --card-foreground: 215 25% 27%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 215 25% 27%;
+    --primary: 221 83% 53%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 25 95% 53%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 214 32% 91%;
+    --muted-foreground: 215 16% 47%;
+    --accent: 214 32% 91%;
+    --accent-foreground: 215 25% 27%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 221 83% 53%;
+    --radius: 0.5rem;
+    --chart-1: 221 83% 53%;
+    --chart-2: 25 95% 53%;
+    --chart-3: 142 72% 50%;
+    --chart-4: 262 83% 58%;
+    --chart-5: 318 70% 55%;
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 215 25% 27%;
+    --sidebar-primary: 221 83% 53%;
+    --sidebar-primary-foreground: 210 40% 98%;
+    --sidebar-accent: 214 32% 91%;
+    --sidebar-accent-foreground: 215 25% 27%;
+    --sidebar-border: 214 32% 91%;
+    --sidebar-ring: 221 83% 53%;
+  }
+
+  .camera-container {
+    aspect-ratio: 2/3;
+    background-color: #f1f5f9;
+  }
+
+  .card-shadow {
+    box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06);
+  }
+}
