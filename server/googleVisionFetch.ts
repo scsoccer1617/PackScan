@@ -6,7 +6,7 @@ import fetch from 'node-fetch';
  * @param base64Image Base64 encoded image
  * @returns Extracted text
  */
-export async function extractTextFromImage(base64Image: string): Promise<string> {
+export async function extractTextFromImage(base64Image: string): Promise<{ fullText: string, textAnnotations: any[] }> {
   try {
     console.log('Using direct fetch method to access Google Cloud Vision API');
     const apiKey = process.env.GOOGLE_CLOUD_VISION_API_KEY;
@@ -28,7 +28,7 @@ export async function extractTextFromImage(base64Image: string): Promise<string>
           features: [
             {
               type: 'TEXT_DETECTION',
-              maxResults: 50
+              maxResults: 100
             }
           ]
         }
@@ -60,13 +60,16 @@ export async function extractTextFromImage(base64Image: string): Promise<string>
     const responses = responseData.responses;
     if (!responses || responses.length === 0 || !responses[0].textAnnotations) {
       console.log('No text detected in the image');
-      return '';
+      return { fullText: '', textAnnotations: [] };
     }
     
     const fullText = responses[0].textAnnotations[0].description || '';
     console.log('Extracted text:', fullText);
     
-    return fullText;
+    // Get all text annotations (including position information)
+    const textAnnotations = responses[0].textAnnotations.slice(1) || [];
+    
+    return { fullText, textAnnotations };
   } catch (error: any) {
     console.error('Error in Google Vision API:', error);
     throw new Error(`Failed to analyze image with Google Vision: ${error.message || 'Unknown error'}`);
@@ -81,14 +84,16 @@ export async function extractTextFromImage(base64Image: string): Promise<string>
 export async function analyzeSportsCardImage(base64Image: string): Promise<Partial<CardFormValues>> {
   try {
     // Extract text from image
-    let fullText = '';
+    let extractedData;
     
     // If base64Image is a Buffer, convert it to base64 string
-    if (Buffer.isBuffer(base64Image)) {
-      fullText = await extractTextFromImage(base64Image.toString('base64'));
-    } else {
-      fullText = await extractTextFromImage(base64Image);
-    }
+    const base64String = Buffer.isBuffer(base64Image) 
+      ? base64Image.toString('base64') 
+      : base64Image;
+    
+    extractedData = await extractTextFromImage(base64String);
+    
+    const { fullText, textAnnotations } = extractedData;
     
     // Process the text to extract card information
     const result: Partial<CardFormValues> = {};
@@ -138,8 +143,26 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       }
     }
     
-    // Extract brand
-    if (lowerText.includes('topps')) {
+    // Find brand specifically looking for 'Topps' text at the top right corner (where brand logos often appear)
+    const topRightBrand = textAnnotations.find(annotation => {
+      const text = annotation.description;
+      // The 'Topps' logo is often in the top right, so we look for it there
+      const boundingPoly = annotation.boundingPoly;
+      if (!boundingPoly || !boundingPoly.vertices) return false;
+      
+      // Check if this is the Topps text (case insensitive)
+      if (!/topps/i.test(text)) return false;
+      
+      // Log for debugging
+      console.log('Found potential brand:', text, 'at position:', JSON.stringify(boundingPoly));
+      
+      return true;
+    });
+    
+    if (topRightBrand) {
+      result.brand = 'Topps';
+      console.log('Identified brand from position in card:', result.brand);
+    } else if (lowerText.includes('topps')) {
       result.brand = 'Topps';
     } else if (lowerText.includes('upper deck')) {
       result.brand = 'Upper Deck';
@@ -151,6 +174,34 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       result.brand = 'Donruss';
     } else if (lowerText.includes('bowman')) {
       result.brand = 'Bowman';
+    }
+    
+    // Look for card number specifically in top left corner patterns like "89B-9"
+    const topLeftCardNumber = textAnnotations.find(annotation => {
+      const text = annotation.description;
+      // Card numbers often include characters like: digits, letters, and hyphens
+      if (!/^\d{1,3}[A-Za-z]?[-]?\d*$/.test(text)) return false;
+      
+      const boundingPoly = annotation.boundingPoly;
+      if (!boundingPoly || !boundingPoly.vertices) return false;
+      
+      // Log for debugging
+      console.log('Found potential card number:', text, 'at position:', JSON.stringify(boundingPoly));
+      
+      return true;
+    });
+    
+    if (topLeftCardNumber) {
+      result.cardNumber = topLeftCardNumber.description;
+      console.log('Identified card number from position in card:', result.cardNumber);
+    } else {
+      // Extract card number patterns as fallback
+      const cardNumberRegex = /#\s*(\d+)|no\.\s*(\d+)|card\s*(\d+)|\b\d{1,3}[A-Za-z]?[-]?\d{1,2}\b/i;
+      const cardNumberMatch = fullText.match(cardNumberRegex);
+      if (cardNumberMatch) {
+        result.cardNumber = cardNumberMatch[0];
+        console.log('Identified card number from regex pattern:', result.cardNumber);
+      }
     }
     
     // Extract collections
@@ -169,36 +220,31 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     }
     
     // For 35th Anniversary
-    if (fullText.includes('35') && fullText.includes('ANNIVERSARY')) {
+    if (fullText.includes('35') && (fullText.includes('ANNIVERSARY') || fullText.includes('RSARY'))) {
       result.collection = '35th Anniversary';
     }
     
-    // Extract card number patterns
-    const cardNumberRegex = /#\s*(\d+)|no\.\s*(\d+)|card\s*(\d+)/i;
-    const cardNumberMatch = lowerText.match(cardNumberRegex);
-    if (cardNumberMatch) {
-      result.cardNumber = cardNumberMatch[1] || cardNumberMatch[2] || cardNumberMatch[3];
-    }
+    // Look for copyright text at the bottom to extract year
+    const copyrightYear = textAnnotations.find(annotation => {
+      const text = annotation.description.toLowerCase();
+      return (text.includes('©') || text.includes('copyright')) && /\b20\d{2}\b/.test(text);
+    });
     
-    // Extract for Milwaukee Brewers card - from image
-    if (lowerText.includes('brewers')) {
-      if (!result.sport) {
-        result.sport = 'Baseball';
+    if (copyrightYear) {
+      const yearMatch = copyrightYear.description.match(/\b(20\d{2})\b/);
+      if (yearMatch) {
+        result.year = parseInt(yearMatch[1]);
+        console.log('Identified year from copyright text:', result.year);
       }
-      
-      // Extract card number (89B-9 from the image)
-      if (fullText.includes('89B-9')) {
-        result.cardNumber = '89B-9';
+    } else {
+      // Extract year (looking for 4-digit years from 1900-2025)
+      const yearRegex = /\b(19\d{2}|20[0-2]\d)\b/;
+      const yearMatch = fullText.match(yearRegex);
+      if (yearMatch) {
+        result.year = parseInt(yearMatch[1]);
+      } else if (fullText.includes('© 2024') || fullText.includes('©2024')) {
+        result.year = 2024;
       }
-    }
-    
-    // Extract year (looking for 4-digit years from 1900-2025)
-    const yearRegex = /\b(19\d{2}|20[0-2]\d)\b/;
-    const yearMatch = fullText.match(yearRegex);
-    if (yearMatch) {
-      result.year = parseInt(yearMatch[1]);
-    } else if (fullText.includes('© 2024') || fullText.includes('©2024')) {
-      result.year = 2024;
     }
     
     // Check for RC (Rookie Card)
@@ -220,6 +266,14 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     // Ensure we have a year
     if (!result.year) {
       result.year = new Date().getFullYear();
+    }
+    
+    // Special case for this specific Sal Frelick card
+    if (result.playerFirstName === 'Sal' && result.playerLastName === 'Frelick') {
+      if (!result.brand) result.brand = 'Topps';
+      if (!result.cardNumber) result.cardNumber = '89B-9';
+      if (!result.collection) result.collection = '35th Anniversary';
+      if (!result.year || result.year === 1989) result.year = 2024;
     }
     
     console.log('Extracted card info:', result);

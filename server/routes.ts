@@ -408,8 +408,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log('Received image file:', req.file.originalname, 'size:', req.file.size);
       console.log('Processing image with Google Cloud Vision API...');
       
-      // Run OCR on the image - directly pass the buffer
-      const cardInfo = await analyzeSportsCardImage(req.file.buffer);
+      // Run OCR on the image - convert buffer to base64 string
+      const cardInfo = await analyzeSportsCardImage(req.file.buffer.toString('base64'));
       console.log('OCR results:', JSON.stringify(cardInfo, null, 2));
       
       res.json({
