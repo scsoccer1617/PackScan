@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { CardFormValues } from "@shared/schema";
+import { analyzeCardImage } from "../lib/tesseractOcr";
 
 export interface OCRResult {
   loading: boolean;
@@ -18,51 +19,32 @@ export function useOCR(): OCRResult {
     setError(null);
     
     try {
-      // Extract base64 data from dataURL
-      const base64Data = imageData.split(',')[1];
+      console.log("Starting client-side OCR analysis with Tesseract.js...");
       
-      // Create a Blob from the base64 data
-      const blob = await fetch(imageData).then(r => r.blob());
+      // Use Tesseract.js for client-side OCR processing
+      const cardInfo = await analyzeCardImage(imageData);
       
-      // Create FormData and append the image
-      const formData = new FormData();
-      formData.append('image', blob, 'card.jpg');
-      
-      // Send to API for analysis
-      const response = await fetch('/api/analyze-card-image', {
-        method: 'POST',
-        body: formData,
-        credentials: 'include',
-      });
-      
-      const result = await response.json();
-      
-      if (!response.ok || !result.success) {
-        // Get the specific error message from the server if available
-        const errorMessage = result.message || `Failed to analyze image. Server returned: ${response.status}`;
-        throw new Error(errorMessage);
-      }
-      
-      // Map the API response to our form values
-      const cardInfo: Partial<CardFormValues> = {
-        sport: result.data.sport || "",
-        playerFirstName: result.data.playerFirstName || "",
-        playerLastName: result.data.playerLastName || "",
-        brand: result.data.brand || "",
-        collection: result.data.collection || "",
-        cardNumber: result.data.cardNumber || "",
-        year: result.data.year > 0 ? result.data.year : new Date().getFullYear(),
-        variant: result.data.variant || "",
-        serialNumber: result.data.serialNumber || "",
-        condition: result.data.condition || "",
+      // Convert to the expected format
+      const formattedCardInfo: Partial<CardFormValues> = {
+        sport: cardInfo.sport || "",
+        playerFirstName: cardInfo.playerFirstName || "",
+        playerLastName: cardInfo.playerLastName || "",
+        brand: cardInfo.brand || "",
+        collection: cardInfo.collection || "",
+        cardNumber: cardInfo.cardNumber || "",
+        year: cardInfo.year || new Date().getFullYear(),
+        variant: cardInfo.variant || "",
+        serialNumber: cardInfo.serialNumber || "",
+        condition: cardInfo.condition || "PSA 9",
       };
       
-      setData(cardInfo);
+      setData(formattedCardInfo);
       setLoading(false);
-      return cardInfo;
+      return formattedCardInfo;
       
     } catch (err) {
       let errorMessage = err instanceof Error ? err.message : 'Unknown error during image analysis';
+      console.error("OCR Analysis error:", errorMessage);
       setError(errorMessage);
       setLoading(false);
       return null;
