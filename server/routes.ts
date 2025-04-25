@@ -1,4 +1,4 @@
-import type { Express } from "express";
+import type { Express, Request } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import * as schema from "@shared/schema";
@@ -10,8 +10,27 @@ import { v4 as uuidv4 } from "uuid";
 import { analyzeSportsCardImage } from "./googleVisionFetch";
 
 // Google Sheets variables
-const googleSheetsInstance = global.googleSheetsInstance;
+const googleSheetsInstance = (global as any).googleSheetsInstance;
 const spreadsheetId = process.env.GOOGLE_SHEET_ID;
+
+// TypeScript interfaces for Express with multer
+interface MulterFile {
+  fieldname: string;
+  originalname: string;
+  encoding: string;
+  mimetype: string;
+  size: number;
+  destination: string;
+  filename: string;
+  path: string;
+  buffer: Buffer;
+}
+
+// Extend Express.Request
+interface MulterRequest extends Request {
+  file?: MulterFile;
+  files?: { [fieldname: string]: MulterFile[] };
+}
 
 // Configure multer for file uploads
 const upload = multer({
@@ -380,7 +399,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // OCR endpoint to analyze card images
-  app.post(`${apiPrefix}/analyze-card-image`, upload.single('image'), async (req, res) => {
+  app.post(`${apiPrefix}/analyze-card-image`, upload.single('image'), async (req: MulterRequest, res) => {
     try {
       if (!req.file) {
         return res.status(400).json({ message: 'No image provided' });
@@ -397,7 +416,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         success: true,
         data: cardInfo
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error analyzing card image:', error);
       
       let statusCode = 500;
@@ -415,7 +434,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
                   error.message.includes('not enabled') || 
                   error.message.includes('disabled')) {
           statusCode = 403;
-          userMessage = 'The Vision API service is not properly configured or permission was denied. Please check your Google Cloud settings.';
+          userMessage = 'The Vision API service is not properly configured or permission was denied. Please make sure the Vision API is enabled in your Google Cloud project.';
+          
+          // Check for specific Google Cloud Vision API error
+          if (error.message.includes('Vision API has not been used in project') || 
+              error.message.includes('it is disabled')) {
+            userMessage = 'The Google Cloud Vision API is not enabled for your project. Please enable it in the Google Cloud Console by visiting the URL mentioned in the error details below.';
+          }
         } else if (error.message.includes('credentials') || 
                   error.message.includes('authentication')) {
           statusCode = 401;

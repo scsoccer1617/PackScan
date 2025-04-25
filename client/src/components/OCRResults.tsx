@@ -22,12 +22,12 @@ export default function OCRResults({ loading, error, data, onApply, onCancel }: 
             Analyzing Card Image
           </CardTitle>
           <CardDescription>
-            Using OCR to analyze your card...
+            Using Google Cloud Vision AI to analyze your card...
           </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="h-16 flex items-center justify-center">
-            <p className="text-slate-500">This may take a few seconds. Tesseract.js is processing your card image to extract the details.</p>
+            <p className="text-slate-500">This may take a few seconds. Google's powerful AI is extracting the details from your card image.</p>
           </div>
         </CardContent>
       </Card>
@@ -42,12 +42,24 @@ export default function OCRResults({ loading, error, data, onApply, onCancel }: 
         <AlertDescription>
           <div>
             <p>{error}</p>
-            <p className="mt-2">This could be due to:</p>
-            <ul className="list-disc pl-5 mt-1 space-y-1">
-              <li>Poor image quality or lighting</li>
-              <li>Text on card not clearly visible</li>
-              <li>Card at an angle making text recognition difficult</li>
-            </ul>
+            
+            {error.includes('Vision API') || error.includes('Google Cloud') || error.includes('API') ? (
+              <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-md">
+                <p className="font-medium">API Configuration Issue</p>
+                <p className="text-sm text-gray-700 mt-1">There appears to be an issue with the Google Cloud Vision API configuration.</p>
+                <p className="text-sm text-gray-700 mt-1">Please follow the instructions to enable the API in your Google Cloud Console.</p>
+              </div>
+            ) : (
+              <>
+                <p className="mt-2">This could be due to:</p>
+                <ul className="list-disc pl-5 mt-1 space-y-1">
+                  <li>Poor image quality or lighting</li>
+                  <li>Text on card not clearly visible</li>
+                  <li>Card at an angle making text recognition difficult</li>
+                </ul>
+              </>
+            )}
+            
             <p className="mt-2">You can try again with a clearer image or manually enter the card details.</p>
           </div>
         </AlertDescription>
