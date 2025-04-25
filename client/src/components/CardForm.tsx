@@ -10,8 +10,10 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
+import { useOCR } from "@/hooks/use-ocr";
 import CameraCapture from "./CameraCapture";
 import ImagePreview from "./ImagePreview";
+import OCRResults from "./OCRResults";
 
 const sportOptions = [
   "Baseball",
@@ -52,6 +54,8 @@ export default function CardForm() {
   const [backImage, setBackImage] = useState<string>('');
   const [selectedCondition, setSelectedCondition] = useState<string>("PSA 9");
   const [valueRange, setValueRange] = useState<string>("$180-220");
+  const [showOCR, setShowOCR] = useState<boolean>(false);
+  const { loading, error, data, analyzeImage } = useOCR();
 
   // Form setup
   const form = useForm<CardFormValues>({
@@ -166,6 +170,51 @@ export default function CardForm() {
   const toggleCaptureMode = (side: 'front' | 'back') => {
     setCaptureMode(side);
   };
+  
+  const handleAnalyzeRequest = async () => {
+    if (!frontImage) {
+      toast({
+        title: "Image required",
+        description: "Please capture a front image of your card first",
+        variant: "destructive"
+      });
+      return;
+    }
+    
+    setShowOCR(true);
+    try {
+      await analyzeImage(frontImage);
+    } catch (err) {
+      // Error handling is done in the hook
+    }
+  };
+  
+  const handleApplyOCRResults = (ocrData: Partial<CardFormValues>) => {
+    // Apply OCR data to form
+    if (ocrData.sport) form.setValue('sport', ocrData.sport);
+    if (ocrData.playerFirstName) form.setValue('playerFirstName', ocrData.playerFirstName);
+    if (ocrData.playerLastName) form.setValue('playerLastName', ocrData.playerLastName);
+    if (ocrData.brand) form.setValue('brand', ocrData.brand);
+    if (ocrData.collection) form.setValue('collection', ocrData.collection);
+    if (ocrData.cardNumber) form.setValue('cardNumber', ocrData.cardNumber);
+    if (ocrData.year && ocrData.year > 0) form.setValue('year', ocrData.year);
+    if (ocrData.variant) form.setValue('variant', ocrData.variant);
+    if (ocrData.serialNumber) form.setValue('serialNumber', ocrData.serialNumber);
+    if (ocrData.condition) {
+      handleConditionChange(ocrData.condition);
+    }
+    
+    toast({
+      title: "Card details applied",
+      description: "OCR results have been applied to the form"
+    });
+    
+    setShowOCR(false);
+  };
+  
+  const handleCancelOCR = () => {
+    setShowOCR(false);
+  };
 
   if (captureMode !== 'none') {
     return (
@@ -196,7 +245,18 @@ export default function CardForm() {
           frontImage={frontImage} 
           backImage={backImage} 
           onCaptureRequest={toggleCaptureMode}
+          onAnalyzeRequest={handleAnalyzeRequest}
         />
+        
+        {showOCR && (
+          <OCRResults 
+            loading={loading} 
+            error={error} 
+            data={data} 
+            onApply={handleApplyOCRResults} 
+            onCancel={handleCancelOCR}
+          />
+        )}
         
         <p className="text-xs text-slate-500">Capture both front and back of your card for complete documentation.</p>
       </div>
