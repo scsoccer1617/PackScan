@@ -1,7 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Loader2, AlertCircle, Check } from 'lucide-react';
+import { Loader2, AlertCircle, Check, AlertTriangle } from 'lucide-react';
 import { CardFormValues } from "@shared/schema";
 
 interface OCRResultsProps {
@@ -35,12 +35,26 @@ export default function OCRResults({ loading, error, data, onApply, onCancel }: 
   }
   
   if (error) {
+    const isQuotaError = error.includes('quota') || error.includes('API usage limits');
+    
     return (
-      <Alert variant="destructive" className="mt-4">
-        <AlertCircle className="h-4 w-4" />
-        <AlertTitle>Error Analyzing Image</AlertTitle>
+      <Alert variant={isQuotaError ? ("warning" as any) : "destructive"} className="mt-4">
+        {isQuotaError ? <AlertTriangle className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
+        <AlertTitle>{isQuotaError ? "API Usage Limit Reached" : "Error Analyzing Image"}</AlertTitle>
         <AlertDescription>
-          {error}
+          {isQuotaError ? (
+            <div>
+              <p>{error}</p>
+              <p className="mt-2">This is happening because the OpenAI API usage limit has been reached. You can:</p>
+              <ul className="list-disc pl-5 mt-1 space-y-1">
+                <li>Wait for the quota to reset (usually within 24 hours)</li>
+                <li>Verify your billing information is complete in your OpenAI account</li>
+                <li>Manually enter the card details below</li>
+              </ul>
+            </div>
+          ) : (
+            error
+          )}
         </AlertDescription>
         <div className="mt-4">
           <Button variant="outline" size="sm" onClick={onCancel}>
