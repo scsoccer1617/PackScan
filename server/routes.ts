@@ -398,9 +398,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     } catch (error) {
       console.error('Error analyzing card image:', error);
-      res.status(500).json({ 
+      
+      let statusCode = 500;
+      let userMessage = 'Failed to analyze card image';
+      
+      // Check for common API errors
+      if (error.message && (
+          error.message.includes('quota exceeded') || 
+          error.message.includes('rate limit') || 
+          error.message.includes('insufficient_quota'))) {
+        statusCode = 429;
+        userMessage = 'OpenAI API quota exceeded. Please try again later or contact support for assistance. You can still manually enter card details.';
+      }
+      
+      res.status(statusCode).json({ 
         success: false, 
-        message: 'Failed to analyze card image',
+        message: userMessage,
         error: error.message 
       });
     }

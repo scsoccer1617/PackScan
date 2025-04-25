@@ -35,14 +35,12 @@ export function useOCR(): OCRResult {
         credentials: 'include',
       });
       
-      if (!response.ok) {
-        throw new Error('Failed to analyze image. Server returned: ' + response.status);
-      }
-      
       const result = await response.json();
       
-      if (!result.success) {
-        throw new Error(result.message || 'Analysis failed');
+      if (!response.ok || !result.success) {
+        // Get the specific error message from the server if available
+        const errorMessage = result.message || `Failed to analyze image. Server returned: ${response.status}`;
+        throw new Error(errorMessage);
       }
       
       // Map the API response to our form values
