@@ -2,24 +2,76 @@ import { CardFormValues } from '../shared/schema';
 import fetch from 'node-fetch';
 
 /**
- * Extract text from image using Google Cloud Vision API via direct fetch
+ * Extract text from image using Google Cloud Vision API via direct REST
  * @param base64Image Base64 encoded image
  * @returns Extracted text
  */
 export async function extractTextFromImage(base64Image: string): Promise<string> {
   try {
-    console.log('Using direct fetch method to access Google Cloud Vision API');
-    const apiKey = process.env.GOOGLE_CLOUD_VISION_API_KEY;
+    console.log('Using direct REST method to access Google Cloud Vision API');
     
-    if (!apiKey) {
-      throw new Error('Missing Google Cloud Vision API key');
+    // Create a JWT for authentication
+    const email = process.env.GOOGLE_CLIENT_EMAIL;
+    const key = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n');
+    
+    if (!email || !key) {
+      throw new Error('Missing Google service account credentials');
     }
     
-    // Prepare the request
-    const visionEndpoint = `https://vision.googleapis.com/v1/images:annotate?key=${apiKey}`;
+    // Prepare the request to get access token
+    const tokenEndpoint = 'https://oauth2.googleapis.com/token';
+    const scope = 'https://www.googleapis.com/auth/cloud-platform';
     
-    // Create request body
-    const requestBody = {
+    // Create a JWT claim
+    const now = Math.floor(Date.now() / 1000);
+    const expiry = now + 3600; // 1 hour
+    
+    const claim = {
+      iss: email,
+      scope: scope,
+      aud: tokenEndpoint,
+      exp: expiry,
+      iat: now
+    };
+    
+    // Encode the claim
+    const header = { alg: 'RS256', typ: 'JWT' };
+    const headerBase64 = Buffer.from(JSON.stringify(header)).toString('base64').replace(/=+$/, '');
+    const claimBase64 = Buffer.from(JSON.stringify(claim)).toString('base64').replace(/=+$/, '');
+    
+    // Sign the JWT
+    const crypto = require('crypto');
+    const sign = crypto.createSign('RSA-SHA256');
+    sign.update(`${headerBase64}.${claimBase64}`);
+    const signature = sign.sign(key, 'base64').replace(/=+$/, '');
+    
+    const jwt = `${headerBase64}.${claimBase64}.${signature}`;
+    
+    // Get the access token
+    console.log('Getting access token...');
+    const tokenResponse = await fetch(tokenEndpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${jwt}`
+    });
+    
+    const tokenData = await tokenResponse.json() as any;
+    
+    if (!tokenResponse.ok || !tokenData.access_token) {
+      console.error('Token error:', tokenData);
+      throw new Error(`Failed to get access token: ${tokenData.error || 'Unknown error'}`);
+    }
+    
+    const accessToken = tokenData.access_token;
+    console.log('Access token obtained successfully');
+    
+    // Make the Vision API request
+    const visionEndpoint = 'https://vision.googleapis.com/v1/images:annotate';
+    console.log('Sending request to Vision API...');
+    
+    const visionRequest = {
       requests: [
         {
           image: {
@@ -35,29 +87,26 @@ export async function extractTextFromImage(base64Image: string): Promise<string>
       ]
     };
     
-    console.log('Sending request to Vision API...');
-    
-    // Send the request
-    const response = await fetch(visionEndpoint, {
+    const visionResponse = await fetch(`${visionEndpoint}?key=${process.env.GOOGLE_CLOUD_VISION_API_KEY}`, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`
       },
-      body: JSON.stringify(requestBody)
+      body: JSON.stringify(visionRequest)
     });
     
-    // Process the response
-    const responseData = await response.json() as any;
+    const visionData = await visionResponse.json() as any;
     
-    if (!response.ok) {
-      console.error('Vision API error:', responseData);
-      throw new Error(`Vision API error: ${responseData.error?.message || 'Unknown error'}`);
+    if (!visionResponse.ok) {
+      console.error('Vision API error:', visionData);
+      throw new Error(`Vision API error: ${visionData.error?.message || 'Unknown error'}`);
     }
     
     console.log('Received Vision API response');
     
     // Extract the text
-    const responses = responseData.responses;
+    const responses = visionData.responses;
     if (!responses || responses.length === 0 || !responses[0].textAnnotations) {
       console.log('No text detected in the image');
       return '';
@@ -74,21 +123,17 @@ export async function extractTextFromImage(base64Image: string): Promise<string>
 }
 
 /**
- * Analyze a sports card image to extract relevant information
- * @param base64Image Base64 encoded image data
- * @returns Object with extracted card information
+ * Extract card information from a sports card image
+ * @param imageBuffer Image buffer
+ * @returns Parsed card information
  */
-export async function analyzeSportsCardImage(base64Image: string): Promise<Partial<CardFormValues>> {
+export async function analyzeSportsCardImage(imageBuffer: Buffer): Promise<Partial<CardFormValues>> {
   try {
-    // Extract text from image
-    let fullText = '';
+    // Convert buffer to base64
+    const base64Image = imageBuffer.toString('base64');
     
-    // If base64Image is a Buffer, convert it to base64 string
-    if (Buffer.isBuffer(base64Image)) {
-      fullText = await extractTextFromImage(base64Image.toString('base64'));
-    } else {
-      fullText = await extractTextFromImage(base64Image);
-    }
+    // Get text from the image
+    const fullText = await extractTextFromImage(base64Image);
     
     // Process the text to extract card information
     const result: Partial<CardFormValues> = {};
@@ -197,7 +242,10 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     const yearMatch = fullText.match(yearRegex);
     if (yearMatch) {
       result.year = parseInt(yearMatch[1]);
-    } else if (fullText.includes('© 2024') || fullText.includes('©2024')) {
+    }
+    
+    // Extract from copyright year (© 2024)
+    if (fullText.includes('© 2024') || fullText.includes('©2024')) {
       result.year = 2024;
     }
     
