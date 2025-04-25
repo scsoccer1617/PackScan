@@ -13,6 +13,7 @@ export default function CameraCapture({ onImageCapture, side }: CameraCapturePro
   const [isCameraActive, setIsCameraActive] = useState(false);
   const [hasCapture, setHasCapture] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const startCamera = async () => {
     try {
@@ -69,6 +70,55 @@ export default function CameraCapture({ onImageCapture, side }: CameraCapturePro
       }
     }
   };
+  
+  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    
+    setErrorMessage(null);
+    
+    // Check file size (limit to 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      setErrorMessage('File size too large. Please select an image under 5MB.');
+      return;
+    }
+    
+    // Check file type
+    if (!file.type.startsWith('image/')) {
+      setErrorMessage('Please select an image file (jpg, png, etc).');
+      return;
+    }
+    
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const imageData = e.target?.result as string;
+      
+      // Create an image to get dimensions
+      const img = new Image();
+      img.onload = () => {
+        if (canvasRef.current) {
+          const canvas = canvasRef.current;
+          canvas.width = img.width;
+          canvas.height = img.height;
+          
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(img, 0, 0);
+            const optimizedImageData = canvas.toDataURL('image/jpeg', 0.8);
+            onImageCapture(optimizedImageData);
+            setHasCapture(true);
+          }
+        }
+      };
+      img.src = imageData;
+    };
+    
+    reader.onerror = () => {
+      setErrorMessage('Error reading file. Please try again.');
+    };
+    
+    reader.readAsDataURL(file);
+  };
 
   useEffect(() => {
     return () => {
@@ -92,13 +142,29 @@ export default function CameraCapture({ onImageCapture, side }: CameraCapturePro
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
             </svg>
-            <p className="text-slate-500 mt-2">Click "Start Camera" to capture {side} of card</p>
-            <Button 
-              onClick={startCamera}
-              className="bg-primary-600 hover:bg-primary-700 text-white mt-4"
-            >
-              Start Camera
-            </Button>
+            <p className="text-slate-500 mt-2">Capture {side} of card using camera or select from your gallery</p>
+            <div className="flex flex-col sm:flex-row gap-2 mt-4 justify-center">
+              <Button 
+                onClick={startCamera}
+                className="bg-primary-600 hover:bg-primary-700 text-white"
+              >
+                Start Camera
+              </Button>
+              <Button 
+                onClick={() => fileInputRef.current?.click()}
+                variant="outline"
+                className="border-slate-300 bg-white text-slate-700"
+              >
+                Upload Image
+              </Button>
+              <input 
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileUpload}
+                accept="image/*"
+                className="hidden"
+              />
+            </div>
           </div>
         )}
 
@@ -131,12 +197,23 @@ export default function CameraCapture({ onImageCapture, side }: CameraCapturePro
         </div>
         <div>
           {!isCameraActive && !hasCapture && (
-            <Button 
-              onClick={startCamera}
-              className="bg-primary-600 hover:bg-primary-700 text-white"
-            >
-              Start Camera
-            </Button>
+            <div className="flex gap-2">
+              <Button 
+                onClick={() => fileInputRef.current?.click()}
+                variant="outline"
+                className="border-slate-300 bg-white hover:bg-slate-100 text-slate-700"
+                size="sm"
+              >
+                Upload
+              </Button>
+              <Button 
+                onClick={startCamera}
+                className="bg-primary-600 hover:bg-primary-700 text-white"
+                size="sm"
+              >
+                Camera
+              </Button>
+            </div>
           )}
           
           {isCameraActive && (
