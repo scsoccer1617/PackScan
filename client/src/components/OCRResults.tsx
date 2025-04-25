@@ -22,12 +22,12 @@ export default function OCRResults({ loading, error, data, onApply, onCancel }: 
             Analyzing Card Image
           </CardTitle>
           <CardDescription>
-            Using Tesseract OCR to extract information from your card...
+            Using Google Cloud Vision AI to analyze your card...
           </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="h-16 flex items-center justify-center">
-            <p className="text-slate-500">This may take a few seconds. All processing happens locally in your browser.</p>
+            <p className="text-slate-500">This may take a few seconds. Google's powerful AI is extracting the details from your card image.</p>
           </div>
         </CardContent>
       </Card>
