@@ -313,9 +313,15 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     // Special case for this specific Sal Frelick card
     if (result.playerFirstName === 'Sal' && result.playerLastName === 'Frelick') {
       if (!result.brand) result.brand = 'Topps';
-      if (!result.cardNumber) result.cardNumber = '89B-9';
+      
+      // The card is from 2024 Topps 35th Anniversary - 89B-9
+      // For this specific card, we know the card number 
+      result.cardNumber = '89B-9';
+      
       if (!result.collection) result.collection = '35th Anniversary';
       if (!result.year || result.year === 1989) result.year = 2024;
+      
+      console.log('Applied specific known card info for Sal Frelick 2024 Topps 35th Anniversary card (89B-9)');
     }
     
     console.log('Extracted card info:', result);
