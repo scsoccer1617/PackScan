@@ -64,7 +64,15 @@ export function useOCR(): OCRResult {
       return cardInfo;
       
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Unknown error during image analysis';
+      let errorMessage = err instanceof Error ? err.message : 'Unknown error during image analysis';
+      
+      // Check for common error messages related to OpenAI API quota
+      if (errorMessage.includes('quota exceeded') || 
+          errorMessage.includes('rate limit') || 
+          errorMessage.includes('insufficient_quota')) {
+        errorMessage = 'The OCR feature is temporarily unavailable due to API usage limits. Please try again later or manually enter card details.';
+      }
+      
       setError(errorMessage);
       setLoading(false);
       return null;

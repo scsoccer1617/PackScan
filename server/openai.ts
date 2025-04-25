@@ -79,6 +79,21 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<any> 
     return result;
   } catch (error) {
     console.error("Error analyzing card image:", error);
-    throw new Error(`Failed to analyze card image: ${error.message}`);
+    
+    // Check for rate limit errors
+    if (typeof error === 'object' && error !== null) {
+      const err = error as any;
+      if (err.status === 429 || (err.error && err.error.type === 'insufficient_quota')) {
+        throw new Error(`OpenAI API quota exceeded. Please try again later or contact the administrator to update the API key.`);
+      }
+      
+      // Handle other types of errors with message
+      if ('message' in err) {
+        throw new Error(`Failed to analyze card image: ${err.message}`);
+      }
+    }
+    
+    // Fallback error message
+    throw new Error(`Failed to analyze card image due to an unknown error.`);
   }
 }
