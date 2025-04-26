@@ -16,6 +16,7 @@ import OCRResults from "./OCRResults";
 import EbayValueLookup from "./EbayValueLookup";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
+import { formatCurrency } from "@/lib/utils";
 
 export default function SimpleCardForm() {
   const [frontImage, setFrontImage] = useState<string>("");

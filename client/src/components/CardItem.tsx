@@ -3,6 +3,7 @@ import { Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { formatCurrency } from "@/lib/utils";
 
 interface CardItemProps {
   card: Card | CardWithRelations;
@@ -152,7 +153,7 @@ export default function CardItem({ card, onDelete }: CardItemProps) {
         </p>
         <div className="flex justify-between items-center mt-2">
           <span className="text-xs font-medium text-secondary-600">
-            ${card.estimatedValue ? card.estimatedValue.toFixed(2) : 'N/A'}
+            {card.estimatedValue ? formatCurrency(Number(card.estimatedValue)) : 'N/A'}
           </span>
           <span className="text-xs text-slate-400">#{card.cardNumber}</span>
         </div>
