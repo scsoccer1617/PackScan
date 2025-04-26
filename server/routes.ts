@@ -784,6 +784,56 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Google Sheets diagnostic endpoint
+  app.get(`${apiPrefix}/sheets/status`, async (req, res) => {
+    try {
+      if (!googleSheetsInstance || !spreadsheetId) {
+        return res.status(400).json({ 
+          status: 'error', 
+          message: 'Google Sheets API not properly initialized' 
+        });
+      }
+      
+      // Try to get basic spreadsheet information
+      const response = await googleSheetsInstance.spreadsheets.get({
+        spreadsheetId,
+        fields: 'properties.title,sheets.properties.title'
+      });
+      
+      return res.json({
+        status: 'success',
+        message: 'Google Sheets API is working properly',
+        spreadsheetTitle: response.data.properties.title,
+        sheets: response.data.sheets.map((sheet: any) => sheet.properties.title)
+      });
+    } catch (error) {
+      console.error('Google Sheets API diagnostic error:', error);
+      
+      // Give more specific error messages
+      let errorMessage = 'Unknown error';
+      let suggestionMessage = '';
+      
+      if (error.message) {
+        errorMessage = error.message;
+        
+        if (error.message.includes('permission') || error.message.includes('Permission')) {
+          suggestionMessage = 'Make sure the service account has edit access to the spreadsheet';
+        } else if (error.message.includes('not found') || error.message.includes('Not Found')) {
+          suggestionMessage = 'The spreadsheet ID may be invalid or the spreadsheet may have been deleted';
+        } else if (error.message.includes('unsupported')) {
+          suggestionMessage = 'There may be an issue with the format of the private key. Try refreshing the credentials.';
+        }
+      }
+      
+      return res.status(500).json({
+        status: 'error',
+        message: errorMessage,
+        suggestion: suggestionMessage,
+        spreadsheetId: spreadsheetId || 'Not set'
+      });
+    }
+  });
+
   // Google Sheets API endpoints
   app.post(`${apiPrefix}/sheets/add-card`, async (req, res) => {
     try {

@@ -22,10 +22,19 @@ export async function initGoogleSheetsApi() {
       return false;
     }
 
+    // Format the private key correctly
+    let privateKey = process.env.GOOGLE_PRIVATE_KEY || '';
+    // Handle both formats: already with newlines or escaped newlines
+    if (privateKey.includes('\\n')) {
+      privateKey = privateKey.replace(/\\n/g, '\n');
+    }
+    
+    // Create the JWT auth client
+    console.log('Initializing Google Sheets with client email:', process.env.GOOGLE_CLIENT_EMAIL);
     googleAuth = new google.auth.JWT(
       process.env.GOOGLE_CLIENT_EMAIL,
       undefined,
-      process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+      privateKey,
       ['https://www.googleapis.com/auth/spreadsheets']
     );
 
@@ -311,7 +320,25 @@ export const storage = {
           });
         } catch (sheetError) {
           console.error('Error writing to Google Sheets directly, but data was saved to CSV:', sheetError);
+          
+          // Add debug details
+          if (spreadsheetId) {
+            console.log('Using spreadsheet ID:', spreadsheetId);
+          } else {
+            console.error('No spreadsheet ID available');
+          }
+          
+          // Try to determine if it's a permission issue
+          if (sheetError.message && sheetError.message.includes('permission')) {
+            console.error('Google Sheets API permission error. Please make sure the service account has edit access to the spreadsheet.');
+          }
+          
           // Continue since we saved to CSV
+          return { 
+            success: false, 
+            row: nextRow,
+            error: `Google Sheets error: ${sheetError.message}. Data was saved to CSV file.`
+          };
         }
       }
       
