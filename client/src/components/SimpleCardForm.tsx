@@ -49,17 +49,18 @@ export default function SimpleCardForm() {
   
   // Handle OCR analysis request
   const handleAnalyzeRequest = async () => {
-    if (!frontImage) {
+    if (!backImage) {
       toast({
-        title: "Image Required",
-        description: "Please upload a front image of the card first.",
+        title: "Back Image Required",
+        description: "Please upload the BACK of the card for OCR analysis. Card numbers and details are typically found on the back.",
         variant: "destructive",
       });
       return;
     }
     
     try {
-      await analyzeImage(frontImage, form);
+      // Use the back image for OCR since it contains the card number and details
+      await analyzeImage(backImage, form);
       setShowOCRResults(true);
     } catch (error) {
       toast({
@@ -169,7 +170,7 @@ export default function SimpleCardForm() {
             Add to Collection
           </CardTitle>
           <CardDescription>
-            Capture both front and back of your card for complete documentation.
+            Capture both front and back of your card. The front will be shown in your collection while the back is needed for OCR detection of card details.
           </CardDescription>
         </CardHeader>
         
@@ -178,20 +179,26 @@ export default function SimpleCardForm() {
             <h3 className="text-lg font-medium text-slate-700 mb-2">Card Images</h3>
             
             <div className="grid grid-cols-2 gap-4">
-              <SimpleImageUploader 
-                label="Front"
-                existingImage={frontImage}
-                onImageCaptured={setFrontImage}
-              />
+              <div>
+                <SimpleImageUploader 
+                  label="Front"
+                  existingImage={frontImage}
+                  onImageCaptured={setFrontImage}
+                />
+                <p className="text-xs text-slate-500 mt-1">Shows in collection</p>
+              </div>
               
-              <SimpleImageUploader 
-                label="Back"
-                existingImage={backImage}
-                onImageCaptured={setBackImage}
-              />
+              <div>
+                <SimpleImageUploader 
+                  label="Back"
+                  existingImage={backImage}
+                  onImageCaptured={setBackImage}
+                />
+                <p className="text-xs text-slate-500 mt-1">Contains card number</p>
+              </div>
             </div>
             
-            {frontImage && (
+            {backImage && (
               <Button 
                 type="button" 
                 variant="secondary" 
@@ -201,7 +208,7 @@ export default function SimpleCardForm() {
                 disabled={ocrLoading}
               >
                 <ScanSearch className="h-4 w-4 mr-2" />
-                {ocrLoading ? "Analyzing..." : "Analyze Card with OCR"}
+                {ocrLoading ? "Analyzing..." : "Analyze Card with OCR (uses back of card)"}
               </Button>
             )}
             
