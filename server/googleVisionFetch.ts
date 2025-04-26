@@ -845,24 +845,53 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     }
     
     // Extract serial number (like "123/499" or "010/399") - we need to do this FIRST
-    // First look for common serial number formats in the bottom right corner
-    // These are typically found in a format like "010/399" in foil or special cards
+    // Serial numbers are typically imprinted in foil or different color ink and 
+    // located in the bottom right corner of the card
     const serialNumberAnnotation = textAnnotations.find(annotation => {
       const text = annotation.description;
       
-      // Skip if this doesn't look like a potential serial number
+      // Skip if this doesn't look like a potential serial number format (e.g., "123/499")
       if (!/^\d{1,3}\/\d{1,4}$/.test(text)) return false;
       
       const boundingPoly = annotation.boundingPoly;
       if (!boundingPoly || !boundingPoly.vertices) return false;
       
-      // Serial numbers are typically in the bottom right corner of the back of the card
-      // Check if it's in the right area (bottom right quadrant of card)
+      // Serial numbers are ONLY in the bottom right corner of the card
+      // Verify it's in the proper location (very specific to serial numbers)
       const isBottomRight = boundingPoly.vertices.every((v: any) => 
         v.y > 1500 && v.x > 900);
       
-      if (isBottomRight) {
-        console.log('Found serial number:', text, 'at position:', JSON.stringify(boundingPoly));
+      // Check if this annotation is relatively isolated
+      // Real serial numbers are typically not part of a paragraph or larger text block
+      const isIsolated = textAnnotations.filter(other => {
+        if (other === annotation) return false;
+        
+        // Check if any other text is very close to this annotation
+        const otherPoly = other.boundingPoly;
+        if (!otherPoly || !otherPoly.vertices) return false;
+        
+        // Calculate the distance between annotations
+        const thisCenter = {
+          x: boundingPoly.vertices.reduce((sum: number, v: any) => sum + v.x, 0) / 4,
+          y: boundingPoly.vertices.reduce((sum: number, v: any) => sum + v.y, 0) / 4
+        };
+        
+        const otherCenter = {
+          x: otherPoly.vertices.reduce((sum: number, v: any) => sum + v.x, 0) / 4,
+          y: otherPoly.vertices.reduce((sum: number, v: any) => sum + v.y, 0) / 4
+        };
+        
+        const distance = Math.sqrt(
+          Math.pow(thisCenter.x - otherCenter.x, 2) + 
+          Math.pow(thisCenter.y - otherCenter.y, 2)
+        );
+        
+        // If another annotation is very close, this might not be an isolated serial number
+        return distance < 50;
+      }).length < 2; // Less than 2 nearby annotations (itself plus maybe 1 more)
+      
+      if (isBottomRight && isIsolated) {
+        console.log('Found likely serial number:', text, 'at position:', JSON.stringify(boundingPoly));
         return true;
       }
       
@@ -871,15 +900,13 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     
     if (serialNumberAnnotation) {
       result.serialNumber = serialNumberAnnotation.description;
+      // This is likely a numbered card (limited edition)
+      result.isNumbered = true;
       console.log('Identified serial number from positioned text:', result.serialNumber);
     } else {
-      // Fallback: Try to find any serial number format in the entire text
-      const serialRegex = /(\d{1,3})\s*\/\s*(\d{1,4})/;
-      const serialMatch = fullText.match(serialRegex);
-      if (serialMatch) {
-        result.serialNumber = serialMatch[0];
-        console.log('Identified serial number from full text pattern:', result.serialNumber);
-      }
+      // Clear any serial number that might have been detected incorrectly
+      result.serialNumber = "";
+      result.isNumbered = false;
     }
     
     // Check for special variants - scan the entire text for common variant keywords
@@ -1027,18 +1054,65 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       console.log('Skipping general top-left number detection for Sal Frelick card - keeping 89B-9');
     }
     
-    // Serial number detection for special cards
-    // Serial numbers typically appear in formats like 123/499 or 010/399
-    const serialAnnotations = textAnnotations.filter(annotation => {
-      const text = annotation.description;
-      return /^\d{1,3}\/\d{1,4}$/.test(text);
-    });
-    
-    if (serialAnnotations.length > 0) {
-      result.serialNumber = serialAnnotations[0].description;
-      // If we found a serial number, it's likely a special variant
-      result.variant = 'Aqua Foil';
-      console.log('Identified special variant card with serial number:', result.serialNumber);
+    // This secondary serial number check is now redundant with our improved detection above
+    // Perform an additional check only if we haven't already identified a serial number
+    if (!result.serialNumber) {
+      // Serial numbers typically appear in formats like 123/499 or 010/399
+      const serialAnnotations = textAnnotations.filter(annotation => {
+        const text = annotation.description;
+        if (!/^\d{1,3}\/\d{1,4}$/.test(text)) return false;
+        
+        const boundingPoly = annotation.boundingPoly;
+        if (!boundingPoly || !boundingPoly.vertices) return false;
+        
+        // Check if it's in the bottom right quadrant
+        const bottomRightQuadrant = boundingPoly.vertices.every((v: any) => 
+          v.y > 1400 && v.x > 800);
+          
+        // Check if it's isolated from other text (imprinted in foil, different color than main text)
+        // by measuring distances to other text annotations
+        return bottomRightQuadrant;
+      });
+      
+      // Only set a serial number if found in the correct position
+      if (serialAnnotations.length > 0) {
+        // Verify this is actually at the bottom right and isolated
+        const annotation = serialAnnotations[0];
+        const boundingPoly = annotation.boundingPoly;
+        
+        // Check if this is isolated from other text blocks
+        const isIsolated = textAnnotations.filter(other => {
+          if (other === annotation) return false;
+          
+          const otherPoly = other.boundingPoly;
+          if (!otherPoly || !otherPoly.vertices) return false;
+          
+          // Calculate distance between centers
+          const thisCenter = {
+            x: boundingPoly.vertices.reduce((sum: number, v: any) => sum + v.x, 0) / 4,
+            y: boundingPoly.vertices.reduce((sum: number, v: any) => sum + v.y, 0) / 4
+          };
+          
+          const otherCenter = {
+            x: otherPoly.vertices.reduce((sum: number, v: any) => sum + v.x, 0) / 4,
+            y: otherPoly.vertices.reduce((sum: number, v: any) => sum + v.y, 0) / 4
+          };
+          
+          const distance = Math.sqrt(
+            Math.pow(thisCenter.x - otherCenter.x, 2) + 
+            Math.pow(thisCenter.y - otherCenter.y, 2)
+          );
+          
+          return distance < 70;
+        }).length < 3; // Less than 3 nearby annotations
+        
+        if (isIsolated) {
+          result.serialNumber = annotation.description;
+          result.isNumbered = true;
+          result.variant = 'Numbered';
+          console.log('Identified isolated special variant card with serial number:', result.serialNumber);
+        }
+      }
     }
     
     // Additional variant detection based on visual cues
