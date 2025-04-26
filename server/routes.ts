@@ -35,8 +35,9 @@ interface MulterRequest extends Request {
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB limit (increased from 5MB)
-    fieldSize: 10 * 1024 * 1024, // 10MB field size limit
+    fileSize: 20 * 1024 * 1024, // 20MB limit (increased from 10MB)
+    fieldSize: 20 * 1024 * 1024, // 20MB field size limit
+    fields: 20, // Allow more fields
   },
 });
 
@@ -170,9 +171,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         userId: null,
       });
       
-      // Save to Google Sheets if configured
+      // Card was successfully saved to database at this point
+      // Proceed to send response regardless of Google Sheets success
+      res.status(201).json(newCard);
+      
+      // Attempt Google Sheets save AFTER sending the response
+      // This way, any problems with Google Sheets won't affect the main card saving operation
       if (googleSheetsInstance && spreadsheetId) {
         try {
+          console.log('Attempting to save card to Google Sheets asynchronously...');
           const sheetResult = await storage.saveCardToGoogleSheets(
             newCard, 
             sport.name, 
@@ -182,20 +189,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
           );
           
           if (sheetResult && sheetResult.success) {
+            console.log(`Successfully saved card to Google Sheets in row ${sheetResult.row}`);
             // Update card with Google Sheet reference
             await storage.updateCard(newCard.id, {
               googleSheetId: `${sheetResult.row}`,
             });
           }
         } catch (sheetError) {
-          console.warn('Failed to save to Google Sheets, but card was saved to database:', sheetError);
+          console.error('Failed to save to Google Sheets, but card was saved to database:', sheetError);
           // Don't fail the request if Google Sheets integration fails
         }
       } else {
         console.log('Google Sheets integration not configured, skipping sheet update');
       }
       
-      res.status(201).json(newCard);
+      // Skip sending another response since we already sent one
+      return;
     } catch (error) {
       console.error('Error creating card:', error);
       if (error instanceof z.ZodError) {
