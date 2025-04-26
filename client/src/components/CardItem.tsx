@@ -94,10 +94,12 @@ export default function CardItem({ card, onDelete }: CardItemProps) {
         {card.frontImage ? (
           <>
             <img 
-              src={card.frontImage.startsWith('http') ? card.frontImage : `${window.location.origin}${card.frontImage}`} 
+              src={card.frontImage.startsWith('http') ? card.frontImage : 
+                 (card.frontImage.startsWith('/') ? `${window.location.origin}${card.frontImage}` : `${window.location.origin}/${card.frontImage}`)} 
               alt={`${card.playerFirstName} ${card.playerLastName} card`} 
               className="object-contain w-full h-full transform hover:scale-105 transition-transform duration-300" 
               onError={(e) => {
+                console.log('Image failed to load:', card.frontImage);
                 // If image fails to load, show placeholder
                 (e.target as HTMLImageElement).style.display = 'none';
                 const parent = (e.target as HTMLImageElement).parentElement;
