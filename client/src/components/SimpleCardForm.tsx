@@ -1,7 +1,7 @@
 import { useState } from "react";
 import SimpleImageUploader from "@/components/SimpleImageUploader";
 import { Button } from "@/components/ui/button";
-import { ScanSearch } from "lucide-react";
+import { ScanSearch, DollarSign } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Form, FormField, FormItem, FormLabel, FormControl, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
@@ -13,6 +13,7 @@ import { CardFormValues, cardSchema } from "@shared/schema";
 import { useOCR } from "@/hooks/use-ocr";
 import { useToast } from "@/hooks/use-toast";
 import OCRResults from "./OCRResults";
+import EbayValueLookup from "./EbayValueLookup";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 
@@ -438,6 +439,41 @@ export default function SimpleCardForm() {
                   )}
                 />
               </div>
+              
+              {/* Estimated Value Field */}
+              <div className="space-y-2">
+                <FormField
+                  control={form.control}
+                  name="estimatedValue"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Estimated Value ($) <span className="text-red-500">*</span></FormLabel>
+                      <div className="flex flex-col space-y-2">
+                        <FormControl>
+                          <Input
+                            type="number"
+                            placeholder="Card value in USD"
+                            {...field}
+                            onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
+                          />
+                        </FormControl>
+                        
+                        {/* eBay Value Lookup */}
+                        <EbayValueLookup
+                          playerName={`${form.watch('playerFirstName')} ${form.watch('playerLastName')}`.trim()}
+                          cardNumber={form.watch('cardNumber')}
+                          brand={form.watch('brand')}
+                          year={form.watch('year') || new Date().getFullYear()}
+                          condition={form.watch('condition')}
+                          onValueSelect={(value) => {
+                            form.setValue('estimatedValue', value);
+                          }}
+                        />
+                      </div>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
               
               <div className="flex flex-col space-y-2">
                 <h3 className="text-sm font-medium text-slate-700">Card Features</h3>
