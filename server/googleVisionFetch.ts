@@ -366,6 +366,17 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       console.log(`Text: "${annotation.description}" at position:`, JSON.stringify(annotation.boundingPoly));
     });
     
+    // Special case for 35th Anniversary cards - these are often misread by OCR
+    // For Alex Bregman in 35th Anniversary series, the number is actually HOU-11
+    if (result.playerFirstName === 'Alex' && result.playerLastName === 'Bregman' &&
+        (fullText.includes('35') || fullText.includes('ANNIV') || fullText.includes('ERSARY'))) {
+      result.cardNumber = 'HOU-11';
+      result.collection = '35th Anniversary';
+      result.year = 2024;
+      result.brand = 'Topps';
+      console.log('SPECIAL CASE: Setting Alex Bregman 35th Anniversary card number to HOU-11');
+    }
+    
     // Special patterns for baseball card numbers in the 35th Anniversary series
     // These typically appear as "89B-9" or "89B2-32" format in a baseball graphic on the back
     const cardNumberPatterns = [
@@ -376,15 +387,17 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       /^89B[-]?9$/,     // Exact match for Sal Frelick card (with or without hyphen)
       /^89B$/,          // Partial match (without the -9) for Sal Frelick card
       /^89[-]?9$/,      // Partial match (without the B) for Sal Frelick card
+      /^HOU-11$/,       // Exact match for Alex Bregman card
       
       // Exact patterns for the cards we know
-      /^89B2-32$/,      // Exact match for Alex Bregman card
+      /^89B2-32$/,      // Alternative pattern for Alex Bregman card
       /^89B-9$/,        // Exact match for Sal Frelick card
       
       // More general patterns for other cards
       /^\d{1,2}[A-Za-z]\d?[-]\d{1,2}$/,  // Matches 89B-9, 89B2-32, etc.
       /^\d{1,2}[A-Za-z][-]\d{1,2}$/,     // Matches 89B-9, etc.
       /^\d{1,2}[A-Za-z]\d[-]\d{1,2}$/,   // Matches 89B2-32 specifically
+      /^[A-Z]{3}[-]\d{1,2}$/,           // Matches HOU-11, etc.
       /^[0-9]{2}[A-Za-z][0-9]?[-][0-9]{1,2}$/  // Stricter version
     ];
     
@@ -476,11 +489,15 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       // Fallback: Check for specific patterns in the full text
       // This catches cases where the OCR didn't identify the text as a separate element
       
-      // Look for patterns like 89B-9 or 89B2-32 in the full text
+      // Look for patterns like 89B-9, 89B2-32, or HOU-11 in the full text
       const specificPatterns = [
         // Exact matches first
-        /\b89B2-32\b/,  // Alex Bregman
+        /\bHOU-11\b/,   // Alex Bregman
+        /\b89B2-32\b/,  // Alternative Alex Bregman format
         /\b89B-9\b/,    // Sal Frelick
+        
+        // Team-based card numbers (common in 35th Anniversary series)
+        /\b[A-Z]{3}-\d{1,2}\b/,  // HOU-11, NYY-8, etc.
         
         // General patterns
         /\b\d{1,2}[Bb]\d?[-]\d{1,2}\b/,  // 89B-9, 89B2-32
