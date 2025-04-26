@@ -1,4 +1,4 @@
-import { pgTable, text, serial, integer, boolean, timestamp, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, boolean, timestamp, jsonb, numeric } from "drizzle-orm/pg-core";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { z } from "zod";
 import { relations } from "drizzle-orm";
@@ -40,7 +40,7 @@ export const cards = pgTable("cards", {
   variant: text("variant"),
   serialNumber: text("serial_number"),
   condition: text("condition"),
-  estimatedValue: integer("estimated_value"),
+  estimatedValue: numeric("estimated_value", { precision: 10, scale: 2 }),
   isRookieCard: boolean("is_rookie_card").default(false),
   isAutographed: boolean("is_autographed").default(false),
   isNumbered: boolean("is_numbered").default(false),

@@ -287,6 +287,9 @@ export const storage = {
         card.serialNumber || '',
         card.condition || '',
         card.estimatedValue ? card.estimatedValue.toString() : '',
+        card.isRookieCard ? 'Yes' : 'No',
+        card.isAutographed ? 'Yes' : 'No', 
+        card.isNumbered ? 'Yes' : 'No',
         frontImageUrl || '',
         backImageUrl || '',
         new Date().toISOString(),
@@ -403,7 +406,7 @@ export const storage = {
           // Insert card data
           await googleSheetsInstance.spreadsheets.values.update({
             spreadsheetId,
-            range: `Cards!A${nextRow}:O${nextRow}`,
+            range: `Cards!A${nextRow}:R${nextRow}`,
             valueInputOption: 'RAW',
             resource: {
               values: [[
@@ -419,6 +422,9 @@ export const storage = {
                 card.serialNumber || '',
                 card.condition || '',
                 card.estimatedValue ? card.estimatedValue.toString() : '',
+                card.isRookieCard ? 'Yes' : 'No',
+                card.isAutographed ? 'Yes' : 'No',
+                card.isNumbered ? 'Yes' : 'No',
                 frontImageUrl || '',
                 backImageUrl || '',
                 new Date().toISOString(),
