@@ -1,19 +1,25 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { CardFormValues } from "@shared/schema";
+import { useToast } from "@/hooks/use-toast";
+import { UseFormReturn } from "react-hook-form";
 
 export interface OCRResult {
   loading: boolean;
   error: string | null;
   data: Partial<CardFormValues> | null;
-  analyzeImage: (imageData: string) => Promise<Partial<CardFormValues> | null>;
+  analyzeImage: (imageData: string, form?: UseFormReturn<CardFormValues>) => Promise<Partial<CardFormValues> | null>;
 }
 
 export function useOCR(): OCRResult {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<Partial<CardFormValues> | null>(null);
+  const { toast } = useToast();
 
-  const analyzeImage = async (imageData: string): Promise<Partial<CardFormValues> | null> => {
+  const analyzeImage = async (
+    imageData: string, 
+    form?: UseFormReturn<CardFormValues>
+  ): Promise<Partial<CardFormValues> | null> => {
     setLoading(true);
     setError(null);
     
@@ -58,6 +64,45 @@ export function useOCR(): OCRResult {
       };
       
       setData(cardInfo);
+      
+      // Auto-fill the form if provided
+      if (form) {
+        if (cardInfo.sport) form.setValue('sport', cardInfo.sport);
+        if (cardInfo.playerFirstName) form.setValue('playerFirstName', cardInfo.playerFirstName);
+        if (cardInfo.playerLastName) form.setValue('playerLastName', cardInfo.playerLastName);
+        if (cardInfo.brand) form.setValue('brand', cardInfo.brand);
+        if (cardInfo.collection) form.setValue('collection', cardInfo.collection);
+        if (cardInfo.cardNumber) form.setValue('cardNumber', cardInfo.cardNumber);
+        if (cardInfo.year && cardInfo.year > 0) form.setValue('year', cardInfo.year);
+        if (cardInfo.variant) form.setValue('variant', cardInfo.variant);
+        if (cardInfo.serialNumber) form.setValue('serialNumber', cardInfo.serialNumber);
+        if (cardInfo.condition) {
+          form.setValue('condition', cardInfo.condition);
+          
+          // Set an estimated value based on condition
+          const condition = cardInfo.condition;
+          // Get the numerical part of the PSA condition
+          const psaMatch = condition.match(/PSA\s*(\d+)/i);
+          if (psaMatch && psaMatch[1]) {
+            const psaValue = parseInt(psaMatch[1]);
+            // Estimate value based on PSA grade
+            let estimatedValue = 200; // Default
+            if (psaValue === 10) estimatedValue = 300;
+            else if (psaValue === 9) estimatedValue = 200;
+            else if (psaValue === 8) estimatedValue = 135;
+            else if (psaValue === 7) estimatedValue = 90;
+            else if (psaValue <= 6) estimatedValue = 50;
+            
+            form.setValue('estimatedValue', estimatedValue);
+          }
+        }
+        
+        toast({
+          title: "Card details applied",
+          description: "OCR results have been automatically applied to the form"
+        });
+      }
+      
       setLoading(false);
       return cardInfo;
       

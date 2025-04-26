@@ -1,6 +1,6 @@
 import type { Express, Request } from "express";
 import { createServer, type Server } from "http";
-import { storage } from "./storage";
+import { storage, googleSheetsInstance } from "./storage";
 import * as schema from "@shared/schema";
 import { z } from "zod";
 import multer from "multer";
@@ -10,7 +10,6 @@ import { v4 as uuidv4 } from "uuid";
 import { analyzeSportsCardImage } from "./googleVisionFetch";
 
 // Google Sheets variables
-const googleSheetsInstance = (global as any).googleSheetsInstance;
 const spreadsheetId = process.env.GOOGLE_SHEET_ID;
 
 // TypeScript interfaces for Express with multer
