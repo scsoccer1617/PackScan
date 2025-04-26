@@ -208,7 +208,7 @@ export default function CardGrid() {
             
             {expandedCollections.has(collection) && (
               <div className="p-3">
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
                   {groupedCards[collection]?.map((card) => (
                     <CardItem key={card.id} card={card} />
                   ))}
