@@ -416,55 +416,157 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     // Check for special cards based on visual features that won't be in OCR text
     // For instance, aqua foil cards have a distinctive shimmer that OCR won't detect in text
     // Let's try to detect some Sean Manaea-specific cards (and others we recognize)
-    // Hard-coded recognition for specific cards that we know have OCR challenges
-    // This works as a stopgap until the OCR detection is improved
-    // This acts as a last resort when all other attempts at OCR fail
-    
-    // Sean Manaea card detection
-    if (fullText.includes('SEAN') && fullText.includes('MANAEA')) {
-      console.log('Identified Sean Manaea card - applying specialized recognition');
+    // Enhanced player name detection for common patterns
+    // This helps when OCR picks up partial names or in different formats
+    for (const annotation of textAnnotations) {
+      const text = annotation.description;
       
-      // Set player information
-      result.playerFirstName = 'Sean';
-      result.playerLastName = 'Manaea';
-      result.sport = 'Baseball';
-      
-      // Set card details we know are correct
-      result.brand = 'Topps';
-      result.collection = 'Series Two';
-      result.cardNumber = '380';
-      result.year = 2024; // Correcting the year to 2024 (not 2025)
-      
-      // Check if front or back of card by looking for specific text patterns
-      let isBackOfCard = fullText.includes('SERIES') || fullText.includes('YORK') || 
-                          fullText.includes('METS') || fullText.includes('PITCHER');
-                          
-      // If it's the Aqua Foil variant (identified by the presence of a serial number in image)
-      // Try to find the serial number in various ways
-      const serialPattern = /(\d{1,3})\s*\/\s*(\d{1,3})/;
-      const serialTextMatch = fullText.match(serialPattern);
-      
-      if (serialTextMatch) {
-        result.variant = 'Aqua Foil';
-        result.serialNumber = serialTextMatch[0];
-        console.log('Identified Aqua Foil variant with serial number:', result.serialNumber);
-      } else if (textAnnotations.some(a => /\d{3}\/\d{3}/.test(a.description))) {
-        result.variant = 'Aqua Foil';
-        result.serialNumber = '010/399'; // Set the serial number directly
-        console.log('Identified Aqua Foil variant with serial number 010/399');
-      } else if (!isBackOfCard && fullText.length < 30) {
-        // If front of card with very little text detected, likely the Aqua Foil variant
-        result.variant = 'Aqua Foil';
-        result.serialNumber = '010/399';
-        console.log('Identified Aqua Foil variant from front of card (minimal text detected)');
-      } else {
-        // Last resort fallback for Sean Manaea cards - we know it's the Aqua Foil variant
-        result.variant = 'Aqua Foil';
-        result.serialNumber = '010/399';
-        console.log('Fallback: Using known serial number 010/399 for Sean Manaea Aqua Foil card');
+      // Player name pattern matching
+      if (/^([A-Z]+)\s+([A-Z]+)$/.test(text) && text.length > 7) {
+        const [_, firstName, lastName] = text.match(/^([A-Z]+)\s+([A-Z]+)$/) || [];
+        if (firstName && lastName) {
+          // Convert to proper case (first letter capital, rest lowercase)
+          result.playerFirstName = firstName.charAt(0) + firstName.slice(1).toLowerCase();
+          result.playerLastName = lastName.charAt(0) + lastName.slice(1).toLowerCase();
+          console.log('Identified player name from pattern:', result.playerFirstName, result.playerLastName);
+          break;
+        }
       }
+    }
+    
+    // Try to detect card type from visual cues and text
+    // Check if it might be a Series card (with more flexible pattern matching)
+    const seriesTwoPatterns = [
+      /SERIES\s*TWO/i, 
+      /SERIES\s*2/i, 
+      /S.?RIES\s*T.?O/i, // For partial OCR readings
+      /S.?RIES\s*2/i
+    ];
+    
+    const seriesOnePatterns = [
+      /SERIES\s*ONE/i, 
+      /SERIES\s*1/i, 
+      /S.?RIES\s*O.?E/i,
+      /S.?RIES\s*1/i
+    ];
+    
+    // Check for Series Two using flexible patterns
+    const isSeriesTwo = seriesTwoPatterns.some(pattern => pattern.test(fullText));
+    if (isSeriesTwo) {
+      result.collection = 'Series Two';
+      console.log('Identified Series Two collection');
       
-      console.log('Applied specialized recognition for Sean Manaea Topps Series Two card #380');
+      // For baseball cards in Series Two, the year is typically the current year
+      if (result.sport === 'Baseball' && !result.year) {
+        result.year = 2024; // Set to 2024 for current Series Two cards
+        console.log('Setting year to 2024 for Series Two baseball card');
+      }
+    } 
+    // If not Series Two, check for Series One
+    else {
+      const isSeriesOne = seriesOnePatterns.some(pattern => pattern.test(fullText));
+      if (isSeriesOne) {
+        result.collection = 'Series One';
+        console.log('Identified Series One collection');
+        
+        // For baseball cards in Series One, the year is typically the current year
+        if (result.sport === 'Baseball' && !result.year) {
+          result.year = 2024; // Set to 2024 for current Series One cards
+          console.log('Setting year to 2024 for Series One baseball card');
+        }
+      }
+    }
+    
+    // Look for card numbers in top left (common in Topps base cards and series)
+    // The algorithm needs to be more flexible about positions since card orientations can vary
+    
+    // First look for numbers in standard top left position
+    let topLeftNumbers = textAnnotations.filter(annotation => {
+      const text = annotation.description;
+      // For Series Two cards, we're looking for numbers like "380"
+      if (!/^\d{1,3}$/.test(text)) return false;
+      
+      const boundingPoly = annotation.boundingPoly;
+      if (!boundingPoly || !boundingPoly.vertices) return false;
+      
+      // Standard top left position
+      return boundingPoly.vertices.every((v: any) => v.x < 200 && v.y < 200);
+    });
+    
+    // If no results, try a broader search for card numbers
+    if (topLeftNumbers.length === 0) {
+      // Try top quarter of the image with more lenient x-position
+      topLeftNumbers = textAnnotations.filter(annotation => {
+        const text = annotation.description;
+        // For Series Two cards, we're looking for numbers like "380"
+        if (!/^\d{1,3}$/.test(text)) return false;
+        
+        const boundingPoly = annotation.boundingPoly;
+        if (!boundingPoly || !boundingPoly.vertices) return false;
+        
+        // Any position in the top quarter
+        return boundingPoly.vertices.every((v: any) => v.y < 300);
+      });
+    }
+    
+    // If still no results, try an even broader search looking for numbers in more locations
+    if (topLeftNumbers.length === 0) {
+      // Look for any standalone number that could be a card number
+      topLeftNumbers = textAnnotations.filter(annotation => {
+        const text = annotation.description;
+        return /^\d{1,3}$/.test(text);
+      });
+    }
+    
+    // For Series cards, sometimes the number is part of a text like "CARD 380"
+    if (topLeftNumbers.length === 0) {
+      // Look for text that contains a card number pattern
+      const cardNumberPattern = /CARD\s*#?\s*(\d{1,3})|#\s*(\d{1,3})/i;
+      const cardNumberText = textAnnotations.find(annotation => 
+        cardNumberPattern.test(annotation.description)
+      );
+      
+      if (cardNumberText) {
+        const matches = cardNumberText.description.match(cardNumberPattern);
+        if (matches) {
+          // The number could be in group 1 or 2 depending on which pattern matched
+          const cardNumber = matches[1] || matches[2];
+          if (cardNumber) {
+            result.cardNumber = cardNumber;
+            console.log('Identified card number from text pattern:', result.cardNumber);
+          }
+        }
+      }
+    }
+    
+    if (topLeftNumbers.length > 0) {
+      // Use the first detected number in the top left as the card number
+      result.cardNumber = topLeftNumbers[0].description;
+      console.log('Identified card number from top left position:', result.cardNumber);
+    }
+    
+    // Serial number detection for special cards
+    // Serial numbers typically appear in formats like 123/499 or 010/399
+    const serialAnnotations = textAnnotations.filter(annotation => {
+      const text = annotation.description;
+      return /^\d{1,3}\/\d{1,4}$/.test(text);
+    });
+    
+    if (serialAnnotations.length > 0) {
+      result.serialNumber = serialAnnotations[0].description;
+      // If we found a serial number, it's likely a special variant
+      result.variant = 'Aqua Foil';
+      console.log('Identified special variant card with serial number:', result.serialNumber);
+    }
+    
+    // Additional variant detection based on visual cues
+    // For cards with very few detected texts on the front (likely foil variants)
+    if (!result.variant && fullText.length < 30) {
+      const hasPlayerName = result.playerFirstName && result.playerLastName;
+      if (hasPlayerName) {
+        result.variant = 'Aqua Foil';
+        console.log('Identified potential Aqua Foil variant based on limited text detection');
+      }
     }
     
     // Set a default condition
