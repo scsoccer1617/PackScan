@@ -465,7 +465,7 @@ export default function CardForm() {
                   <FormLabel className="text-sm font-medium text-slate-700">Serial Number</FormLabel>
                   <FormControl>
                     <Input 
-                      placeholder="042/150" 
+                      placeholder="" 
                       {...field} 
                       className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
                     />
