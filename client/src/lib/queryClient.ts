@@ -7,20 +7,67 @@ async function throwIfResNotOk(res: Response) {
   }
 }
 
-export async function apiRequest(
-  method: string,
-  url: string,
-  data?: unknown | undefined,
-): Promise<Response> {
-  const res = await fetch(url, {
-    method,
-    headers: data ? { "Content-Type": "application/json" } : {},
-    body: data ? JSON.stringify(data) : undefined,
-    credentials: "include",
-  });
+interface ApiRequestOptions {
+  url: string;
+  method: string;
+  body?: any;
+  headers?: Record<string, string>;
+}
 
+export async function apiRequest<T = any>(
+  options: ApiRequestOptions | string,
+  optionalConfig?: any
+): Promise<T> {
+  let url: string;
+  let config: RequestInit = {};
+  
+  // Support both new object-style and legacy string-style calls
+  if (typeof options === 'string') {
+    // Legacy style: apiRequest(url, { method, body })
+    url = options;
+    config = optionalConfig || {};
+  } else {
+    // New style: apiRequest({ url, method, body })
+    url = options.url;
+    const { headers, body, method } = options;
+    
+    config = {
+      method,
+      headers,
+      body
+    };
+  }
+  
+  // Ensure credentials are included
+  config.credentials = 'include';
+  
+  // If body is not FormData and content-type isn't set, set it to JSON
+  if (
+    config.body && 
+    !(config.body instanceof FormData) && 
+    !config.headers?.['Content-Type'] &&
+    !(config.headers && Object.keys(config.headers).some(h => h.toLowerCase() === 'content-type'))
+  ) {
+    config.headers = {
+      ...config.headers,
+      'Content-Type': 'application/json'
+    };
+    
+    // Convert body to JSON string if it's not already a string
+    if (typeof config.body !== 'string') {
+      config.body = JSON.stringify(config.body);
+    }
+  }
+
+  const res = await fetch(url, config);
   await throwIfResNotOk(res);
-  return res;
+  
+  // Return the parsed JSON data if it exists, otherwise return an empty object
+  try {
+    return await res.json();
+  } catch (e) {
+    return {} as T;
+  }
 }
 
 type UnauthorizedBehavior = "returnNull" | "throw";

@@ -91,20 +91,29 @@ export default function SimpleCardForm() {
       // Convert the form data to FormData to include images
       const formData = new FormData();
       
-      // Add all form fields
-      Object.entries(data).forEach(([key, value]) => {
-        formData.append(key, value !== null && value !== undefined ? value.toString() : '');
-      });
+      // Properly serialize card data as JSON string
+      const cardDataJson = JSON.stringify(data);
+      formData.append('data', cardDataJson);
       
       // Add images if they exist
       if (frontImage) {
-        const frontBlob = await fetch(frontImage).then(r => r.blob());
-        formData.append('frontImage', frontBlob, 'front.jpg');
+        try {
+          const frontBlob = await fetch(frontImage).then(r => r.blob());
+          formData.append('frontImage', frontBlob, 'front.jpg');
+        } catch (error) {
+          console.error('Error converting front image:', error);
+          throw new Error('Failed to process front image. Please try uploading a different image.');
+        }
       }
       
       if (backImage) {
-        const backBlob = await fetch(backImage).then(r => r.blob());
-        formData.append('backImage', backBlob, 'back.jpg');
+        try {
+          const backBlob = await fetch(backImage).then(r => r.blob());
+          formData.append('backImage', backBlob, 'back.jpg');
+        } catch (error) {
+          console.error('Error converting back image:', error);
+          throw new Error('Failed to process back image. Please try uploading a different image.');
+        }
       }
       
       return apiRequest<any>({
