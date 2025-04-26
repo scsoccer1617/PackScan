@@ -628,6 +628,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         cardInfo.playerFirstName === 'Mike' || 
         cardInfo.playerLastName === 'Trout';
       
+      // Check specifically for Stars of MLB collection
+      const isStarsOfMLB = 
+        fullText.includes('Stars') || 
+        fullText.includes('STARS') || 
+        fullText.toLowerCase().includes('stars of mlb');
+      
       // Special handling for Mike Trout cards which have CSMLB format
       if (isTroutCard) {
         console.log('Detected Mike Trout card, looking for CSMLB format');
@@ -637,7 +643,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           /CSMLB[-]?\d+/i,                  // CSMLB-2, CSMLB2
           /CSMLB\s+[-]?\s*\d+/i,            // CSMLB 2, CSMLB - 2
           /CS\s*MLB[-]?\d+/i,               // CS MLB-2, CS MLB2
-          /CS\s*MLB\s+[-]?\s*\d+/i          // CS MLB 2, CS MLB - 2
+          /CS\s*MLB\s+[-]?\s*\d+/i,         // CS MLB 2, CS MLB - 2
+          /\bCS[^A-Za-z]*MLB[^A-Za-z]*\d+/i, // Any spacing/chars between CS, MLB and number
         ];
         
         let csmlbMatch = null;
@@ -650,9 +657,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
         
         if (csmlbMatch) {
-          // Clean up any extra spaces in the match
-          cardInfo.cardNumber = csmlbMatch[0].replace(/\s+/g, '');
-          console.log(`Found CSMLB card number for Mike Trout: ${cardInfo.cardNumber}`);
+          // Extract just the number part first
+          const numberMatch = csmlbMatch[0].match(/\d+/);
+          if (numberMatch) {
+            const numberPart = numberMatch[0];
+            // Create a clean CSMLB format
+            cardInfo.cardNumber = `CSMLB-${numberPart}`;
+            console.log(`Found and reformatted CSMLB card number for Mike Trout: ${cardInfo.cardNumber}`);
+          } else {
+            // If we can't extract just the number, clean up any extra spaces in the match
+            cardInfo.cardNumber = csmlbMatch[0].replace(/\s+/g, '');
+            console.log(`Found CSMLB card number for Mike Trout: ${cardInfo.cardNumber}`);
+          }
         }
         // If we have only a numeric value and it's likely a Trout card
         else if (cardInfo.cardNumber && /^\d+$/.test(cardInfo.cardNumber)) {
@@ -665,9 +681,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
         cardInfo.playerFirstName = 'Mike';
         cardInfo.playerLastName = 'Trout';
         
+        // Set the correct collection for Trout cards
+        if (isStarsOfMLB) {
+          cardInfo.collection = 'Stars of MLB';
+          console.log('Setting collection to "Stars of MLB" for Mike Trout card');
+        }
         // Trout CSMLB cards are not 35th Anniversary
-        if (cardInfo.collection === '35th Anniversary') {
+        else if (cardInfo.collection === '35th Anniversary') {
           cardInfo.collection = 'Topps Baseball';
+        }
+      }
+      
+      // For any card, if it looks like a Stars of MLB card but we didn't explicitly set it
+      if (isStarsOfMLB && cardInfo.collection !== 'Stars of MLB') {
+        cardInfo.collection = 'Stars of MLB';
+        console.log('Detected "Stars of MLB" collection from text');
+        
+        // If this seems to be a Stars card and it has a simple number, it's likely CSMLB
+        if (cardInfo.cardNumber && /^\d+$/.test(cardInfo.cardNumber)) {
+          const originalNumber = cardInfo.cardNumber;
+          cardInfo.cardNumber = `CSMLB-${originalNumber}`;
+          console.log(`Formatting Stars of MLB card number from ${originalNumber} to ${cardInfo.cardNumber}`);
         }
       }
       // For 35th Anniversary cards with numeric-only card numbers

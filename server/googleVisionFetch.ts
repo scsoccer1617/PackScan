@@ -665,8 +665,38 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       'Chrome', 'Prizm', 'Heritage', 'Optic', 'Finest', 
       'Select', 'Dynasty', 'Contenders', 'Clearly Authentic', 
       'Allen & Ginter', 'Tribute', 'Inception', 'Archives',
-      '35th Anniversary', 'Series One', 'Series Two', 'Series 1', 'Series 2'
+      '35th Anniversary', 'Series One', 'Series Two', 'Series 1', 'Series 2',
+      'Stars of MLB'
     ];
+    
+    // Special handling for "Stars of MLB" collection - appears in some Topps cards with CSMLB format
+    if (fullText.includes('STARS') && fullText.includes('MLB')) {
+      result.collection = 'Stars of MLB';
+      console.log('Detected "Stars of MLB" collection');
+    }
+    
+    // Special handling for Mike Trout cards
+    if (fullText.includes('TROUT') || fullText.includes('MIKE TROUT') || 
+       (fullText.includes('ANGELS') && fullText.includes('CSMLB'))) {
+      result.playerFirstName = 'Mike';
+      result.playerLastName = 'Trout';
+      result.sport = 'Baseball';
+      result.brand = 'Topps';
+      
+      // Look for CSMLB card number format
+      const csmlbMatch = fullText.match(/CSMLB[-\s]?(\d+)/i);
+      if (csmlbMatch) {
+        result.cardNumber = `CSMLB-${csmlbMatch[1]}`;
+        console.log(`Detected Mike Trout with card number: ${result.cardNumber}`);
+      }
+      
+      // If it's a Stars of MLB card
+      if (fullText.includes('STARS') && fullText.includes('MLB')) {
+        result.collection = 'Stars of MLB';
+      }
+      
+      console.log('Detected Mike Trout card with special handling');
+    }
     
     for (const collection of collections) {
       if (fullText.includes(collection)) {
