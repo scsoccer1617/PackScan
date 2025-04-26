@@ -23,11 +23,26 @@ export async function initGoogleSheetsApi() {
 
     // Create a properly formatted private key
     let privateKey = process.env.GOOGLE_PRIVATE_KEY || '';
+    
+    // Handle various formats of private key
     if (privateKey.includes('\\n')) {
       privateKey = privateKey.replace(/\\n/g, '\n');
     }
     
+    // Make sure it begins and ends with the right markers
+    if (!privateKey.includes('-----BEGIN PRIVATE KEY-----')) {
+      privateKey = '-----BEGIN PRIVATE KEY-----\n' + privateKey;
+    }
+    if (!privateKey.includes('-----END PRIVATE KEY-----')) {
+      privateKey = privateKey + '\n-----END PRIVATE KEY-----';
+    }
+    
+    // Check key format and log diagnostic info (without exposing sensitive data)
     console.log('Initializing Google Sheets with client email:', process.env.GOOGLE_CLIENT_EMAIL);
+    console.log('Private key starts with correct header:', privateKey.startsWith('-----BEGIN PRIVATE KEY-----'));
+    console.log('Private key ends with correct footer:', privateKey.endsWith('-----END PRIVATE KEY-----'));
+    console.log('Private key length:', privateKey.length);
+    console.log('Private key contains newlines:', privateKey.includes('\n'));
     
     // Try with direct JWT approach
     googleAuth = new google.auth.JWT(
@@ -282,10 +297,27 @@ export const storage = {
       // Append the data
       fs.appendFileSync(csvFilePath, csvRow + '\n');
       
+      // CSV backup success message
+      console.log('Card data saved to CSV backup file:', csvFilePath);
+      
       // Try to update Google Sheets if available
       let nextRow = 1;
       if (googleSheetsInstance && spreadsheetId) {
         try {
+          // Reinitialize Sheets API connection with updated credentials if needed
+          if (process.env.GOOGLE_PRIVATE_KEY && !googleAuth) {
+            await initGoogleSheetsApi();
+            
+            // If still not initialized, report error but continue with CSV
+            if (!googleSheetsInstance) {
+              return { 
+                success: false, 
+                row: nextRow,
+                error: `Failed to initialize Google Sheets client with updated credentials. Data was saved to CSV file.`
+              };
+            }
+          }
+          
           // Get the next row number
           const response = await googleSheetsInstance.spreadsheets.values.get({
             spreadsheetId,
@@ -320,6 +352,8 @@ export const storage = {
               ]],
             },
           });
+          
+          console.log(`Successfully saved card to Google Sheets in row ${nextRow}`);
         } catch (error: any) {
           console.error('Error writing to Google Sheets directly, but data was saved to CSV:', error);
           
@@ -342,6 +376,13 @@ export const storage = {
             error: `Google Sheets error: ${error.message}. Data was saved to CSV file.`
           };
         }
+      } else {
+        console.log('Google Sheets API not initialized, using CSV backup only');
+        return { 
+          success: false, 
+          row: nextRow,
+          error: `Google Sheets API not properly initialized. Data was saved to CSV file only.`
+        };
       }
       
       return { success: true, row: nextRow };

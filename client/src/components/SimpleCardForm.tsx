@@ -126,7 +126,7 @@ export default function SimpleCardForm() {
         },
       });
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       // Reset the form
       form.reset();
       setFrontImage("");
@@ -135,10 +135,31 @@ export default function SimpleCardForm() {
       // Invalidate cards query to refresh the collection
       queryClient.invalidateQueries({ queryKey: ['/api/cards'] });
       
-      toast({
-        title: "Card Added",
-        description: "Your card has been added to the collection!",
-      });
+      // Check if Google Sheets export was successful
+      if (data.googleSheetsStatus) {
+        if (data.googleSheetsStatus.success) {
+          toast({
+            title: "Card Added Successfully",
+            description: "Your card has been added to the collection and synced to Google Sheets!",
+          });
+        } else {
+          // Card was saved to database but not to Google Sheets
+          toast({
+            title: "Card Added with Warning",
+            description: "Card saved to collection but couldn't sync to Google Sheets. A CSV backup was created.",
+            variant: "warning",
+          });
+          
+          // Log the detailed error for troubleshooting
+          console.warn("Google Sheets sync issue:", data.googleSheetsStatus.error);
+        }
+      } else {
+        // Standard success message if no Google Sheets status info
+        toast({
+          title: "Card Added",
+          description: "Your card has been added to the collection!",
+        });
+      }
     },
     onError: (error: any) => {
       toast({
