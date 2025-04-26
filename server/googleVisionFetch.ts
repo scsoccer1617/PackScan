@@ -428,46 +428,56 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     const isSeriesCard = fullText.includes('SERIES TWO') || fullText.includes('SERIES 2') || 
                          fullText.includes('SERIES ONE') || fullText.includes('SERIES 1');
                          
-    // First scan the top half of the card with broader detection
+    // Comprehensive scan of the card for card numbers in various formats and positions
     const topCardNumberCandidates = textAnnotations.filter(annotation => {
       const text = annotation.description;
       
       const boundingPoly = annotation.boundingPoly;
       if (!boundingPoly || !boundingPoly.vertices) return false;
       
-      // For back of card - check if it's in the top half of the card
-      // Most card numbers appear in the top 1/3 of the card
-      const isTopHalf = boundingPoly.vertices.every((v: any) => v.y < 700);
+      // IMPORTANT: Card numbers can appear in different locations
+      // 1. Top left corner (common for many cards like 89B-9, 89B2-32)
+      // 2. Top middle (like CSMLB-2)  
+      // 3. Top right area
       
-      // Check pattern based on card type 
-      let isValidFormat = false;
+      // Check if the text is in the top portion of the card (adjust threshold as needed)
+      // We're being more generous with the height to catch more potential numbers
+      const isTopPortion = boundingPoly.vertices.every((v: any) => v.y < 800);
       
-      if (isSeriesCard) {
-        // Series cards typically have 3-digit numbers
-        isValidFormat = /^\d{1,3}$/.test(text);
-      } else if (result.collection === '35th Anniversary') {
-        // 35th Anniversary cards have complex numbers like 89B-9 or 89B2-32
-        isValidFormat = /^[\dB][\dB][A-Za-z\d\-]+$|^\d{1,3}[A-Za-z]?[-]?\d*$|^[A-Z]{3}-\d{1,2}$/.test(text);
+      // Detect various card number patterns
+      // We'll check multiple formats that could be card numbers
+      
+      // Baseball card formats
+      const isBaseballFormat = /^(?:\d{1,2}[A-Za-z]\d?[-]?\d{1,2})$/i.test(text) ||        // 89B-9, 89B2-32
+                              /^(?:[A-Z]{2,}[-][0-9]{1,2})$/i.test(text) ||                // CSMLB-2
+                              /^(?:[A-Z]{3}[-]?[0-9]{1,2})$/i.test(text);                  // HOU-11, NYY25
+      
+      // General card numbering formats              
+      const isGeneralCardNumber = /^(?:\d{1,3})$/i.test(text) ||                          // Simple numbers like 123
+                                 /^(?:NO\.?\s*\d+)$/i.test(text) ||                       // NO.123
+                                 /^(?:CARD\s*\d+)$/i.test(text) ||                        // CARD 123
+                                 /^(?:#\s*\d+)$/i.test(text) ||                           // #123
+                                 /^(?:[A-Z][0-9]{1,3})$/i.test(text) ||                   // T206, A15 
+                                 /^(?:\d{1,3}[A-Z])$/i.test(text);                        // 123A, 45T
+                                 
+      // Specific formats known in sports cards
+      const isKnownCardFormat = text.toUpperCase().includes('CSMLB') ||                   // CSMLB-2 (Trout)
+                               /^89[Bb]/.test(text) ||                                   // 89B style (35th Anniversary)
+                               text.includes('-');                                        // Any hyphenated format
+      
+      // Log all potential candidates with their positions for debugging
+      if (isTopPortion && (isBaseballFormat || isGeneralCardNumber || isKnownCardFormat)) {
+        // Calculate if this is left, middle, or right portion
+        const xCoords = boundingPoly.vertices.map((v: any) => v.x);
+        const avgX = xCoords.reduce((a, b) => a + b, 0) / xCoords.length;
         
-        // Look for 89B pattern numbers that might be 35th Anniversary cards
-        if (/89[Bb][-]?\d{1,2}$/.test(text)) {
-          console.log('Found a potential 35th Anniversary card number pattern:', text);
-          return true;
-        }
-          
-        // Also check for common related patterns
-        if (text === '1989' || text === '89B' || text.includes('35')) {
-          console.log('Found a partial 35th Anniversary indicator:', text);
-          // Don't return true here, but continue searching for better matches
-        }
-      } else {
-        // General card number formats
-        isValidFormat = /^[\dB][\dB][A-Za-z\d\-]+$|^\d{1,3}[A-Za-z]?[-]?\d*$|^[A-Z]{3}-\d{1,2}$/.test(text);
-      }
-      
-      // Log all potential candidates
-      if (isTopHalf && isValidFormat) {
-        console.log('Found potential card number candidate:', text, 'at position:', JSON.stringify(boundingPoly));
+        // Determine position (left, middle, right) for better analysis
+        let position = "unknown";
+        if (avgX < 400) position = "top-left";
+        else if (avgX < 800) position = "top-middle";
+        else position = "top-right";
+        
+        console.log(`Found potential card number: "${text}" at ${position} position:`, JSON.stringify(boundingPoly));
         return true;
       }
       
@@ -497,19 +507,78 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       });
     }
     
-    // Try to find the card number in the traditional top-left position first
-    const topLeftCardNumber = topCardNumberCandidates.find(candidate => {
-      return candidate.boundingPoly.vertices.every((v: any) => v.x < 200 && v.y < 200);
+    // Separate candidates by location: top-left, top-middle, top-right
+    const topLeftCandidates = topCardNumberCandidates.filter(candidate => {
+      const xCoords = candidate.boundingPoly.vertices.map((v: any) => v.x);
+      const avgX = xCoords.reduce((a, b) => a + b, 0) / xCoords.length;
+      return avgX < 400; // Left side of card
     });
     
+    const topMiddleCandidates = topCardNumberCandidates.filter(candidate => {
+      const xCoords = candidate.boundingPoly.vertices.map((v: any) => v.x);
+      const avgX = xCoords.reduce((a, b) => a + b, 0) / xCoords.length;
+      return avgX >= 400 && avgX < 800; // Middle of card
+    });
+    
+    const topRightCandidates = topCardNumberCandidates.filter(candidate => {
+      const xCoords = candidate.boundingPoly.vertices.map((v: any) => v.x);
+      const avgX = xCoords.reduce((a, b) => a + b, 0) / xCoords.length;
+      return avgX >= 800; // Right side of card
+    });
+    
+    // Log the candidates by position
+    console.log(`Found ${topLeftCandidates.length} top-left candidates, ${topMiddleCandidates.length} top-middle candidates, ${topRightCandidates.length} top-right candidates`);
+    
+    // Determine card number format and select the best candidate
+    // RULE: Prioritize formats that look like baseball card numbers first
+    
+    // Find any "special" card number formats that we want to prioritize
+    const anySpecialFormat = topCardNumberCandidates.find(candidate => {
+      const text = candidate.description;
+      return /^(?:\d{1,2}[A-Za-z]\d?[-]?\d{1,2})$/i.test(text) ||     // 89B-9, 89B2-32
+             /^(?:[A-Z]{2,}[-][0-9]{1,2})$/i.test(text) ||            // CSMLB-2
+             text.toUpperCase().includes('CSMLB') ||                  // CSMLB format (Trout)
+             /^89[Bb]/.test(text);                                    // 89B format (35th Anniversary)
+    });
+    
+    // Look for candidates with these specific formats
+    const bestCandidates = [
+      // First try the special formats that include letters and numbers
+      anySpecialFormat,
+      
+      // Try position-based selection:
+      // 1. If it's like 89B-9, it's probably in top left
+      ...topLeftCandidates.filter(c => /^(?:\d{1,2}[A-Za-z]\d?[-]?\d{1,2})$/i.test(c.description)),
+      
+      // 2. If it's like CSMLB-2, it could be top-middle
+      ...topMiddleCandidates.filter(c => /^(?:[A-Z]{2,}[-][0-9]{1,2})$/i.test(c.description)),
+      
+      // 3. Team code formats like HOU-11 (often top left)
+      ...topLeftCandidates.filter(c => /^(?:[A-Z]{3}[-]?[0-9]{1,2})$/i.test(c.description)),
+      
+      // 4. If not found, try baseball number in top-left
+      topLeftCandidates[0],
+      
+      // 5. Try middle (some brands place the number here)
+      topMiddleCandidates[0],
+      
+      // 6. Try general baseball pattern anywhere
+      baseballCardNumber,
+      
+      // 7. Last resort, any candidate
+      topCardNumberCandidates[0]
+    ].filter(Boolean); // Remove undefined entries
+    
+    // Use the best candidate we found
+    const bestCardNumber = bestCandidates.length > 0 ? bestCandidates[0] : null;
+    
     // Check if this looks like a 35th Anniversary card based on the detected patterns
-    // This is a more dynamic approach instead of hardcoding specific player rules
     const is35thAnniversaryCard = fullText.includes('35') || 
                                fullText.includes('ANNIVERSARY') || 
                                (baseballCardNumber && baseballCardNumber.description.includes('89B'));
     
     // If we detect a card with the 89B pattern, it's very likely from the 35th Anniversary collection
-    if (is35thAnniversaryCard || (result.cardNumber && result.cardNumber.includes('89B'))) {
+    if (is35thAnniversaryCard || (bestCardNumber && bestCardNumber.description.includes('89B'))) {
       console.log('*** DETECTED 35th ANNIVERSARY CARD PATTERN ***');
       // Set collection-specific values but keep the dynamic card number
       if (!result.brand) result.brand = 'Topps';
@@ -519,20 +588,32 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       // Only set a default condition if none detected
       if (!result.condition) result.condition = 'PSA 9';
       
+      // For 35th Anniversary cards, if we have a card number, use it
+      if (bestCardNumber) {
+        result.cardNumber = bestCardNumber.description;
+        console.log('Selected card number for 35th Anniversary card:', result.cardNumber);
+      }
+      
       console.log('Applied 35th Anniversary card context:', {
         cardNumber: result.cardNumber,
         brand: result.brand,
         collection: result.collection,
         year: result.year
       });
-    }
-    // For other cards, use our regular pattern matching logic
-    else if (baseballCardNumber) {
-      result.cardNumber = baseballCardNumber.description;
-      console.log('Identified card number from baseball pattern match:', result.cardNumber);
-    } else if (topLeftCardNumber) {
-      result.cardNumber = topLeftCardNumber.description;
-      console.log('Identified card number from top-left position in card:', result.cardNumber);
+    } 
+    // For other cards, use our improved selection logic
+    else if (bestCardNumber) {
+      result.cardNumber = bestCardNumber.description;
+      
+      // Calculate position description for logging
+      const xCoords = bestCardNumber.boundingPoly.vertices.map((v: any) => v.x);
+      const avgX = xCoords.reduce((a, b) => a + b, 0) / xCoords.length;
+      let position = "unknown";
+      if (avgX < 400) position = "top-left";
+      else if (avgX < 800) position = "top-middle";
+      else position = "top-right";
+      
+      console.log(`Selected card number "${result.cardNumber}" from ${position} position`);
     } else {
       // Fallback: Check for specific patterns in the full text
       // This catches cases where the OCR didn't identify the text as a separate element

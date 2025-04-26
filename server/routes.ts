@@ -428,36 +428,81 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Run OCR on the image - convert buffer to base64 string
       let cardInfo = await analyzeSportsCardImage(req.file.buffer.toString('base64'));
       
-      // More dynamic approach for baseball card numbers in certain formats
-      // Look for baseball format card numbers like 89B-32 or 89B2-32 in the extracted text
-      const baseballCardNumberRegex = /\b(?:\d{1,2}[Bb][-]?\d{1,2}|\d{1,2}[Bb]\d[-]?\d{1,2})\b/;
+      // More comprehensive approach for various card number formats in different positions
       const fullText = JSON.stringify(cardInfo); // Convert all detected info to searchable text
-      const baseballNumberMatch = fullText.match(baseballCardNumberRegex);
       
-      if (baseballNumberMatch) {
-        const detectedCardNumber = baseballNumberMatch[0];
-        console.log('IMPORTANT: Detected baseball format card number in text:', detectedCardNumber);
+      // Check for different card number formats used across different brands and series
+      const cardNumberPatterns = [
+        // Baseball special formats
+        { regex: /\b(\d{1,2}[Bb][^a-zA-Z0-9\s][0-9]{1,2})\b/, format: "35th Anniversary", example: "89B-9" },
+        { regex: /\b(\d{1,2}[Bb]\d[-]?\d{1,2})\b/, format: "35th Anniversary", example: "89B2-32" },
+        { regex: /\b(\d{1,2}[Bb][-]?\d{1,2})\b/, format: "35th Anniversary", example: "89B-32" },
         
-        // Always prioritize baseball format card numbers when detected
-        cardInfo.cardNumber = detectedCardNumber;
+        // Team code formats
+        { regex: /\b([A-Z]{3}[-]?\d{1,2})\b/, format: "Team code", example: "HOU-11" },
         
-        // For baseball cards with this format, assume it's from the Topps 35th Anniversary collection
-        if (!cardInfo.collection) {
-          cardInfo.collection = '35th Anniversary';
-        }
-        if (!cardInfo.brand) {
-          cardInfo.brand = 'Topps';
-        }
-        if (!cardInfo.year || cardInfo.year < 2020) { // Fix old years
-          cardInfo.year = 2024;
-        }
+        // Special format like CSMLB (Mike Trout) 
+        { regex: /\b(CSMLB[-]?[0-9]{1,2})\b/i, format: "CSMLB series", example: "CSMLB-2" },
         
-        console.log('Applied baseball card number format corrections:', {
-          cardNumber: cardInfo.cardNumber,
-          collection: cardInfo.collection,
-          brand: cardInfo.brand,
-          year: cardInfo.year
-        });
+        // Other common formats
+        { regex: /\b(\d{1,3}[A-Z]{1,2}[0-9]{0,3})\b/, format: "Alphanumeric", example: "89BC" },
+        { regex: /\b(\d{1,3}[A-Z]?\-\d{1,3})\b/, format: "Numbered with dash", example: "89-32" }
+      ];
+      
+      // Try to detect card number from the full text
+      let cardNumberFound = false;
+      
+      for (const pattern of cardNumberPatterns) {
+        const match = fullText.match(pattern.regex);
+        if (match) {
+          const detectedCardNumber = match[1];
+          console.log(`IMPORTANT: Detected ${pattern.format} card number in text:`, detectedCardNumber, `(example pattern: ${pattern.example})`);
+          
+          // Always prioritize these specific formats when detected
+          cardInfo.cardNumber = detectedCardNumber;
+          cardNumberFound = true;
+          
+          // Apply appropriate context based on the card number format
+          if (pattern.format === "35th Anniversary") {
+            if (!cardInfo.collection) cardInfo.collection = '35th Anniversary';
+            if (!cardInfo.brand) cardInfo.brand = 'Topps';
+            if (!cardInfo.year || cardInfo.year < 2020) cardInfo.year = 2024;
+          }
+          else if (pattern.format === "CSMLB series") {
+            if (!cardInfo.brand) cardInfo.brand = 'Topps';
+            if (!cardInfo.year || cardInfo.year < 2020) cardInfo.year = 2024;
+          }
+          
+          console.log(`Applied context for ${pattern.format} card number:`, {
+            cardNumber: cardInfo.cardNumber,
+            collection: cardInfo.collection,
+            brand: cardInfo.brand,
+            year: cardInfo.year
+          });
+          
+          break;
+        }
+      }
+      
+      // If no specific format was detected but we have a numeric card number
+      if (!cardNumberFound && cardInfo.cardNumber && /^\d+$/.test(cardInfo.cardNumber)) {
+        console.log('Numeric card number detected:', cardInfo.cardNumber);
+        
+        // Check for Series One/Two context
+        if (fullText.includes('SERIES TWO') || fullText.includes('SERIES 2')) {
+          if (!cardInfo.collection) cardInfo.collection = 'Series Two';
+          if (!cardInfo.brand) cardInfo.brand = 'Topps';
+          if (!cardInfo.year || cardInfo.year < 2020) cardInfo.year = 2024;
+          
+          console.log('Applied Series Two context to numeric card number:', cardInfo.cardNumber);
+        }
+        else if (fullText.includes('SERIES ONE') || fullText.includes('SERIES 1')) {
+          if (!cardInfo.collection) cardInfo.collection = 'Series One';
+          if (!cardInfo.brand) cardInfo.brand = 'Topps';
+          if (!cardInfo.year || cardInfo.year < 2020) cardInfo.year = 2024;
+          
+          console.log('Applied Series One context to numeric card number:', cardInfo.cardNumber);
+        }
       }
       // General handling for 35th Anniversary cards
       else if (cardInfo.collection === '35th Anniversary' || 
