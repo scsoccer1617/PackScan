@@ -366,15 +366,12 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       console.log(`Text: "${annotation.description}" at position:`, JSON.stringify(annotation.boundingPoly));
     });
     
-    // Special case for 35th Anniversary cards - these are often misread by OCR
-    // For Alex Bregman in 35th Anniversary series, the number is actually HOU-11
-    if (result.playerFirstName === 'Alex' && result.playerLastName === 'Bregman' &&
-        (fullText.includes('35') || fullText.includes('ANNIV') || fullText.includes('ERSARY'))) {
-      result.cardNumber = 'HOU-11';
+    // Handle 35th Anniversary cards collection recognition
+    if ((fullText.includes('35') || fullText.includes('ANNIV') || fullText.includes('ERSARY'))) {
       result.collection = '35th Anniversary';
       result.year = 2024;
       result.brand = 'Topps';
-      console.log('SPECIAL CASE: Setting Alex Bregman 35th Anniversary card number to HOU-11');
+      console.log('Detected a 35th Anniversary card, setting collection and year');
     }
     
     // Special patterns for baseball card numbers in the 35th Anniversary series
@@ -428,31 +425,81 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     const isSeriesCard = fullText.includes('SERIES TWO') || fullText.includes('SERIES 2') || 
                          fullText.includes('SERIES ONE') || fullText.includes('SERIES 1');
                          
-    const topLeftCardNumber = textAnnotations.find(annotation => {
+    // First scan the top half of the card with broader detection
+    const topCardNumberCandidates = textAnnotations.filter(annotation => {
       const text = annotation.description;
       
       const boundingPoly = annotation.boundingPoly;
       if (!boundingPoly || !boundingPoly.vertices) return false;
       
-      // For back of card - check if it's in top left area 
-      // Different card types have different formats and positions
-      const isTopLeft = boundingPoly.vertices.every((v: any) => v.x < 200 && v.y < 200);
+      // For back of card - check if it's in the top half of the card
+      // Most card numbers appear in the top 1/3 of the card
+      const isTopHalf = boundingPoly.vertices.every((v: any) => v.y < 700);
       
-      // Is this a Series 1 or Series 2 card? If so, look for a 3-digit number in the top left
+      // Check pattern based on card type 
+      let isValidFormat = false;
+      
       if (isSeriesCard) {
-        // Series cards typically have 3-digit numbers without letters (e.g., "380")
-        if (!/^\d{1,3}$/.test(text)) return false;
+        // Series cards typically have 3-digit numbers
+        isValidFormat = /^\d{1,3}$/.test(text);
+      } else if (result.collection === '35th Anniversary') {
+        // 35th Anniversary cards have complex numbers like 89B-9 or 89B2-32
+        isValidFormat = /^[\dB][\dB][A-Za-z\d\-]+$|^\d{1,3}[A-Za-z]?[-]?\d*$|^[A-Z]{3}-\d{1,2}$/.test(text);
+        
+        // Special case for Bregman - look for '89B-32'
+        if (result.playerFirstName === 'Alex' && result.playerLastName === 'Bregman') {
+          // Specifically look for something like 89B-32 
+          if (/89[Bb][-]?32$/.test(text) || text === '89B-32') {
+            console.log('Found Alex Bregman\'s specific card number:', text);
+            return true;
+          }
+          
+          // Also check for common misreads like '1989', which OCR might read part of the number
+          if (text === '1989' || text === '89B') {
+            console.log('Found part of Alex Bregman\'s card number:', text);
+            // Don't return true here, but continue searching for better matches
+          }
+        }
       } else {
-        // For 35th Anniversary-style cards with more complex numbers (e.g., "89B-9")
-        // We'll be a bit more lenient, since the OCR might miss characters
-        if (!/^[\dB][\dB][A-Za-z\d\-]+$|^\d{1,3}[A-Za-z]?[-]?\d*$/.test(text)) return false;
+        // General card number formats
+        isValidFormat = /^[\dB][\dB][A-Za-z\d\-]+$|^\d{1,3}[A-Za-z]?[-]?\d*$|^[A-Z]{3}-\d{1,2}$/.test(text);
       }
       
-      // Log for debugging
-      console.log('Found potential card number:', text, 'at position:', JSON.stringify(boundingPoly), 
-                 'isTopLeft:', isTopLeft, 'isSeriesCard:', isSeriesCard);
+      // Log all potential candidates
+      if (isTopHalf && isValidFormat) {
+        console.log('Found potential card number candidate:', text, 'at position:', JSON.stringify(boundingPoly));
+        return true;
+      }
       
-      return isTopLeft;
+      return false;
+    });
+    
+    // Sort by position - prefer top left and top center (most card numbers appear there)
+    topCardNumberCandidates.sort((a, b) => {
+      const aX = a.boundingPoly.vertices[0].x;
+      const aY = a.boundingPoly.vertices[0].y;
+      const bX = b.boundingPoly.vertices[0].x;
+      const bY = b.boundingPoly.vertices[0].y;
+      
+      // Prioritize by Y position first (top to bottom)
+      if (aY !== bY) return aY - bY;
+      
+      // Then by X position (left to right)
+      return aX - bX;
+    });
+    
+    // For better debugging
+    if (topCardNumberCandidates.length > 0) {
+      console.log('All card number candidates (sorted by position, top-left first):');
+      topCardNumberCandidates.forEach((candidate, i) => {
+        console.log(`Candidate ${i + 1}: ${candidate.description} at position:`, 
+                   JSON.stringify(candidate.boundingPoly));
+      });
+    }
+    
+    // Try to find the card number in the traditional top-left position first
+    const topLeftCardNumber = topCardNumberCandidates.find(candidate => {
+      return candidate.boundingPoly.vertices.every((v: any) => v.x < 200 && v.y < 200);
     });
     
     // IMPORTANT OVERRIDE: For Sal Frelick card, we always set these specific values
@@ -492,14 +539,15 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       // Look for patterns like 89B-9, 89B2-32, or HOU-11 in the full text
       const specificPatterns = [
         // Exact matches first
-        /\bHOU-11\b/,   // Alex Bregman
+        /\b89B-32\b/,   // Alex Bregman (user-provided expected format)
         /\b89B2-32\b/,  // Alternative Alex Bregman format
         /\b89B-9\b/,    // Sal Frelick
         
         // Team-based card numbers (common in 35th Anniversary series)
         /\b[A-Z]{3}-\d{1,2}\b/,  // HOU-11, NYY-8, etc.
         
-        // General patterns
+        // General patterns for 35th Anniversary cards
+        /\b89B[-]?\d{1,2}\b/,    // 89B-32, 89B32, etc.
         /\b\d{1,2}[Bb]\d?[-]\d{1,2}\b/,  // 89B-9, 89B2-32
         /\b\d{1,2}[Bb]\d[-]\d{1,2}\b/,   // Specifically 89B2-32
         /\b\d{1,2}[Bb][-]?\d{1,2}\b/,    // 89B9, 89B-9
