@@ -485,13 +485,16 @@ export default function SimpleCardForm() {
                 )}
               />
               
-              <div className="pt-2">
+              <div className="pt-4">
+                <p className="text-center text-sm mb-3 text-amber-600 font-medium">
+                  ↓ Click the button below to add this card to your collection ↓
+                </p>
                 <Button 
                   type="submit" 
-                  className="w-full bg-slate-800 hover:bg-slate-700 active:bg-slate-900 text-white"
+                  className="w-full bg-green-600 hover:bg-green-500 active:bg-green-700 text-white py-6 text-lg font-bold"
                   disabled={createCardMutation.isPending}
                 >
-                  {createCardMutation.isPending ? "Adding to Collection..." : "Add to Collection"}
+                  {createCardMutation.isPending ? "Adding to Collection..." : "ADD TO COLLECTION"}
                 </Button>
               </div>
             </form>

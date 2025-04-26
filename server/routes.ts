@@ -428,44 +428,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Run OCR on the image - convert buffer to base64 string
       let cardInfo = await analyzeSportsCardImage(req.file.buffer.toString('base64'));
       
-      // Special case for Sal Frelick card since it has a unique pattern
-      if (cardInfo.playerFirstName === 'Sal' && cardInfo.playerLastName === 'Frelick') {
-        console.log('SPECIAL HANDLING: Detected Sal Frelick card, applying known values');
+      // More dynamic approach for baseball card numbers in certain formats
+      // Look for baseball format card numbers like 89B-32 or 89B2-32 in the extracted text
+      const baseballCardNumberRegex = /\b(?:\d{1,2}[Bb][-]?\d{1,2}|\d{1,2}[Bb]\d[-]?\d{1,2})\b/;
+      const fullText = JSON.stringify(cardInfo); // Convert all detected info to searchable text
+      const baseballNumberMatch = fullText.match(baseballCardNumberRegex);
+      
+      if (baseballNumberMatch) {
+        const detectedCardNumber = baseballNumberMatch[0];
+        console.log('IMPORTANT: Detected baseball format card number in text:', detectedCardNumber);
         
-        // Ensure all the correct values for the Sal Frelick card
-        cardInfo = {
-          ...cardInfo,
-          sport: 'Baseball',
-          playerFirstName: 'Sal',
-          playerLastName: 'Frelick',
-          brand: 'Topps',
-          cardNumber: '89B-9',  // This is the correct card number
-          collection: '35th Anniversary',
-          year: 2024,
-          variant: 'Rookie',
-          condition: 'PSA 9'
-        };
+        // Always prioritize baseball format card numbers when detected
+        cardInfo.cardNumber = detectedCardNumber;
         
-        console.log('Corrected card values for Sal Frelick:', cardInfo);
-      }
-      // Special case for Alex Bregman card
-      else if (cardInfo.playerFirstName === 'Alex' && cardInfo.playerLastName === 'Bregman') {
-        console.log('SPECIAL HANDLING: Detected Alex Bregman card, applying known values');
+        // For baseball cards with this format, assume it's from the Topps 35th Anniversary collection
+        if (!cardInfo.collection) {
+          cardInfo.collection = '35th Anniversary';
+        }
+        if (!cardInfo.brand) {
+          cardInfo.brand = 'Topps';
+        }
+        if (!cardInfo.year || cardInfo.year < 2020) { // Fix old years
+          cardInfo.year = 2024;
+        }
         
-        // Ensure all the correct values for the Alex Bregman card
-        cardInfo = {
-          ...cardInfo,
-          sport: 'Baseball',
-          playerFirstName: 'Alex',
-          playerLastName: 'Bregman',
-          brand: 'Topps',
-          cardNumber: '89B-32',  // This is the correct card number
-          collection: '35th Anniversary',
-          year: 2024,
-          condition: 'PSA 9'
-        };
-        
-        console.log('Corrected card values for Alex Bregman:', cardInfo);
+        console.log('Applied baseball card number format corrections:', {
+          cardNumber: cardInfo.cardNumber,
+          collection: cardInfo.collection,
+          brand: cardInfo.brand,
+          year: cardInfo.year
+        });
       }
       // General handling for 35th Anniversary cards
       else if (cardInfo.collection === '35th Anniversary' || 
