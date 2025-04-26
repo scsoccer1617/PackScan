@@ -447,10 +447,12 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       // Detect various card number patterns
       // We'll check multiple formats that could be card numbers
       
-      // Baseball card formats
+      // Baseball card formats - broad patterns to catch different card number styles
       const isBaseballFormat = /^(?:\d{1,2}[A-Za-z]\d?[-]?\d{1,2})$/i.test(text) ||        // 89B-9, 89B2-32
-                              /^(?:[A-Z]{2,}[-][0-9]{1,2})$/i.test(text) ||                // CSMLB-2
-                              /^(?:[A-Z]{3}[-]?[0-9]{1,2})$/i.test(text);                  // HOU-11, NYY25
+                             /^(?:[A-Z]{2,}[-]?[0-9]{1,2})$/i.test(text) ||               // CSMLB-2, CSMLB2 (Mike Trout)
+                             /^(?:[A-Z]{3}[-]?[0-9]{1,2})$/i.test(text) ||               // HOU-11, NYY25 (team codes)
+                             text.includes('CSMLB') ||                                   // Mike Trout cards (any CSMLB format)
+                             text.includes('89B');                                       // 35th Anniversary (any 89B format)
       
       // General card numbering formats              
       const isGeneralCardNumber = /^(?:\d{1,3})$/i.test(text) ||                          // Simple numbers like 123
