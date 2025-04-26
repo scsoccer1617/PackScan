@@ -147,7 +147,7 @@ export default function SimpleCardForm() {
           toast({
             title: "Card Added with Warning",
             description: "Card saved to collection but couldn't sync to Google Sheets. A CSV backup was created.",
-            variant: "warning",
+            variant: "default", // Using default for warning since "warning" is not a supported variant
           });
           
           // Log the detailed error for troubleshooting

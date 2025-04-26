@@ -24,17 +24,27 @@ export async function initGoogleSheetsApi() {
     // Create a properly formatted private key
     let privateKey = process.env.GOOGLE_PRIVATE_KEY || '';
     
-    // Handle various formats of private key
-    if (privateKey.includes('\\n')) {
-      privateKey = privateKey.replace(/\\n/g, '\n');
-    }
-    
-    // Make sure it begins and ends with the right markers
-    if (!privateKey.includes('-----BEGIN PRIVATE KEY-----')) {
-      privateKey = '-----BEGIN PRIVATE KEY-----\n' + privateKey;
-    }
-    if (!privateKey.includes('-----END PRIVATE KEY-----')) {
-      privateKey = privateKey + '\n-----END PRIVATE KEY-----';
+    try {
+      // Try to parse the key in case it was literally copied from the JSON file
+      if (privateKey.startsWith('"') && privateKey.endsWith('"')) {
+        // Remove the outer quotes
+        privateKey = privateKey.slice(1, -1);
+      }
+      
+      // Handle various formats of private key
+      if (privateKey.includes('\\n')) {
+        privateKey = privateKey.replace(/\\n/g, '\n');
+      }
+      
+      // Make sure it begins and ends with the right markers
+      if (!privateKey.includes('-----BEGIN PRIVATE KEY-----')) {
+        privateKey = '-----BEGIN PRIVATE KEY-----\n' + privateKey;
+      }
+      if (!privateKey.includes('-----END PRIVATE KEY-----')) {
+        privateKey = privateKey + '\n-----END PRIVATE KEY-----';
+      }
+    } catch (error) {
+      console.error('Error processing private key:', error);
     }
     
     // Check key format and log diagnostic info (without exposing sensitive data)
