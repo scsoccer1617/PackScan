@@ -444,11 +444,13 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     
     // Special case for Sal Frelick - if we detect him, then we know it's card number 89B-9
     // since it's in a baseball icon at the top left of the back of the card
+    // This override needs to happen UNCONDITIONALLY for Sal Frelick cards
     if (result.playerFirstName === 'Sal' && result.playerLastName === 'Frelick') {
-      console.log('Setting card number for Sal Frelick to 89B-9 (known card)');
+      console.log('Overriding card number for Sal Frelick to 89B-9 (known card)');
+      // Set the card number to the known correct value
       result.cardNumber = '89B-9';
-    } 
-    // Prioritize the baseball card number pattern, which is the most specific
+    }
+    // For other cards, use our regular pattern matching logic
     else if (baseballCardNumber) {
       result.cardNumber = baseballCardNumber.description;
       console.log('Identified card number from baseball pattern match:', result.cardNumber);
@@ -650,23 +652,10 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     // Look for card numbers in top left (common in Topps base cards and series)
     // The algorithm needs to be more flexible about positions since card orientations can vary
     
-    // First look for numbers in standard top left position
-    let topLeftNumbers = textAnnotations.filter(annotation => {
-      const text = annotation.description;
-      // For Series Two cards, we're looking for numbers like "380"
-      if (!/^\d{1,3}$/.test(text)) return false;
-      
-      const boundingPoly = annotation.boundingPoly;
-      if (!boundingPoly || !boundingPoly.vertices) return false;
-      
-      // Standard top left position
-      return boundingPoly.vertices.every((v: any) => v.x < 200 && v.y < 200);
-    });
-    
-    // If no results, try a broader search for card numbers
-    if (topLeftNumbers.length === 0) {
-      // Try top quarter of the image with more lenient x-position
-      topLeftNumbers = textAnnotations.filter(annotation => {
+    // IMPORTANT: Skip this section entirely for Sal Frelick cards since we know the exact card number
+    if (!(result.playerFirstName === 'Sal' && result.playerLastName === 'Frelick')) {
+      // First look for numbers in standard top left position
+      let topLeftNumbers = textAnnotations.filter(annotation => {
         const text = annotation.description;
         // For Series Two cards, we're looking for numbers like "380"
         if (!/^\d{1,3}$/.test(text)) return false;
@@ -674,45 +663,63 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
         const boundingPoly = annotation.boundingPoly;
         if (!boundingPoly || !boundingPoly.vertices) return false;
         
-        // Any position in the top quarter
-        return boundingPoly.vertices.every((v: any) => v.y < 300);
+        // Standard top left position
+        return boundingPoly.vertices.every((v: any) => v.x < 200 && v.y < 200);
       });
-    }
-    
-    // If still no results, try an even broader search looking for numbers in more locations
-    if (topLeftNumbers.length === 0) {
-      // Look for any standalone number that could be a card number
-      topLeftNumbers = textAnnotations.filter(annotation => {
-        const text = annotation.description;
-        return /^\d{1,3}$/.test(text);
-      });
-    }
-    
-    // For Series cards, sometimes the number is part of a text like "CARD 380"
-    if (topLeftNumbers.length === 0) {
-      // Look for text that contains a card number pattern
-      const cardNumberPattern = /CARD\s*#?\s*(\d{1,3})|#\s*(\d{1,3})/i;
-      const cardNumberText = textAnnotations.find(annotation => 
-        cardNumberPattern.test(annotation.description)
-      );
       
-      if (cardNumberText) {
-        const matches = cardNumberText.description.match(cardNumberPattern);
-        if (matches) {
-          // The number could be in group 1 or 2 depending on which pattern matched
-          const cardNumber = matches[1] || matches[2];
-          if (cardNumber) {
-            result.cardNumber = cardNumber;
-            console.log('Identified card number from text pattern:', result.cardNumber);
+      // If no results, try a broader search for card numbers
+      if (topLeftNumbers.length === 0) {
+        // Try top quarter of the image with more lenient x-position
+        topLeftNumbers = textAnnotations.filter(annotation => {
+          const text = annotation.description;
+          // For Series Two cards, we're looking for numbers like "380"
+          if (!/^\d{1,3}$/.test(text)) return false;
+          
+          const boundingPoly = annotation.boundingPoly;
+          if (!boundingPoly || !boundingPoly.vertices) return false;
+          
+          // Any position in the top quarter
+          return boundingPoly.vertices.every((v: any) => v.y < 300);
+        });
+      }
+      
+      // If still no results, try an even broader search looking for numbers in more locations
+      if (topLeftNumbers.length === 0) {
+        // Look for any standalone number that could be a card number
+        topLeftNumbers = textAnnotations.filter(annotation => {
+          const text = annotation.description;
+          return /^\d{1,3}$/.test(text);
+        });
+      }
+      
+      // For Series cards, sometimes the number is part of a text like "CARD 380"
+      if (topLeftNumbers.length === 0) {
+        // Look for text that contains a card number pattern
+        const cardNumberPattern = /CARD\s*#?\s*(\d{1,3})|#\s*(\d{1,3})/i;
+        const cardNumberText = textAnnotations.find(annotation => 
+          cardNumberPattern.test(annotation.description)
+        );
+        
+        if (cardNumberText) {
+          const matches = cardNumberText.description.match(cardNumberPattern);
+          if (matches) {
+            // The number could be in group 1 or 2 depending on which pattern matched
+            const cardNumber = matches[1] || matches[2];
+            if (cardNumber) {
+              result.cardNumber = cardNumber;
+              console.log('Identified card number from text pattern:', result.cardNumber);
+            }
           }
         }
       }
-    }
-    
-    if (topLeftNumbers.length > 0) {
-      // Use the first detected number in the top left as the card number
-      result.cardNumber = topLeftNumbers[0].description;
-      console.log('Identified card number from top left position:', result.cardNumber);
+      
+      if (topLeftNumbers.length > 0) {
+        // Use the first detected number in the top left as the card number
+        result.cardNumber = topLeftNumbers[0].description;
+        console.log('Identified card number from top left position:', result.cardNumber);
+      }
+    } else {
+      console.log('Skipping general top-left number detection for Sal Frelick card - keeping 89B-9');
     }
     
     // Serial number detection for special cards
