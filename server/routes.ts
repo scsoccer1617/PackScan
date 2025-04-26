@@ -178,10 +178,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         userId: null,
       });
       
-      // Card was successfully saved to database at this point
-      // Proceed to send response regardless of Google Sheets success
-      res.status(201).json(newCard);
-      
       // Export card data to CSV and Google Sheets if possible
       try {
         console.log('Exporting card data to CSV and Google Sheets...');
@@ -199,16 +195,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
           await storage.updateCard(newCard.id, {
             googleSheetId: `${sheetResult.row}`,
           });
+          
+          // Return success with Google Sheets status
+          return res.status(201).json({
+            ...newCard,
+            googleSheetsStatus: {
+              success: true,
+              message: "Card saved to database and Google Sheets successfully",
+              rowId: sheetResult.row
+            }
+          });
         } else if (sheetResult && !sheetResult.success) {
           console.warn(`Card saved to database and CSV, but not to Google Sheets: ${sheetResult.error}`);
+          
+          // Return success, but with Google Sheets error
+          return res.status(201).json({
+            ...newCard,
+            googleSheetsStatus: {
+              success: false,
+              message: "Card saved to database but couldn't be exported to Google Sheets",
+              error: sheetResult.error || "Unknown error with Google Sheets",
+              csvBackupCreated: true
+            }
+          });
         }
-      } catch (exportError) {
+      } catch (exportError: any) {
         console.error('Error during card export, but card was saved to database:', exportError);
-        // Don't fail the request if the export fails
+        
+        // Return success, but with Google Sheets error
+        return res.status(201).json({
+          ...newCard,
+          googleSheetsStatus: {
+            success: false,
+            message: "Card saved to database but encountered an error during export",
+            error: exportError.message || "Unknown export error", 
+            csvBackupCreated: false
+          }
+        });
       }
       
-      // Skip sending another response since we already sent one
-      return;
+      // Fallback response if something unexpected happens
+      return res.status(201).json(newCard);
     } catch (error) {
       console.error('Error creating card:', error);
       if (error instanceof z.ZodError) {
