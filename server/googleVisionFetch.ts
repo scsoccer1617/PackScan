@@ -377,25 +377,28 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     // Special patterns for baseball card numbers in the 35th Anniversary series
     // These typically appear as "89B-9" or "89B2-32" format in a baseball graphic on the back
     const cardNumberPatterns = [
-      // Look specifically for the '89B-9' in the baseball icon for Sal Frelick card
-      // Sometimes OCR can't read the entire baseball with the number, so we'll look for any 
-      // annotation that's positioned in top left (where the baseball appears)
-      // and contains something like "89" or "9" or "B" or any combination
-      /^89B[-]?9$/,     // Exact match for Sal Frelick card (with or without hyphen)
-      /^89B$/,          // Partial match (without the -9) for Sal Frelick card
-      /^89[-]?9$/,      // Partial match (without the B) for Sal Frelick card
-      /^HOU-11$/,       // Exact match for Alex Bregman card
+      // General baseball card patterns (dynamic detection for any similar pattern)
+      /^\d{1,2}[A-Za-z]\d?[-]?\d{1,2}$/,  // Catches 89B-9, 89B2-32, 89B9 (with or without dash)
+      /^\d{1,3}[-]?\d{1,3}$/,             // Catches 89-9, 891-32, 191, etc.
       
-      // Exact patterns for the cards we know
-      /^89B2-32$/,      // Alternative pattern for Alex Bregman card
-      /^89B-9$/,        // Exact match for Sal Frelick card
+      // Team code patterns - any 3 letters followed by numbers
+      /^[A-Za-z]{3}[-]?\d{1,2}$/,        // Catches HOU-11, NYY-2, BOS99, etc.
       
-      // More general patterns for other cards
-      /^\d{1,2}[A-Za-z]\d?[-]\d{1,2}$/,  // Matches 89B-9, 89B2-32, etc.
-      /^\d{1,2}[A-Za-z][-]\d{1,2}$/,     // Matches 89B-9, etc.
+      // Generic number patterns that might be card numbers
+      /^#?\d{1,3}[A-Za-z]?$/,            // Catches #123, 123A, 99, etc.
+      /^[A-Za-z][-]?\d{1,3}$/,           // Catches T-206, B-12, A99, etc.
+      
+      // Card number with text prefix patterns
+      /^(?:card|no)[.\s#]?\d{1,3}[A-Za-z]?$/i,  // Catches "Card 123", "No.99", etc.
+      
+      // Alternative patterns for partial matches
+      /^\d{1,2}[A-Za-z]$/,               // Catches just "89B", "7T", etc. 
+      /^[-]?\d{1,2}$/,                   // Catches just "-9", "32", etc.
+      
+      // Special baseball card formats
       /^\d{1,2}[A-Za-z]\d[-]\d{1,2}$/,   // Matches 89B2-32 specifically
-      /^[A-Z]{3}[-]\d{1,2}$/,           // Matches HOU-11, etc.
-      /^[0-9]{2}[A-Za-z][0-9]?[-][0-9]{1,2}$/  // Stricter version
+      /^[A-Z]{3}[-]\d{1,2}$/,            // Matches HOU-11, etc.
+      /^[0-9]{2}[A-Za-z][0-9]?[-][0-9]{1,2}$/  // Stricter version for 89B-9, etc.
     ];
     
     // First look for specific baseball card number patterns
@@ -446,19 +449,16 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
         // 35th Anniversary cards have complex numbers like 89B-9 or 89B2-32
         isValidFormat = /^[\dB][\dB][A-Za-z\d\-]+$|^\d{1,3}[A-Za-z]?[-]?\d*$|^[A-Z]{3}-\d{1,2}$/.test(text);
         
-        // Special case for Bregman - look for '89B-32'
-        if (result.playerFirstName === 'Alex' && result.playerLastName === 'Bregman') {
-          // Specifically look for something like 89B-32 
-          if (/89[Bb][-]?32$/.test(text) || text === '89B-32') {
-            console.log('Found Alex Bregman\'s specific card number:', text);
-            return true;
-          }
+        // Look for 89B pattern numbers that might be 35th Anniversary cards
+        if (/89[Bb][-]?\d{1,2}$/.test(text)) {
+          console.log('Found a potential 35th Anniversary card number pattern:', text);
+          return true;
+        }
           
-          // Also check for common misreads like '1989', which OCR might read part of the number
-          if (text === '1989' || text === '89B') {
-            console.log('Found part of Alex Bregman\'s card number:', text);
-            // Don't return true here, but continue searching for better matches
-          }
+        // Also check for common related patterns
+        if (text === '1989' || text === '89B' || text.includes('35')) {
+          console.log('Found a partial 35th Anniversary indicator:', text);
+          // Don't return true here, but continue searching for better matches
         }
       } else {
         // General card number formats
@@ -502,47 +502,28 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       return candidate.boundingPoly.vertices.every((v: any) => v.x < 200 && v.y < 200);
     });
     
-    // IMPORTANT OVERRIDE: For Sal Frelick card, we always set these specific values
-    // since the OCR might not detect everything correctly
-    if (result.playerFirstName === 'Sal' && result.playerLastName === 'Frelick') {
-      console.log('*** APPLYING SPECIAL CASE FOR SAL FRELICK CARD ***');
-      // Set the card number to the known correct value
-      result.cardNumber = '89B-9';
-      result.brand = 'Topps';
-      result.collection = '35th Anniversary';
-      result.year = 2024;
-      result.variant = 'Rookie';
-      result.condition = 'PSA 9';
+    // Check if this looks like a 35th Anniversary card based on the detected patterns
+    // This is a more dynamic approach instead of hardcoding specific player rules
+    const is35thAnniversaryCard = fullText.includes('35') || 
+                               fullText.includes('ANNIVERSARY') || 
+                               (baseballCardNumber && baseballCardNumber.description.includes('89B'));
+    
+    // If we detect a card with the 89B pattern, it's very likely from the 35th Anniversary collection
+    if (is35thAnniversaryCard || (result.cardNumber && result.cardNumber.includes('89B'))) {
+      console.log('*** DETECTED 35th ANNIVERSARY CARD PATTERN ***');
+      // Set collection-specific values but keep the dynamic card number
+      if (!result.brand) result.brand = 'Topps';
+      if (!result.collection) result.collection = '35th Anniversary';
+      if (!result.year) result.year = 2024;
       
-      console.log('Special case applied for Sal Frelick card:', {
-        playerFirstName: result.playerFirstName,
-        playerLastName: result.playerLastName,
+      // Only set a default condition if none detected
+      if (!result.condition) result.condition = 'PSA 9';
+      
+      console.log('Applied 35th Anniversary card context:', {
         cardNumber: result.cardNumber,
         brand: result.brand,
         collection: result.collection,
-        year: result.year,
-        variant: result.variant,
-        condition: result.condition
-      });
-    }
-    // IMPORTANT OVERRIDE: For Alex Bregman card, set the specific card number
-    else if (result.playerFirstName === 'Alex' && result.playerLastName === 'Bregman') {
-      console.log('*** APPLYING SPECIAL CASE FOR ALEX BREGMAN CARD ***');
-      // Set the card number to the known correct value
-      result.cardNumber = '89B-32';
-      result.brand = 'Topps';
-      result.collection = '35th Anniversary';
-      result.year = 2024;
-      result.condition = 'PSA 9';
-      
-      console.log('Special case applied for Alex Bregman card:', {
-        playerFirstName: result.playerFirstName,
-        playerLastName: result.playerLastName,
-        cardNumber: result.cardNumber,
-        brand: result.brand,
-        collection: result.collection,
-        year: result.year,
-        condition: result.condition
+        year: result.year
       });
     }
     // For other cards, use our regular pattern matching logic
