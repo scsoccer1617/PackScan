@@ -1,19 +1,56 @@
+import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { ScanSearch, Camera, Plus } from "lucide-react";
+import { 
+  ScanSearch, 
+  Camera, 
+  Plus, 
+  Upload, 
+  ImageIcon, 
+  ChevronDown 
+} from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 interface ImagePreviewProps {
   frontImage: string;
   backImage: string;
   onCaptureRequest: (side: 'front' | 'back') => void;
   onAnalyzeRequest?: () => void;
+  onDirectImageUpload?: (side: 'front' | 'back', imageData: string) => void;
 }
 
 export default function ImagePreview({ 
   frontImage, 
   backImage, 
   onCaptureRequest,
-  onAnalyzeRequest
+  onAnalyzeRequest,
+  onDirectImageUpload
 }: ImagePreviewProps) {
+  const frontFileInputRef = useRef<HTMLInputElement>(null);
+  const backFileInputRef = useRef<HTMLInputElement>(null);
+  
+  const handleFileInputChange = (side: 'front' | 'back', event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const imageData = e.target?.result as string;
+        // If we have the direct upload function, use it
+        if (onDirectImageUpload) {
+          onDirectImageUpload(side, imageData);
+        } else {
+          // Otherwise fall back to the capture request
+          onCaptureRequest(side);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
   return (
     <div className="mb-4">
       <div className="grid grid-cols-2 gap-4 mb-3">
@@ -33,15 +70,42 @@ export default function ImagePreview({
               Front
             </div>
           </div>
-          <Button 
-            type="button" 
-            variant={frontImage ? "outline" : "default"}
-            size="sm" 
-            className="mt-2 w-full"
-            onClick={() => onCaptureRequest('front')}
-          >
-            {frontImage ? "Replace Image" : <><Plus className="h-4 w-4 mr-1" /> Front Image</>}
-          </Button>
+          
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button 
+                type="button" 
+                variant={frontImage ? "outline" : "default"}
+                size="sm" 
+                className="mt-2 w-full bg-slate-500 hover:bg-slate-600 text-white border border-slate-400"
+              >
+                {frontImage ? "Replace Front Image" : <><Plus className="h-4 w-4 mr-1" /> Front Image</>}
+                <ChevronDown className="h-4 w-4 ml-1" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent className="w-52">
+              <DropdownMenuItem onClick={() => onCaptureRequest('front')}>
+                <Camera className="h-4 w-4 mr-2" />
+                Take Photo
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => frontFileInputRef.current?.click()}>
+                <ImageIcon className="h-4 w-4 mr-2" />
+                Choose from Gallery
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => frontFileInputRef.current?.click()}>
+                <Upload className="h-4 w-4 mr-2" />
+                Upload File
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          
+          <input 
+            type="file"
+            ref={frontFileInputRef}
+            onChange={(e) => handleFileInputChange('front', e)}
+            accept="image/*"
+            className="hidden"
+          />
         </div>
         
         <div className="flex flex-col">
@@ -60,15 +124,42 @@ export default function ImagePreview({
               Back
             </div>
           </div>
-          <Button 
-            type="button" 
-            variant={backImage ? "outline" : "default"}
-            size="sm" 
-            className="mt-2 w-full"
-            onClick={() => onCaptureRequest('back')}
-          >
-            {backImage ? "Replace Image" : <><Plus className="h-4 w-4 mr-1" /> Back Image</>}
-          </Button>
+          
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button 
+                type="button" 
+                variant={backImage ? "outline" : "default"}
+                size="sm" 
+                className="mt-2 w-full bg-slate-500 hover:bg-slate-600 text-white border border-slate-400"
+              >
+                {backImage ? "Replace Back Image" : <><Plus className="h-4 w-4 mr-1" /> Back Image</>}
+                <ChevronDown className="h-4 w-4 ml-1" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent className="w-52">
+              <DropdownMenuItem onClick={() => onCaptureRequest('back')}>
+                <Camera className="h-4 w-4 mr-2" />
+                Take Photo
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => backFileInputRef.current?.click()}>
+                <ImageIcon className="h-4 w-4 mr-2" />
+                Choose from Gallery
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => backFileInputRef.current?.click()}>
+                <Upload className="h-4 w-4 mr-2" />
+                Upload File
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          
+          <input 
+            type="file"
+            ref={backFileInputRef}
+            onChange={(e) => handleFileInputChange('back', e)}
+            accept="image/*"
+            className="hidden"
+          />
         </div>
       </div>
       

@@ -130,6 +130,14 @@ export default function CardForm() {
     }
     setCaptureMode('none');
   };
+  
+  const handleDirectFileUpload = (side: 'front' | 'back', imageData: string) => {
+    if (side === 'front') {
+      setFrontImage(imageData);
+    } else {
+      setBackImage(imageData);
+    }
+  };
 
   const handleSubmit = (data: CardFormValues) => {
     // Add image data to form submission
@@ -248,6 +256,7 @@ export default function CardForm() {
           backImage={backImage} 
           onCaptureRequest={toggleCaptureMode}
           onAnalyzeRequest={handleAnalyzeRequest}
+          onDirectImageUpload={handleDirectFileUpload}
         />
         
         {showOCR && (
