@@ -154,9 +154,9 @@ export default function CameraCapture({ onImageCapture, side }: CameraCapturePro
                     fileInputRef.current?.click();
                   }
                 }}
-                className="bg-primary-600 hover:bg-primary-700 text-white font-medium px-4 py-2 rounded-md shadow-sm"
+                className="bg-primary-700 hover:bg-primary-800 text-white font-bold px-8 py-3 rounded-md shadow-md ring-2 ring-primary-300 text-base transition-all duration-200 ease-in-out transform hover:scale-105 hover:shadow-lg"
               >
-                Add Image
+                📷 Add Image
               </Button>
               <input 
                 type="file"
@@ -209,10 +209,10 @@ export default function CameraCapture({ onImageCapture, side }: CameraCapturePro
                     fileInputRef.current?.click();
                   }
                 }}
-                className="bg-primary-600 hover:bg-primary-700 text-white font-medium px-3 py-1 rounded-md shadow-sm"
+                className="bg-primary-700 hover:bg-primary-800 text-white font-medium px-3 py-1 rounded-md shadow-sm ring-1 ring-primary-300"
                 size="sm"
               >
-                Add Image
+                📷 Add Image
               </Button>
             </div>
           )}
@@ -220,9 +220,9 @@ export default function CameraCapture({ onImageCapture, side }: CameraCapturePro
           {isCameraActive && (
             <Button 
               onClick={captureImage}
-              className="bg-primary-600 hover:bg-primary-700 text-white"
+              className="bg-primary-700 hover:bg-primary-800 text-white font-bold rounded-md shadow-md ring-1 ring-primary-300 animate-pulse"
             >
-              Capture
+              📸 Capture Photo
             </Button>
           )}
           
@@ -233,9 +233,9 @@ export default function CameraCapture({ onImageCapture, side }: CameraCapturePro
                 onImageCapture('');
               }}
               variant="outline"
-              className="border-slate-300 text-slate-700"
+              className="border-red-300 text-red-600 hover:bg-red-50 font-medium shadow-sm"
             >
-              Retake
+              🔄 Retake Photo
             </Button>
           )}
         </div>
