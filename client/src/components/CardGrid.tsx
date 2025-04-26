@@ -2,11 +2,17 @@ import { useQuery } from "@tanstack/react-query";
 import CardItem from "./CardItem";
 import { Card } from "@shared/schema";
 import { useState, useEffect } from "react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { ChevronDown, ChevronUp, Filter, SortDesc } from "lucide-react";
 
 // Group cards by collection
 type CardsByCollection = {
   [key: string]: Card[];
 };
+
+// Sort types
+type SortOption = "newest" | "oldest" | "name-asc" | "name-desc" | "value-high" | "value-low";
 
 export default function CardGrid() {
   const { data: cards, isLoading, error } = useQuery<Card[]>({
@@ -15,6 +21,19 @@ export default function CardGrid() {
 
   const [groupedCards, setGroupedCards] = useState<CardsByCollection>({});
   const [allCollections, setAllCollections] = useState<string[]>([]);
+  const [sortOption, setSortOption] = useState<SortOption>("newest");
+  const [expandedCollections, setExpandedCollections] = useState<Set<string>>(new Set());
+  
+  // Toggle collection expansion
+  const toggleCollection = (collection: string) => {
+    const newExpanded = new Set(expandedCollections);
+    if (newExpanded.has(collection)) {
+      newExpanded.delete(collection);
+    } else {
+      newExpanded.add(collection);
+    }
+    setExpandedCollections(newExpanded);
+  };
   
   // Process cards into collections when data changes
   useEffect(() => {
@@ -42,24 +61,58 @@ export default function CardGrid() {
       return a.localeCompare(b);
     });
     
+    // Apply sorting to each collection group
+    Object.keys(grouped).forEach(collection => {
+      switch (sortOption) {
+        case "newest":
+          grouped[collection].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+          break;
+        case "oldest":
+          grouped[collection].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+          break;
+        case "name-asc":
+          grouped[collection].sort((a, b) => `${a.playerFirstName} ${a.playerLastName}`.localeCompare(`${b.playerFirstName} ${b.playerLastName}`));
+          break;
+        case "name-desc":
+          grouped[collection].sort((a, b) => `${b.playerFirstName} ${b.playerLastName}`.localeCompare(`${a.playerFirstName} ${a.playerLastName}`));
+          break;
+        case "value-high":
+          grouped[collection].sort((a, b) => (b.estimatedValue || 0) - (a.estimatedValue || 0));
+          break;
+        case "value-low":
+          grouped[collection].sort((a, b) => (a.estimatedValue || 0) - (b.estimatedValue || 0));
+          break;
+        default:
+          break;
+      }
+    });
+    
     setGroupedCards(grouped);
     setAllCollections(sortedCollections);
-  }, [cards]);
+    
+    // Auto-expand all collections when first loading
+    if (expandedCollections.size === 0) {
+      setExpandedCollections(new Set(sortedCollections));
+    }
+  }, [cards, sortOption]);
 
   if (isLoading) {
     return (
       <div className="space-y-8">
-        <div className="h-6 bg-slate-200 rounded animate-pulse w-1/3 mb-2"></div>
+        <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 mb-4 animate-pulse">
+          <div className="h-8 bg-slate-200 rounded w-1/3 mb-2"></div>
+          <div className="h-6 bg-slate-200 rounded w-1/4"></div>
+        </div>
         <div className="grid grid-cols-2 gap-4">
           {[...Array(4)].map((_, i) => (
-            <div key={i} className="rounded-lg overflow-hidden border border-slate-200 bg-white">
-              <div className="aspect-w-2 aspect-h-3 bg-slate-200 animate-pulse"></div>
+            <div key={i} className="rounded-lg overflow-hidden border border-slate-200 bg-white animate-pulse">
+              <div className="aspect-w-2 aspect-h-3 bg-slate-200"></div>
               <div className="p-3">
-                <div className="h-4 bg-slate-200 rounded animate-pulse mb-2"></div>
-                <div className="h-3 bg-slate-200 rounded animate-pulse w-2/3 mb-2"></div>
+                <div className="h-4 bg-slate-200 rounded mb-2"></div>
+                <div className="h-3 bg-slate-200 rounded w-2/3 mb-2"></div>
                 <div className="flex justify-between items-center mt-2">
-                  <div className="h-3 bg-slate-200 rounded animate-pulse w-1/4"></div>
-                  <div className="h-3 bg-slate-200 rounded animate-pulse w-1/6"></div>
+                  <div className="h-3 bg-slate-200 rounded w-1/4"></div>
+                  <div className="h-3 bg-slate-200 rounded w-1/6"></div>
                 </div>
               </div>
             </div>
@@ -89,24 +142,82 @@ export default function CardGrid() {
     );
   }
 
+  const sortOptions = [
+    { value: "newest", label: "Newest First" },
+    { value: "oldest", label: "Oldest First" },
+    { value: "name-asc", label: "Name (A-Z)" },
+    { value: "name-desc", label: "Name (Z-A)" },
+    { value: "value-high", label: "Value (High-Low)" },
+    { value: "value-low", label: "Value (Low-High)" },
+  ];
+
   return (
     <div className="space-y-8">
-      {allCollections.map(collection => (
-        <div key={collection} className="mb-6">
-          <div className="flex items-center mb-3">
-            <h2 className="text-lg font-bold text-slate-800">{collection}</h2>
-            <span className="ml-2 bg-slate-100 text-slate-700 text-xs font-medium px-2 py-1 rounded-full">
-              {groupedCards[collection]?.length || 0}
-            </span>
+      {/* Sort and filter controls */}
+      <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 mb-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center">
+            <SortDesc className="h-5 w-5 text-slate-500 mr-2" />
+            <span className="text-sm font-medium text-slate-700">Sort by:</span>
           </div>
           
-          <div className="grid grid-cols-2 gap-4">
-            {groupedCards[collection]?.map((card) => (
-              <CardItem key={card.id} card={card} />
-            ))}
-          </div>
+          <Select value={sortOption} onValueChange={(value) => setSortOption(value as SortOption)}>
+            <SelectTrigger className="w-[180px] h-8 text-sm bg-white">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {sortOptions.map(option => (
+                <SelectItem key={option.value} value={option.value} className="text-sm">
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
-      ))}
+        
+        <div className="mt-2 text-xs text-slate-500 flex items-center">
+          <Filter className="h-3 w-3 mr-1" />
+          <span>Displaying {cards.length} cards in {allCollections.length} collections</span>
+        </div>
+      </div>
+      
+      {/* Card Collections */}
+      <div className="space-y-4">
+        {allCollections.map(collection => (
+          <div 
+            key={collection} 
+            className="border border-slate-200 rounded-lg overflow-hidden bg-white"
+          >
+            <button 
+              className="w-full flex items-center justify-between p-3 bg-slate-50 hover:bg-slate-100 transition-colors"
+              onClick={() => toggleCollection(collection)}
+            >
+              <div className="flex items-center">
+                <h2 className="text-lg font-bold text-slate-800">{collection}</h2>
+                <span className="ml-2 bg-slate-200 text-slate-700 text-xs font-medium px-2 py-1 rounded-full">
+                  {groupedCards[collection]?.length || 0}
+                </span>
+              </div>
+              
+              {expandedCollections.has(collection) ? (
+                <ChevronUp className="h-5 w-5 text-slate-500" />
+              ) : (
+                <ChevronDown className="h-5 w-5 text-slate-500" />
+              )}
+            </button>
+            
+            {expandedCollections.has(collection) && (
+              <div className="p-3">
+                <div className="grid grid-cols-2 gap-4">
+                  {groupedCards[collection]?.map((card) => (
+                    <CardItem key={card.id} card={card} />
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

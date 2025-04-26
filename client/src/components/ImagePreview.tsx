@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button";
-import { ScanSearch } from "lucide-react";
+import { ScanSearch, Camera, Plus } from "lucide-react";
 
 interface ImagePreviewProps {
   frontImage: string;
@@ -15,59 +15,73 @@ export default function ImagePreview({
   onAnalyzeRequest
 }: ImagePreviewProps) {
   return (
-    <div className="mb-2">
-      <div className="flex space-x-3 mb-2">
-        <button 
-          type="button"
-          className="relative w-24 h-32 bg-slate-100 rounded border border-slate-300 flex flex-col items-center justify-center overflow-hidden hover:bg-slate-200 transition-colors"
-          onClick={() => onCaptureRequest('front')}
-        >
-          {frontImage ? (
-            <img src={frontImage} alt="Card front preview" className="object-cover w-full h-full" />
-          ) : (
-            <>
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-              </svg>
-              <div className="mt-1 text-xs font-medium text-white bg-primary-600 hover:bg-primary-700 px-3 py-1 rounded-md shadow-sm">Add photo</div>
-            </>
-          )}
-          <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-50 text-white text-xs py-1 px-2">
-            Front
+    <div className="mb-4">
+      <div className="grid grid-cols-2 gap-4 mb-3">
+        <div className="flex flex-col">
+          <div 
+            className={`relative rounded-lg border-2 ${frontImage ? 'border-slate-300' : 'border-dashed border-slate-400'} bg-slate-50 h-36 flex flex-col items-center justify-center overflow-hidden`}
+          >
+            {frontImage ? (
+              <img src={frontImage} alt="Card front preview" className="object-cover w-full h-full" />
+            ) : (
+              <div className="flex flex-col items-center justify-center p-4">
+                <Camera className="h-8 w-8 text-slate-400 mb-2" />
+                <p className="text-xs text-center text-slate-500">No front image added</p>
+              </div>
+            )}
+            <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-60 text-white text-xs py-1 px-2 font-medium">
+              Front
+            </div>
           </div>
-        </button>
+          <Button 
+            type="button" 
+            variant={frontImage ? "outline" : "default"}
+            size="sm" 
+            className="mt-2 w-full"
+            onClick={() => onCaptureRequest('front')}
+          >
+            {frontImage ? "Replace Image" : <><Plus className="h-4 w-4 mr-1" /> Front Image</>}
+          </Button>
+        </div>
         
-        <button 
-          type="button"
-          className={`relative w-24 h-32 bg-slate-100 rounded border ${backImage ? 'border-slate-300' : 'border-dashed border-slate-300'} flex flex-col items-center justify-center overflow-hidden hover:bg-slate-200 transition-colors`}
-          onClick={() => onCaptureRequest('back')}
-        >
-          {backImage ? (
-            <img src={backImage} alt="Card back preview" className="object-cover w-full h-full" />
-          ) : (
-            <>
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-              </svg>
-              <div className="mt-1 text-xs font-medium text-white bg-primary-600 hover:bg-primary-700 px-3 py-1 rounded-md shadow-sm">Add photo</div>
-            </>
-          )}
-          <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-50 text-white text-xs py-1 px-2 text-center">
-            Back
+        <div className="flex flex-col">
+          <div 
+            className={`relative rounded-lg border-2 ${backImage ? 'border-slate-300' : 'border-dashed border-slate-400'} bg-slate-50 h-36 flex flex-col items-center justify-center overflow-hidden`}
+          >
+            {backImage ? (
+              <img src={backImage} alt="Card back preview" className="object-cover w-full h-full" />
+            ) : (
+              <div className="flex flex-col items-center justify-center p-4">
+                <Camera className="h-8 w-8 text-slate-400 mb-2" />
+                <p className="text-xs text-center text-slate-500">No back image added</p>
+              </div>
+            )}
+            <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-60 text-white text-xs py-1 px-2 font-medium">
+              Back
+            </div>
           </div>
-        </button>
+          <Button 
+            type="button" 
+            variant={backImage ? "outline" : "default"}
+            size="sm" 
+            className="mt-2 w-full"
+            onClick={() => onCaptureRequest('back')}
+          >
+            {backImage ? "Replace Image" : <><Plus className="h-4 w-4 mr-1" /> Back Image</>}
+          </Button>
+        </div>
       </div>
       
       {frontImage && onAnalyzeRequest && (
         <Button 
           type="button" 
-          variant="outline" 
+          variant="secondary" 
           size="sm" 
-          className="w-full mt-1 border-dashed"
+          className="w-full"
           onClick={onAnalyzeRequest}
         >
           <ScanSearch className="h-4 w-4 mr-2" />
-          Analyze with OCR
+          Analyze Card with OCR
         </Button>
       )}
     </div>
