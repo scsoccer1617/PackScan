@@ -215,7 +215,7 @@ export const storage = {
     const allCards = await this.getCards();
     
     // Total value calculation
-    const totalValue = allCards.reduce((sum, card) => sum + (card.estimatedValue || 0), 0);
+    const totalValue = allCards.reduce((sum, card) => sum + (card.estimatedValue ? Number(card.estimatedValue) : 0), 0);
     
     // Cards by sport
     const sportDistribution = await db.select({
@@ -229,7 +229,7 @@ export const storage = {
     // Value by year
     const valueByYear = await db.select({
       year: schema.cards.year,
-      value: sql<number>`sum(${schema.cards.estimatedValue})`,
+      value: sql<string>`sum(CAST(${schema.cards.estimatedValue} AS numeric))`,
     })
     .from(schema.cards)
     .groupBy(schema.cards.year)
@@ -301,6 +301,7 @@ export const storage = {
           'ID', 'Sport', 'Player First Name', 'Player Last Name', 
           'Brand', 'Collection', 'Card Number', 'Year', 
           'Variant', 'Serial Number', 'Condition', 'Estimated Value',
+          'Rookie Card', 'Autographed', 'Numbered',
           'Front Image URL', 'Back Image URL', 'Last Updated'
         ].map(header => `"${header}"`).join(',');
         
@@ -369,7 +370,7 @@ export const storage = {
               // Add headers to the new sheet
               await googleSheetsInstance.spreadsheets.values.update({
                 spreadsheetId,
-                range: 'Cards!A1:O1',
+                range: 'Cards!A1:R1',
                 valueInputOption: 'RAW',
                 resource: {
                   values: [[
