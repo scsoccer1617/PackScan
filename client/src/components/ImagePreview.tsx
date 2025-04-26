@@ -1,19 +1,10 @@
-import { useRef, useState } from "react";
+import { useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { 
   ScanSearch, 
   Camera, 
-  Plus, 
-  Upload, 
-  ImageIcon, 
-  ChevronDown 
+  Plus
 } from "lucide-react";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 
 interface ImagePreviewProps {
   frontImage: string;
@@ -59,7 +50,7 @@ export default function ImagePreview({
             className={`relative rounded-lg border-2 ${frontImage ? 'border-slate-300' : 'border-dashed border-slate-400'} bg-slate-50 h-36 flex flex-col items-center justify-center overflow-hidden`}
           >
             {frontImage ? (
-              <img src={frontImage} alt="Card front preview" className="object-cover w-full h-full" />
+              <img src={frontImage} alt="Card front preview" className="object-contain w-full h-full" />
             ) : (
               <div className="flex flex-col items-center justify-center p-4">
                 <Camera className="h-8 w-8 text-slate-400 mb-2" />
@@ -71,33 +62,23 @@ export default function ImagePreview({
             </div>
           </div>
           
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button 
-                type="button" 
-                variant={frontImage ? "outline" : "default"}
-                size="sm" 
-                className="mt-2 w-full bg-slate-500 hover:bg-slate-600 text-white border border-slate-400"
-              >
-                {frontImage ? "Replace Front Image" : <><Plus className="h-4 w-4 mr-1" /> Front Image</>}
-                <ChevronDown className="h-4 w-4 ml-1" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent className="w-52">
-              <DropdownMenuItem onClick={() => onCaptureRequest('front')}>
-                <Camera className="h-4 w-4 mr-2" />
-                Take Photo
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => frontFileInputRef.current?.click()}>
-                <ImageIcon className="h-4 w-4 mr-2" />
-                Choose from Gallery
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => frontFileInputRef.current?.click()}>
-                <Upload className="h-4 w-4 mr-2" />
-                Upload File
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <Button 
+            type="button" 
+            variant={frontImage ? "outline" : "default"}
+            size="sm" 
+            className="mt-2 w-full bg-secondary-500 hover:bg-secondary-600 text-white"
+            onClick={() => {
+              // Show a simple modal or alert with image options
+              const choice = window.prompt('Select an option: \n1. Take Photo \n2. Photo Library \n3. Upload File');
+              if (choice === '1') {
+                onCaptureRequest('front');
+              } else if (choice === '2' || choice === '3') {
+                frontFileInputRef.current?.click();
+              }
+            }}
+          >
+            {frontImage ? "Replace Front Image" : <><Plus className="h-4 w-4 mr-1" /> Front Image</>}
+          </Button>
           
           <input 
             type="file"
@@ -113,7 +94,7 @@ export default function ImagePreview({
             className={`relative rounded-lg border-2 ${backImage ? 'border-slate-300' : 'border-dashed border-slate-400'} bg-slate-50 h-36 flex flex-col items-center justify-center overflow-hidden`}
           >
             {backImage ? (
-              <img src={backImage} alt="Card back preview" className="object-cover w-full h-full" />
+              <img src={backImage} alt="Card back preview" className="object-contain w-full h-full" />
             ) : (
               <div className="flex flex-col items-center justify-center p-4">
                 <Camera className="h-8 w-8 text-slate-400 mb-2" />
@@ -125,33 +106,23 @@ export default function ImagePreview({
             </div>
           </div>
           
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button 
-                type="button" 
-                variant={backImage ? "outline" : "default"}
-                size="sm" 
-                className="mt-2 w-full bg-slate-500 hover:bg-slate-600 text-white border border-slate-400"
-              >
-                {backImage ? "Replace Back Image" : <><Plus className="h-4 w-4 mr-1" /> Back Image</>}
-                <ChevronDown className="h-4 w-4 ml-1" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent className="w-52">
-              <DropdownMenuItem onClick={() => onCaptureRequest('back')}>
-                <Camera className="h-4 w-4 mr-2" />
-                Take Photo
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => backFileInputRef.current?.click()}>
-                <ImageIcon className="h-4 w-4 mr-2" />
-                Choose from Gallery
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => backFileInputRef.current?.click()}>
-                <Upload className="h-4 w-4 mr-2" />
-                Upload File
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <Button 
+            type="button" 
+            variant={backImage ? "outline" : "default"}
+            size="sm" 
+            className="mt-2 w-full bg-secondary-500 hover:bg-secondary-600 text-white"
+            onClick={() => {
+              // Show a simple modal or alert with image options
+              const choice = window.prompt('Select an option: \n1. Take Photo \n2. Photo Library \n3. Upload File');
+              if (choice === '1') {
+                onCaptureRequest('back');
+              } else if (choice === '2' || choice === '3') {
+                backFileInputRef.current?.click();
+              }
+            }}
+          >
+            {backImage ? "Replace Back Image" : <><Plus className="h-4 w-4 mr-1" /> Back Image</>}
+          </Button>
           
           <input 
             type="file"
