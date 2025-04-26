@@ -159,8 +159,20 @@ export default function StatsCharts() {
               >
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="year" />
-                <YAxis tickFormatter={(value) => formatCurrency(value).replace('$', '')} />
-                <Tooltip formatter={(value) => [formatCurrency(value), 'Value']} />
+                <YAxis tickFormatter={(value) => {
+                  if (typeof value === 'number') {
+                    return formatCurrency(value).replace('$', '');
+                  }
+                  return value;
+                }} />
+                <Tooltip 
+                  formatter={(value: any) => {
+                    if (typeof value === 'number') {
+                      return [formatCurrency(value), 'Value'];
+                    }
+                    return [value, 'Value'];
+                  }}
+                />
                 <Bar dataKey="value" fill="#3b82f6" />
               </BarChart>
             </ResponsiveContainer>

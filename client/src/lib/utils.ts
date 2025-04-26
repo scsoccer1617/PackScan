@@ -48,20 +48,23 @@ export function getConditionLabel(condition: string): string {
 }
 
 export function getValueRange(condition: string): string {
-  const rangeMap: Record<string, string> = {
-    'PSA 10': '$250-350',
-    'PSA 9': '$180-220',
-    'PSA 8': '$120-150',
-    'PSA 7': '$80-100',
-    'PSA 6': '$60-75',
-    'PSA 5': '$40-55',
-    'PSA 4': '$25-35',
-    'PSA 3': '$15-20',
-    'PSA 2': '$10-15',
-    'PSA 1': '$5-10',
+  const rangeMap: Record<string, [number, number]> = {
+    'PSA 10': [250, 350],
+    'PSA 9': [180, 220],
+    'PSA 8': [120, 150],
+    'PSA 7': [80, 100],
+    'PSA 6': [60, 75],
+    'PSA 5': [40, 55],
+    'PSA 4': [25, 35],
+    'PSA 3': [15, 20],
+    'PSA 2': [10, 15],
+    'PSA 1': [5, 10],
   };
 
-  return rangeMap[condition] || '';
+  if (!rangeMap[condition]) return '';
+  
+  const [min, max] = rangeMap[condition];
+  return `${formatCurrency(min)}-${formatCurrency(max).replace('$', '')}`;
 }
 
 export function dataURLtoBlob(dataURL: string): Blob {
