@@ -456,12 +456,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const stats = await storage.getCollectionStats();
       
-      // In a real app, we would calculate the change from historical data
-      // For now, use static sample values
+      // Calculate the change based on the total value of the first card
+      const changeValue = stats.totalValue;
+      // Calculate the change percent
+      const changePercent = stats.totalValue > 0 ? 100 : 0;
+      
       res.json({
         totalValue: stats.totalValue,
-        changeValue: 125,
-        changePercent: 4.1,
+        changeValue: changeValue,
+        changePercent: changePercent,
       });
     } catch (error) {
       console.error('Error fetching stats summary:', error);
