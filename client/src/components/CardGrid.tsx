@@ -1,28 +1,70 @@
 import { useQuery } from "@tanstack/react-query";
 import CardItem from "./CardItem";
 import { Card } from "@shared/schema";
+import { useState, useEffect } from "react";
+
+// Group cards by collection
+type CardsByCollection = {
+  [key: string]: Card[];
+};
 
 export default function CardGrid() {
   const { data: cards, isLoading, error } = useQuery<Card[]>({
     queryKey: ['/api/cards'],
   });
 
+  const [groupedCards, setGroupedCards] = useState<CardsByCollection>({});
+  const [allCollections, setAllCollections] = useState<string[]>([]);
+  
+  // Process cards into collections when data changes
+  useEffect(() => {
+    if (!cards || cards.length === 0) return;
+    
+    const grouped: CardsByCollection = {};
+    const collections: Set<string> = new Set();
+    
+    // Group cards by collection
+    cards.forEach(card => {
+      const collection = card.collection || "Uncategorized";
+      collections.add(collection);
+      
+      if (!grouped[collection]) {
+        grouped[collection] = [];
+      }
+      
+      grouped[collection].push(card);
+    });
+    
+    // Sort collections alphabetically, but put "Uncategorized" at the end
+    const sortedCollections = Array.from(collections).sort((a, b) => {
+      if (a === "Uncategorized") return 1;
+      if (b === "Uncategorized") return -1;
+      return a.localeCompare(b);
+    });
+    
+    setGroupedCards(grouped);
+    setAllCollections(sortedCollections);
+  }, [cards]);
+
   if (isLoading) {
     return (
-      <div className="grid grid-cols-2 gap-4">
-        {[...Array(4)].map((_, i) => (
-          <div key={i} className="rounded-lg overflow-hidden border border-slate-200 bg-white">
-            <div className="aspect-w-2 aspect-h-3 bg-slate-200 animate-pulse"></div>
-            <div className="p-3">
-              <div className="h-4 bg-slate-200 rounded animate-pulse mb-2"></div>
-              <div className="h-3 bg-slate-200 rounded animate-pulse w-2/3 mb-2"></div>
-              <div className="flex justify-between items-center mt-2">
-                <div className="h-3 bg-slate-200 rounded animate-pulse w-1/4"></div>
-                <div className="h-3 bg-slate-200 rounded animate-pulse w-1/6"></div>
+      <div className="space-y-8">
+        <div className="h-6 bg-slate-200 rounded animate-pulse w-1/3 mb-2"></div>
+        <div className="grid grid-cols-2 gap-4">
+          {[...Array(4)].map((_, i) => (
+            <div key={i} className="rounded-lg overflow-hidden border border-slate-200 bg-white">
+              <div className="aspect-w-2 aspect-h-3 bg-slate-200 animate-pulse"></div>
+              <div className="p-3">
+                <div className="h-4 bg-slate-200 rounded animate-pulse mb-2"></div>
+                <div className="h-3 bg-slate-200 rounded animate-pulse w-2/3 mb-2"></div>
+                <div className="flex justify-between items-center mt-2">
+                  <div className="h-3 bg-slate-200 rounded animate-pulse w-1/4"></div>
+                  <div className="h-3 bg-slate-200 rounded animate-pulse w-1/6"></div>
+                </div>
               </div>
             </div>
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
     );
   }
@@ -48,9 +90,22 @@ export default function CardGrid() {
   }
 
   return (
-    <div className="grid grid-cols-2 gap-4">
-      {cards.map((card) => (
-        <CardItem key={card.id} card={card} />
+    <div className="space-y-8">
+      {allCollections.map(collection => (
+        <div key={collection} className="mb-6">
+          <div className="flex items-center mb-3">
+            <h2 className="text-lg font-bold text-slate-800">{collection}</h2>
+            <span className="ml-2 bg-slate-100 text-slate-700 text-xs font-medium px-2 py-1 rounded-full">
+              {groupedCards[collection]?.length || 0}
+            </span>
+          </div>
+          
+          <div className="grid grid-cols-2 gap-4">
+            {groupedCards[collection]?.map((card) => (
+              <CardItem key={card.id} card={card} />
+            ))}
+          </div>
+        </div>
       ))}
     </div>
   );
