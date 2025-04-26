@@ -34,13 +34,23 @@ export default function CardItem({ card, onDelete }: CardItemProps) {
     if (confirm(`Are you sure you want to delete ${card.playerFirstName} ${card.playerLastName}'s card?`)) {
       setIsDeleting(true);
       try {
-        await apiRequest({
-          url: `/api/cards/${card.id}`,
+        // Use fetch directly instead of apiRequest helper
+        const response = await fetch(`/api/cards/${card.id}`, {
           method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json',
+          },
         });
+        
+        if (!response.ok) {
+          throw new Error(`Server responded with ${response.status}: ${response.statusText}`);
+        }
         
         // Invalidate cards query to refresh the list
         queryClient.invalidateQueries({ queryKey: ['/api/cards'] });
+        
+        // Also invalidate stats
+        queryClient.invalidateQueries({ queryKey: ['/api/collection/summary'] });
         
         toast({
           title: "Card Deleted",
