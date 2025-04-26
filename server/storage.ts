@@ -95,13 +95,14 @@ export async function initGoogleSheetsApi() {
         // Add headers
         await googleSheetsInstance.spreadsheets.values.update({
           spreadsheetId,
-          range: 'Cards!A1:O1',
+          range: 'Cards!A1:R1',
           valueInputOption: 'RAW',
           resource: {
             values: [[
               'ID', 'Sport', 'Player First Name', 'Player Last Name', 
               'Brand', 'Collection', 'Card Number', 'Year', 
               'Variant', 'Serial Number', 'Condition', 'Estimated Value',
+              'Rookie Card', 'Autographed', 'Numbered',
               'Front Image URL', 'Back Image URL', 'Last Updated'
             ]],
           },
