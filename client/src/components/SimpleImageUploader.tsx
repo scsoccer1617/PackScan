@@ -47,9 +47,9 @@ export default function SimpleImageUploader({
         <Button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          variant="outline"
+          variant="default"
           size="sm"
-          className="flex-1 bg-slate-600 hover:bg-slate-700 text-white"
+          className="flex-1 bg-slate-600 hover:bg-slate-700 active:bg-slate-800 text-white"
         >
           <Upload className="h-4 w-4 mr-1" />
           {existingImage ? "Replace Image" : "Upload Image"}

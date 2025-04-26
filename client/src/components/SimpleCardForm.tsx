@@ -6,13 +6,22 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Form, FormField, FormItem, FormLabel, FormControl, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
-import { useForm } from "react-hook-form";
+import { Checkbox } from "@/components/ui/checkbox";
+import { useForm, type SubmitHandler } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { CardFormValues, cardSchema } from "@shared/schema";
+import { useOCR } from "@/hooks/use-ocr";
+import { useToast } from "@/hooks/use-toast";
+import OCRResults from "./OCRResults";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
 
 export default function SimpleCardForm() {
   const [frontImage, setFrontImage] = useState<string>("");
   const [backImage, setBackImage] = useState<string>("");
+  const [showOCRResults, setShowOCRResults] = useState<boolean>(false);
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
   
   const form = useForm<CardFormValues>({
     resolver: zodResolver(cardSchema),
@@ -28,14 +37,119 @@ export default function SimpleCardForm() {
       serialNumber: "",
       condition: "PSA 9",
       estimatedValue: 200,
+      isRookieCard: false,
+      isAutographed: false,
+      isNumbered: false,
+      notes: "",
+    },
+  });
+  
+  // OCR hook for analyzing card images
+  const { loading: ocrLoading, error: ocrError, data: ocrData, analyzeImage } = useOCR();
+  
+  // Handle OCR analysis request
+  const handleAnalyzeRequest = async () => {
+    if (!frontImage) {
+      toast({
+        title: "Image Required",
+        description: "Please upload a front image of the card first.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    try {
+      await analyzeImage(frontImage, form);
+      setShowOCRResults(true);
+    } catch (error) {
+      toast({
+        title: "Analysis Failed",
+        description: "Could not analyze the card image. Please try again or enter details manually.",
+        variant: "destructive",
+      });
+    }
+  };
+  
+  // Apply OCR results to form
+  const applyOCRResults = (data: Partial<CardFormValues>) => {
+    Object.entries(data).forEach(([key, value]) => {
+      if (value !== undefined && value !== null) {
+        form.setValue(key as any, value);
+      }
+    });
+    setShowOCRResults(false);
+    
+    toast({
+      title: "OCR Results Applied",
+      description: "Card details have been populated from the image analysis.",
+    });
+  };
+  
+  // Create card mutation
+  const createCardMutation = useMutation({
+    mutationFn: async (data: CardFormValues) => {
+      // Convert the form data to FormData to include images
+      const formData = new FormData();
+      
+      // Add all form fields
+      Object.entries(data).forEach(([key, value]) => {
+        formData.append(key, value !== null && value !== undefined ? value.toString() : '');
+      });
+      
+      // Add images if they exist
+      if (frontImage) {
+        const frontBlob = await fetch(frontImage).then(r => r.blob());
+        formData.append('frontImage', frontBlob, 'front.jpg');
+      }
+      
+      if (backImage) {
+        const backBlob = await fetch(backImage).then(r => r.blob());
+        formData.append('backImage', backBlob, 'back.jpg');
+      }
+      
+      return apiRequest<any>({
+        url: '/api/cards',
+        method: 'POST',
+        body: formData,
+        headers: {
+          // Don't set Content-Type, browser will set it with proper boundary for FormData
+        },
+      });
+    },
+    onSuccess: () => {
+      // Reset the form
+      form.reset();
+      setFrontImage("");
+      setBackImage("");
+      
+      // Invalidate cards query to refresh the collection
+      queryClient.invalidateQueries({ queryKey: ['/api/cards'] });
+      
+      toast({
+        title: "Card Added",
+        description: "Your card has been added to the collection!",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error Adding Card",
+        description: error.message || "Failed to add card. Please try again.",
+        variant: "destructive",
+      });
     },
   });
   
   const handleSubmit = (data: CardFormValues) => {
-    // Here would go the code to save the card data
-    console.log("Form submitted:", data);
-    console.log("Front image:", frontImage);
-    console.log("Back image:", backImage);
+    if (!frontImage) {
+      toast({
+        title: "Front Image Required",
+        description: "Please upload a front image of the card.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    createCardMutation.mutate(data);
   };
   
   return (
@@ -74,10 +188,23 @@ export default function SimpleCardForm() {
                 variant="secondary" 
                 size="sm" 
                 className="w-full mt-2"
+                onClick={handleAnalyzeRequest}
+                disabled={ocrLoading}
               >
                 <ScanSearch className="h-4 w-4 mr-2" />
-                Analyze Card with OCR
+                {ocrLoading ? "Analyzing..." : "Analyze Card with OCR"}
               </Button>
+            )}
+            
+            {/* OCR Results Dialog */}
+            {showOCRResults && (
+              <OCRResults
+                loading={ocrLoading}
+                error={ocrError}
+                data={ocrData}
+                onApply={applyOCRResults}
+                onCancel={() => setShowOCRResults(false)}
+              />
             )}
           </div>
           
@@ -140,12 +267,217 @@ export default function SimpleCardForm() {
                 />
               </div>
               
-              <Button 
-                type="submit" 
-                className="w-full bg-slate-800 hover:bg-slate-700 text-white"
-              >
-                Add to Collection
-              </Button>
+              <FormField
+                control={form.control}
+                name="brand"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Brand <span className="text-red-500">*</span></FormLabel>
+                    <Select
+                      onValueChange={field.onChange}
+                      defaultValue={field.value}
+                      value={field.value}
+                    >
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select brand" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {["Topps", "Panini", "Upper Deck", "Bowman", "Fleer", "Donruss", "Score", "Other"].map((brand) => (
+                          <SelectItem key={brand} value={brand}>{brand}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              
+              <div className="grid grid-cols-2 gap-4">
+                <FormField
+                  control={form.control}
+                  name="collection"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Collection</FormLabel>
+                      <FormControl>
+                        <Input placeholder="e.g. Chrome, Series 1" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                
+                <FormField
+                  control={form.control}
+                  name="cardNumber"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Card Number</FormLabel>
+                      <FormControl>
+                        <Input placeholder="e.g. 42, BP-12" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <FormField
+                  control={form.control}
+                  name="year"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Year <span className="text-red-500">*</span></FormLabel>
+                      <FormControl>
+                        <Input 
+                          type="number" 
+                          placeholder="e.g. 2024" 
+                          {...field} 
+                          onChange={(e) => field.onChange(parseInt(e.target.value) || '')}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                
+                <FormField
+                  control={form.control}
+                  name="variant"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Variant</FormLabel>
+                      <FormControl>
+                        <Input placeholder="e.g. Refractor, Parallel" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <FormField
+                  control={form.control}
+                  name="serialNumber"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Serial Number</FormLabel>
+                      <FormControl>
+                        <Input placeholder="e.g. 42/100" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                
+                <FormField
+                  control={form.control}
+                  name="condition"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Condition <span className="text-red-500">*</span></FormLabel>
+                      <Select
+                        onValueChange={field.onChange}
+                        defaultValue={field.value}
+                        value={field.value}
+                      >
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select condition" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {["PSA 10", "PSA 9", "PSA 8", "PSA 7", "PSA 6", "PSA 5", "Raw-Mint", "Raw-Good", "Raw-Poor"].map((condition) => (
+                            <SelectItem key={condition} value={condition}>{condition}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+              
+              <div className="flex flex-col space-y-2">
+                <h3 className="text-sm font-medium text-slate-700">Card Features</h3>
+                <div className="grid grid-cols-3 gap-4">
+                  <FormField
+                    control={form.control}
+                    name="isRookieCard"
+                    render={({ field }) => (
+                      <FormItem className="flex flex-row items-center space-x-2 space-y-0">
+                        <FormControl>
+                          <Checkbox
+                            checked={field.value}
+                            onCheckedChange={field.onChange}
+                          />
+                        </FormControl>
+                        <FormLabel className="font-normal">Rookie Card</FormLabel>
+                      </FormItem>
+                    )}
+                  />
+                  
+                  <FormField
+                    control={form.control}
+                    name="isAutographed"
+                    render={({ field }) => (
+                      <FormItem className="flex flex-row items-center space-x-2 space-y-0">
+                        <FormControl>
+                          <Checkbox
+                            checked={field.value}
+                            onCheckedChange={field.onChange}
+                          />
+                        </FormControl>
+                        <FormLabel className="font-normal">Autographed</FormLabel>
+                      </FormItem>
+                    )}
+                  />
+                  
+                  <FormField
+                    control={form.control}
+                    name="isNumbered"
+                    render={({ field }) => (
+                      <FormItem className="flex flex-row items-center space-x-2 space-y-0">
+                        <FormControl>
+                          <Checkbox
+                            checked={field.value}
+                            onCheckedChange={field.onChange}
+                          />
+                        </FormControl>
+                        <FormLabel className="font-normal">Numbered</FormLabel>
+                      </FormItem>
+                    )}
+                  />
+                </div>
+              </div>
+              
+              <FormField
+                control={form.control}
+                name="notes"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Notes</FormLabel>
+                    <FormControl>
+                      <Input placeholder="Any additional details about the card" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              
+              <div className="pt-2">
+                <Button 
+                  type="submit" 
+                  className="w-full bg-slate-800 hover:bg-slate-700 active:bg-slate-900 text-white"
+                  disabled={createCardMutation.isPending}
+                >
+                  {createCardMutation.isPending ? "Adding to Collection..." : "Add to Collection"}
+                </Button>
+              </div>
             </form>
           </Form>
         </CardContent>
