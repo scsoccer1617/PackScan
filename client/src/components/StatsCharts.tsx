@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { formatCurrency } from "@/lib/utils";
 
 interface SportDistribution {
   name: string;
@@ -158,8 +159,8 @@ export default function StatsCharts() {
               >
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="year" />
-                <YAxis tickFormatter={(value) => `$${value}`} />
-                <Tooltip formatter={(value) => [`$${value}`, 'Value']} />
+                <YAxis tickFormatter={(value) => formatCurrency(value).replace('$', '')} />
+                <Tooltip formatter={(value) => [formatCurrency(value), 'Value']} />
                 <Bar dataKey="value" fill="#3b82f6" />
               </BarChart>
             </ResponsiveContainer>

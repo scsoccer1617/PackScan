@@ -45,10 +45,10 @@ export default function StatsSummary() {
     <Card className="bg-white rounded-lg p-4 shadow-sm mb-4">
       <h3 className="text-sm font-medium text-slate-500 mb-2">Total Collection Value</h3>
       <div className="flex items-baseline">
-        <span className="text-2xl font-bold">${totalValue.toLocaleString()}</span>
+        <span className="text-2xl font-bold">{formatCurrency(totalValue)}</span>
         {changeValue !== 0 && (
           <span className={`ml-2 text-xs font-medium ${changeValue > 0 ? 'text-green-600' : 'text-red-600'}`}>
-            {changeValue > 0 ? '↑' : '↓'} ${Math.abs(changeValue)} ({changePercent.toFixed(1)}%)
+            {changeValue > 0 ? '↑' : '↓'} {formatCurrency(Math.abs(changeValue))} ({changePercent.toFixed(1)}%)
           </span>
         )}
       </div>
