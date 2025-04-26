@@ -12,33 +12,35 @@ let googleAuth: OAuth2Client | null = null;
 export let googleSheetsInstance: any = null;
 export let spreadsheetId = process.env.GOOGLE_SHEET_ID || '';
 
-// Global variable will be updated after initialization
-
 // Initialize Google Sheets API
 export async function initGoogleSheetsApi() {
   try {
+    // Check if we have the required environment variables
     if (!process.env.GOOGLE_CLIENT_EMAIL || !process.env.GOOGLE_PRIVATE_KEY) {
       console.warn('Google Sheets API credentials not found. Using database storage only.');
       return false;
     }
 
-    // Format the private key correctly
+    // Create a properly formatted private key
     let privateKey = process.env.GOOGLE_PRIVATE_KEY || '';
-    // Handle both formats: already with newlines or escaped newlines
     if (privateKey.includes('\\n')) {
       privateKey = privateKey.replace(/\\n/g, '\n');
     }
     
-    // Create the JWT auth client
     console.log('Initializing Google Sheets with client email:', process.env.GOOGLE_CLIENT_EMAIL);
+    
+    // Try with direct JWT approach
     googleAuth = new google.auth.JWT(
       process.env.GOOGLE_CLIENT_EMAIL,
       undefined,
       privateKey,
       ['https://www.googleapis.com/auth/spreadsheets']
     );
-
-    googleSheetsInstance = google.sheets({ version: 'v4', auth: googleAuth });
+    
+    googleSheetsInstance = google.sheets({
+      version: 'v4',
+      auth: googleAuth
+    });
 
     // Create or validate spreadsheet
     if (!spreadsheetId) {
@@ -318,8 +320,8 @@ export const storage = {
               ]],
             },
           });
-        } catch (sheetError) {
-          console.error('Error writing to Google Sheets directly, but data was saved to CSV:', sheetError);
+        } catch (error: any) {
+          console.error('Error writing to Google Sheets directly, but data was saved to CSV:', error);
           
           // Add debug details
           if (spreadsheetId) {
@@ -329,7 +331,7 @@ export const storage = {
           }
           
           // Try to determine if it's a permission issue
-          if (sheetError.message && sheetError.message.includes('permission')) {
+          if (error.message && error.message.includes('permission')) {
             console.error('Google Sheets API permission error. Please make sure the service account has edit access to the spreadsheet.');
           }
           
@@ -337,13 +339,13 @@ export const storage = {
           return { 
             success: false, 
             row: nextRow,
-            error: `Google Sheets error: ${sheetError.message}. Data was saved to CSV file.`
+            error: `Google Sheets error: ${error.message}. Data was saved to CSV file.`
           };
         }
       }
       
       return { success: true, row: nextRow };
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error saving card data:', error);
       // Return a more graceful error that doesn't break the card saving flow
       return { success: false, error: error.message };
@@ -370,7 +372,7 @@ export const storage = {
       
       // Return the relative URL for the image
       return `/uploads/${filename}`;
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error saving image:', error);
       throw error;
     }

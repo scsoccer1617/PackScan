@@ -880,15 +880,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       } else {
         // Card was saved to CSV but not to Google Sheets
+        // Still mark as success since CSV backup worked
         res.json({ 
           success: true, 
-          message: 'Card saved to CSV file. Google Sheets integration experienced an error: ' + (result.error || 'Unknown error'),
-          rowId: null
+          message: `Card saved to CSV file. ${result.error ? 'Google Sheets integration experienced an error: ' + result.error : 'Google Sheets integration is not configured.'}`,
+          rowId: null,
+          csvOnly: true
         });
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error saving to Google Sheets:', error);
-      res.status(500).json({ message: 'Failed to save to Google Sheets' });
+      // Check if we can still return a useful response
+      res.status(500).json({ 
+        message: 'Failed to save to Google Sheets',
+        error: error.message || 'Unknown error',
+        suggestion: 'Your card was still saved to the database, but could not be exported to Google Sheets.'
+      });
     }
   });
 
