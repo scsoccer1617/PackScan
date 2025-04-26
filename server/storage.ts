@@ -328,14 +328,76 @@ export const storage = {
             }
           }
           
-          // Get the next row number
-          const response = await googleSheetsInstance.spreadsheets.values.get({
-            spreadsheetId,
-            range: 'Cards!A:A',
-          });
-          
-          const rows = response.data.values || [];
-          nextRow = rows.length + 1;
+          // First check if the "Cards" sheet exists
+          console.log(`Checking if "Cards" sheet exists in spreadsheet: ${spreadsheetId}`);
+          try {
+            const spreadsheet = await googleSheetsInstance.spreadsheets.get({
+              spreadsheetId,
+            });
+            
+            // Check if the Cards sheet exists
+            const sheetsInfo = spreadsheet.data.sheets || [];
+            const cardsSheet = sheetsInfo.find((s: any) => 
+              s.properties?.title === 'Cards'
+            );
+            
+            if (!cardsSheet) {
+              console.log('Creating "Cards" sheet as it does not exist');
+              
+              // Add the Cards sheet
+              await googleSheetsInstance.spreadsheets.batchUpdate({
+                spreadsheetId,
+                requestBody: {
+                  requests: [
+                    {
+                      addSheet: {
+                        properties: {
+                          title: 'Cards',
+                          gridProperties: {
+                            frozenRowCount: 1,
+                          },
+                        },
+                      },
+                    },
+                  ],
+                },
+              });
+              
+              // Add headers to the new sheet
+              await googleSheetsInstance.spreadsheets.values.update({
+                spreadsheetId,
+                range: 'Cards!A1:O1',
+                valueInputOption: 'RAW',
+                resource: {
+                  values: [[
+                    'ID', 'Sport', 'Player First Name', 'Player Last Name', 
+                    'Brand', 'Collection', 'Card Number', 'Year', 
+                    'Variant', 'Serial Number', 'Condition', 'Estimated Value',
+                    'Front Image URL', 'Back Image URL', 'Last Updated'
+                  ]],
+                },
+              });
+              
+              console.log('Created "Cards" sheet with headers');
+              nextRow = 2; // Start at row 2 after headers
+            } else {
+              // If Cards sheet exists, get the next row number
+              const response = await googleSheetsInstance.spreadsheets.values.get({
+                spreadsheetId,
+                range: 'Cards!A:A',
+              });
+              
+              const rows = response.data.values || [];
+              nextRow = rows.length + 1;
+            }
+          } catch (sheetCheckError: any) {
+            console.error('Error checking/creating Cards sheet:', sheetCheckError);
+            // Continue with CSV backup
+            return { 
+              success: false, 
+              error: `Error with Google Sheets: ${sheetCheckError.message}. Data was saved to CSV file.`
+            };
+          }
           
           // Insert card data
           await googleSheetsInstance.spreadsheets.values.update({
