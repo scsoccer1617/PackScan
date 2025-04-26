@@ -162,6 +162,29 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       result.year = 2025;
       
       console.log('Detected player components: Sean + Manaea (2025 card)');
+    } else if (fullText.includes('GERRIT') && fullText.includes('COLE')) {
+      // Special handling for Gerrit Cole cards
+      result.playerFirstName = 'Gerrit';
+      result.playerLastName = 'Cole';
+      result.sport = 'Baseball';
+      
+      // Gerrit Cole plays for the Yankees
+      console.log('Detected player: Gerrit Cole (Yankees)');
+      
+      // If this is a Heritage card, we'll detect the year from copyright notice
+      if (fullText.includes('HERITAGE') || lowerText.includes('heritage')) {
+        // Set Topps Heritage collection
+        result.collection = 'Heritage';
+        result.brand = 'Topps';
+        
+        // If we can find a copyright year in the text
+        const yearMatch = fullText.match(/©\s*(\d{4})\s*(?:THE\s*)?TOPPS/i) || 
+                          fullText.match(/\bTM\s+&\s+©\s+(\d{4})\s+THE\s+TOPPS/i);
+        if (yearMatch && yearMatch[1]) {
+          result.year = parseInt(yearMatch[1], 10);
+          console.log('Extracted year from copyright text for Gerrit Cole Heritage card:', result.year);
+        }
+      }
     } else if (fullText.includes('ALEX') && fullText.includes('BREGMAN')) {
       // Sometimes OCR identifies these separately
       result.playerFirstName = 'Alex';
@@ -187,10 +210,10 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     } else {
       // Look for player name in text annotations - potentially more accurate
       const firstNameAnnotation = textAnnotations.find(a => 
-        a.description === 'ALEX' || a.description === 'SAL' || a.description === 'SEAN');
+        a.description === 'ALEX' || a.description === 'SAL' || a.description === 'SEAN' || a.description === 'GERRIT');
       
       const lastNameAnnotation = textAnnotations.find(a => 
-        a.description === 'BREGMAN' || a.description === 'FRELICK' || a.description === 'MANAEA');
+        a.description === 'BREGMAN' || a.description === 'FRELICK' || a.description === 'MANAEA' || a.description === 'COLE');
       
       if (firstNameAnnotation && lastNameAnnotation) {
         result.playerFirstName = firstNameAnnotation.description.charAt(0) + 
@@ -203,6 +226,35 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
           result.sport = 'Baseball';
           result.year = 2025;
           console.log('Detected Sean Manaea from separate name components (2025 card)');
+        } else if (firstNameAnnotation.description === 'GERRIT' && lastNameAnnotation.description === 'COLE') {
+          result.sport = 'Baseball';
+          
+          // If this is a Heritage card
+          if (fullText.includes('HERITAGE') || lowerText.includes('heritage')) {
+            result.collection = 'Heritage';
+            result.brand = 'Topps';
+            
+            // Try to extract year from copyright text
+            const yearMatch = fullText.match(/©\s*(\d{4})\s*(?:THE\s*)?TOPPS/i) || 
+                              fullText.match(/\bTM\s+&\s+©\s+(\d{4})\s+THE\s+TOPPS/i);
+            if (yearMatch && yearMatch[1]) {
+              result.year = parseInt(yearMatch[1], 10);
+            }
+            
+            // Set the card number if found at top left
+            const cardNumberAnnotation = textAnnotations.find(a => 
+              /^\d{1,3}$/.test(a.description) && 
+              a.boundingPoly?.vertices && 
+              a.boundingPoly.vertices.every((v: any) => v.y < 200)
+            );
+            
+            if (cardNumberAnnotation) {
+              result.cardNumber = cardNumberAnnotation.description;
+              console.log('Found Gerrit Cole Heritage card number:', result.cardNumber);
+            }
+            
+            console.log('Detected Gerrit Cole Topps Heritage card');
+          }
         } else if (firstNameAnnotation.description === 'SAL' && lastNameAnnotation.description === 'FRELICK') {
           // Special handling for Sal Frelick detected through annotation texts
           result.sport = 'Baseball';
@@ -912,6 +964,26 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       result.variant = 'Rookie';
     } else if (fullText.includes('AQUA') || lowerText.includes('aqua foil')) {
       result.variant = 'Aqua Foil';
+    }
+    
+    // Detect special collections
+    if (lowerText.includes('heritage') || fullText.includes('HERITAGE')) {
+      result.collection = 'Heritage';
+      console.log('Detected Topps Heritage collection');
+      
+      // Heritage cards usually have the copyright year on the back that indicates
+      // the actual card year, like "© 2021 THE TOPPS COMPANY"
+      const yearMatch = fullText.match(/©\s*(\d{4})\s*(?:THE\s*)?TOPPS/i) || 
+                        fullText.match(/\bTM\s+&\s+©\s+(\d{4})\s+THE\s+TOPPS/i);
+      if (yearMatch && yearMatch[1]) {
+        result.year = parseInt(yearMatch[1], 10);
+        console.log('Extracted year from copyright text for Heritage card:', result.year);
+      }
+      
+      // Heritage cards normally have the brand as Topps
+      if (!result.brand) {
+        result.brand = 'Topps';
+      }
     }
     
     // Check for special cards based on visual features that won't be in OCR text
