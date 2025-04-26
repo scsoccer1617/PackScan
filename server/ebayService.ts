@@ -32,12 +32,9 @@ export async function searchCardValues(
     }
 
     // Build search query based on card details
+    // Note: We intentionally exclude the condition (PSA grade) from the search
+    // to get a wider range of results
     let keywords = `${playerName} ${brand} ${year} ${cardNumber}`;
-    
-    // Add condition if provided
-    if (condition) {
-      keywords += ` ${condition}`;
-    }
 
     // API request parameters
     const params = {
@@ -143,6 +140,7 @@ export function getEbaySearchUrl(
   year: number,
   condition?: string
 ): string {
-  let keywords = encodeURIComponent(`${playerName} ${brand} ${year} ${cardNumber} ${condition || ''}`).trim();
+  // Exclude condition (PSA grade) from the search to get wider range of results
+  let keywords = encodeURIComponent(`${playerName} ${brand} ${year} ${cardNumber}`).trim();
   return `https://www.ebay.com/sch/i.html?_nkw=${keywords}&_sacat=0&LH_Complete=1&LH_Sold=1`;
 }
