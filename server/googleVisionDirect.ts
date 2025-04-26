@@ -263,7 +263,7 @@ export async function analyzeSportsCardImage(imageBuffer: Buffer): Promise<Parti
     }
     
     // Set a default condition
-    result.condition = 'PSA 9';
+    result.condition = 'PSA 8';
     
     // Ensure we have a year
     if (!result.year) {

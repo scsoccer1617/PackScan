@@ -189,7 +189,7 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     }
     
     // Set a default condition (hard to determine from image)
-    result.condition = 'PSA 9';
+    result.condition = 'PSA 8';
     
     // Post-processing to fill in blanks with reasonable defaults
     if (!result.year) {

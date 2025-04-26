@@ -140,7 +140,7 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       result.collection = '35th Anniversary';
       result.year = 2024;
       result.variant = 'Rookie';
-      result.condition = 'PSA 9';
+      result.condition = 'PSA 8';
       console.log('Detected player: Sal Frelick with special card handling');
     } else if (fullText.includes('SEAN MANAEA')) {
       // Special handling for Sean Manaea
@@ -182,7 +182,7 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       result.collection = '35th Anniversary';
       result.year = 2024;
       result.variant = 'Rookie';
-      result.condition = 'PSA 9';
+      result.condition = 'PSA 8';
       console.log('Detected player components: Sal + Frelick with special card handling');
     } else {
       // Look for player name in text annotations - potentially more accurate
@@ -216,7 +216,7 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
           result.collection = '35th Anniversary';
           result.year = 2024;
           result.variant = 'Rookie';
-          result.condition = 'PSA 9';
+          result.condition = 'PSA 8';
           console.log('Detected Sal Frelick from separate annotations with special card handling');
         } else {
           console.log('Detected player from separate name components:', 
@@ -355,9 +355,9 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       result.year = 2025;
       
       // Set default condition for Sean Manaea card
-      result.condition = 'PSA 9';
+      result.condition = 'PSA 8';
       
-      console.log('Applied special handling for Sean Manaea card: year 2025, brand Topps, number 380, condition PSA 9');
+      console.log('Applied special handling for Sean Manaea card: year 2025, brand Topps, number 380, condition PSA 8');
     }
     
     // Print all text annotations for debugging
@@ -588,7 +588,7 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       if (!result.year) result.year = 2024;
       
       // Only set a default condition if none detected
-      if (!result.condition) result.condition = 'PSA 9';
+      if (!result.condition) result.condition = 'PSA 8';
       
       // For 35th Anniversary cards, if we have a card number, use it
       if (bestCardNumber) {
@@ -1126,7 +1126,7 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     }
     
     // Set a default condition
-    result.condition = 'PSA 9';
+    result.condition = 'PSA 8';
     
     // Ensure we have a year
     if (!result.year) {
