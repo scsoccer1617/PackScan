@@ -8,6 +8,7 @@ import path from "path";
 import fs from "fs";
 import { v4 as uuidv4 } from "uuid";
 import { analyzeSportsCardImage } from "./googleVisionFetch";
+import { searchCardValues, getEbaySearchUrl } from "./ebayService";
 
 // Google Sheets variables
 const spreadsheetId = process.env.GOOGLE_SHEET_ID;
