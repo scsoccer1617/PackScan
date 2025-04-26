@@ -45,13 +45,32 @@ export default function ImageSelector({
 
   const handlePhotoLibrary = () => {
     if (!activeSide) return;
+    // For mobile devices, use a file input with no capture attribute to open the photo library
     const fileInput = activeSide === 'front' ? frontFileInputRef.current : backFileInputRef.current;
-    fileInput?.click();
+    if (fileInput) {
+      // Make sure there's no capture attribute to allow browsing the photo library
+      fileInput.removeAttribute('capture');
+      fileInput.click();
+    }
+    setActiveSide(null);
   };
 
   const handleTakePhoto = () => {
     if (!activeSide) return;
+    // Use the proper camera request function to open the camera
     onCameraRequest(activeSide);
+    setActiveSide(null);
+  };
+  
+  const handleChooseFile = () => {
+    if (!activeSide) return;
+    // For desktop file selection, also use the file input
+    const fileInput = activeSide === 'front' ? frontFileInputRef.current : backFileInputRef.current;
+    if (fileInput) {
+      // Remove capture to ensure it opens a file browser
+      fileInput.removeAttribute('capture');
+      fileInput.click();
+    }
     setActiveSide(null);
   };
 
@@ -137,7 +156,7 @@ export default function ImageSelector({
             </button>
             <button
               className="flex items-center w-full px-4 py-3 text-white hover:bg-slate-600"
-              onClick={handlePhotoLibrary}
+              onClick={handleChooseFile}
             >
               <Upload className="h-5 w-5 mr-3" />
               <span>Choose File</span>
