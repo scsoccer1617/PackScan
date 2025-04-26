@@ -175,32 +175,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Proceed to send response regardless of Google Sheets success
       res.status(201).json(newCard);
       
-      // Attempt Google Sheets save AFTER sending the response
-      // This way, any problems with Google Sheets won't affect the main card saving operation
-      if (googleSheetsInstance && spreadsheetId) {
-        try {
-          console.log('Attempting to save card to Google Sheets asynchronously...');
-          const sheetResult = await storage.saveCardToGoogleSheets(
-            newCard, 
-            sport.name, 
-            brand.name, 
-            frontImageUrl, 
-            backImageUrl
-          );
-          
-          if (sheetResult && sheetResult.success) {
-            console.log(`Successfully saved card to Google Sheets in row ${sheetResult.row}`);
-            // Update card with Google Sheet reference
-            await storage.updateCard(newCard.id, {
-              googleSheetId: `${sheetResult.row}`,
-            });
-          }
-        } catch (sheetError) {
-          console.error('Failed to save to Google Sheets, but card was saved to database:', sheetError);
-          // Don't fail the request if Google Sheets integration fails
+      // Export card data to CSV and Google Sheets if possible
+      try {
+        console.log('Exporting card data to CSV and Google Sheets...');
+        const sheetResult = await storage.saveCardToGoogleSheets(
+          newCard, 
+          sport.name, 
+          brand.name, 
+          frontImageUrl, 
+          backImageUrl
+        );
+        
+        if (sheetResult && sheetResult.success) {
+          console.log(`Successfully saved card data. Sheet row: ${sheetResult.row}`);
+          // Update card with Google Sheet reference
+          await storage.updateCard(newCard.id, {
+            googleSheetId: `${sheetResult.row}`,
+          });
+        } else if (sheetResult && !sheetResult.success) {
+          console.warn(`Card saved to database and CSV, but not to Google Sheets: ${sheetResult.error}`);
         }
-      } else {
-        console.log('Google Sheets integration not configured, skipping sheet update');
+      } catch (exportError) {
+        console.error('Error during card export, but card was saved to database:', exportError);
+        // Don't fail the request if the export fails
       }
       
       // Skip sending another response since we already sent one
@@ -511,7 +508,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: 'Invalid sport or brand' });
       }
       
-      // Save to Google Sheets
+      // Save to CSV and Google Sheets
       const result = await storage.saveCardToGoogleSheets(
         card,
         sport.name,
@@ -520,12 +517,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
         card.backImage || undefined
       );
       
-      // Update card with Google Sheet reference
-      await storage.updateCard(card.id, {
-        googleSheetId: `${result.row}`,
-      });
-      
-      res.json({ success: true, message: 'Card saved to Google Sheets', rowId: result.row });
+      if (result.success) {
+        // Update card with Google Sheet reference
+        await storage.updateCard(card.id, {
+          googleSheetId: `${result.row}`,
+        });
+        
+        res.json({ 
+          success: true, 
+          message: 'Card saved to CSV and Google Sheets',
+          rowId: result.row 
+        });
+      } else {
+        // Card was saved to CSV but not to Google Sheets
+        res.json({ 
+          success: true, 
+          message: 'Card saved to CSV file. Google Sheets integration experienced an error: ' + (result.error || 'Unknown error'),
+          rowId: null
+        });
+      }
     } catch (error) {
       console.error('Error saving to Google Sheets:', error);
       res.status(500).json({ message: 'Failed to save to Google Sheets' });

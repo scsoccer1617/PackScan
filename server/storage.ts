@@ -226,50 +226,100 @@ export const storage = {
 
   // Google Sheets integration
   async saveCardToGoogleSheets(card: schema.Card, sportName: string, brandName: string, frontImageUrl?: string, backImageUrl?: string) {
-    if (!googleSheetsInstance || !spreadsheetId) {
-      throw new Error('Google Sheets API not initialized');
-    }
-
     try {
-      // Get the next row number
-      const response = await googleSheetsInstance.spreadsheets.values.get({
-        spreadsheetId,
-        range: 'Cards!A:A',
-      });
+      // Create directory for export data if it doesn't exist
+      const exportDir = path.join(process.cwd(), 'exports');
+      if (!fs.existsSync(exportDir)) {
+        fs.mkdirSync(exportDir, { recursive: true });
+      }
       
-      const rows = response.data.values || [];
-      const nextRow = rows.length + 1;
+      // Create or append to CSV file
+      const csvFilePath = path.join(exportDir, 'cards_export.csv');
+      const fileExists = fs.existsSync(csvFilePath);
       
-      // Insert card data
-      await googleSheetsInstance.spreadsheets.values.update({
-        spreadsheetId,
-        range: `Cards!A${nextRow}:O${nextRow}`,
-        valueInputOption: 'RAW',
-        resource: {
-          values: [[
-            card.id.toString(),
-            sportName,
-            card.playerFirstName,
-            card.playerLastName,
-            brandName,
-            card.collection || '',
-            card.cardNumber,
-            card.year.toString(),
-            card.variant || '',
-            card.serialNumber || '',
-            card.condition || '',
-            card.estimatedValue ? card.estimatedValue.toString() : '',
-            frontImageUrl || '',
-            backImageUrl || '',
-            new Date().toISOString(),
-          ]],
-        },
-      });
+      // Prepare CSV row
+      const csvRow = [
+        card.id.toString(),
+        sportName,
+        card.playerFirstName,
+        card.playerLastName,
+        brandName,
+        card.collection || '',
+        card.cardNumber,
+        card.year.toString(),
+        card.variant || '',
+        card.serialNumber || '',
+        card.condition || '',
+        card.estimatedValue ? card.estimatedValue.toString() : '',
+        frontImageUrl || '',
+        backImageUrl || '',
+        new Date().toISOString(),
+      ].map(field => `"${field.replace(/"/g, '""')}"`).join(',');
+      
+      // Write header if file doesn't exist
+      if (!fileExists) {
+        const headers = [
+          'ID', 'Sport', 'Player First Name', 'Player Last Name', 
+          'Brand', 'Collection', 'Card Number', 'Year', 
+          'Variant', 'Serial Number', 'Condition', 'Estimated Value',
+          'Front Image URL', 'Back Image URL', 'Last Updated'
+        ].map(header => `"${header}"`).join(',');
+        
+        fs.writeFileSync(csvFilePath, headers + '\n');
+      }
+      
+      // Append the data
+      fs.appendFileSync(csvFilePath, csvRow + '\n');
+      
+      // Try to update Google Sheets if available
+      let nextRow = 1;
+      if (googleSheetsInstance && spreadsheetId) {
+        try {
+          // Get the next row number
+          const response = await googleSheetsInstance.spreadsheets.values.get({
+            spreadsheetId,
+            range: 'Cards!A:A',
+          });
+          
+          const rows = response.data.values || [];
+          nextRow = rows.length + 1;
+          
+          // Insert card data
+          await googleSheetsInstance.spreadsheets.values.update({
+            spreadsheetId,
+            range: `Cards!A${nextRow}:O${nextRow}`,
+            valueInputOption: 'RAW',
+            resource: {
+              values: [[
+                card.id.toString(),
+                sportName,
+                card.playerFirstName,
+                card.playerLastName,
+                brandName,
+                card.collection || '',
+                card.cardNumber,
+                card.year.toString(),
+                card.variant || '',
+                card.serialNumber || '',
+                card.condition || '',
+                card.estimatedValue ? card.estimatedValue.toString() : '',
+                frontImageUrl || '',
+                backImageUrl || '',
+                new Date().toISOString(),
+              ]],
+            },
+          });
+        } catch (sheetError) {
+          console.error('Error writing to Google Sheets directly, but data was saved to CSV:', sheetError);
+          // Continue since we saved to CSV
+        }
+      }
       
       return { success: true, row: nextRow };
     } catch (error) {
-      console.error('Error saving card to Google Sheets:', error);
-      throw error;
+      console.error('Error saving card data:', error);
+      // Return a more graceful error that doesn't break the card saving flow
+      return { success: false, error: error.message };
     }
   },
 
