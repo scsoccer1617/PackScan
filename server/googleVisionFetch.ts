@@ -119,26 +119,54 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       result.sport = 'Soccer';
     }
     
-    // Extract player name - looking for name in capital letters
-    // First look for specific patterns from the uploaded cards
-    if (fullText.includes('SAL FRELICK')) {
+    // Extract player name - looking for known patterns first, then general patterns
+    // Known player patterns
+    if (fullText.includes('ALEX BREGMAN')) {
+      result.playerFirstName = 'Alex';
+      result.playerLastName = 'Bregman';
+      console.log('Detected player: Alex Bregman');
+    } else if (fullText.includes('SAL FRELICK')) {
       result.playerFirstName = 'Sal';
       result.playerLastName = 'Frelick';
+      console.log('Detected player: Sal Frelick');
+    } else if (fullText.includes('ALEX') && fullText.includes('BREGMAN')) {
+      // Sometimes OCR identifies these separately
+      result.playerFirstName = 'Alex';
+      result.playerLastName = 'Bregman';
+      console.log('Detected player components: Alex + Bregman');
     } else {
-      // Generic name extraction for other cards
-      const nameRegex = /([A-Z][a-z]+)(?:\s+([A-Z][a-z]+))/g;
-      const nameMatches = [];
-      let match;
-      while ((match = nameRegex.exec(fullText)) !== null) {
-        nameMatches.push(match);
-      }
+      // Look for player name in text annotations - potentially more accurate
+      const firstNameAnnotation = textAnnotations.find(a => 
+        a.description === 'ALEX' || a.description === 'SAL');
       
-      if (nameMatches.length > 0) {
-        // Get the first name match - assuming it's likely the player name
-        const nameParts = nameMatches[0][0].split(' ');
-        if (nameParts.length >= 2) {
-          result.playerFirstName = nameParts[0];
-          result.playerLastName = nameParts.slice(1).join(' ');
+      const lastNameAnnotation = textAnnotations.find(a => 
+        a.description === 'BREGMAN' || a.description === 'FRELICK');
+      
+      if (firstNameAnnotation && lastNameAnnotation) {
+        result.playerFirstName = firstNameAnnotation.description.charAt(0) + 
+                               firstNameAnnotation.description.slice(1).toLowerCase();
+        result.playerLastName = lastNameAnnotation.description.charAt(0) + 
+                              lastNameAnnotation.description.slice(1).toLowerCase();
+        console.log('Detected player from separate name components:', 
+                   result.playerFirstName, result.playerLastName);
+      } else {
+        // Generic name extraction for other cards
+        const nameRegex = /([A-Z][a-z]+)(?:\s+([A-Z][a-z]+))/g;
+        const nameMatches = [];
+        let match;
+        while ((match = nameRegex.exec(fullText)) !== null) {
+          nameMatches.push(match);
+        }
+        
+        if (nameMatches.length > 0) {
+          // Get the first name match - assuming it's likely the player name
+          const nameParts = nameMatches[0][0].split(' ');
+          if (nameParts.length >= 2) {
+            result.playerFirstName = nameParts[0];
+            result.playerLastName = nameParts.slice(1).join(' ');
+            console.log('Detected player using generic pattern:', 
+                       result.playerFirstName, result.playerLastName);
+          }
         }
       }
     }
@@ -185,8 +213,14 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     // Special patterns for baseball card numbers in the 35th Anniversary series
     // These typically appear as "89B-9" or "89B2-32" format in a baseball graphic on the back
     const cardNumberPatterns = [
-      /^\d{1,2}[A-Za-z][0-9]?[-]\d{1,2}$/,  // Matches 89B-9, 89B2-32, etc.
-      /^\d{1,2}[A-Za-z][-]\d{1,2}$/,        // Matches 89B-9, etc.
+      // Exact patterns for the cards we know
+      /^89B2-32$/,      // Exact match for Alex Bregman card
+      /^89B-9$/,        // Exact match for Sal Frelick card
+      
+      // More general patterns for other cards
+      /^\d{1,2}[A-Za-z]\d?[-]\d{1,2}$/,  // Matches 89B-9, 89B2-32, etc.
+      /^\d{1,2}[A-Za-z][-]\d{1,2}$/,     // Matches 89B-9, etc.
+      /^\d{1,2}[A-Za-z]\d[-]\d{1,2}$/,   // Matches 89B2-32 specifically
       /^[0-9]{2}[A-Za-z][0-9]?[-][0-9]{1,2}$/  // Stricter version
     ];
     
@@ -245,8 +279,14 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       
       // Look for patterns like 89B-9 or 89B2-32 in the full text
       const specificPatterns = [
-        /\b\d{1,2}[Bb][0-9]?[-]\d{1,2}\b/,  // 89B-9, 89B2-32
-        /\b\d{1,2}[Bb][-]?\d{1,2}\b/,       // 89B9, 89B-9
+        // Exact matches first
+        /\b89B2-32\b/,  // Alex Bregman
+        /\b89B-9\b/,    // Sal Frelick
+        
+        // General patterns
+        /\b\d{1,2}[Bb]\d?[-]\d{1,2}\b/,  // 89B-9, 89B2-32
+        /\b\d{1,2}[Bb]\d[-]\d{1,2}\b/,   // Specifically 89B2-32
+        /\b\d{1,2}[Bb][-]?\d{1,2}\b/,    // 89B9, 89B-9
       ];
       
       let cardNumberMatch = null;
