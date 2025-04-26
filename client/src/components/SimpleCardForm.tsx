@@ -451,13 +451,22 @@ export default function SimpleCardForm() {
                       <FormLabel>Estimated Value ($) <span className="text-red-500">*</span></FormLabel>
                       <div className="flex flex-col space-y-2">
                         <FormControl>
-                          <Input
-                            type="number"
-                            placeholder="Card value in USD"
-                            {...field}
-                            onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
-                          />
+                          <div className="relative">
+                            <Input
+                              type="number"
+                              placeholder="Card value in USD"
+                              {...field}
+                              onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
+                              className="pl-7"
+                            />
+                            <div className="absolute inset-y-0 left-0 flex items-center pl-2 pointer-events-none">
+                              <span className="text-gray-500">$</span>
+                            </div>
+                          </div>
                         </FormControl>
+                        <p className="text-xs text-gray-500">
+                          {field.value ? `Display value: ${formatCurrency(field.value)}` : ''}
+                        </p>
                         
                         {/* eBay Value Lookup */}
                         <EbayValueLookup

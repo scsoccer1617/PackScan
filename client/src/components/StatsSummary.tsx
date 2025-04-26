@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
+import { formatCurrency } from "@/lib/utils";
 
 interface StatsSummaryProps {
   totalValue: number;
@@ -32,7 +33,7 @@ export default function StatsSummary() {
       <Card className="bg-white rounded-lg p-4 shadow-sm mb-4">
         <h3 className="text-sm font-medium text-slate-500 mb-2">Total Collection Value</h3>
         <div className="flex items-baseline">
-          <span className="text-2xl font-bold">$0</span>
+          <span className="text-2xl font-bold">{formatCurrency(0)}</span>
         </div>
       </Card>
     );

@@ -3,6 +3,7 @@ import { Card, CardContent, CardTitle } from "@/components/ui/card";
 import StatsSummary from "@/components/StatsSummary";
 import StatsCharts from "@/components/StatsCharts";
 import { Card as CardType, CardWithRelations } from "@shared/schema";
+import { formatCurrency } from "@/lib/utils";
 
 interface TopCard extends CardWithRelations {
   changePercent: number;
@@ -97,7 +98,7 @@ export default function Stats() {
                     <p className="text-xs text-slate-500 truncate">{card.year} {getBrandName(card)} {card.collection} #{card.cardNumber}</p>
                   </div>
                   <div className="text-right">
-                    <div className="font-medium text-secondary-600">${card.estimatedValue}</div>
+                    <div className="font-medium text-secondary-600">{formatCurrency(Number(card.estimatedValue))}</div>
                     {card.changePercent !== 0 && (
                       <div className={`text-xs ${card.changePercent > 0 ? 'text-green-600' : 'text-red-600'}`}>
                         {card.changePercent > 0 ? '↑' : '↓'} {Math.abs(card.changePercent).toFixed(1)}%
