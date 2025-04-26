@@ -176,42 +176,54 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       result.brand = 'Bowman';
     }
     
-    // Look for card number specifically in top left corner patterns like "89B-9"
     // Print all text annotations for debugging
     console.log('All detected text fragments:');
     textAnnotations.forEach(annotation => {
       console.log(`Text: "${annotation.description}" at position:`, JSON.stringify(annotation.boundingPoly));
     });
     
-    // First try to find exact match for "89B-9" format (for Sal Frelick card)
-    const exactCardNumber = textAnnotations.find(annotation => {
-      const text = annotation.description;
-      return text === '89B-9';
-    });
+    // Special patterns for baseball card numbers in the 35th Anniversary series
+    // These typically appear as "89B-9" or "89B2-32" format in a baseball graphic on the back
+    const cardNumberPatterns = [
+      /^\d{1,2}[A-Za-z][0-9]?[-]\d{1,2}$/,  // Matches 89B-9, 89B2-32, etc.
+      /^\d{1,2}[A-Za-z][-]\d{1,2}$/,        // Matches 89B-9, etc.
+      /^[0-9]{2}[A-Za-z][0-9]?[-][0-9]{1,2}$/  // Stricter version
+    ];
     
-    if (exactCardNumber) {
-      console.log('Found exact match for card number 89B-9!');
+    // First look for specific baseball card number patterns
+    let baseballCardNumber = null;
+    
+    for (const pattern of cardNumberPatterns) {
+      baseballCardNumber = textAnnotations.find(annotation => {
+        const text = annotation.description;
+        
+        if (pattern.test(text)) {
+          console.log(`Found baseball card number matching pattern ${pattern}:`, text);
+          return true;
+        }
+        return false;
+      });
+      
+      if (baseballCardNumber) break;
+    }
+    
+    if (baseballCardNumber) {
+      console.log('Found baseball card number:', baseballCardNumber.description);
     }
     
     // Look for card numbers in specific formats, prioritizing those in the top left
+    // This acts as a fallback if we don't find a specific baseball card number pattern
     const topLeftCardNumber = textAnnotations.find(annotation => {
       const text = annotation.description;
       
-      // Very specific pattern for "digits-letter-hyphen-digit" like "89B-9"
-      if (/^\d{1,2}[A-Za-z]{1}[-]\d{1}$/.test(text)) {
-        console.log('Found pattern match for card number format (like 89B-9):', text);
-        return true;
-      }
-      
-      // More general card number patterns
+      // Skip if this doesn't look like a potential card number
       if (!/^\d{1,3}[A-Za-z]?[-]?\d*$/.test(text)) return false;
       
       const boundingPoly = annotation.boundingPoly;
       if (!boundingPoly || !boundingPoly.vertices) return false;
       
-      // Check if it's in top left area - look for vertices with small x and y values
-      // A very rough heuristic for "top left"
-      const isTopLeft = boundingPoly.vertices.some(v => v.x < 100 && v.y < 100);
+      // For back of card - check if it's in top left area 
+      const isTopLeft = boundingPoly.vertices.every((v: any) => v.x < 200 && v.y < 200);
       
       // Log for debugging
       console.log('Found potential card number:', text, 'at position:', JSON.stringify(boundingPoly), 
@@ -220,27 +232,41 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       return isTopLeft;
     });
     
-    if (exactCardNumber) {
-      result.cardNumber = exactCardNumber.description;
-      console.log('Identified card number from exact match:', result.cardNumber);
+    // Prioritize the baseball card number pattern, which is the most specific
+    if (baseballCardNumber) {
+      result.cardNumber = baseballCardNumber.description;
+      console.log('Identified card number from baseball pattern match:', result.cardNumber);
     } else if (topLeftCardNumber) {
       result.cardNumber = topLeftCardNumber.description;
-      console.log('Identified card number from position in card:', result.cardNumber);
+      console.log('Identified card number from top-left position in card:', result.cardNumber);
     } else {
-      // Extract card number patterns as fallback
-      // More aggressive regex pattern specifically for 89B-9 format
-      const specific89BPattern = /\b\d{1,2}[Bb][-]?\d{1}\b/;
-      const specificMatch = fullText.match(specific89BPattern);
+      // Fallback: Check for specific patterns in the full text
+      // This catches cases where the OCR didn't identify the text as a separate element
       
-      if (specificMatch) {
-        result.cardNumber = specificMatch[0];
-        console.log('Identified specific 89B-9 format card number:', result.cardNumber);
+      // Look for patterns like 89B-9 or 89B2-32 in the full text
+      const specificPatterns = [
+        /\b\d{1,2}[Bb][0-9]?[-]\d{1,2}\b/,  // 89B-9, 89B2-32
+        /\b\d{1,2}[Bb][-]?\d{1,2}\b/,       // 89B9, 89B-9
+      ];
+      
+      let cardNumberMatch = null;
+      for (const pattern of specificPatterns) {
+        const match = fullText.match(pattern);
+        if (match) {
+          cardNumberMatch = match;
+          break;
+        }
+      }
+      
+      if (cardNumberMatch) {
+        result.cardNumber = cardNumberMatch[0];
+        console.log('Identified card number from specific text pattern:', result.cardNumber);
       } else {
-        // General card number regex as final fallback
+        // Very general card number regex as final fallback
         const cardNumberRegex = /#\s*(\d+)|no\.\s*(\d+)|card\s*(\d+)|\b\d{1,3}[A-Za-z]?[-]?\d{1,2}\b/i;
-        const cardNumberMatch = fullText.match(cardNumberRegex);
-        if (cardNumberMatch) {
-          result.cardNumber = cardNumberMatch[0];
+        const generalMatch = fullText.match(cardNumberRegex);
+        if (generalMatch) {
+          result.cardNumber = generalMatch[0];
           console.log('Identified card number from general regex pattern:', result.cardNumber);
         }
       }
@@ -310,18 +336,21 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       result.year = new Date().getFullYear();
     }
     
-    // Special case for this specific Sal Frelick card
-    if (result.playerFirstName === 'Sal' && result.playerLastName === 'Frelick') {
+    // For 35th Anniversary Topps cards, the year is always 2024
+    // If we detect "35" and "Anniversary" OR "35th" markings, we can be confident
+    if ((fullText.includes('35') && 
+        (fullText.includes('ANNIVERSARY') || fullText.includes('RSARY') || 
+         fullText.includes('ANNIV'))) || fullText.includes('35th')) {
+      
+      // Set default brand for these cards
       if (!result.brand) result.brand = 'Topps';
       
-      // The card is from 2024 Topps 35th Anniversary - 89B-9
-      // For this specific card, we know the card number 
-      result.cardNumber = '89B-9';
+      // Set collection name
+      result.collection = '35th Anniversary';
       
-      if (!result.collection) result.collection = '35th Anniversary';
-      if (!result.year || result.year === 1989) result.year = 2024;
-      
-      console.log('Applied specific known card info for Sal Frelick 2024 Topps 35th Anniversary card (89B-9)');
+      // Even if we detect "1989" in the card, these are 2024 cards 
+      // (the 1989 is part of the 35th Anniversary "1989-2024" logo)
+      result.year = 2024;
     }
     
     console.log('Extracted card info:', result);
