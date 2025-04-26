@@ -154,7 +154,7 @@ export default function CameraCapture({ onImageCapture, side }: CameraCapturePro
                     fileInputRef.current?.click();
                   }
                 }}
-                className="bg-primary-700 hover:bg-primary-800 text-white font-bold px-8 py-3 rounded-md shadow-md ring-2 ring-primary-300 text-base transition-all duration-200 ease-in-out transform hover:scale-105 hover:shadow-lg"
+                className="bg-slate-500 hover:bg-slate-600 text-white font-bold px-8 py-3 rounded-md shadow-md border border-slate-400 text-base transition-all duration-200 ease-in-out transform hover:scale-105 hover:shadow-lg"
               >
                 📷 Add Image
               </Button>
@@ -209,7 +209,7 @@ export default function CameraCapture({ onImageCapture, side }: CameraCapturePro
                     fileInputRef.current?.click();
                   }
                 }}
-                className="bg-primary-700 hover:bg-primary-800 text-white font-medium px-3 py-1 rounded-md shadow-sm ring-1 ring-primary-300"
+                className="bg-slate-500 hover:bg-slate-600 text-white font-medium px-3 py-1 rounded-md shadow-sm border border-slate-400"
                 size="sm"
               >
                 📷 Add Image
@@ -220,7 +220,7 @@ export default function CameraCapture({ onImageCapture, side }: CameraCapturePro
           {isCameraActive && (
             <Button 
               onClick={captureImage}
-              className="bg-primary-700 hover:bg-primary-800 text-white font-bold rounded-md shadow-md ring-1 ring-primary-300 animate-pulse"
+              className="bg-slate-600 hover:bg-slate-700 text-white font-bold rounded-md shadow-md border border-slate-400 animate-pulse"
             >
               📸 Capture Photo
             </Button>
