@@ -1,5 +1,5 @@
-import CardForm from "@/components/CardForm";
+import SimpleCardForm from "@/components/SimpleCardForm";
 
 export default function AddCard() {
-  return <CardForm />;
+  return <SimpleCardForm />;
 }
