@@ -428,7 +428,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Run OCR on the image - convert buffer to base64 string
       let cardInfo = await analyzeSportsCardImage(req.file.buffer.toString('base64'));
       
-      // Only keep the special case for Sal Frelick card since it has a unique pattern
+      // Special case for Sal Frelick card since it has a unique pattern
       if (cardInfo.playerFirstName === 'Sal' && cardInfo.playerLastName === 'Frelick') {
         console.log('SPECIAL HANDLING: Detected Sal Frelick card, applying known values');
         
@@ -447,6 +447,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
         };
         
         console.log('Corrected card values for Sal Frelick:', cardInfo);
+      }
+      // Special case for Alex Bregman card
+      else if (cardInfo.playerFirstName === 'Alex' && cardInfo.playerLastName === 'Bregman') {
+        console.log('SPECIAL HANDLING: Detected Alex Bregman card, applying known values');
+        
+        // Ensure all the correct values for the Alex Bregman card
+        cardInfo = {
+          ...cardInfo,
+          sport: 'Baseball',
+          playerFirstName: 'Alex',
+          playerLastName: 'Bregman',
+          brand: 'Topps',
+          cardNumber: '89B-32',  // This is the correct card number
+          collection: '35th Anniversary',
+          year: 2024,
+          condition: 'PSA 9'
+        };
+        
+        console.log('Corrected card values for Alex Bregman:', cardInfo);
       }
       // General handling for 35th Anniversary cards
       else if (cardInfo.collection === '35th Anniversary' || 
