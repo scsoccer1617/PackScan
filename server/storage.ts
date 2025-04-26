@@ -373,6 +373,7 @@ export const storage = {
                     'ID', 'Sport', 'Player First Name', 'Player Last Name', 
                     'Brand', 'Collection', 'Card Number', 'Year', 
                     'Variant', 'Serial Number', 'Condition', 'Estimated Value',
+                    'Rookie Card', 'Autographed', 'Numbered',
                     'Front Image URL', 'Back Image URL', 'Last Updated'
                   ]],
                 },
