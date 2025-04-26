@@ -1,79 +1,66 @@
-import { useRef, useState } from "react";
+import { useState, useRef } from 'react';
 import { Button } from "@/components/ui/button";
-import { 
-  ScanSearch, 
-  Camera, 
-  Plus,
-  Upload,
+import {
+  Camera,
   ImageIcon,
+  Upload,
   X
 } from "lucide-react";
 
-interface ImagePreviewProps {
+interface ImageSelectorProps {
   frontImage: string;
   backImage: string;
-  onCaptureRequest: (side: 'front' | 'back') => void;
-  onAnalyzeRequest?: () => void;
-  onDirectImageUpload?: (side: 'front' | 'back', imageData: string) => void;
+  onFrontImageCapture: (imageData: string) => void;
+  onBackImageCapture: (imageData: string) => void;
+  onCameraRequest: (side: 'front' | 'back') => void;
 }
 
-export default function ImagePreview({ 
-  frontImage, 
-  backImage, 
-  onCaptureRequest,
-  onAnalyzeRequest,
-  onDirectImageUpload
-}: ImagePreviewProps) {
+export default function ImageSelector({
+  frontImage,
+  backImage,
+  onFrontImageCapture,
+  onBackImageCapture,
+  onCameraRequest
+}: ImageSelectorProps) {
+  const [activeSide, setActiveSide] = useState<'front' | 'back' | null>(null);
   const frontFileInputRef = useRef<HTMLInputElement>(null);
   const backFileInputRef = useRef<HTMLInputElement>(null);
-  const [activeSide, setActiveSide] = useState<'front' | 'back' | null>(null);
-  
-  const handleFileInputChange = (side: 'front' | 'back', event: React.ChangeEvent<HTMLInputElement>) => {
+
+  const handleFileSelect = (side: 'front' | 'back', event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const imageData = e.target?.result as string;
-        // If we have the direct upload function, use it
-        if (onDirectImageUpload) {
-          onDirectImageUpload(side, imageData);
-        } else {
-          // Otherwise fall back to the capture request
-          onCaptureRequest(side);
-        }
-        
-        // Close the selector after selection
-        setActiveSide(null);
-      };
-      reader.readAsDataURL(file);
-    }
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const imageData = e.target?.result as string;
+      if (side === 'front') {
+        onFrontImageCapture(imageData);
+      } else {
+        onBackImageCapture(imageData);
+      }
+    };
+    reader.readAsDataURL(file);
+    setActiveSide(null);
   };
-  
+
   const handlePhotoLibrary = () => {
     if (!activeSide) return;
     const fileInput = activeSide === 'front' ? frontFileInputRef.current : backFileInputRef.current;
     fileInput?.click();
-    setActiveSide(null);
   };
-  
+
   const handleTakePhoto = () => {
     if (!activeSide) return;
-    onCaptureRequest(activeSide);
-    setActiveSide(null);
-  };
-  
-  const handleChooseFile = () => {
-    if (!activeSide) return;
-    const fileInput = activeSide === 'front' ? frontFileInputRef.current : backFileInputRef.current;
-    fileInput?.click();
+    onCameraRequest(activeSide);
     setActiveSide(null);
   };
 
   return (
-    <div className="mb-4 relative">
+    <div className="relative">
       <div className="grid grid-cols-2 gap-4 mb-3">
+        {/* Front Image */}
         <div className="flex flex-col">
-          <div 
+          <div
             className={`relative rounded-lg border-2 ${frontImage ? 'border-slate-300' : 'border-dashed border-slate-400'} bg-slate-50 h-36 flex flex-col items-center justify-center overflow-hidden`}
           >
             {frontImage ? (
@@ -88,28 +75,21 @@ export default function ImagePreview({
               Front
             </div>
           </div>
-          
-          <Button 
-            type="button" 
+
+          <Button
+            type="button"
             variant={frontImage ? "outline" : "default"}
-            size="sm" 
+            size="sm"
             className="mt-2 w-full bg-slate-500 hover:bg-slate-600 text-white"
             onClick={() => setActiveSide('front')}
           >
-            {frontImage ? "Replace Front Image" : <><Plus className="h-4 w-4 mr-1" /> Front Image</>}
+            {frontImage ? "Replace Front Image" : "Front Image"}
           </Button>
-          
-          <input 
-            type="file"
-            ref={frontFileInputRef}
-            onChange={(e) => handleFileInputChange('front', e)}
-            accept="image/*"
-            className="hidden"
-          />
         </div>
-        
+
+        {/* Back Image */}
         <div className="flex flex-col">
-          <div 
+          <div
             className={`relative rounded-lg border-2 ${backImage ? 'border-slate-300' : 'border-dashed border-slate-400'} bg-slate-50 h-36 flex flex-col items-center justify-center overflow-hidden`}
           >
             {backImage ? (
@@ -124,48 +104,40 @@ export default function ImagePreview({
               Back
             </div>
           </div>
-          
-          <Button 
-            type="button" 
+
+          <Button
+            type="button"
             variant={backImage ? "outline" : "default"}
-            size="sm" 
+            size="sm"
             className="mt-2 w-full bg-slate-500 hover:bg-slate-600 text-white"
             onClick={() => setActiveSide('back')}
           >
-            {backImage ? "Replace Back Image" : <><Plus className="h-4 w-4 mr-1" /> Back Image</>}
+            {backImage ? "Replace Back Image" : "Back Image"}
           </Button>
-          
-          <input 
-            type="file"
-            ref={backFileInputRef}
-            onChange={(e) => handleFileInputChange('back', e)}
-            accept="image/*"
-            className="hidden"
-          />
         </div>
       </div>
-      
-      {/* Single shared image selector menu */}
+
+      {/* Image options menu */}
       {activeSide && (
-        <>
-          <div className="absolute z-10 top-1/3 left-1/2 transform -translate-x-1/2 -translate-y-1/4 w-64 rounded-md overflow-hidden shadow-lg bg-slate-800">
+        <div className="absolute z-10 left-0 right-0 mt-1 rounded-md shadow-lg overflow-hidden">
+          <div className="bg-slate-700">
             <button
-              className="flex items-center w-full px-4 py-3 text-white bg-slate-700 hover:bg-slate-600 border-b border-slate-800"
+              className="flex items-center w-full px-4 py-3 text-white hover:bg-slate-600 border-b border-slate-800"
               onClick={handlePhotoLibrary}
             >
               <ImageIcon className="h-5 w-5 mr-3" />
               <span>Photo Library</span>
             </button>
             <button
-              className="flex items-center w-full px-4 py-3 text-white bg-slate-700 hover:bg-slate-600 border-b border-slate-800"
+              className="flex items-center w-full px-4 py-3 text-white hover:bg-slate-600 border-b border-slate-800"
               onClick={handleTakePhoto}
             >
               <Camera className="h-5 w-5 mr-3" />
               <span>Take Photo</span>
             </button>
             <button
-              className="flex items-center w-full px-4 py-3 text-white bg-slate-700 hover:bg-slate-600"
-              onClick={handleChooseFile}
+              className="flex items-center w-full px-4 py-3 text-white hover:bg-slate-600"
+              onClick={handlePhotoLibrary}
             >
               <Upload className="h-5 w-5 mr-3" />
               <span>Choose File</span>
@@ -174,24 +146,28 @@ export default function ImagePreview({
           
           {/* Backdrop to close the menu when clicking outside */}
           <div 
-            className="fixed inset-0 bg-black bg-opacity-30 z-0" 
+            className="fixed inset-0 z-0" 
             onClick={() => setActiveSide(null)}
           />
-        </>
+        </div>
       )}
+
+      {/* Hidden file inputs */}
+      <input
+        type="file"
+        ref={frontFileInputRef}
+        onChange={(e) => handleFileSelect('front', e)}
+        accept="image/*"
+        className="hidden"
+      />
       
-      {frontImage && onAnalyzeRequest && (
-        <Button 
-          type="button" 
-          variant="secondary" 
-          size="sm" 
-          className="w-full"
-          onClick={onAnalyzeRequest}
-        >
-          <ScanSearch className="h-4 w-4 mr-2" />
-          Analyze Card with OCR
-        </Button>
-      )}
+      <input
+        type="file"
+        ref={backFileInputRef}
+        onChange={(e) => handleFileSelect('back', e)}
+        accept="image/*"
+        className="hidden"
+      />
     </div>
   );
 }

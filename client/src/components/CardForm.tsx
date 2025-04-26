@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery } from "@tanstack/react-query";
@@ -13,7 +13,9 @@ import { useToast } from "@/hooks/use-toast";
 import { useOCR } from "@/hooks/use-ocr";
 import CameraCapture from "./CameraCapture";
 import ImagePreview from "./ImagePreview";
+import ImageSelector from "./ImageSelector";
 import OCRResults from "./OCRResults";
+import { ScanSearch } from "lucide-react";
 
 const sportOptions = [
   "Baseball",
@@ -251,13 +253,26 @@ export default function CardForm() {
       <div className="mb-6">
         <h2 className="font-semibold text-lg mb-2">Card Images</h2>
         
-        <ImagePreview 
-          frontImage={frontImage} 
-          backImage={backImage} 
-          onCaptureRequest={toggleCaptureMode}
-          onAnalyzeRequest={handleAnalyzeRequest}
-          onDirectImageUpload={handleDirectFileUpload}
+        <ImageSelector
+          frontImage={frontImage}
+          backImage={backImage}
+          onFrontImageCapture={(image) => setFrontImage(image)}
+          onBackImageCapture={(image) => setBackImage(image)}
+          onCameraRequest={toggleCaptureMode}
         />
+        
+        {frontImage && (
+          <Button 
+            type="button" 
+            variant="secondary" 
+            size="sm" 
+            className="w-full mt-2"
+            onClick={handleAnalyzeRequest}
+          >
+            <ScanSearch className="h-4 w-4 mr-2" />
+            Analyze Card with OCR
+          </Button>
+        )}
         
         {showOCR && (
           <OCRResults 
