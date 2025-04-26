@@ -36,7 +36,7 @@ export default function SimpleCardForm() {
       year: new Date().getFullYear(),
       variant: "",
       serialNumber: "",
-      condition: "PSA 9",
+      condition: "PSA 8", // Changed from PSA 9 to PSA 8 as requested
       estimatedValue: 200,
       isRookieCard: false,
       isAutographed: false,
@@ -440,7 +440,7 @@ export default function SimpleCardForm() {
                 />
               </div>
               
-              {/* Estimated Value Field */}
+              {/* Estimated Value Field with eBay Lookup */}
               <div className="space-y-2">
                 <FormField
                   control={form.control}
@@ -474,6 +474,7 @@ export default function SimpleCardForm() {
                     </FormItem>
                   )}
                 />
+              </div>
               
               <div className="flex flex-col space-y-2">
                 <h3 className="text-sm font-medium text-slate-700">Card Features</h3>
