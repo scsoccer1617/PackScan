@@ -520,6 +520,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.log('Adjusted values for 35th Anniversary card:', cardInfo);
       }
       
+      // Fix common OCR year mistakes
+      // Sometimes OCR reads "2024" but interprets it as "2015" due to similar digit appearance
+      if (cardInfo.year === 2015 && 
+         (cardInfo.collection === '35th Anniversary' || 
+          cardInfo.collection === 'Series One' || 
+          cardInfo.collection === 'Series Two')) {
+        console.log('Correcting likely OCR year error: 2015 → 2024 for current collection');
+        cardInfo.year = 2024;
+      }
+      
       console.log('OCR results:', JSON.stringify(cardInfo, null, 2));
       
       res.json({

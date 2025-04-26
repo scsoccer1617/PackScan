@@ -678,8 +678,84 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       result.collection = '35th Anniversary';
     }
     
-    // Look for copyright text at the bottom to extract year
-    const copyrightYear = textAnnotations.find(annotation => {
+    // Improved approach to year detection by looking for the year near the ® symbol at the bottom of the card
+    
+    // First identify all text annotations that are likely at the bottom portion of the card
+    // Most copyright/trademark information is in the bottom 25% of the card
+    const bottomAnnotations = textAnnotations.filter(annotation => {
+      const boundingPoly = annotation.boundingPoly;
+      if (!boundingPoly || !boundingPoly.vertices) return false;
+      
+      // Get the vertical position (y-coordinate) to identify bottom section
+      const yCoords = boundingPoly.vertices.map((v: any) => v.y);
+      const avgY = yCoords.reduce((a: number, b: number) => a + b, 0) / yCoords.length;
+      
+      // Most cards have height around 1500-2000 pixels, so the bottom 25% would start at around 1200-1500
+      // We'll use a generous threshold to catch more potential text
+      const isBottomSection = avgY > 1200;
+      
+      return isBottomSection;
+    });
+    
+    console.log(`Found ${bottomAnnotations.length} text annotations in the bottom section of the card`);
+    
+    // Look for the trademark/copyright symbols (®, ©, ™) and extract nearby years
+    const trademarkYearCandidates: {year: number, confidence: number, source: string}[] = [];
+    
+    // Check each annotation in the bottom section for trademark/copyright symbols and nearby years
+    bottomAnnotations.forEach(annotation => {
+      const text = annotation.description;
+      
+      // Log for debugging
+      console.log(`Bottom text: "${text}" at position:`, JSON.stringify(annotation.boundingPoly));
+      
+      // Look for years with nearby trademark symbols
+      const hasTrademarkSymbol = text.includes('®') || 
+                                text.includes('©') || 
+                                text.includes('™') ||
+                                text.includes('(R)') ||
+                                text.includes('(TM)') ||
+                                text.includes('(C)');
+                                
+      // Different patterns for years
+      const yearPatterns = [
+        { regex: /\b(20\d{2})\b/, confidence: 0.9, type: '20XX' },     // 2023, 2024
+        { regex: /\b(19\d{2})\b/, confidence: 0.9, type: '19XX' },     // 1993, 1994
+        { regex: /[''](\d{2})/, confidence: 0.7, type: "'YY" },        // '23, '24
+        { regex: /\b\d{4}\b/, confidence: 0.6, type: 'XXXX' }          // Any 4 digits as fallback
+      ];
+      
+      // If we have a trademark symbol, look for years
+      if (hasTrademarkSymbol) {
+        for (const pattern of yearPatterns) {
+          const yearMatch = text.match(pattern.regex);
+          if (yearMatch) {
+            let year = parseInt(yearMatch[1]);
+            
+            // Handle 2-digit years
+            if (year < 100) {
+              // Assume 00-25 is 2000-2025, and everything else is 1900s
+              year = year <= 25 ? 2000 + year : 1900 + year;
+            }
+            
+            // Only accept reasonable years (1900-2025)
+            if (year >= 1900 && year <= 2025) {
+              trademarkYearCandidates.push({
+                year,
+                confidence: pattern.confidence,
+                source: `${text} (${pattern.type})`
+              });
+              
+              console.log(`Found potential card year: ${year} from text "${text}" with pattern ${pattern.type}`);
+              break;  // Once we find a match in this annotation, move to next
+            }
+          }
+        }
+      }
+    });
+    
+    // Also check for specific copyright year pattern
+    const copyrightYear = bottomAnnotations.find(annotation => {
       const text = annotation.description.toLowerCase();
       return (text.includes('©') || text.includes('copyright')) && /\b20\d{2}\b/.test(text);
     });
@@ -687,18 +763,53 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     if (copyrightYear) {
       const yearMatch = copyrightYear.description.match(/\b(20\d{2})\b/);
       if (yearMatch) {
-        result.year = parseInt(yearMatch[1]);
-        console.log('Identified year from copyright text:', result.year);
+        const year = parseInt(yearMatch[1]);
+        trademarkYearCandidates.push({
+          year,
+          confidence: 0.95,  // High confidence for explicit copyright
+          source: `Copyright text: ${copyrightYear.description}`
+        });
+        console.log(`Found year ${year} from copyright text: ${copyrightYear.description}`);
       }
-    } else {
-      // Extract year (looking for 4-digit years from 1900-2025)
+    }
+    
+    // Sort candidates by confidence (highest first)
+    trademarkYearCandidates.sort((a, b) => b.confidence - a.confidence);
+    
+    // Use the highest confidence year if available
+    if (trademarkYearCandidates.length > 0) {
+      const bestYearCandidate = trademarkYearCandidates[0];
+      result.year = bestYearCandidate.year;
+      console.log(`Selected card year: ${result.year} from "${bestYearCandidate.source}" with confidence ${bestYearCandidate.confidence}`);
+    } 
+    // Fallback to general detection if no trademark years found
+    else {
+      // Extract any year (looking for 4-digit years from 1900-2025)
       const yearRegex = /\b(19\d{2}|20[0-2]\d)\b/;
       const yearMatch = fullText.match(yearRegex);
       if (yearMatch) {
         result.year = parseInt(yearMatch[1]);
+        console.log('Identified year from general text:', result.year);
       } else if (fullText.includes('© 2024') || fullText.includes('©2024')) {
         result.year = 2024;
+        console.log('Defaulting to 2024 based on copyright text');
       }
+    }
+    
+    // Context-based year correction
+    // For 35th Anniversary and recent collections
+    if (is35thAnniversaryCard || 
+        result.collection === '35th Anniversary' || 
+        (result.cardNumber && result.cardNumber.includes('89B'))) {
+      // Override any detected year for 35th Anniversary cards
+      result.year = 2024;
+      console.log('Overriding year to 2024 for 35th Anniversary collection');
+    }
+    else if ((result.collection === 'Series One' || result.collection === 'Series Two') && 
+             (!result.year || result.year < 2020)) {
+      // Recent Series One/Two cards are from 2024
+      result.year = 2024;
+      console.log('Overriding year to 2024 for recent Series One/Two collection');
     }
     
     // Extract serial number (like "123/499" or "010/399") - we need to do this FIRST
