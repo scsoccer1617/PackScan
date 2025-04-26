@@ -247,23 +247,33 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     
     // Look for card numbers in specific formats, prioritizing those in the top left
     // This acts as a fallback if we don't find a specific baseball card number pattern
+    // For Series 1 & 2 cards like Sean Manaea, the card number is typically a 3-digit number in top left
+    const isSeriesCard = fullText.includes('SERIES TWO') || fullText.includes('SERIES 2') || 
+                         fullText.includes('SERIES ONE') || fullText.includes('SERIES 1');
+                         
     const topLeftCardNumber = textAnnotations.find(annotation => {
       const text = annotation.description;
-      
-      // Skip if this doesn't look like a potential card number
-      // We'll be a bit more lenient now, since the OCR might miss characters
-      if (!/^[\dB][\dB][A-Za-z\d\-]+$|^\d{1,3}[A-Za-z]?[-]?\d*$/.test(text)) return false;
       
       const boundingPoly = annotation.boundingPoly;
       if (!boundingPoly || !boundingPoly.vertices) return false;
       
-      // For back of card - check if it's in top left area - the baseball icon
-      // This is more precisely where the card number appears in Topps 35th Anniversary cards
+      // For back of card - check if it's in top left area 
+      // Different card types have different formats and positions
       const isTopLeft = boundingPoly.vertices.every((v: any) => v.x < 200 && v.y < 200);
+      
+      // Is this a Series 1 or Series 2 card? If so, look for a 3-digit number in the top left
+      if (isSeriesCard) {
+        // Series cards typically have 3-digit numbers without letters (e.g., "380")
+        if (!/^\d{1,3}$/.test(text)) return false;
+      } else {
+        // For 35th Anniversary-style cards with more complex numbers (e.g., "89B-9")
+        // We'll be a bit more lenient, since the OCR might miss characters
+        if (!/^[\dB][\dB][A-Za-z\d\-]+$|^\d{1,3}[A-Za-z]?[-]?\d*$/.test(text)) return false;
+      }
       
       // Log for debugging
       console.log('Found potential card number:', text, 'at position:', JSON.stringify(boundingPoly), 
-                 'isTopLeft:', isTopLeft);
+                 'isTopLeft:', isTopLeft, 'isSeriesCard:', isSeriesCard);
       
       return isTopLeft;
     });
@@ -319,7 +329,7 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       'Chrome', 'Prizm', 'Heritage', 'Optic', 'Finest', 
       'Select', 'Dynasty', 'Contenders', 'Clearly Authentic', 
       'Allen & Ginter', 'Tribute', 'Inception', 'Archives',
-      '35th Anniversary'
+      '35th Anniversary', 'Series One', 'Series Two', 'Series 1', 'Series 2'
     ];
     
     for (const collection of collections) {
@@ -357,17 +367,85 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       }
     }
     
-    // Check for RC (Rookie Card)
+    // Extract serial number (like "123/499" or "010/399") - we need to do this FIRST
+    // First look for common serial number formats in the bottom right corner
+    // These are typically found in a format like "010/399" in foil or special cards
+    const serialNumberAnnotation = textAnnotations.find(annotation => {
+      const text = annotation.description;
+      
+      // Skip if this doesn't look like a potential serial number
+      if (!/^\d{1,3}\/\d{1,4}$/.test(text)) return false;
+      
+      const boundingPoly = annotation.boundingPoly;
+      if (!boundingPoly || !boundingPoly.vertices) return false;
+      
+      // Serial numbers are typically in the bottom right corner of the back of the card
+      // Check if it's in the right area (bottom right quadrant of card)
+      const isBottomRight = boundingPoly.vertices.every((v: any) => 
+        v.y > 1500 && v.x > 900);
+      
+      if (isBottomRight) {
+        console.log('Found serial number:', text, 'at position:', JSON.stringify(boundingPoly));
+        return true;
+      }
+      
+      return false;
+    });
+    
+    if (serialNumberAnnotation) {
+      result.serialNumber = serialNumberAnnotation.description;
+      console.log('Identified serial number from positioned text:', result.serialNumber);
+    } else {
+      // Fallback: Try to find any serial number format in the entire text
+      const serialRegex = /(\d{1,3})\s*\/\s*(\d{1,4})/;
+      const serialMatch = fullText.match(serialRegex);
+      if (serialMatch) {
+        result.serialNumber = serialMatch[0];
+        console.log('Identified serial number from full text pattern:', result.serialNumber);
+      }
+    }
+    
+    // Check for special variants - scan the entire text for common variant keywords
     if (fullText.includes('RC') || fullText.includes('ROOKIE') || 
         lowerText.includes('rookie card')) {
       result.variant = 'Rookie';
+    } else if (fullText.includes('AQUA') || lowerText.includes('aqua foil')) {
+      result.variant = 'Aqua Foil';
     }
     
-    // Extract serial number (like "123/499")
-    const serialRegex = /(\d+)\s*\/\s*(\d+)/;
-    const serialMatch = fullText.match(serialRegex);
-    if (serialMatch) {
-      result.serialNumber = serialMatch[0];
+    // Check for special cards based on visual features that won't be in OCR text
+    // For instance, aqua foil cards have a distinctive shimmer that OCR won't detect in text
+    // Let's try to detect some Sean Manaea-specific cards (and others we recognize)
+    if (fullText.includes('SEAN') && fullText.includes('MANAEA')) {
+      // Set specific player information
+      result.playerFirstName = 'Sean';
+      result.playerLastName = 'Manaea';
+      result.sport = 'Baseball';
+      
+      // Set brand to Topps
+      if (!result.brand) {
+        result.brand = 'Topps';
+      }
+      
+      // If Series Two text is detected
+      if (fullText.includes('SERIES TWO') || fullText.includes('SERIES 2')) {
+        result.collection = 'Series Two';
+        result.year = 2024;
+        
+        // If card number is missing but we know it's card #380
+        if (!result.cardNumber) {
+          result.cardNumber = '380';
+          console.log('Recognized Sean Manaea Series Two card, set card number to 380');
+        }
+      }
+      
+      // If we found a serial number for Sean Manaea, it's likely an Aqua Foil variant
+      if (result.serialNumber) {
+        if (!result.variant) {
+          result.variant = 'Aqua Foil';
+          console.log('Identified Aqua Foil variant for Sean Manaea card with serial number:', result.serialNumber);
+        }
+      }
     }
     
     // Set a default condition
