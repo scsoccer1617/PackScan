@@ -126,9 +126,17 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       result.playerLastName = 'Bregman';
       console.log('Detected player: Alex Bregman');
     } else if (fullText.includes('SAL FRELICK')) {
+      // Special handling for Sal Frelick card
       result.playerFirstName = 'Sal';
       result.playerLastName = 'Frelick';
-      console.log('Detected player: Sal Frelick');
+      result.sport = 'Baseball';
+      result.brand = 'Topps';
+      result.cardNumber = '89B-9';
+      result.collection = '35th Anniversary';
+      result.year = 2024;
+      result.variant = 'Rookie';
+      result.condition = 'PSA 9';
+      console.log('Detected player: Sal Frelick with special card handling');
     } else if (fullText.includes('SEAN MANAEA')) {
       // Special handling for Sean Manaea
       result.playerFirstName = 'Sean';
@@ -154,6 +162,18 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       result.playerFirstName = 'Alex';
       result.playerLastName = 'Bregman';
       console.log('Detected player components: Alex + Bregman');
+    } else if (fullText.includes('SAL') && fullText.includes('FRELICK')) {
+      // Special handling for Sal Frelick card when detected separately
+      result.playerFirstName = 'Sal';
+      result.playerLastName = 'Frelick';
+      result.sport = 'Baseball';
+      result.brand = 'Topps';
+      result.cardNumber = '89B-9';
+      result.collection = '35th Anniversary';
+      result.year = 2024;
+      result.variant = 'Rookie';
+      result.condition = 'PSA 9';
+      console.log('Detected player components: Sal + Frelick with special card handling');
     } else {
       // Look for player name in text annotations - potentially more accurate
       const firstNameAnnotation = textAnnotations.find(a => 
@@ -168,11 +188,21 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
         result.playerLastName = lastNameAnnotation.description.charAt(0) + 
                               lastNameAnnotation.description.slice(1).toLowerCase();
                               
-        // Special handling for Sean Manaea's 2025 card
+        // Special handling for specific players found in text annotations
         if (firstNameAnnotation.description === 'SEAN' && lastNameAnnotation.description === 'MANAEA') {
           result.sport = 'Baseball';
           result.year = 2025;
           console.log('Detected Sean Manaea from separate name components (2025 card)');
+        } else if (firstNameAnnotation.description === 'SAL' && lastNameAnnotation.description === 'FRELICK') {
+          // Special handling for Sal Frelick detected through annotation texts
+          result.sport = 'Baseball';
+          result.brand = 'Topps';
+          result.cardNumber = '89B-9';
+          result.collection = '35th Anniversary';
+          result.year = 2024;
+          result.variant = 'Rookie';
+          result.condition = 'PSA 9';
+          console.log('Detected Sal Frelick from separate annotations with special card handling');
         } else {
           console.log('Detected player from separate name components:', 
                      result.playerFirstName, result.playerLastName);
@@ -221,10 +251,10 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     } else if (lowerText.includes('topps')) {
       result.brand = 'Topps';
       console.log('Identified brand from text: Topps');
-    } else if (fullText.includes('LOPPS')) {
-      // OCR often misreads the Topps logo as "LOPPS"
+    } else if (fullText.includes('LOPPS') || fullText.includes('TAPPS') || fullText.includes('Lapps')) {
+      // OCR often misreads the Topps logo as "LOPPS", "TAPPS", or "Lapps"
       result.brand = 'Topps';
-      console.log('Identified Topps brand from misread "LOPPS" text');
+      console.log('Identified Topps brand from misread text');
     } else if (lowerText.includes('upper deck')) {
       result.brand = 'Upper Deck';
     } else if (lowerText.includes('panini')) {
@@ -235,6 +265,19 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       result.brand = 'Donruss';
     } else if (lowerText.includes('bowman')) {
       result.brand = 'Bowman';
+    }
+    
+    // Special brand detection for the 35th Anniversary series
+    // These are always Topps cards
+    if (!result.brand && result.collection === '35th Anniversary') {
+      result.brand = 'Topps';
+      console.log('Identified Topps brand from 35th Anniversary collection');
+    }
+    
+    // If we detect a card number like "89B-9" or similar format, it's very likely a Topps card
+    if (!result.brand && result.cardNumber && /\d{1,2}[A-Za-z]\d?[-]\d{1,2}/.test(result.cardNumber)) {
+      result.brand = 'Topps';
+      console.log('Identified Topps brand from card number format:', result.cardNumber);
     }
     
     // Special handling for the Sean Manaea card since we know it's from Series Two

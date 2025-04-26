@@ -185,33 +185,25 @@ export default function OCRResults({ loading, error, data, onApply, onCancel }: 
               />
             </div>
 
-            {/* Fourth row - Variant and Serial Number (if present) */}
-            {(data.variant || data.serialNumber) && (
-              <>
-                {data.variant && (
-                  <div className="space-y-2">
-                    <Label htmlFor="variant">Variant</Label>
-                    <Input
-                      id="variant"
-                      value={editedData.variant || ''}
-                      onChange={(e) => handleInputChange('variant', e.target.value)}
-                      placeholder="Card Variant"
-                    />
-                  </div>
-                )}
-                {data.serialNumber && (
-                  <div className="space-y-2">
-                    <Label htmlFor="serialNumber">Serial Number</Label>
-                    <Input
-                      id="serialNumber"
-                      value={editedData.serialNumber || ''}
-                      onChange={(e) => handleInputChange('serialNumber', e.target.value)}
-                      placeholder="Serial Number"
-                    />
-                  </div>
-                )}
-              </>
-            )}
+            {/* Fourth row - Variant and Serial Number */}
+            <div className="space-y-2">
+              <Label htmlFor="variant">Variant</Label>
+              <Input
+                id="variant"
+                value={editedData.variant || ''}
+                onChange={(e) => handleInputChange('variant', e.target.value)}
+                placeholder="Card Variant"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="serialNumber">Serial Number</Label>
+              <Input
+                id="serialNumber"
+                value={editedData.serialNumber || ''}
+                onChange={(e) => handleInputChange('serialNumber', e.target.value)}
+                placeholder="Serial Number (if any)"
+              />
+            </div>
 
             {/* Fifth row - Condition */}
             <div className="space-y-2">
@@ -225,60 +217,60 @@ export default function OCRResults({ loading, error, data, onApply, onCancel }: 
             </div>
           </div>
         ) : (
-          <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-            {data.sport && (
-              <div className="col-span-2">
-                <span className="font-medium">Sport:</span> {data.sport}
-              </div>
-            )}
+          <div className="space-y-4">
+            {/* Summary box at the top */}
+            <div className="bg-green-50 border border-green-100 rounded-lg p-3">
+              <h3 className="font-semibold text-green-800 mb-1 text-sm">Card Analysis Results</h3>
+              <p className="text-sm text-green-700">
+                {data.playerFirstName || data.playerLastName ? 
+                  `${data.playerFirstName || ''} ${data.playerLastName || ''} • ` : ''}
+                {data.year ? `${data.year} ` : ''}
+                {data.brand ? `${data.brand} ` : ''}
+                {data.collection ? `${data.collection} ` : ''}
+                {data.cardNumber ? `#${data.cardNumber}` : ''}
+              </p>
+            </div>
             
-            {(data.playerFirstName || data.playerLastName) && (
-              <div className="col-span-2">
-                <span className="font-medium">Player:</span> {data.playerFirstName} {data.playerLastName}
+            {/* Detailed results grid */}
+            <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+              {data.sport && (
+                <div className="col-span-2 py-1 border-b border-gray-100">
+                  <span className="font-medium text-slate-700">Sport:</span> <span className="text-slate-900">{data.sport}</span>
+                </div>
+              )}
+              
+              <div className="col-span-2 py-1 border-b border-gray-100">
+                <span className="font-medium text-slate-700">Player:</span> <span className="text-slate-900">{data.playerFirstName || ''} {data.playerLastName || ''}</span>
               </div>
-            )}
-            
-            {data.brand && (
-              <div>
-                <span className="font-medium">Brand:</span> {data.brand}
+              
+              <div className="py-1 border-b border-gray-100">
+                <span className="font-medium text-slate-700">Brand:</span> <span className="text-slate-900">{data.brand || 'Not detected'}</span>
               </div>
-            )}
-            
-            {data.collection && (
-              <div>
-                <span className="font-medium">Collection:</span> {data.collection}
+              
+              <div className="py-1 border-b border-gray-100">
+                <span className="font-medium text-slate-700">Collection:</span> <span className="text-slate-900">{data.collection || 'Not detected'}</span>
               </div>
-            )}
-            
-            {data.cardNumber && (
-              <div>
-                <span className="font-medium">Card #:</span> {data.cardNumber}
+              
+              <div className="py-1 border-b border-gray-100">
+                <span className="font-medium text-slate-700">Card #:</span> <span className="text-slate-900">{data.cardNumber || 'Not detected'}</span>
               </div>
-            )}
-            
-            {data.year && data.year > 0 && (
-              <div>
-                <span className="font-medium">Year:</span> {data.year}
+              
+              <div className="py-1 border-b border-gray-100">
+                <span className="font-medium text-slate-700">Year:</span> <span className="text-slate-900">{data.year && data.year > 0 ? data.year : 'Not detected'}</span>
               </div>
-            )}
-            
-            {data.variant && (
-              <div>
-                <span className="font-medium">Variant:</span> {data.variant}
+              
+              <div className="py-1 border-b border-gray-100">
+                <span className="font-medium text-slate-700">Variant:</span> <span className="text-slate-900">{data.variant || 'Not detected'}</span>
               </div>
-            )}
-            
-            {data.serialNumber && (
-              <div>
-                <span className="font-medium">Serial #:</span> {data.serialNumber}
+              
+              <div className="py-1 border-b border-gray-100">
+                <span className="font-medium text-slate-700">Serial #:</span> <span className="text-slate-900">{data.serialNumber || 'None'}</span>
               </div>
-            )}
-            
-            {data.condition && (
-              <div>
-                <span className="font-medium">Condition:</span> {data.condition}
+              
+              <div className="col-span-2 py-1">
+                <span className="font-medium text-slate-700">Condition:</span> <span className="text-slate-900">{data.condition || 'Not detected'}</span>
               </div>
-            )}
+            </div>
           </div>
         )}
       </CardContent>
