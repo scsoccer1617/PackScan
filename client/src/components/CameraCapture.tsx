@@ -154,7 +154,7 @@ export default function CameraCapture({ onImageCapture, side }: CameraCapturePro
                     fileInputRef.current?.click();
                   }
                 }}
-                className="bg-primary-600 hover:bg-primary-700 text-white"
+                className="bg-primary-600 hover:bg-primary-700 text-white font-medium px-4 py-2 rounded-md shadow-sm"
               >
                 Add Image
               </Button>
@@ -209,7 +209,7 @@ export default function CameraCapture({ onImageCapture, side }: CameraCapturePro
                     fileInputRef.current?.click();
                   }
                 }}
-                className="bg-primary-600 hover:bg-primary-700 text-white"
+                className="bg-primary-600 hover:bg-primary-700 text-white font-medium px-3 py-1 rounded-md shadow-sm"
                 size="sm"
               >
                 Add Image
