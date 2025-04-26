@@ -57,11 +57,7 @@ export default function CardItem({ card }: CardItemProps) {
       <div className="p-3">
         <h3 className="font-medium text-sm">{card.playerFirstName} {card.playerLastName}</h3>
         <p className="text-xs text-slate-500">
-          {card.year} {
-            'brand' in card && typeof card.brand === 'object' && card.brand && 'name' in card.brand 
-              ? card.brand.name 
-              : ''
-          } {typeof card.collection === 'string' ? card.collection : ''}
+          {card.year} {getBrandName()} {typeof card.collection === 'string' ? card.collection : ''}
         </p>
         <div className="flex justify-between items-center mt-2">
           <span className="text-xs font-medium text-secondary-600">

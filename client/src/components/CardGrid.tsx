@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import CardItem from "./CardItem";
-import { Card } from "@shared/schema";
+import { Card, CardWithRelations } from "@shared/schema";
 import { useState, useEffect } from "react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -8,14 +8,14 @@ import { ChevronDown, ChevronUp, Filter, SortDesc } from "lucide-react";
 
 // Group cards by collection
 type CardsByCollection = {
-  [key: string]: Card[];
+  [key: string]: CardWithRelations[];
 };
 
 // Sort types
 type SortOption = "newest" | "oldest" | "name-asc" | "name-desc" | "value-high" | "value-low";
 
 export default function CardGrid() {
-  const { data: cards, isLoading, error } = useQuery<Card[]>({
+  const { data: cards, isLoading, error } = useQuery<CardWithRelations[]>({
     queryKey: ['/api/cards'],
   });
 
