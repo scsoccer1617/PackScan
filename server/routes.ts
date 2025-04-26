@@ -1,4 +1,4 @@
-import type { Express, Request } from "express";
+import express, { type Express, type Request } from "express";
 import { createServer, type Server } from "http";
 import { storage, googleSheetsInstance } from "./storage";
 import * as schema from "@shared/schema";
@@ -50,6 +50,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   if (!fs.existsSync(uploadsDir)) {
     fs.mkdirSync(uploadsDir, { recursive: true });
   }
+  
+  // Serve static files from the uploads directory directly
+  app.use('/uploads', express.static(path.join(process.cwd(), 'dist', 'public', 'uploads')));
 
   // Get all sports
   app.get(`${apiPrefix}/sports`, async (req, res) => {
