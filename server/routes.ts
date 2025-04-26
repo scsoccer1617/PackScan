@@ -383,6 +383,73 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ message: 'Failed to fetch collection summary' });
     }
   });
+  
+  // Look up eBay value for a card
+  app.get(`${apiPrefix}/card-value`, async (req, res) => {
+    try {
+      const { playerName, cardNumber, brand, year, condition } = req.query;
+      
+      if (!playerName || !cardNumber || !brand || !year) {
+        return res.status(400).json({ 
+          message: 'Missing required parameters. Please provide playerName, cardNumber, brand, and year.' 
+        });
+      }
+      
+      // Convert year to number
+      const yearNum = parseInt(year as string);
+      if (isNaN(yearNum)) {
+        return res.status(400).json({ message: 'Year must be a valid number' });
+      }
+      
+      // Check if we have eBay API credentials configured
+      if (!process.env.EBAY_APP_ID) {
+        // Return a fallback URL if we don't have API credentials
+        const searchUrl = getEbaySearchUrl(
+          playerName as string,
+          cardNumber as string,
+          brand as string,
+          yearNum,
+          condition as string
+        );
+        
+        return res.json({
+          message: 'eBay API not configured. Using direct search link instead.',
+          status: 'unconfigured',
+          searchUrl,
+          averageValue: null,
+          results: []
+        });
+      }
+      
+      // Search for card values on eBay
+      const valueData = await searchCardValues(
+        playerName as string,
+        cardNumber as string,
+        brand as string,
+        yearNum,
+        condition as string
+      );
+      
+      // Generate a search URL as a backup
+      const searchUrl = getEbaySearchUrl(
+        playerName as string,
+        cardNumber as string,
+        brand as string,
+        yearNum,
+        condition as string
+      );
+      
+      // Return results
+      return res.json({
+        status: 'success',
+        searchUrl,
+        ...valueData
+      });
+    } catch (error) {
+      console.error('Error looking up card value:', error);
+      res.status(500).json({ message: 'Failed to look up card value', error: String(error) });
+    }
+  });
 
   // Get stats summary
   app.get(`${apiPrefix}/stats/summary`, async (req, res) => {
