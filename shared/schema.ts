@@ -100,4 +100,9 @@ export const cardSchema = z.object({
 
 export type CardInsert = z.infer<typeof cardInsertSchema>;
 export type Card = typeof cards.$inferSelect;
+export type CardWithRelations = Card & {
+  sport?: Sport;
+  brand?: Brand;
+  user?: User;
+};
 export type CardFormValues = z.infer<typeof cardSchema>;

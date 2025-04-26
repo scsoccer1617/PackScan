@@ -1,10 +1,23 @@
-import { Card } from "@shared/schema";
+import { Card, CardWithRelations } from "@shared/schema";
 
 interface CardItemProps {
-  card: Card;
+  card: Card | CardWithRelations;
 }
 
 export default function CardItem({ card }: CardItemProps) {
+  // Function to check if the card has relations
+  const hasRelations = (card: Card | CardWithRelations): card is CardWithRelations => {
+    return 'brand' in card || 'sport' in card;
+  };
+
+  // Access brand name safely
+  const getBrandName = () => {
+    if (hasRelations(card) && card.brand && typeof card.brand === 'object') {
+      return card.brand.name;
+    }
+    return '';
+  };
+
   const conditionClass = 
     card.condition === "PSA 10" ? "bg-green-500" :
     card.condition === "PSA 9" ? "bg-secondary-500" :
@@ -44,7 +57,11 @@ export default function CardItem({ card }: CardItemProps) {
       <div className="p-3">
         <h3 className="font-medium text-sm">{card.playerFirstName} {card.playerLastName}</h3>
         <p className="text-xs text-slate-500">
-          {card.year} {card.brand} {typeof card.collection === 'string' ? card.collection : ''}
+          {card.year} {
+            'brand' in card && typeof card.brand === 'object' && card.brand && 'name' in card.brand 
+              ? card.brand.name 
+              : ''
+          } {typeof card.collection === 'string' ? card.collection : ''}
         </p>
         <div className="flex justify-between items-center mt-2">
           <span className="text-xs font-medium text-secondary-600">
