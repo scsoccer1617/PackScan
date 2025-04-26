@@ -192,7 +192,7 @@ export default function SimpleCardForm() {
             Add to Collection
           </CardTitle>
           <CardDescription>
-            Capture both front and back of your card. The front will be shown in your collection while the back is needed for OCR detection of card details.
+            Add a new card to your collection.
           </CardDescription>
         </CardHeader>
         
@@ -207,7 +207,7 @@ export default function SimpleCardForm() {
                   existingImage={frontImage}
                   onImageCaptured={setFrontImage}
                 />
-                <p className="text-xs text-slate-500 mt-1">Shows in collection</p>
+
               </div>
               
               <div>
@@ -216,7 +216,7 @@ export default function SimpleCardForm() {
                   existingImage={backImage}
                   onImageCaptured={setBackImage}
                 />
-                <p className="text-xs text-slate-500 mt-1">Contains card number</p>
+
               </div>
             </div>
             
@@ -230,7 +230,7 @@ export default function SimpleCardForm() {
                 disabled={ocrLoading}
               >
                 <ScanSearch className="h-4 w-4 mr-2" />
-                {ocrLoading ? "Analyzing..." : "Analyze Card with OCR (uses back of card)"}
+                {ocrLoading ? "Analyzing..." : "Analyze Card with OCR"}
               </Button>
             )}
             
