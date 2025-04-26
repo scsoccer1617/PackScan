@@ -29,7 +29,7 @@ export default function ImagePreview({
               <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
               </svg>
-              <span className="text-xs text-slate-500 mt-1">Add photo</span>
+              <div className="mt-1 text-xs font-medium text-white bg-primary-600 hover:bg-primary-700 px-3 py-1 rounded-md shadow-sm">Add photo</div>
             </>
           )}
           <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-50 text-white text-xs py-1 px-2">
@@ -49,7 +49,7 @@ export default function ImagePreview({
               <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
               </svg>
-              <span className="text-xs text-slate-500 mt-1">Add photo</span>
+              <div className="mt-1 text-xs font-medium text-white bg-primary-600 hover:bg-primary-700 px-3 py-1 rounded-md shadow-sm">Add photo</div>
             </>
           )}
           <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-50 text-white text-xs py-1 px-2 text-center">
