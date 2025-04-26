@@ -43,10 +43,12 @@ export default function CardItem({ card }: CardItemProps) {
       </div>
       <div className="p-3">
         <h3 className="font-medium text-sm">{card.playerFirstName} {card.playerLastName}</h3>
-        <p className="text-xs text-slate-500">{card.year} {card.brand} {card.collection}</p>
+        <p className="text-xs text-slate-500">
+          {card.year} {card.brand} {typeof card.collection === 'string' ? card.collection : ''}
+        </p>
         <div className="flex justify-between items-center mt-2">
           <span className="text-xs font-medium text-secondary-600">
-            ${card.estimatedValue ? card.estimatedValue : 'N/A'}
+            ${card.estimatedValue ? card.estimatedValue.toFixed(2) : 'N/A'}
           </span>
           <span className="text-xs text-slate-400">#{card.cardNumber}</span>
         </div>

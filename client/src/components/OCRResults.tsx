@@ -1,7 +1,10 @@
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Loader2, AlertCircle, Check, AlertTriangle } from 'lucide-react';
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Loader2, AlertCircle, Check, Edit2, Pencil } from 'lucide-react';
 import { CardFormValues } from "@shared/schema";
 
 interface OCRResultsProps {
@@ -13,6 +16,24 @@ interface OCRResultsProps {
 }
 
 export default function OCRResults({ loading, error, data, onApply, onCancel }: OCRResultsProps) {
+  const [editMode, setEditMode] = useState(false);
+  const [editedData, setEditedData] = useState<Partial<CardFormValues>>({});
+
+  // When OCR data changes, update our local state
+  useEffect(() => {
+    if (data) {
+      setEditedData(data);
+    }
+  }, [data]);
+
+  // Handle input changes
+  const handleInputChange = (field: keyof CardFormValues, value: string | number) => {
+    setEditedData(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
   if (loading) {
     return (
       <Card className="w-full mt-4 border border-slate-200">
@@ -79,76 +100,193 @@ export default function OCRResults({ loading, error, data, onApply, onCancel }: 
   return (
     <Card className="w-full mt-4 border border-slate-200">
       <CardHeader className="pb-2">
-        <CardTitle className="text-lg flex items-center">
-          <Check className="h-5 w-5 mr-2 text-green-600" />
-          Card Information Found
-        </CardTitle>
+        <div className="flex justify-between items-center">
+          <CardTitle className="text-lg flex items-center">
+            <Check className="h-5 w-5 mr-2 text-green-600" />
+            Card Information Found
+          </CardTitle>
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            onClick={() => setEditMode(!editMode)} 
+            className="h-8 px-2"
+          >
+            <Pencil className="h-4 w-4 mr-1" />
+            {editMode ? "View" : "Edit"}
+          </Button>
+        </div>
         <CardDescription>
-          We identified the following details from your card image
+          {editMode 
+            ? "Edit any incorrect details before applying" 
+            : "We identified the following details from your card image"}
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-          {data.sport && (
-            <div className="col-span-2">
-              <span className="font-medium">Sport:</span> {data.sport}
+        {editMode ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* First row - Player Name */}
+            <div className="space-y-2">
+              <Label htmlFor="playerFirstName">First Name</Label>
+              <Input
+                id="playerFirstName"
+                value={editedData.playerFirstName || ''}
+                onChange={(e) => handleInputChange('playerFirstName', e.target.value)}
+                placeholder="Player First Name"
+              />
             </div>
-          )}
-          
-          {(data.playerFirstName || data.playerLastName) && (
-            <div className="col-span-2">
-              <span className="font-medium">Player:</span> {data.playerFirstName} {data.playerLastName}
+            <div className="space-y-2">
+              <Label htmlFor="playerLastName">Last Name</Label>
+              <Input
+                id="playerLastName"
+                value={editedData.playerLastName || ''}
+                onChange={(e) => handleInputChange('playerLastName', e.target.value)}
+                placeholder="Player Last Name"
+              />
             </div>
-          )}
-          
-          {data.brand && (
-            <div>
-              <span className="font-medium">Brand:</span> {data.brand}
+
+            {/* Second row - Brand and Collection */}
+            <div className="space-y-2">
+              <Label htmlFor="brand">Brand</Label>
+              <Input
+                id="brand"
+                value={editedData.brand || ''}
+                onChange={(e) => handleInputChange('brand', e.target.value)}
+                placeholder="Card Brand"
+              />
             </div>
-          )}
-          
-          {data.collection && (
-            <div>
-              <span className="font-medium">Collection:</span> {data.collection}
+            <div className="space-y-2">
+              <Label htmlFor="collection">Collection</Label>
+              <Input
+                id="collection"
+                value={editedData.collection || ''}
+                onChange={(e) => handleInputChange('collection', e.target.value)}
+                placeholder="Card Collection"
+              />
             </div>
-          )}
-          
-          {data.cardNumber && (
-            <div>
-              <span className="font-medium">Card #:</span> {data.cardNumber}
+
+            {/* Third row - Card Number and Year */}
+            <div className="space-y-2">
+              <Label htmlFor="cardNumber">Card Number</Label>
+              <Input
+                id="cardNumber"
+                value={editedData.cardNumber || ''}
+                onChange={(e) => handleInputChange('cardNumber', e.target.value)}
+                placeholder="Card Number"
+              />
             </div>
-          )}
-          
-          {data.year && data.year > 0 && (
-            <div>
-              <span className="font-medium">Year:</span> {data.year}
+            <div className="space-y-2">
+              <Label htmlFor="year">Year</Label>
+              <Input
+                id="year"
+                type="number"
+                value={editedData.year || ''}
+                onChange={(e) => handleInputChange('year', parseInt(e.target.value) || '')}
+                placeholder="Card Year"
+              />
             </div>
-          )}
-          
-          {data.variant && (
-            <div>
-              <span className="font-medium">Variant:</span> {data.variant}
+
+            {/* Fourth row - Variant and Serial Number (if present) */}
+            {(data.variant || data.serialNumber) && (
+              <>
+                {data.variant && (
+                  <div className="space-y-2">
+                    <Label htmlFor="variant">Variant</Label>
+                    <Input
+                      id="variant"
+                      value={editedData.variant || ''}
+                      onChange={(e) => handleInputChange('variant', e.target.value)}
+                      placeholder="Card Variant"
+                    />
+                  </div>
+                )}
+                {data.serialNumber && (
+                  <div className="space-y-2">
+                    <Label htmlFor="serialNumber">Serial Number</Label>
+                    <Input
+                      id="serialNumber"
+                      value={editedData.serialNumber || ''}
+                      onChange={(e) => handleInputChange('serialNumber', e.target.value)}
+                      placeholder="Serial Number"
+                    />
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* Fifth row - Condition */}
+            <div className="space-y-2">
+              <Label htmlFor="condition">Condition</Label>
+              <Input
+                id="condition"
+                value={editedData.condition || ''}
+                onChange={(e) => handleInputChange('condition', e.target.value)}
+                placeholder="Card Condition"
+              />
             </div>
-          )}
-          
-          {data.serialNumber && (
-            <div>
-              <span className="font-medium">Serial #:</span> {data.serialNumber}
-            </div>
-          )}
-          
-          {data.condition && (
-            <div>
-              <span className="font-medium">Condition:</span> {data.condition}
-            </div>
-          )}
-        </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+            {data.sport && (
+              <div className="col-span-2">
+                <span className="font-medium">Sport:</span> {data.sport}
+              </div>
+            )}
+            
+            {(data.playerFirstName || data.playerLastName) && (
+              <div className="col-span-2">
+                <span className="font-medium">Player:</span> {data.playerFirstName} {data.playerLastName}
+              </div>
+            )}
+            
+            {data.brand && (
+              <div>
+                <span className="font-medium">Brand:</span> {data.brand}
+              </div>
+            )}
+            
+            {data.collection && (
+              <div>
+                <span className="font-medium">Collection:</span> {data.collection}
+              </div>
+            )}
+            
+            {data.cardNumber && (
+              <div>
+                <span className="font-medium">Card #:</span> {data.cardNumber}
+              </div>
+            )}
+            
+            {data.year && data.year > 0 && (
+              <div>
+                <span className="font-medium">Year:</span> {data.year}
+              </div>
+            )}
+            
+            {data.variant && (
+              <div>
+                <span className="font-medium">Variant:</span> {data.variant}
+              </div>
+            )}
+            
+            {data.serialNumber && (
+              <div>
+                <span className="font-medium">Serial #:</span> {data.serialNumber}
+              </div>
+            )}
+            
+            {data.condition && (
+              <div>
+                <span className="font-medium">Condition:</span> {data.condition}
+              </div>
+            )}
+          </div>
+        )}
       </CardContent>
       <CardFooter className="flex justify-between">
         <Button variant="outline" onClick={onCancel}>
           Cancel
         </Button>
-        <Button onClick={() => onApply(data)}>
+        <Button onClick={() => onApply(editMode ? editedData : data)}>
           Apply These Details
         </Button>
       </CardFooter>
