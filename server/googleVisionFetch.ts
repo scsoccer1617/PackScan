@@ -172,128 +172,109 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       }
     }
     
-    // SPECIAL HANDLING FOR PROBLEMATIC OCR OF FREDDIE FREEMAN STARS OF MLB CARD
-    // OCR often incorrectly detects "Los Angele" or "Star Game" instead of Freddie Freeman
-    if ((fullText.includes('LOS ANGELE') || fullText.includes('LOS ANGELES')) && 
-        fullText.includes('STARS') && fullText.includes('MLB')) {
-      console.log('CRITICAL FIX: Detected Los Angeles + STARS MLB pattern - this is a Freddie Freeman card');
+    // Check for Stars of MLB collection with the generic "Star" pattern
+    if (fullText.includes('STAR') && fullText.includes('MLB')) {
+      console.log('DETECTED: Stars of MLB collection');
       
-      result.playerFirstName = 'Freddie';
-      result.playerLastName = 'Freeman';
-      result.sport = 'Baseball';
-      result.brand = 'Topps';
       result.collection = 'Stars of MLB';
-      result.year = 2023;
-      result.cardNumber = 'SMLB-27';
-      
-      console.log('Applied special handling for Freddie Freeman STARS MLB card based on Los Angeles pattern');
-      return result; // Return early since we've identified the card completely
-    }
-    // Check for "Star Game" or just "Star" misreading
-    else if (((fullText.includes('STAR GAME') || fullText.includes('STAR_GAME') || 
-              fullText.includes('STAR')) && fullText.includes('MLB')) || 
-              (fullText.includes('STAR') && fullText.includes('DODGERS'))) {
-      console.log('CRITICAL FIX: Detected Star Game + MLB pattern - this is a Freddie Freeman card');
-      
-      result.playerFirstName = 'Freddie';
-      result.playerLastName = 'Freeman';
       result.sport = 'Baseball';
-      result.brand = 'Topps';
-      result.collection = 'Stars of MLB';
-      result.year = 2023;
-      result.cardNumber = 'SMLB-27';
       
-      console.log('Applied special handling for Freddie Freeman STARS MLB card based on Star Game pattern');
-      return result; // Return early since we've identified the card completely
+      // Common brand for Stars of MLB
+      if (fullText.includes('TOPPS')) {
+        result.brand = 'Topps';
+      }
+      
+      // Check if this is a Chrome version
+      if (fullText.includes('CHROME')) {
+        result.collection = 'Chrome Stars of MLB';
+      }
+      
+      // Look for card number patterns specific to Stars of MLB series
+      const csmlbMatch = fullText.match(/CSMLB[-]?(\d+)/i);
+      const smlbMatch = fullText.match(/SMLB[-]?(\d+)/i);
+      
+      if (csmlbMatch && csmlbMatch[1]) {
+        // Chrome Stars of MLB card number format
+        result.cardNumber = `CSMLB-${csmlbMatch[1]}`;
+        console.log(`Detected Chrome Stars of MLB card number: ${result.cardNumber}`);
+      } else if (smlbMatch && smlbMatch[1]) {
+        // Regular Stars of MLB card number format
+        result.cardNumber = `SMLB-${smlbMatch[1]}`;
+        console.log(`Detected Stars of MLB card number: ${result.cardNumber}`);
+      }
+      
+      // Extract year from copyright text, common for many cards
+      const yearMatch = fullText.match(/[©\(\s](\d{4})[\s\)]/);
+      if (yearMatch) {
+        result.year = parseInt(yearMatch[1], 10);
+        console.log(`Detected year from copyright: ${result.year}`);
+      }
     }
     
-    // Known player patterns
-    if (fullText.includes('FREDDIE FREEMAN')) {
-      result.playerFirstName = 'Freddie';
-      result.playerLastName = 'Freeman';
-      result.sport = 'Baseball';
-      result.brand = 'Topps';
-      result.collection = 'Stars of MLB';
+    // Generic player name detection for all cards
+    // Look for player name patterns: FIRST LAST or FIRST MIDDLE LAST formats
+    const playerNameMatch = fullText.match(/([A-Z]{2,})\s+([A-Z]{2,}(?:\s+[A-Z]{2,})?)/);
+    
+    if (playerNameMatch) {
+      const nameParts = playerNameMatch[0].split(/\s+/);
       
-      // Force the correct card number for Freddie Freeman's Stars of MLB card
-      result.cardNumber = 'SMLB-27';
-      console.log('Setting known Freddie Freeman Stars of MLB card number: SMLB-27');
-      
-      // Extract year from copyright text
-      const yearMatch = fullText.match(/©\s*(\d{4})/);
-      if (yearMatch) {
-        result.year = parseInt(yearMatch[1]);
-      } else {
-        result.year = 2023; // Default year for Freddie Freeman SMLB cards
+      if (nameParts.length >= 2) {
+        // Convert to proper case (first letter uppercase, rest lowercase)
+        result.playerFirstName = nameParts[0].charAt(0) + nameParts[0].slice(1).toLowerCase();
+        
+        // If there are more than 2 parts, join the rest as last name
+        if (nameParts.length > 2) {
+          const lastNameParts = nameParts.slice(1);
+          result.playerLastName = lastNameParts.map(part => 
+            part.charAt(0) + part.slice(1).toLowerCase()
+          ).join(' ');
+        } else {
+          result.playerLastName = nameParts[1].charAt(0) + nameParts[1].slice(1).toLowerCase();
+        }
+        
+        console.log(`Detected player name: ${result.playerFirstName} ${result.playerLastName}`);
       }
+    }
+    
+    // Detect player names from specific parts of the card for better accuracy
+    // This works well for cards where the player name is clearly displayed
+    const playerNameLines = fullText.split('\n')
+      .filter(line => /^[A-Z\s]+$/.test(line.trim()))  // Only all-caps lines
+      .filter(line => line.length > 5 && line.length < 30)  // Reasonable length for names
+      .filter(line => !line.includes('MLB') && !line.includes('TOPPS'));  // Exclude non-name text
       
-      console.log('Detected player: Freddie Freeman Stars of MLB card');
-    } else if (fullText.includes('ALEX BREGMAN')) {
-      result.playerFirstName = 'Alex';
-      result.playerLastName = 'Bregman';
-      console.log('Detected player: Alex Bregman');
-    } else if (fullText.includes('SAL FRELICK')) {
-      // Special handling for Sal Frelick card
-      result.playerFirstName = 'Sal';
-      result.playerLastName = 'Frelick';
-      result.sport = 'Baseball';
-      result.brand = 'Topps';
+    if (playerNameLines.length > 0) {
+      // Sort by line length ascending (player names are usually shorter)
+      playerNameLines.sort((a, b) => a.length - b.length);
       
-      // For Sal Frelick's card, we know the exact card number from the baseball notation on the back
-      // It's "89B-9" in a baseball icon in the top left corner
-      // The "35" is just part of the 35th Anniversary logo
-      result.cardNumber = '89B-9';
+      // Take the shortest valid name line
+      const potentialName = playerNameLines[0].trim();
+      const nameParts = potentialName.split(/\s+/);
       
-      result.collection = '35th Anniversary';
-      result.year = 2024;
-      result.variant = 'Rookie';
-      result.condition = 'PSA 8';
-      console.log('Detected player: Sal Frelick with special card handling');
-    } else if (fullText.includes('SEAN MANAEA')) {
-      // Special handling for Sean Manaea
-      result.playerFirstName = 'Sean';
-      result.playerLastName = 'Manaea';
-      result.sport = 'Baseball';
-      
-      // For Sean Manaea's card specifically, which is from 2025
-      result.year = 2025;
-      
-      console.log('Detected player: Sean Manaea (2025 card)');
-    } else if (fullText.includes('SEAN') && fullText.includes('MANAEA')) {
-      // Sometimes OCR identifies these separately
-      result.playerFirstName = 'Sean';
-      result.playerLastName = 'Manaea';
-      result.sport = 'Baseball';
-      
-      // For Sean Manaea's card specifically, which is from 2025
-      result.year = 2025;
-      
-      console.log('Detected player components: Sean + Manaea (2025 card)');
-    } else if (fullText.includes('FREDDIE') && fullText.includes('FREEMAN')) {
-      // Special handling for Freddie Freeman when detected separately
-      result.playerFirstName = 'Freddie';
-      result.playerLastName = 'Freeman';
-      result.sport = 'Baseball';
-      result.brand = 'Topps';
-      result.collection = 'Stars of MLB';
-      
-      // Look for SMLB card number
-      const smlbMatch = fullText.match(/SMLB[-]?(\d+)/i);
-      if (smlbMatch) {
-        result.cardNumber = `SMLB-${smlbMatch[1]}`;
-        console.log(`Detected SMLB card number: ${result.cardNumber}`);
+      if (nameParts.length >= 2) {
+        // Convert to proper case (first letter uppercase, rest lowercase)
+        const firstName = nameParts[0].charAt(0) + nameParts[0].slice(1).toLowerCase();
+        
+        // If more than 2 parts, join rest as last name
+        let lastName;
+        if (nameParts.length > 2) {
+          lastName = nameParts.slice(1).map(part => 
+            part.charAt(0) + part.slice(1).toLowerCase()
+          ).join(' ');
+        } else {
+          lastName = nameParts[1].charAt(0) + nameParts[1].slice(1).toLowerCase();
+        }
+        
+        // Only override existing player name if this one seems valid
+        if (firstName.length > 1 && lastName.length > 1) {
+          result.playerFirstName = firstName;
+          result.playerLastName = lastName;
+          console.log(`Detected refined player name: ${firstName} ${lastName}`);
+        }
       }
-      
-      // Extract year from copyright text
-      const yearMatch = fullText.match(/©\s*(\d{4})/);
-      if (yearMatch) {
-        result.year = parseInt(yearMatch[1]);
-      } else {
-        result.year = 2023; // Default year for Freddie Freeman SMLB cards
-      }
-      
-      console.log('Detected player components: Freddie + Freeman Stars of MLB card');
-    } else if (fullText.includes('GERRIT') && fullText.includes('COLE')) {
+    }
+    
+    if (fullText.includes('GERRIT') && fullText.includes('COLE')) {
       // Special handling for Gerrit Cole cards
       result.playerFirstName = 'Gerrit';
       result.playerLastName = 'Cole';
