@@ -92,41 +92,18 @@ export default function SimpleCardForm() {
   // Create card mutation
   const createCardMutation = useMutation({
     mutationFn: async (data: CardFormValues) => {
-      // Convert the form data to FormData to include images
-      const formData = new FormData();
+      // Instead of FormData, let's use a direct object with image data
+      const cardData = {
+        ...data,
+        frontImage: frontImage || undefined,
+        backImage: backImage || undefined
+      };
       
-      // Properly serialize card data as JSON string
-      const cardDataJson = JSON.stringify(data);
-      formData.append('data', cardDataJson);
-      
-      // Add images if they exist
-      if (frontImage) {
-        try {
-          const frontBlob = await fetch(frontImage).then(r => r.blob());
-          formData.append('frontImage', frontBlob, 'front.jpg');
-        } catch (error) {
-          console.error('Error converting front image:', error);
-          throw new Error('Failed to process front image. Please try uploading a different image.');
-        }
-      }
-      
-      if (backImage) {
-        try {
-          const backBlob = await fetch(backImage).then(r => r.blob());
-          formData.append('backImage', backBlob, 'back.jpg');
-        } catch (error) {
-          console.error('Error converting back image:', error);
-          throw new Error('Failed to process back image. Please try uploading a different image.');
-        }
-      }
-      
+      // This approach works better with our routes
       return apiRequest<any>({
         url: '/api/cards',
         method: 'POST',
-        body: formData,
-        headers: {
-          // Don't set Content-Type, browser will set it with proper boundary for FormData
-        },
+        body: cardData,
       });
     },
     onSuccess: (data) => {
