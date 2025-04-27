@@ -241,6 +241,7 @@ export default function SimpleCardForm() {
                 loading={ocrLoading}
                 error={ocrError}
                 data={ocrData}
+                form={form}
                 onApply={applyOCRResults}
                 onCancel={() => setShowOCRResults(false)}
               />

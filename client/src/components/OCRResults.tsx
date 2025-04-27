@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Loader2, AlertCircle, Check, Edit2, Pencil } from 'lucide-react';
 import { CardFormValues } from "@shared/schema";
+import { UseFormReturn } from "react-hook-form";
 
 interface OCRResultsProps {
   loading: boolean;
@@ -13,9 +14,10 @@ interface OCRResultsProps {
   data: Partial<CardFormValues> | null;
   onApply: (data: Partial<CardFormValues>) => void;
   onCancel: () => void;
+  form?: UseFormReturn<CardFormValues>;
 }
 
-export default function OCRResults({ loading, error, data, onApply, onCancel }: OCRResultsProps) {
+export default function OCRResults({ loading, error, data, onApply, onCancel, form }: OCRResultsProps) {
   const [editMode, setEditMode] = useState(false);
   const [editedData, setEditedData] = useState<Partial<CardFormValues>>({});
 
@@ -97,6 +99,24 @@ export default function OCRResults({ loading, error, data, onApply, onCancel }: 
     return null;
   }
   
+  // Function to apply OCR data and hide standard form
+  const applyAndUseDirectly = () => {
+    if (form) {
+      // Apply all fields from data to the form
+      Object.entries(data).forEach(([key, value]) => {
+        if (value !== undefined && value !== null) {
+          form.setValue(key as any, value);
+        }
+      });
+      
+      // Hide OCR dialog and proceed with the form data
+      onCancel();
+    } else {
+      // If no form is provided, just call the regular onApply
+      onApply(editMode ? editedData : data);
+    }
+  };
+
   return (
     <Card className="w-full mt-4 border border-slate-200">
       <CardHeader className="pb-2">
@@ -278,8 +298,8 @@ export default function OCRResults({ loading, error, data, onApply, onCancel }: 
         <Button variant="outline" onClick={onCancel}>
           Cancel
         </Button>
-        <Button onClick={() => onApply(editMode ? editedData : data)}>
-          Apply These Details
+        <Button onClick={applyAndUseDirectly} className="bg-blue-600 hover:bg-blue-500">
+          Use These Details
         </Button>
       </CardFooter>
     </Card>
