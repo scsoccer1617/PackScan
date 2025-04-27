@@ -2,6 +2,46 @@ import { CardFormValues } from '../shared/schema';
 import fetch from 'node-fetch';
 
 /**
+ * Improve detection of RC (Rookie Card) logo in images
+ * This function is specifically designed to find the small RC logo that appears 
+ * in the corner of rookie cards, which is easy to miss with standard OCR.
+ */
+function isRCLogoPresent(textAnnotations: any[]): boolean {
+  // RC logos are typically in corners as small text blocks
+  const potentialRcLogos = textAnnotations.filter(annotation => {
+    const text = annotation.description.trim();
+    // Exact match for "RC" text
+    if (text === 'RC') {
+      // Get bounding poly to check position
+      const boundingPoly = annotation.boundingPoly;
+      if (boundingPoly && boundingPoly.vertices) {
+        // Check if it's small and in a likely corner position by measuring dimensions
+        const width = Math.max(
+          Math.abs(boundingPoly.vertices[1].x - boundingPoly.vertices[0].x),
+          Math.abs(boundingPoly.vertices[2].x - boundingPoly.vertices[3].x)
+        );
+        const height = Math.max(
+          Math.abs(boundingPoly.vertices[3].y - boundingPoly.vertices[0].y),
+          Math.abs(boundingPoly.vertices[2].y - boundingPoly.vertices[1].y)
+        );
+        
+        // RC logos are typically small relative to the image
+        // and positioned in corners with space around them
+        const isSmall = width < 100 && height < 100;
+        
+        if (isSmall) {
+          console.log('Detected RC logo in corner position');
+          return true;
+        }
+      }
+    }
+    return false;
+  });
+  
+  return potentialRcLogos.length > 0;
+}
+
+/**
  * Extract text from image using Google Cloud Vision API via direct fetch
  * @param base64Image Base64 encoded image
  * @returns Extracted text
