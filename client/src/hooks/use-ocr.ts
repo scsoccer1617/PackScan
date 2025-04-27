@@ -79,22 +79,8 @@ export function useOCR(): OCRResult {
         if (cardInfo.condition) {
           form.setValue('condition', cardInfo.condition);
           
-          // Set an estimated value based on condition
-          const condition = cardInfo.condition;
-          // Get the numerical part of the PSA condition
-          const psaMatch = condition.match(/PSA\s*(\d+)/i);
-          if (psaMatch && psaMatch[1]) {
-            const psaValue = parseInt(psaMatch[1]);
-            // Estimate value based on PSA grade
-            let estimatedValue = 200; // Default
-            if (psaValue === 10) estimatedValue = 300;
-            else if (psaValue === 9) estimatedValue = 200;
-            else if (psaValue === 8) estimatedValue = 135;
-            else if (psaValue === 7) estimatedValue = 90;
-            else if (psaValue <= 6) estimatedValue = 50;
-            
-            form.setValue('estimatedValue', estimatedValue);
-          }
+          // Leave the estimatedValue empty as requested by user
+          // No automatic value setting based on condition
         }
         
         toast({
