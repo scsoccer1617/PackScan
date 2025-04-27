@@ -65,14 +65,7 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     // CARD FEATURES DETECTION - Rookie cards, autographs, etc.
     detectCardFeatures(cleanText, cardDetails);
     
-    // Final verification/overrides for specific known cards
-    if (cardDetails.playerFirstName === 'Manny' && cardDetails.playerLastName === 'Machado' && 
-        cardDetails.collection === 'Stars of MLB') {
-      // Override with correct card number for Manny Machado
-      const isChrome = cardDetails.variant === 'Chrome' || cleanText.includes("CHROME");
-      cardDetails.cardNumber = isChrome ? 'CSMLB-4' : 'SMLB-4';
-      console.log(`Final card number override for Manny Machado: ${cardDetails.cardNumber}`);
-    }
+    // No player-specific overrides - fully dynamic
     
     console.log('Extracted card details:', cardDetails);
     return cardDetails;
@@ -216,31 +209,7 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>): 
       }
     }
     
-    // Fourth try: If we have a card number but no player name, try other options
-    if (cardDetails.cardNumber) {
-      // For known card numbers, look for player matches
-      if (cardDetails.cardNumber.includes("SMLB-27") || cardDetails.cardNumber.includes("SMLB27")) {
-        cardDetails.playerFirstName = "Freddie";
-        cardDetails.playerLastName = "Freeman";
-        console.log(`Detected player from card number ${cardDetails.cardNumber}: Freddie Freeman`);
-        return;
-      } else if (cardDetails.cardNumber.includes("CSMLB-2") || cardDetails.cardNumber.includes("CSMLB2")) {
-        cardDetails.playerFirstName = "Mike";
-        cardDetails.playerLastName = "Trout";
-        console.log(`Detected player from card number ${cardDetails.cardNumber}: Mike Trout`);
-        return;
-      } else if (cardDetails.cardNumber.includes("SMLB-49") || cardDetails.cardNumber.includes("SMLB49")) {
-        cardDetails.playerFirstName = "Carlos";
-        cardDetails.playerLastName = "Correa";
-        console.log(`Detected player from card number ${cardDetails.cardNumber}: Carlos Correa`);
-        return;
-      } else if (cardDetails.cardNumber.includes("CSMLB-12") || cardDetails.cardNumber.includes("CSMLB12")) {
-        cardDetails.playerFirstName = "Manny";
-        cardDetails.playerLastName = "Machado";
-        console.log(`Detected player from card number ${cardDetails.cardNumber}: Manny Machado`);
-        return;
-      }
-    }
+    // No player-specific hardcoded detection - fully dynamic
     
     // If all Stars of MLB specific approaches fail, use general name patterns from whole text
     const allWords = text.split(/\s+/);
@@ -371,37 +340,20 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>): 
   if (text.includes("STARS") && text.includes("MLB")) {
     console.log("Applying special Stars of MLB card number rules");
 
-    // For Machado's card - we need a less restrictive match since the OCR might be inconsistent
-    if (text.includes("MANNY") && text.includes("MACHADO")) {
-      console.log("Detected Manny Machado Stars of MLB card");
-      
-      // Override with the correct card number for Manny Machado
-      const isChrome = text.includes("CHROME") || text.includes("TOPPS CHROME");
-      cardDetails.cardNumber = isChrome ? "CSMLB-4" : "SMLB-4";
-      console.log(`Set specific card number for Manny Machado card: ${cardDetails.cardNumber}`);
-      
-      // Also set Chrome variant if needed
-      if (isChrome) {
-        cardDetails.variant = "Chrome";
-      }
-      
-      cardDetails.collection = "Stars of MLB";
-      cardDetails.brand = "Topps";
-      return;
-    }
+    // No player-specific hardcoded detection - fully dynamic
 
-    // Rule 3: For Stars of MLB, look specifically for SMLB or CSMLB card numbers
-    // These need special handling per user requirements
+    // Look for all possible patterns of Stars of MLB card numbers
+    // Fully dynamic detection for any card number format including double-digit numbers
     const smlbPatterns = [
       // Chrome Stars MLB formats (prioritize these first for exactness)
-      { regex: /\b(CSMLB[-]?[0-9]{1,2})\b/i, format: "Chrome Stars MLB exact", example: "CSMLB-2" },
-      { regex: /\b(CSMLB)\s*[-]?\s*([0-9]{1,2})\b/i, format: "Chrome Stars MLB with space", example: "CSMLB 2" },
-      { regex: /\b(CSMLB[0-9]{1,2})\b/i, format: "Chrome Stars MLB no dash", example: "CSMLB2" },
+      { regex: /\b(CSMLB[-]?[0-9]{1,3})\b/i, format: "Chrome Stars MLB exact", example: "CSMLB-44" },
+      { regex: /\b(CSMLB)\s*[-]?\s*([0-9]{1,3})\b/i, format: "Chrome Stars MLB with space", example: "CSMLB 44" },
+      { regex: /\b(CSMLB[0-9]{1,3})\b/i, format: "Chrome Stars MLB no dash", example: "CSMLB44" },
       
       // Regular Stars MLB formats
-      { regex: /\b(SMLB[-]?[0-9]{1,2})\b/i, format: "Stars MLB exact", example: "SMLB-27" },
-      { regex: /\b(SMLB)\s*[-]?\s*([0-9]{1,2})\b/i, format: "Stars MLB with space", example: "SMLB 27" },
-      { regex: /\b(SMLB[0-9]{1,2})\b/i, format: "Stars MLB no dash", example: "SMLB27" }
+      { regex: /\b(SMLB[-]?[0-9]{1,3})\b/i, format: "Stars MLB exact", example: "SMLB-27" },
+      { regex: /\b(SMLB)\s*[-]?\s*([0-9]{1,3})\b/i, format: "Stars MLB with space", example: "SMLB 27" },
+      { regex: /\b(SMLB[0-9]{1,3})\b/i, format: "Stars MLB no dash", example: "SMLB27" }
     ];
     
     // First try precise MLB card number patterns
@@ -455,10 +407,12 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>): 
     
     // If we get here, we didn't find a specific Stars of MLB card number pattern
     // Look for plain numbers that might be part of a SMLB card number
-    const numberMatch = text.match(/\b([0-9]{1,2})\b/);
+    // Updated to support two-digit or higher card numbers (up to 999)
+    const numberMatch = text.match(/\b([0-9]{1,3})\b/);
     if (numberMatch) {
       // Check if we've already identified whether this is a Chrome card
-      const isChrome = text.includes("CHROME") || text.includes("CSMLB");
+      const isChrome = text.includes("CHROME") || text.includes("CSMLB") || 
+                       text.includes("TOPPS CHROME");
       const prefix = isChrome ? "CSMLB" : "SMLB";
       
       cardDetails.cardNumber = `${prefix}-${numberMatch[1]}`;
