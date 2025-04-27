@@ -100,14 +100,14 @@ export default function Stats() {
             ) : (
               directTopCards.map((card) => (
                 <div key={card.id} className="flex items-center space-x-3 p-2 hover:bg-slate-50 rounded">
-                  <div className="w-12 h-16 bg-slate-100 rounded overflow-hidden">
-                    {card.frontImage ? (
-                      <>
-                        <div className="w-full h-full flex items-center justify-center overflow-hidden">
+                  <div className="w-12 h-16 rounded overflow-hidden bg-slate-200">
+                    <div className="w-full h-full relative">
+                      {card.frontImage ? (
+                        <>
                           <img 
                             src={card.frontImage.startsWith('http') ? card.frontImage : `${window.location.origin}${card.frontImage}`} 
                             alt="Card thumbnail" 
-                            className="object-cover w-full h-full" 
+                            className="card-image" 
                             onError={(e) => {
                               (e.target as HTMLImageElement).style.display = 'none';
                               const parent = (e.target as HTMLImageElement).parentElement;
@@ -117,20 +117,20 @@ export default function Stats() {
                               }
                             }}
                           />
-                        </div>
-                        <div className="w-full h-full flex items-center justify-center hidden image-fallback">
+                          <div className="absolute inset-0 flex items-center justify-center hidden image-fallback">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                            </svg>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="absolute inset-0 flex items-center justify-center">
                           <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                           </svg>
                         </div>
-                      </>
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center">
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                        </svg>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
                   <div className="flex-1 min-w-0">
                     <h4 className="font-medium text-sm truncate">{card.playerFirstName} {card.playerLastName}</h4>
