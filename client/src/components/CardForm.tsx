@@ -72,6 +72,10 @@ export default function CardForm() {
       serialNumber: "",
       condition: "PSA 9",
       estimatedValue: 200,
+      isRookieCard: false,
+      isAutographed: false,
+      isNumbered: false,
+      notes: "",
     },
   });
 
@@ -212,6 +216,24 @@ export default function CardForm() {
     if (ocrData.serialNumber) form.setValue('serialNumber', ocrData.serialNumber);
     if (ocrData.condition) {
       handleConditionChange(ocrData.condition);
+    }
+    
+    // Set card features checkboxes
+    if (ocrData.isRookieCard !== undefined) {
+      form.setValue('isRookieCard', ocrData.isRookieCard);
+      console.log('Setting isRookieCard to:', ocrData.isRookieCard);
+    }
+    
+    if (ocrData.isAutographed !== undefined) {
+      form.setValue('isAutographed', ocrData.isAutographed);
+    }
+    
+    if (ocrData.isNumbered !== undefined) {
+      form.setValue('isNumbered', ocrData.isNumbered);
+    }
+    
+    if (ocrData.notes) {
+      form.setValue('notes', ocrData.notes);
     }
     
     toast({
@@ -617,7 +639,7 @@ export default function CardForm() {
           </div>
           
           {/* Serial Number */}
-          <div className="mb-6">
+          <div className="mb-4">
             <FormField
               control={form.control}
               name="serialNumber"
@@ -636,6 +658,69 @@ export default function CardForm() {
                 </FormItem>
               )}
             />
+          </div>
+          
+          {/* Card Features */}
+          <div className="mb-4">
+            <h3 className="text-sm font-medium text-slate-700 mb-2">Card Features</h3>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+              <FormField
+                control={form.control}
+                name="isRookieCard"
+                render={({ field }) => (
+                  <FormItem className="flex flex-row items-center space-x-2 space-y-0">
+                    <FormControl>
+                      <input 
+                        type="checkbox" 
+                        checked={field.value || false}
+                        onChange={(e) => {
+                          field.onChange(e.target.checked);
+                          console.log("Rookie card checkbox changed to:", e.target.checked);
+                        }}
+                        className="h-5 w-5 rounded border-gray-300"
+                      />
+                    </FormControl>
+                    <FormLabel className="font-normal text-sm ml-2">Rookie Card</FormLabel>
+                  </FormItem>
+                )}
+              />
+              
+              <FormField
+                control={form.control}
+                name="isAutographed"
+                render={({ field }) => (
+                  <FormItem className="flex flex-row items-center space-x-2 space-y-0">
+                    <FormControl>
+                      <input 
+                        type="checkbox" 
+                        checked={field.value || false}
+                        onChange={(e) => field.onChange(e.target.checked)}
+                        className="h-5 w-5 rounded border-gray-300"
+                      />
+                    </FormControl>
+                    <FormLabel className="font-normal text-sm ml-2">Autographed</FormLabel>
+                  </FormItem>
+                )}
+              />
+              
+              <FormField
+                control={form.control}
+                name="isNumbered"
+                render={({ field }) => (
+                  <FormItem className="flex flex-row items-center space-x-2 space-y-0">
+                    <FormControl>
+                      <input 
+                        type="checkbox" 
+                        checked={field.value || false}
+                        onChange={(e) => field.onChange(e.target.checked)}
+                        className="h-5 w-5 rounded border-gray-300"
+                      />
+                    </FormControl>
+                    <FormLabel className="font-normal text-sm ml-2">Numbered</FormLabel>
+                  </FormItem>
+                )}
+              />
+            </div>
           </div>
           
           {/* Condition Rating */}
