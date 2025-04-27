@@ -475,7 +475,6 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>)
   // Collection detection
   const collectionPatterns = [
     { regex: /\bSTARS\s*OF\s*MLB\b/, name: "Stars of MLB" },
-    { regex: /\bCHROME\s*STARS\b/, name: "Chrome Stars of MLB" },
     { regex: /\bSERIES\s*ONE\b|\bSERIES\s*1\b/, name: "Series One" },
     { regex: /\bSERIES\s*TWO\b|\bSERIES\s*2\b/, name: "Series Two" },
     { regex: /\b35TH\s*ANNIVERSARY\b/, name: "35th Anniversary" },
@@ -490,19 +489,20 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>)
     // Always set these defaults for Stars of MLB cards
     cardDetails.brand = "Topps";
     
-    // Rule 1: Detect Chrome variant by looking for "CHROME" text or "C" in card number
+    // Rule 1: Set collection to Stars of MLB for all cards in this set
+    cardDetails.collection = "Stars of MLB";
+    console.log("Set collection to Stars of MLB");
+    
+    // Rule 2: Detect Chrome variant by looking for "CHROME" text or "C" in card number
     const isChrome = 
       text.includes("CHROME") || 
       (cardDetails.cardNumber && cardDetails.cardNumber.startsWith("C")) ||
       text.includes("CSMLB");
     
-    // Set proper collection based on Chrome detection
+    // Set Chrome as a variant instead of a separate collection
     if (isChrome) {
-      cardDetails.collection = "Chrome Stars of MLB";
-      console.log("Detected Chrome Stars of MLB variant");
-    } else {
-      cardDetails.collection = "Stars of MLB";
-      console.log("Detected regular Stars of MLB");
+      cardDetails.variant = "Chrome";
+      console.log("Detected Chrome variant for Stars of MLB card");
     }
     
     // Rule 2: For Stars of MLB, always check for copyright year which is more reliable
@@ -528,12 +528,10 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>)
       // Set default year for modern collections if not already set
       if (!cardDetails.year && (
           collection.name === "35th Anniversary" || 
-          collection.name === "Chrome Stars of MLB" || 
           collection.name === "Series One" || 
-          collection.name === "Series Two")) {
+          collection.name === "Series Two" ||
+          collection.name === "Stars of MLB")) {
         cardDetails.year = 2024;
-      } else if (!cardDetails.year && collection.name === "Stars of MLB") {
-        cardDetails.year = 2023;
       }
       
       break;
