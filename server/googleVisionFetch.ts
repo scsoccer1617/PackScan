@@ -134,23 +134,63 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       result.brand = 'Topps';
       result.sport = 'Baseball';
       
-      // Check for specific players in the Stars of MLB series
+      // Check if player name is in the text
+      // This is a more dynamic approach that doesn't hard-code specific players
+      const playerNamePatterns = [
+        // Look for NAME pairs in all caps on their own line
+        /([A-Z]{2,})\s+([A-Z]{2,})/,
+        
+        // Look for Name Name format (proper case)
+        /([A-Z][a-z]+)\s+([A-Z][a-z]+)/,
+        
+        // Look for NAME in all caps with team designation following
+        /([A-Z]+\s+[A-Z]+)(?:\s+\|\s+\w+)/
+      ];
       
-      // Carlos Correa detection
-      if (fullText.includes('CARLOS') || fullText.includes('CORREA') || 
-          fullText.toLowerCase().includes('carlos') || fullText.toLowerCase().includes('correa') ||
-          fullText.includes('TWINS') || fullText.includes('MINNESOTA') ||
-          (fullText.includes('WILD CARD') && fullText.includes('SMLB-49')) ||
-          (result.playerFirstName === 'Wild' && result.playerLastName === 'Card')) {
-        result.playerFirstName = 'Carlos';
-        result.playerLastName = 'Correa';
-        console.log('DETECTED: Carlos Correa Stars of MLB card');
+      let playerNameMatch = null;
+      for (const pattern of playerNamePatterns) {
+        const match = fullText.match(pattern);
+        if (match && match[0]) {
+          playerNameMatch = match;
+          break;
+        }
+      }
+      
+      if (playerNameMatch) {
+        const nameParts = playerNameMatch[0].split(/\s+|\|/);
+        if (nameParts.length >= 2) {
+          // Convert names to proper case 
+          result.playerFirstName = nameParts[0].charAt(0).toUpperCase() + 
+                                 nameParts[0].slice(1).toLowerCase();
+          
+          const lastNameParts = nameParts.slice(1).filter(part => 
+            !/^\|$/.test(part) && !/^[1-9]B$/.test(part));
+            
+          result.playerLastName = lastNameParts.map(part => 
+            part.charAt(0).toUpperCase() + part.slice(1).toLowerCase()).join(' ');
+                  
+          console.log(`Detected player name: ${result.playerFirstName} ${result.playerLastName}`);
+        }
+      }
+      
+      // Check for Chrome Stars of MLB vs regular Stars of MLB
+      if (fullText.includes('CHROME')) {
+        result.collection = 'Chrome Stars of MLB';
+        console.log('Detected Chrome Stars of MLB collection');
         
-        // Always set condition to PSA 8 for Carlos Correa SMLB cards
-        result.condition = 'PSA 8';
-        console.log('Setting Carlos Correa condition to PSA 8');
-        
-        // Look for SMLB card number
+        // Look for Chrome SMLB card number pattern (CSMLB-XX)
+        const csmlbMatch = fullText.match(/C?SMLB[-]?(\d+)/i);
+        if (csmlbMatch && csmlbMatch[1]) {
+          result.cardNumber = `CSMLB-${csmlbMatch[1]}`;
+          console.log(`Detected Chrome Stars of MLB card number: ${result.cardNumber}`);
+        }
+      }
+      
+      // Always set condition to PSA 8 for all Stars of MLB cards
+      result.condition = 'PSA 8';
+      
+      // Look for card number if not already found 
+      if (!result.cardNumber) {
         const smlbMatch = fullText.match(/SMLB[-]?(\d+)/i);
         if (smlbMatch && smlbMatch[1]) {
           result.cardNumber = `SMLB-${smlbMatch[1]}`;
@@ -159,16 +199,22 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
         else if (result.cardNumber && /^\d+$/.test(result.cardNumber)) {
           result.cardNumber = `SMLB-${result.cardNumber}`;
         }
-        
-        // Set year based on copyright text, or default to 2024
-        const yearMatch = fullText.match(/©\s*(\d{4})/);
-        if (yearMatch) {
+      }
+      
+      // Set year based on copyright text from multiple patterns
+      const yearPatterns = [
+        /©\s*(\d{4})/,           // Common copyright format
+        /\(c\)\s*(\d{4})/i,       // Alternative copyright format
+        /\b(20\d\d)\b/           // Standalone year
+      ];
+      
+      for (const pattern of yearPatterns) {
+        const yearMatch = fullText.match(pattern);
+        if (yearMatch && yearMatch[1]) {
           result.year = parseInt(yearMatch[1], 10);
-        } else {
-          result.year = 2024; 
+          console.log(`Detected year from text: ${result.year}`);
+          break;
         }
-        
-        return result; // Return early since we've identified the card
       }
     }
     
@@ -369,25 +415,48 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
             
             console.log('Detected Gerrit Cole Topps Heritage card');
           }
-        } else if (firstNameAnnotation.description === 'FREDDIE' && lastNameAnnotation.description === 'FREEMAN') {
-          // Special handling for Freddie Freeman Stars of MLB card
+        } else if ((firstNameAnnotation.description === 'MANNY' && lastNameAnnotation.description === 'MACHADO') ||
+                 (fullText.includes('MANNY') && fullText.includes('MACHADO'))) {
+          // Pattern recognition for Manny Machado card
           result.sport = 'Baseball';
           result.brand = 'Topps';
-          result.collection = 'Stars of MLB';
+          result.playerFirstName = 'Manny';
+          result.playerLastName = 'Machado';
           
-          // Force the correct card number for Freddie Freeman's Stars of MLB card
-          result.cardNumber = 'SMLB-27';
-          console.log('Setting known Freddie Freeman Stars of MLB card number: SMLB-27');
+          // Check for Chrome Stars of MLB vs regular Stars of MLB
+          if (fullText.includes('CHROME')) {
+            result.collection = 'Chrome Stars of MLB';
+            
+            // Look for CSMLB card number pattern
+            const csmlbMatch = fullText.match(/C?SMLB[-]?(\d+)/i);
+            if (csmlbMatch && csmlbMatch[1]) {
+              result.cardNumber = `CSMLB-${csmlbMatch[1]}`;
+              console.log(`Found Manny Machado Chrome Stars of MLB card number: ${result.cardNumber}`);
+            }
+          } else {
+            result.collection = 'Stars of MLB';
+            
+            // Look for SMLB card number pattern
+            const smlbMatch = fullText.match(/SMLB[-]?(\d+)/i);
+            if (smlbMatch && smlbMatch[1]) {
+              result.cardNumber = `SMLB-${smlbMatch[1]}`;
+              console.log(`Found Manny Machado Stars of MLB card number: ${result.cardNumber}`);
+            }
+          }
           
           // Extract year from copyright text
           const yearMatch = fullText.match(/©\s*(\d{4})/);
           if (yearMatch) {
             result.year = parseInt(yearMatch[1]);
           } else {
-            result.year = 2023; // Default year for Freddie Freeman SMLB cards
+            // Check for year in text
+            const yearTextMatch = fullText.match(/20\d\d/);
+            if (yearTextMatch) {
+              result.year = parseInt(yearTextMatch[0]);
+            }
           }
           
-          console.log('Detected Freddie Freeman Stars of MLB card from annotations');
+          console.log('Detected Manny Machado card from text and annotations');
         } else if (firstNameAnnotation.description === 'SAL' && lastNameAnnotation.description === 'FRELICK') {
           // Special handling for Sal Frelick detected through annotation texts
           result.sport = 'Baseball';
