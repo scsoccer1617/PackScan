@@ -7,10 +7,11 @@ import { formatCurrency } from "@/lib/utils";
 
 interface CardItemProps {
   card: Card | CardWithRelations;
+  quantity?: number;
   onDelete?: () => void;
 }
 
-export default function CardItem({ card, onDelete }: CardItemProps) {
+export default function CardItem({ card, quantity, onDelete }: CardItemProps) {
   const [isDeleting, setIsDeleting] = useState(false);
   const { toast } = useToast();
   
@@ -159,7 +160,12 @@ export default function CardItem({ card, onDelete }: CardItemProps) {
           <span className="text-xs font-medium text-secondary-600">
             {card.estimatedValue ? formatCurrency(Number(card.estimatedValue)) : 'N/A'}
           </span>
-          <span className="text-xs text-slate-400">#{card.cardNumber}</span>
+          <div className="flex flex-col items-end">
+            <span className="text-xs text-slate-400">#{card.cardNumber}</span>
+            {quantity && quantity > 1 && (
+              <span className="text-xs font-semibold text-secondary-500">x{quantity}</span>
+            )}
+          </div>
         </div>
       </div>
     </div>
