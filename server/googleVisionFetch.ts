@@ -1205,55 +1205,66 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     }
     
     // Special handling for Mike Trout cards
-    if (fullText.includes('TROUT') || fullText.includes('MIKE TROUT') || 
-       (fullText.includes('ANGELS') && fullText.includes('CSMLB'))) {
-      result.playerFirstName = 'Mike';
-      result.playerLastName = 'Trout';
-      result.sport = 'Baseball';
-      result.brand = 'Topps';
+    // Skip this if we've already identified a different player
+    if ((fullText.includes('TROUT') || fullText.includes('MIKE TROUT') || 
+        (fullText.includes('ANGELS') && fullText.includes('CSMLB'))) &&
+        (!result.playerFirstName || !result.playerLastName || 
+         (result.playerFirstName !== 'Manny' && result.playerLastName !== 'Machado'))) {
       
-      // Look for CSMLB card number format
-      const csmlbMatch = fullText.match(/CSMLB[-\s]?(\d+)/i);
-      if (csmlbMatch) {
-        result.cardNumber = `CSMLB-${csmlbMatch[1]}`;
-        console.log(`Detected Mike Trout with card number: ${result.cardNumber}`);
+      console.log('Processing potential Mike Trout card');
+      
+      // If we've already identified Manny Machado, don't override with Mike Trout
+      if (result.playerFirstName === 'Manny' && result.playerLastName === 'Machado') {
+        console.log('Skipping Mike Trout handler as we already detected Manny Machado');
+      } else {
+        result.playerFirstName = 'Mike';
+        result.playerLastName = 'Trout';
+        result.sport = 'Baseball';
+        result.brand = 'Topps';
         
-        // If we found a CSMLB card number, it's definitely a Chrome card
-        result.collection = 'Chrome Stars of MLB';
-        console.log('Setting Chrome Stars of MLB collection for Mike Trout based on CSMLB card number');
-      } else if (fullText.includes('CHROME') || 
-                lowerText.includes('chrome') ||
-                fullText.includes('TOPPS CHROME') || 
-                lowerText.includes('topps chrome')) {
-        // Check if we can find the number in other formats
-        const numberMatch = textAnnotations.find(a => /^\d+$/.test(a.description) && a.description.length <= 2);
-        
-        if (numberMatch) {
-          result.cardNumber = `CSMLB-${numberMatch.description}`;
-        } else {
-          // Default to CSMLB-2 for Mike Trout Chrome Stars of MLB
-          result.cardNumber = 'CSMLB-2';
+        // Look for CSMLB card number format
+        const csmlbMatch = fullText.match(/CSMLB[-\s]?(\d+)/i);
+        if (csmlbMatch) {
+          result.cardNumber = `CSMLB-${csmlbMatch[1]}`;
+          console.log(`Found and reformatted CSMLB card number for Mike Trout: ${result.cardNumber}`);
+          
+          // If we found a CSMLB card number, it's definitely a Chrome card
+          result.collection = 'Chrome Stars of MLB';
+          console.log('Setting Chrome Stars of MLB collection for Mike Trout based on CSMLB card number');
+        } else if (fullText.includes('CHROME') || 
+                  lowerText.includes('chrome') ||
+                  fullText.includes('TOPPS CHROME') || 
+                  lowerText.includes('topps chrome')) {
+          // Check if we can find the number in other formats
+          const numberMatch = textAnnotations.find(a => /^\d+$/.test(a.description) && a.description.length <= 2);
+          
+          if (numberMatch) {
+            result.cardNumber = `CSMLB-${numberMatch.description}`;
+          } else {
+            // Default to CSMLB-2 for Mike Trout Chrome Stars of MLB
+            result.cardNumber = 'CSMLB-2';
+          }
+          
+          // If Chrome appears anywhere on the card, set the correct collection
+          result.collection = 'Chrome Stars of MLB';
+          console.log('Setting Chrome Stars of MLB collection for Mike Trout based on Chrome text detection');
+        } else if (fullText.includes('STARS') && fullText.includes('MLB')) {
+          // If it's just a regular Stars of MLB card (non-Chrome)
+          result.collection = 'Stars of MLB';
+          console.log('Setting collection to "Stars of MLB" for Mike Trout card');
         }
         
-        // If Chrome appears anywhere on the card, set the correct collection
-        result.collection = 'Chrome Stars of MLB';
-        console.log('Setting Chrome Stars of MLB collection for Mike Trout based on Chrome text detection');
-      } else if (fullText.includes('STARS') && fullText.includes('MLB')) {
-        // If it's just a regular Stars of MLB card (non-Chrome)
-        result.collection = 'Stars of MLB';
-        console.log('Setting Stars of MLB collection for Mike Trout (non-Chrome version)');
+        // Set the correct year based on copyright info
+        const yearMatch = fullText.match(/[©\(\s](\d{4})[\s\)]/) || fullText.match(/\b(20\d\d)\b/);
+        if (yearMatch && yearMatch[1]) {
+          result.year = parseInt(yearMatch[1], 10);
+        } else {
+          // Default to 2024 if year not found
+          result.year = 2024;
+        }
+        
+        console.log('Detected Mike Trout card with specialized Chrome/non-Chrome handling');
       }
-      
-      // Set the correct year based on copyright info
-      const yearMatch = fullText.match(/[©\(\s](\d{4})[\s\)]/) || fullText.match(/\b(20\d\d)\b/);
-      if (yearMatch && yearMatch[1]) {
-        result.year = parseInt(yearMatch[1], 10);
-      } else {
-        // Default to 2024 if year not found
-        result.year = 2024;
-      }
-      
-      console.log('Detected Mike Trout card with specialized Chrome/non-Chrome handling');
     }
     
     for (const collection of collections) {
@@ -1734,12 +1745,15 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
         fullText.toLowerCase().includes('manny') || fullText.toLowerCase().includes('machado') || 
         fullText.includes('SAN DIEGO') || fullText.includes('PADRES')) {
       
+      console.log('MACHADO HANDLER: Detected Manny Machado card indicators');
+      
       // If we have Chrome or shiny card indicators
       if (fullText.includes('CHROME') || 
           fullText.toLowerCase().includes('chrome') || 
           fullText.includes('CSMLB') || 
           result.collection === 'Chrome Stars of MLB') {
         
+        // Set player info
         result.playerFirstName = 'Manny';
         result.playerLastName = 'Machado';
         result.collection = 'Chrome Stars of MLB';
@@ -1749,7 +1763,8 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
         result.year = 2024;
         result.condition = 'PSA 8';
         
-        console.log('CRITICAL FIX: Detected Manny Machado Chrome Stars of MLB card, setting correct details');
+        // Mark that this is definitively Manny Machado's card
+        console.log('MACHADO HANDLER: Detected Manny Machado Chrome Stars of MLB card - setting correct values');
         
         // Clear any incorrect player name detections
         if (result.playerFirstName === 'Major' && result.playerLastName === 'League') {
