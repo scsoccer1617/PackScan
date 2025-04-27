@@ -78,7 +78,9 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     const { fullText, textBlocks } = await extractTextFromImage(base64Image);
     
     // Initialize result
-    const result: Partial<CardFormValues> = {};
+    const result: Partial<CardFormValues> = {
+      condition: 'PSA 8' // Set default condition to PSA 8 for all cards
+    };
     
     if (!fullText) {
       return result;
