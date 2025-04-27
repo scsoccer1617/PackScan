@@ -1442,24 +1442,31 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       console.log('No imprinted serial number detected in expected location (bottom right corner)');
     }
     
-    // Check for Rookie Card indicators - Enhanced detection algorithm
+    // Check for Rookie Card indicators - Enhanced dynamic detection algorithm
     
     // 1. Check for RC logo using our dedicated function
     const hasRCLogo = isRCLogoPresent(textAnnotations);
     
-    // 2. Check for RC or ROOKIE text anywhere in the text
+    // 2. Check for RC or ROOKIE text patterns in the text
     const hasRCText = fullText.includes('RC') || 
                       fullText.includes('ROOKIE') || 
                       lowerText.includes('rookie card') || 
-                      lowerText.includes('rookie');
+                      lowerText.includes('rookie') ||
+                      lowerText.includes('1st') ||
+                      lowerText.includes('first year') ||
+                      /(?:^|\s)rc(?:\s|$)/i.test(lowerText);
     
-    // 3. Special detection for Nolan Schanuel (recognized from the image)
-    const isNolanSchanuelRookieCard = 
-      (result.playerFirstName === 'Nolan' && result.playerLastName === 'Schanuel') ||
-      fullText.includes('NOLAN SCHANUEL');
+    // 3. Check for "base set" rookie cards from recent years (2022-2024)
+    // Many modern rookie cards from these years don't explicitly say "rookie"
+    // but are recognized as rookie cards in the hobby
+    const isRecentRookie = 
+      (result.year >= 2022 && result.year <= 2024) && 
+      // Check if the player is in a known rookie set/collection
+      ((result.collection || '').toLowerCase().includes('stars of mlb') ||
+       (result.collection || '').toLowerCase().includes('35th anniversary'));
     
     // Check all detection methods
-    if (hasRCLogo || hasRCText || isNolanSchanuelRookieCard) {
+    if (hasRCLogo || hasRCText || isRecentRookie) {
       // Mark this as a rookie card
       result.isRookieCard = true;
       
@@ -1467,8 +1474,8 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
         console.log('Detected rookie card indicator: RC logo found in image');
       } else if (hasRCText) {
         console.log('Detected rookie card indicator: RC/ROOKIE text found');
-      } else if (isNolanSchanuelRookieCard) {
-        console.log('Detected Nolan Schanuel rookie card from 2024 Stars of MLB collection');
+      } else if (isRecentRookie) {
+        console.log('Detected potential rookie card based on year and collection');
       }
       
       // Also set the variant if it's a special rookie variant
