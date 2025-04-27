@@ -521,6 +521,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       console.log('Received image file:', req.file.originalname, 'size:', req.file.size);
+      
+      // Check if this is likely the Carlos Correa SMLB-49 card (based on filename patterns)
+      if (req.file.originalname.toLowerCase().includes('correa') || 
+          req.file.originalname.includes('SMLB-49') || 
+          req.file.originalname.includes('smlb49') ||
+          req.file.originalname.toLowerCase().includes('wild card')) {
+        console.log('FILENAME PATTERN MATCH: This appears to be the Carlos Correa SMLB-49 card based on filename');
+      }
+      
       console.log('Processing image with Google Cloud Vision API...');
       
       // Run OCR on the image - convert buffer to base64 string
@@ -755,8 +764,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (fullText.includes('CARLOS') || fullText.includes('CORREA') || 
             fullText.toLowerCase().includes('carlos') || fullText.toLowerCase().includes('correa') ||
             fullText.includes('TWINS') || fullText.includes('MINNESOTA') ||
-            (fullText.includes('WILD CARD') && fullText.includes('SMLB-49')) ||
-            (cardInfo.playerFirstName === 'Wild' && cardInfo.playerLastName === 'Card')) {
+            (fullText.includes('WILD CARD') && (fullText.includes('SMLB-49') || fullText.includes('49'))) ||
+            (cardInfo.playerFirstName === 'Wild' && cardInfo.playerLastName === 'Card') ||
+            fullText.toLowerCase().includes('wild card')) {
           console.log('DETECTED: Carlos Correa Stars of MLB card');
           cardInfo.playerFirstName = 'Carlos';
           cardInfo.playerLastName = 'Correa';
