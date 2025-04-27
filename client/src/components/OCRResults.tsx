@@ -127,15 +127,6 @@ export default function OCRResults({ loading, error, data, onApply, onCancel, fo
             <Check className="h-5 w-5 mr-2 text-green-600" />
             Card Information Found
           </CardTitle>
-          <Button 
-            variant="ghost" 
-            size="sm" 
-            onClick={() => setEditMode(!editMode)} 
-            className="h-8 px-2"
-          >
-            <Pencil className="h-4 w-4 mr-1" />
-            {editMode ? "View" : "Edit Card Details"}
-          </Button>
         </div>
         <CardDescription>
           {editMode 
@@ -376,10 +367,18 @@ export default function OCRResults({ loading, error, data, onApply, onCancel, fo
           </div>
         )}
       </CardContent>
-      <CardFooter className="flex justify-end">
+      <CardFooter className="flex justify-between">
         <Button variant="outline" onClick={onCancel}>
           Close
         </Button>
+        {!editMode && (
+          <Button
+            onClick={() => setEditMode(true)}
+            className="bg-blue-600 hover:bg-blue-500 text-white"
+          >
+            Edit Card Details
+          </Button>
+        )}
       </CardFooter>
     </Card>
   );

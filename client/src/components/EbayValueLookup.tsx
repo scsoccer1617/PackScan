@@ -133,12 +133,12 @@ export default function EbayValueLookup({
   // Function to directly open eBay instead of dialog
   const openEbaySearch = () => {
     // Build eBay search URL directly
-    let query = `${brand} ${year} ${playerName} ${cardNumber}`;
+    let query = `${brand} ${year} ${playerName} #${cardNumber}`;
     
     // Add collection if provided, but handle special collections
     if (collection) {
       if (collection.toLowerCase().includes('heritage')) {
-        query = `${brand} ${year} heritage ${playerName}`;
+        query = `${brand} ${year} heritage ${playerName} #${cardNumber}`;
       } else {
         query += ` ${collection}`;
       }
