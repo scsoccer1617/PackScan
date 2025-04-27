@@ -78,6 +78,18 @@ export function useOCR(): OCRResult {
         console.log("CLIENT FIX: Cleared invalid player name. Server will attempt to find proper name.");
       }
       
+      // Client-side Chrome Stars of MLB detection fix
+      if (cardInfo.collection === "Stars of MLB" && cardInfo.cardNumber?.startsWith("CSMLB-")) {
+        console.log("CLIENT FIX: Detected CSMLB card number but collection is not Chrome Stars of MLB. Fixing collection name.");
+        
+        cardInfo = {
+          ...cardInfo,
+          collection: "Chrome Stars of MLB"
+        };
+        
+        console.log("CLIENT FIX: Updated collection to Chrome Stars of MLB based on CSMLB card number format.");
+      }
+      
       setData(cardInfo);
       
       // Auto-fill the form if provided

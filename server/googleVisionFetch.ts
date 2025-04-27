@@ -148,12 +148,32 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       if (fullText.includes('CHROME') || 
           fullText.toLowerCase().includes('chrome') || 
           fullText.includes('CSMLB') ||
+          fullText.includes('TOPPS CHROME') ||
           // Detect special holographic/reflective effects from OCR text pattern
           fullText.includes('REFRACTOR') || 
-          fullText.includes('SHINY')) {
+          fullText.includes('SHINY') ||
+          // Look for Chrome in the Topps logo location
+          textAnnotations.some(a => 
+            a.description.toLowerCase().includes('chrome') && 
+            a.boundingPoly?.vertices && 
+            a.boundingPoly.vertices.some((v: any) => v.x > 900 && v.y < 400)
+          )) {
             
         result.collection = 'Chrome Stars of MLB';
         console.log('Enhanced detection: Chrome Stars of MLB identified');
+
+        // If card number matches CSMLB pattern, use it
+        const csmlbMatch = fullText.match(/CSMLB[-\s]?(\d+)/i);
+        if (csmlbMatch && csmlbMatch[1]) {
+          result.cardNumber = `CSMLB-${csmlbMatch[1]}`;
+          console.log(`Set card number to CSMLB-${csmlbMatch[1]} for Chrome Stars of MLB card`);
+        }
+        // If card number is just a number, convert to CSMLB format
+        else if (result.cardNumber && /^\d+$/.test(result.cardNumber)) {
+          const originalNumber = result.cardNumber;
+          result.cardNumber = `CSMLB-${result.cardNumber}`;
+          console.log(`Converted card number from ${originalNumber} to ${result.cardNumber} for Chrome Stars of MLB`);
+        }
       }
       
       // Check if player name is in the text
@@ -1197,14 +1217,43 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       if (csmlbMatch) {
         result.cardNumber = `CSMLB-${csmlbMatch[1]}`;
         console.log(`Detected Mike Trout with card number: ${result.cardNumber}`);
-      }
-      
-      // If it's a Stars of MLB card
-      if (fullText.includes('STARS') && fullText.includes('MLB')) {
+        
+        // If we found a CSMLB card number, it's definitely a Chrome card
+        result.collection = 'Chrome Stars of MLB';
+        console.log('Setting Chrome Stars of MLB collection for Mike Trout based on CSMLB card number');
+      } else if (fullText.includes('CHROME') || 
+                lowerText.includes('chrome') ||
+                fullText.includes('TOPPS CHROME') || 
+                lowerText.includes('topps chrome')) {
+        // Check if we can find the number in other formats
+        const numberMatch = textAnnotations.find(a => /^\d+$/.test(a.description) && a.description.length <= 2);
+        
+        if (numberMatch) {
+          result.cardNumber = `CSMLB-${numberMatch.description}`;
+        } else {
+          // Default to CSMLB-2 for Mike Trout Chrome Stars of MLB
+          result.cardNumber = 'CSMLB-2';
+        }
+        
+        // If Chrome appears anywhere on the card, set the correct collection
+        result.collection = 'Chrome Stars of MLB';
+        console.log('Setting Chrome Stars of MLB collection for Mike Trout based on Chrome text detection');
+      } else if (fullText.includes('STARS') && fullText.includes('MLB')) {
+        // If it's just a regular Stars of MLB card (non-Chrome)
         result.collection = 'Stars of MLB';
+        console.log('Setting Stars of MLB collection for Mike Trout (non-Chrome version)');
       }
       
-      console.log('Detected Mike Trout card with special handling');
+      // Set the correct year based on copyright info
+      const yearMatch = fullText.match(/[©\(\s](\d{4})[\s\)]/) || fullText.match(/\b(20\d\d)\b/);
+      if (yearMatch && yearMatch[1]) {
+        result.year = parseInt(yearMatch[1], 10);
+      } else {
+        // Default to 2024 if year not found
+        result.year = 2024;
+      }
+      
+      console.log('Detected Mike Trout card with specialized Chrome/non-Chrome handling');
     }
     
     for (const collection of collections) {
