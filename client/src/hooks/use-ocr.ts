@@ -117,6 +117,12 @@ export function useOCR(): OCRResult {
         if (cardInfo.year && cardInfo.year > 0) form.setValue('year', cardInfo.year);
         if (cardInfo.variant) form.setValue('variant', cardInfo.variant);
         if (cardInfo.serialNumber) form.setValue('serialNumber', cardInfo.serialNumber);
+        
+        // Set rookie card checkbox if detected in the OCR results
+        if (result.data.isRookieCard) {
+          form.setValue('isRookieCard', true);
+        }
+        
         if (cardInfo.condition) {
           form.setValue('condition', cardInfo.condition);
           
