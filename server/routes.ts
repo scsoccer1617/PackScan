@@ -997,6 +997,90 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // eBay API endpoints
+  app.get(`${apiPrefix}/ebay/test`, async (req, res) => {
+    try {
+      // Check if eBay credentials are configured
+      const ebayConfigured = !!process.env.EBAY_APP_ID && 
+                             !!process.env.EBAY_CERT_ID && 
+                             !!process.env.EBAY_DEV_ID;
+      
+      return res.json({
+        status: ebayConfigured ? 'success' : 'unconfigured',
+        message: ebayConfigured ? 'eBay API is configured' : 'eBay API credentials are not set',
+        appIdConfigured: !!process.env.EBAY_APP_ID,
+        certIdConfigured: !!process.env.EBAY_CERT_ID,
+        devIdConfigured: !!process.env.EBAY_DEV_ID
+      });
+    } catch (error) {
+      console.error('Error testing eBay configuration:', error);
+      return res.status(500).json({
+        status: 'error', 
+        message: error.message || 'Unknown error testing eBay configuration'
+      });
+    }
+  });
+  
+  // eBay value lookup
+  app.post(`${apiPrefix}/ebay/search-values`, async (req, res) => {
+    try {
+      const { playerName, cardNumber, brand, year, collection, condition } = req.query;
+      
+      if (!playerName || !cardNumber || !brand || !year) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Missing required parameters'
+        });
+      }
+      
+      // Check if eBay credentials are configured
+      if (!process.env.EBAY_APP_ID) {
+        return res.json({
+          status: 'unconfigured',
+          message: 'eBay API credentials are not set',
+          searchUrl: getEbaySearchUrl(
+            playerName as string, 
+            cardNumber as string, 
+            brand as string, 
+            parseInt(year as string)
+          ),
+          averageValue: null,
+          results: []
+        });
+      }
+      
+      // Call eBay API search function
+      const { averageValue, results } = await searchCardValues(
+        playerName as string,
+        cardNumber as string,
+        brand as string,
+        parseInt(year as string),
+        condition as string
+      );
+      
+      // Create a direct search URL for the eBay website
+      const searchUrl = getEbaySearchUrl(
+        playerName as string,
+        cardNumber as string,
+        brand as string,
+        parseInt(year as string)
+      );
+      
+      return res.json({
+        status: 'success',
+        searchUrl,
+        averageValue,
+        results
+      });
+    } catch (error) {
+      console.error('Error searching eBay values:', error);
+      return res.status(500).json({
+        status: 'error',
+        message: error.message || 'Unknown error searching eBay values'
+      });
+    }
+  });
+
   const httpServer = createServer(app);
   return httpServer;
 }
