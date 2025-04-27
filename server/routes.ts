@@ -7,7 +7,8 @@ import multer from "multer";
 import path from "path";
 import fs from "fs";
 import { v4 as uuidv4 } from "uuid";
-import { analyzeSportsCardImage } from "./googleVisionFetch";
+// Import the new dynamic OCR analyzer that doesn't rely on player-specific hardcoded logic
+import { analyzeSportsCardImage } from "./dynamicCardAnalyzer";
 import { searchCardValues, getEbaySearchUrl } from "./ebayService";
 
 // Google Sheets variables
@@ -522,44 +523,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       console.log('Received image file:', req.file.originalname, 'size:', req.file.size);
       
-      // Check if this is likely the Carlos Correa SMLB-49 card (based on filename patterns)
-      if (req.file.originalname.toLowerCase().includes('correa') || 
-          req.file.originalname.includes('SMLB-49') || 
-          req.file.originalname.includes('smlb49') ||
-          req.file.originalname.toLowerCase().includes('wild card')) {
-        console.log('FILENAME PATTERN MATCH: This appears to be the Carlos Correa SMLB-49 card based on filename');
-      }
-      
-      console.log('Processing image with Google Cloud Vision API...');
+      console.log('Processing image with dynamic OCR analyzer...');
       
       // Run OCR on the image - convert buffer to base64 string
       let cardInfo = await analyzeSportsCardImage(req.file.buffer.toString('base64'));
-      
-      // Special handling for Chrome Stars of MLB Cards - check the filename
-      // This is an extremely aggressive detection for Manny Machado card since we're having issues
-      const isMachadoCard = true;
-      
-      // Check if image has features of Manny Machado
-      // If Chrome Stars of MLB is detected in any way, set the fields correctly
-      if (isMachadoCard || 
-          (cardInfo.collection && cardInfo.collection.includes('Stars of MLB') && 
-           (cardInfo.playerFirstName === 'Manny' || 
-            cardInfo.playerLastName === 'Machado' ||
-            cardInfo.playerFirstName === 'Major' ||
-            cardInfo.playerLastName === 'League'))) {
-            
-        console.log('MACHADO HANDLER: Detected Manny Machado Chrome Stars of MLB card - setting correct values');
-        
-        // Override with correct values for Manny Machado Chrome Stars of MLB card
-        cardInfo.playerFirstName = 'Manny';
-        cardInfo.playerLastName = 'Machado';
-        cardInfo.collection = 'Chrome Stars of MLB';
-        cardInfo.cardNumber = 'CSMLB-44';
-        cardInfo.sport = 'Baseball';
-        cardInfo.brand = 'Topps';
-        cardInfo.year = 2024;
-        cardInfo.condition = 'PSA 8';
-      }
       
       // More comprehensive approach for various card number formats in different positions
       const fullText = JSON.stringify(cardInfo); // Convert all detected info to searchable text
