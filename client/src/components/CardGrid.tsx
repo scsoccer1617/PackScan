@@ -103,22 +103,35 @@ export default function CardGrid() {
           break;
         case "card-number":
           grouped[group].sort((a: CardWithRelations, b: CardWithRelations) => {
-            // Helper function to extract numeric portion from card number
-            const extractNumber = (cardNum: string): number => {
-              // Extract numbers from strings like "SMLB-27", "CSMLB-12", "27", etc.
-              const matches = cardNum.match(/(\d+)/);
-              return matches ? parseInt(matches[0]) : 0;
+            // Helper function to parse complex card numbers like "89B-32" or "SMLB-27"
+            const parseCardNumber = (cardNum: string) => {
+              // First, try to split by dash (-) to handle formats like "89B-32"
+              const parts = cardNum.split('-');
+              
+              // Extract prefix (everything before the dash) and number (after the dash)
+              const prefix = parts.length > 1 ? parts[0] : '';
+              const numberPart = parts.length > 1 ? parts[1] : cardNum;
+              
+              // Convert the number part to a number for correct numerical sorting
+              const number = parseInt(numberPart);
+              
+              return { prefix, number, originalNumber: numberPart };
             };
             
-            // Sort primarily by the numeric part of the card number
-            const numA = extractNumber(a.cardNumber);
-            const numB = extractNumber(b.cardNumber);
+            const cardA = parseCardNumber(a.cardNumber);
+            const cardB = parseCardNumber(b.cardNumber);
             
-            if (numA !== numB) {
-              return numA - numB; // Ascending numeric order
+            // First, sort by prefix (if they're different)
+            if (cardA.prefix !== cardB.prefix) {
+              return cardA.prefix.localeCompare(cardB.prefix);
             }
             
-            // If numeric parts are the same, sort alphabetically by full card number
+            // If prefixes are the same, sort by number part
+            if (!isNaN(cardA.number) && !isNaN(cardB.number)) {
+              return cardA.number - cardB.number;
+            }
+            
+            // Fallback to original card number comparison if parsing failed
             return a.cardNumber.localeCompare(b.cardNumber);
           });
           break;
