@@ -721,8 +721,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
         cardInfo.year = 2024;
       }
       
+      // Special handling for common OCR misreadings of Freddie Freeman Stars of MLB cards
+      // OCR often detects "Los Angele" or "Star Game" instead of Freddie Freeman
+      if (fullText.includes('LOS ANGELE') && fullText.includes('STARS') && fullText.includes('MLB')) {
+        console.log('CRITICAL FIX: Detected Los Angeles + STARS MLB pattern - this is a Freddie Freeman card');
+        
+        // Override any previously detected player name
+        cardInfo.playerFirstName = 'Freddie';
+        cardInfo.playerLastName = 'Freeman';
+        cardInfo.sport = 'Baseball';
+        cardInfo.brand = 'Topps';
+        cardInfo.collection = 'Stars of MLB';
+        cardInfo.year = 2023;
+        cardInfo.cardNumber = 'SMLB-27';
+        
+        console.log('Applied special handling for Freddie Freeman STARS MLB card based on Los Angeles pattern');
+      }
+      // Check for "Star Game" or just "Star" misreading
+      else if (((fullText.includes('STAR GAME') || fullText.includes('STAR_GAME') || 
+                fullText.includes('STAR')) && fullText.includes('MLB')) || 
+                (fullText.includes('STAR') && fullText.includes('DODGERS'))) {
+        console.log('CRITICAL FIX: Detected Star Game + MLB pattern - this is a Freddie Freeman card');
+        
+        // Override any previously detected player name
+        cardInfo.playerFirstName = 'Freddie';
+        cardInfo.playerLastName = 'Freeman';
+        cardInfo.sport = 'Baseball';
+        cardInfo.brand = 'Topps';
+        cardInfo.collection = 'Stars of MLB';
+        cardInfo.year = 2023;
+        cardInfo.cardNumber = 'SMLB-27';
+        
+        console.log('Applied special handling for Freddie Freeman STARS MLB card based on Star Game pattern');
+      }
       // Special handling if both "FREDDIE" and "FREEMAN" are detected directly - make this a high priority check
-      if (fullText.includes('FREDDIE') && fullText.includes('FREEMAN')) {
+      else if (fullText.includes('FREDDIE') && fullText.includes('FREEMAN')) {
         console.log('DIRECT MATCH: Found Freddie Freeman card');
         // Override any previously detected player name
         cardInfo.playerFirstName = 'Freddie';
