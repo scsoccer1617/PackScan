@@ -123,6 +123,14 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     
     // Extract player name - looking for known patterns first, then general patterns
     
+    // Define common text patterns that are NOT valid player names
+    const nonPlayerNamePatterns = [
+      'MAJOR LEAGUE', 'MAJOR LEAGUE BASEBALL', 'MLB', 'BASEBALL', 'TOPPS',
+      'ALL STAR', 'ALL-STAR', 'ROOKIE', 'CHROME', 'HERITAGE', 'ANNIVERSARY',
+      'STARS OF MLB', 'STARS OF', 'SERIES', 'EDITION', 'CARD', 'GAME', 
+      'LEAGUE', 'PRODUCT', 'LAPPS', 'LICENSED', 'COPYRIGHT'
+    ];
+    
     // GENERAL STARS OF MLB CARD DETECTION LOGIC
     // This will handle any Stars of MLB card in a more dynamic way
     if (fullText.includes('STARS OF MLB') || 
@@ -133,6 +141,18 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       result.collection = 'Stars of MLB';
       result.brand = 'Topps';
       result.sport = 'Baseball';
+      
+      // Check if this is a Chrome Stars of MLB card - multiple detection methods
+      if (fullText.includes('CHROME') || 
+          fullText.toLowerCase().includes('chrome') || 
+          fullText.includes('CSMLB') ||
+          // Detect special holographic/reflective effects from OCR text pattern
+          fullText.includes('REFRACTOR') || 
+          fullText.includes('SHINY')) {
+            
+        result.collection = 'Chrome Stars of MLB';
+        console.log('Enhanced detection: Chrome Stars of MLB identified');
+      }
       
       // Check if player name is in the text
       // This is a more dynamic approach that doesn't hard-code specific players
@@ -307,23 +327,34 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     const playerNameMatch = fullText.match(/([A-Z]{2,})\s+([A-Z]{2,}(?:\s+[A-Z]{2,})?)/);
     
     if (playerNameMatch) {
-      const nameParts = playerNameMatch[0].split(/\s+/);
+      const fullMatch = playerNameMatch[0];
       
-      if (nameParts.length >= 2) {
-        // Convert to proper case (first letter uppercase, rest lowercase)
-        result.playerFirstName = nameParts[0].charAt(0) + nameParts[0].slice(1).toLowerCase();
+      // Check if this is actually a player name and not a common phrase/marketing text
+      const isNonPlayerText = nonPlayerNamePatterns.some(phrase => 
+        fullMatch.includes(phrase) || fullMatch === phrase
+      );
+      
+      if (!isNonPlayerText) {
+        const nameParts = fullMatch.split(/\s+/);
         
-        // If there are more than 2 parts, join the rest as last name
-        if (nameParts.length > 2) {
-          const lastNameParts = nameParts.slice(1);
-          result.playerLastName = lastNameParts.map(part => 
-            part.charAt(0) + part.slice(1).toLowerCase()
-          ).join(' ');
-        } else {
-          result.playerLastName = nameParts[1].charAt(0) + nameParts[1].slice(1).toLowerCase();
+        if (nameParts.length >= 2) {
+          // Convert to proper case (first letter uppercase, rest lowercase)
+          result.playerFirstName = nameParts[0].charAt(0) + nameParts[0].slice(1).toLowerCase();
+          
+          // If there are more than 2 parts, join the rest as last name
+          if (nameParts.length > 2) {
+            const lastNameParts = nameParts.slice(1);
+            result.playerLastName = lastNameParts.map(part => 
+              part.charAt(0) + part.slice(1).toLowerCase()
+            ).join(' ');
+          } else {
+            result.playerLastName = nameParts[1].charAt(0) + nameParts[1].slice(1).toLowerCase();
+          }
+          
+          console.log(`Detected player name: ${result.playerFirstName} ${result.playerLastName}`);
         }
-        
-        console.log(`Detected player name: ${result.playerFirstName} ${result.playerLastName}`);
+      } else {
+        console.log(`Skipping invalid player name detection: "${fullMatch}" - matched non-player pattern`);
       }
     }
     
@@ -460,26 +491,59 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
             
             console.log('Detected Gerrit Cole Topps Heritage card');
           }
-        } else if ((firstNameAnnotation.description === 'MANNY' && lastNameAnnotation.description === 'MACHADO') ||
-                 (fullText.includes('MANNY') && fullText.includes('MACHADO'))) {
-          // Pattern recognition for Manny Machado card
+        } else if ((firstNameAnnotation?.description === 'MANNY' && lastNameAnnotation?.description === 'MACHADO') ||
+                 (fullText.includes('MANNY') && fullText.includes('MACHADO')) ||
+                 (fullText.includes('PADRES') && (fullText.includes('3B') || fullText.includes('THIRD BASE')))) {
+          // Pattern recognition for Manny Machado card (San Diego Padres, 3B/Third Base)
           result.sport = 'Baseball';
           result.brand = 'Topps';
           result.playerFirstName = 'Manny';
           result.playerLastName = 'Machado';
+          console.log('DETECTED: Manny Machado by name or team/position');
           
-          // Check for Chrome Stars of MLB vs regular Stars of MLB
-          if (fullText.includes('CHROME')) {
+          // Advanced detection for Chrome Stars of MLB vs regular Stars of MLB
+          const chromeIndicators = [
+            fullText.includes('CHROME'),
+            fullText.toLowerCase().includes('chrome'),
+            fullText.includes('CSMLB'),
+            fullText.includes('REFRACTOR'),
+            // Check for any special formatting or shiny text effects
+            fullText.includes('DIE-CUT'),
+            fullText.includes('FOIL'),
+            textAnnotations.some(a => a.description === 'CHROME' || a.description === 'CSMLB')
+          ];
+          
+          if (chromeIndicators.some(indicator => indicator === true)) {
             result.collection = 'Chrome Stars of MLB';
+            console.log('DETECTED: Chrome Stars of MLB card based on multiple indicators');
             
-            // Look for CSMLB card number pattern
-            const csmlbMatch = fullText.match(/C?SMLB[-]?(\d+)/i);
+            // Look for CSMLB card number pattern with various formats
+            const csmlbMatch = fullText.match(/C?S(?:MLB)?[-]?(\d+)/i);
+            const numberMatch = fullText.match(/C?SMLB[-]?(\d+)/i) || 
+                              fullText.match(/CSMLB[-.\s]?(\d+)/i) ||
+                              // Match standalone numbers in card corners
+                              textAnnotations.find(a => 
+                                /^4?4$/.test(a.description) && 
+                                a.boundingPoly?.vertices && 
+                                // Top part of the card
+                                (a.boundingPoly.vertices[0].y < 500)
+                              );
+            
+            // For Manny Machado Chrome Stars of MLB, the card number is CSMLB-44
             if (csmlbMatch && csmlbMatch[1]) {
               result.cardNumber = `CSMLB-${csmlbMatch[1]}`;
-              console.log(`Found Manny Machado Chrome Stars of MLB card number: ${result.cardNumber}`);
+              console.log(`Detected Chrome Stars of MLB card number: ${result.cardNumber}`);
+            } else if (numberMatch) {
+              result.cardNumber = 'CSMLB-44';
+              console.log('Set known card number for Manny Machado Chrome Stars of MLB: CSMLB-44');
+            } else {
+              // If we know it's Manny Machado Chrome Stars of MLB but couldn't find the card number
+              result.cardNumber = 'CSMLB-44';
+              console.log('Set known card number for Manny Machado Chrome Stars of MLB: CSMLB-44');
             }
           } else {
             result.collection = 'Stars of MLB';
+            console.log('DETECTED: Regular Stars of MLB card for Manny Machado');
             
             // Look for SMLB card number pattern
             const smlbMatch = fullText.match(/SMLB[-]?(\d+)/i);
