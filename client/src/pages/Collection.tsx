@@ -81,7 +81,7 @@ export default function Collection() {
           <div>
             <h3 className="font-medium text-primary-900">My Collection</h3>
             <p className="text-sm text-primary-700 font-medium">
-              {manualCardCount} cards • Est. value: ${manualTotalValue.toLocaleString()}
+              {manualCardCount} cards • Est. value: ${manualTotalValue.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
             </p>
           </div>
           <Button className="bg-primary-100 text-primary-800 hover:bg-primary-200">
