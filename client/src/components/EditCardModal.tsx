@@ -59,7 +59,7 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
         variant: card.variant || "",
         serialNumber: card.serialNumber || "",
         condition: card.condition || "PSA 9",
-        estimatedValue: card.estimatedValue || 0,
+        estimatedValue: typeof card.estimatedValue === 'string' ? parseFloat(card.estimatedValue) : (card.estimatedValue || 0),
         isRookieCard: card.isRookieCard || false,
         isAutographed: card.isAutographed || false,
         isNumbered: card.isNumbered || false,

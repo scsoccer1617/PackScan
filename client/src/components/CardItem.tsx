@@ -190,6 +190,13 @@ export default function CardItem({ card, quantity, onDelete }: CardItemProps) {
           </div>
         </div>
       </div>
+      
+      {/* Edit Card Modal */}
+      <EditCardModal 
+        card={hasRelations(card) ? card : null}
+        isOpen={isEditModalOpen}
+        onClose={() => setIsEditModalOpen(false)}
+      />
     </div>
   );
 }
