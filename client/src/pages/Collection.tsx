@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -6,7 +6,40 @@ import CardGrid from "@/components/CardGrid";
 
 export default function Collection() {
   const [searchQuery, setSearchQuery] = useState("");
+  const [manualCardCount, setManualCardCount] = useState(0);
+  const [manualTotalValue, setManualTotalValue] = useState(0);
+  const [allCards, setAllCards] = useState([]);
   
+  // Direct API call for the cards
+  useEffect(() => {
+    async function fetchCards() {
+      try {
+        const response = await fetch('/api/cards');
+        if (response.ok) {
+          const cardsData = await response.json();
+          setAllCards(cardsData);
+          
+          // Calculate stats from cards data
+          const totalValue = cardsData.reduce((sum, card) => 
+            sum + (card.estimatedValue ? Number(card.estimatedValue) : 0), 0);
+          
+          console.log("Direct cards data:", {
+            cardCount: cardsData.length,
+            totalValue: totalValue
+          });
+          
+          setManualCardCount(cardsData.length);
+          setManualTotalValue(totalValue);
+        }
+      } catch (error) {
+        console.error("Error fetching cards:", error);
+      }
+    }
+    
+    fetchCards();
+  }, []);
+  
+  // Fetch using React Query (for comparison)
   const { data: collectionSummary, isLoading: summaryLoading } = useQuery<{ cardCount: number, totalValue: number }>({
     queryKey: ['/api/collection/summary'],
   });
@@ -47,13 +80,14 @@ export default function Collection() {
         <div className="flex justify-between items-center">
           <div>
             <h3 className="font-medium text-primary-900">My Collection</h3>
-            <p className="text-sm text-primary-700">
-              {summaryLoading ? (
-                <span className="inline-block w-32 h-4 bg-primary-200 rounded animate-pulse"></span>
-              ) : (
-                `${collectionSummary?.cardCount || 0} cards • Est. value: $${collectionSummary?.totalValue?.toLocaleString() || 0}`
-              )}
+            <p className="text-sm text-primary-700 font-medium">
+              {manualCardCount} cards • Est. value: ${manualTotalValue.toLocaleString()}
             </p>
+            {allCards.length > 0 && (
+              <div className="text-xs text-slate-500 mt-1">
+                <strong>Cards detected:</strong> {allCards.map(card => card.playerLastName).join(', ')}
+              </div>
+            )}
           </div>
           <Button className="bg-primary-100 text-primary-800 hover:bg-primary-200">
             Export
