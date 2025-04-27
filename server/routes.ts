@@ -393,6 +393,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const allCards = await storage.getCards();
       const totalValue = allCards.reduce((sum, card) => sum + (card.estimatedValue ? Number(card.estimatedValue) : 0), 0);
       
+      console.log("Collection summary data:", {
+        cardCount: allCards.length,
+        totalValue: totalValue
+      });
+      
       return res.json({
         cardCount: allCards.length,
         totalValue: totalValue
@@ -400,6 +405,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error fetching collection summary:', error);
       return res.status(500).json({ error: 'Failed to fetch collection summary' });
+    }
+  });
+  
+  // Testing route to directly access the endpoint
+  app.get('/test-collection', async (_req, res) => {
+    try {
+      const allCards = await storage.getCards();
+      const totalValue = allCards.reduce((sum, card) => sum + (card.estimatedValue ? Number(card.estimatedValue) : 0), 0);
+      
+      return res.send(`
+        <html>
+          <body>
+            <h1>Collection Summary Test</h1>
+            <p>Card Count: ${allCards.length}</p>
+            <p>Total Value: $${totalValue}</p>
+            <h2>Raw JSON</h2>
+            <pre>${JSON.stringify({ cardCount: allCards.length, totalValue }, null, 2)}</pre>
+          </body>
+        </html>
+      `);
+    } catch (error) {
+      console.error('Error in test route:', error);
+      return res.status(500).send('Error fetching data');
     }
   });
   
