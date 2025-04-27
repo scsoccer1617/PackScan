@@ -115,8 +115,8 @@ export default function ImagePreview({
             className={`relative rounded-lg border-2 ${backImage ? 'border-slate-300' : 'border-dashed border-slate-400'} bg-slate-50 h-36 flex flex-col items-center justify-center overflow-hidden`}
           >
             {backImage ? (
-              <div className="w-full h-full flex items-center justify-center overflow-hidden">
-                <img src={backImage} alt="Card back preview" className="object-cover w-full h-full" />
+              <div className="card-image-container h-auto">
+                <img src={backImage} alt="Card back preview" className="card-image" />
               </div>
             ) : (
               <div className="flex flex-col items-center justify-center p-4">
