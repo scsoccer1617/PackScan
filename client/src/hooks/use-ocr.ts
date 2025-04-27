@@ -79,18 +79,19 @@ export function useOCR(): OCRResult {
       }
       
       // Client-side Chrome Stars of MLB detection fix
-      if (cardInfo.collection === "Stars of MLB" && cardInfo.cardNumber?.startsWith("CSMLB-")) {
-        console.log("CLIENT FIX: Detected CSMLB card number but collection is not Chrome Stars of MLB. Fixing collection name.");
+      if (cardInfo.cardNumber?.startsWith("CSMLB-")) {
+        console.log("CLIENT FIX: Detected CSMLB card number. Setting Chrome variant instead of changing collection.");
         
         cardInfo = {
           ...cardInfo,
-          collection: "Chrome Stars of MLB"
+          collection: "Stars of MLB",
+          variant: "Chrome"
         };
         
-        console.log("CLIENT FIX: Updated collection to Chrome Stars of MLB based on CSMLB card number format.");
+        console.log("CLIENT FIX: Updated to use Chrome variant for Stars of MLB card with CSMLB card number.");
       }
       
-      // Specific fix for Manny Machado Chrome Stars of MLB (CSMLB-44)
+      // Specific fix for Manny Machado Stars of MLB Chrome (CSMLB-44)
       if (cardInfo.cardNumber === "CSMLB-44" && cardInfo.playerFirstName === "Mike" && cardInfo.playerLastName === "Trout") {
         // Potentially a Manny Machado card misidentified as Mike Trout
         console.log("CLIENT FIX: Detected CSMLB-44 with Mike Trout - this is potentially a Manny Machado card.");
