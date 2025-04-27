@@ -1332,7 +1332,13 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     // Extract serial number (like "123/499" or "010/399") - we need to do this FIRST
     // Serial numbers are typically imprinted in foil or different color ink and 
     // located in the bottom right corner of the card
-    const serialNumberAnnotation = textAnnotations.find(annotation => {
+    let serialNumberAnnotation = null;
+    
+    // IMPROVED SERIAL NUMBER DETECTION
+    // This specifically looks for the imprinted serial numbers that appear 
+    // in silver/foil at the bottom right corner of limited edition cards
+    // First pass: Look for serial numbers in the exact format and location
+    serialNumberAnnotation = textAnnotations.find(annotation => {
       const text = annotation.description;
       
       // Skip if this doesn't look like a potential serial number format (e.g., "123/499")
@@ -1341,13 +1347,13 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       const boundingPoly = annotation.boundingPoly;
       if (!boundingPoly || !boundingPoly.vertices) return false;
       
-      // Serial numbers are ONLY in the bottom right corner of the card
-      // Verify it's in the proper location (very specific to serial numbers)
-      const isBottomRight = boundingPoly.vertices.every((v: any) => 
-        v.y > 1500 && v.x > 900);
+      // VERY STRICT: Serial numbers are ONLY in the bottom right corner of the card
+      // This specifically targets the foil-stamped serial numbers that appear in a specific location
+      const isBottomRightCorner = boundingPoly.vertices.every((v: any) => 
+        v.y > 1700 && v.x > 950);
       
-      // Check if this annotation is relatively isolated
-      // Real serial numbers are typically not part of a paragraph or larger text block
+      // Verify this is an isolated number (not part of stats, career info, etc.)
+      // Real serial numbers are ALWAYS isolated from other text
       const isIsolated = textAnnotations.filter(other => {
         if (other === annotation) return false;
         
@@ -1371,12 +1377,13 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
           Math.pow(thisCenter.y - otherCenter.y, 2)
         );
         
-        // If another annotation is very close, this might not be an isolated serial number
-        return distance < 50;
-      }).length < 2; // Less than 2 nearby annotations (itself plus maybe 1 more)
+        // Real serial numbers should have NO other text within 70 pixels
+        // This helps avoid mistaking numbers in tables/stats for serial numbers
+        return distance < 70;
+      }).length < 2; // Only the annotation itself should be detected in this area
       
-      if (isBottomRight && isIsolated) {
-        console.log('Found likely serial number:', text, 'at position:', JSON.stringify(boundingPoly));
+      if (isBottomRightCorner && isIsolated) {
+        console.log('Found imprinted serial number:', text, 'at position:', JSON.stringify(boundingPoly));
         return true;
       }
       
@@ -1387,11 +1394,12 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       result.serialNumber = serialNumberAnnotation.description;
       // This is likely a numbered card (limited edition)
       result.isNumbered = true;
-      console.log('Identified serial number from positioned text:', result.serialNumber);
+      console.log('Identified imprinted serial number from positioned text:', result.serialNumber);
     } else {
       // Clear any serial number that might have been detected incorrectly
       result.serialNumber = "";
       result.isNumbered = false;
+      console.log('No imprinted serial number detected in expected location (bottom right corner)');
     }
     
     // Check for special variants - scan the entire text for common variant keywords

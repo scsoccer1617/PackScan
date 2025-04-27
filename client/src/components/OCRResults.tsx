@@ -371,12 +371,22 @@ export default function OCRResults({ loading, error, data, onApply, onCancel, fo
         <Button variant="outline" onClick={onCancel}>
           Close
         </Button>
-        {!editMode && (
+        {!editMode ? (
           <Button
             onClick={() => setEditMode(true)}
             className="bg-blue-600 hover:bg-blue-500 text-white"
           >
             Edit Card Details
+          </Button>
+        ) : (
+          <Button
+            onClick={() => {
+              applyAndUseDirectly();
+              setEditMode(false);
+            }}
+            className="bg-green-600 hover:bg-green-500 text-white"
+          >
+            Save Changes
           </Button>
         )}
       </CardFooter>

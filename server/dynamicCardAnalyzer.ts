@@ -661,23 +661,28 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>)
 
 /**
  * Extract serial number if present
+ * 
+ * IMPORTANT: Serial numbers should only be detected from specific locations on the card
+ * - Serial numbers are typically imprinted in silver/foil in the bottom right corner of the card
+ * - They have a format like "123/1000" or "123 OF 1000"
+ * - This function should NOT set serial numbers detected from other parts of the card
+ *   (like paragraph text that might mention "10 of 25 players" or similar)
  */
 function extractSerialNumber(text: string, cardDetails: Partial<CardFormValues>): void {
-  // Common serial number patterns (typically low numbers out of a print run)
-  const serialPatterns = [
-    /\b(\d{1,4})\s*\/\s*(\d{1,5})\b/, // Format: 123/1000
-    /\b(\d{1,4})\s+OF\s+(\d{1,5})\b/i // Format: 123 OF 1000
-  ];
+  // REFINED APPROACH:
+  // Since we don't have position data in this function, we need to be extremely cautious
+  // about detecting serial numbers from card stats or other text that might match the pattern
   
-  for (const pattern of serialPatterns) {
-    const match = text.match(pattern);
-    if (match) {
-      cardDetails.serialNumber = match[0];
-      console.log(`Detected serial number: ${cardDetails.serialNumber}`);
-      cardDetails.isNumbered = true;
-      return;
-    }
-  }
+  // We'll be much more restrictive in the plain text analyzer:
+  // - Only process standalone serial numbers (i.e., not embedded in larger text)
+  // - Don't set a serial number from this function at all - leave it to the Vision API
+  //   which can properly detect the position
+  
+  // This function will do nothing - the proper serial number detection happens in 
+  // the Vision API with position detection. This avoids false positives.
+  
+  console.log('Skipping serial number detection in plain text analyzer - will be handled by Vision API with position data');
+  return;
 }
 
 /**
