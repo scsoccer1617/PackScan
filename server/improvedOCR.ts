@@ -1,20 +1,21 @@
 import { Request, Response } from 'express';
 import { analyzeSportsCardImage } from './dynamicCardAnalyzer';
 
+// Define a standalone MulterFile interface that doesn't conflict with built-in types
 interface MulterFile {
   fieldname: string;
   originalname: string;
   encoding: string;
   mimetype: string;
   size: number;
-  destination: string;
-  filename: string;
-  path: string;
+  destination?: string;
+  filename?: string;
+  path?: string;
   buffer: Buffer;
 }
 
-// Extended Express Request with multer file
-interface MulterRequest extends Request {
+// Create a type rather than an interface to avoid conflicts with Express's Request type
+type MulterRequest = Request & {
   file?: MulterFile;
   files?: { [fieldname: string]: MulterFile[] };
 }
