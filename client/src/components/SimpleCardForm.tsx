@@ -281,7 +281,9 @@ export default function SimpleCardForm() {
                     
                     {/* Estimated Value Field */}
                     <div className="space-y-2">
-                      <FormLabel>Estimated Value ($)</FormLabel>
+                      <label className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+                        Estimated Value ($)
+                      </label>
                       <div className="relative">
                         <Input
                           type="number"
