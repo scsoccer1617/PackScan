@@ -1024,7 +1024,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // eBay value lookup
   app.post(`${apiPrefix}/ebay/search-values`, async (req, res) => {
     try {
-      const { playerName, cardNumber, brand, year, collection, condition } = req.query;
+      // Get parameters from body for POST requests
+      const { playerName, cardNumber, brand, year, collection, condition } = req.body;
       
       if (!playerName || !cardNumber || !brand || !year) {
         return res.status(400).json({
@@ -1042,7 +1043,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             playerName as string, 
             cardNumber as string, 
             brand as string, 
-            parseInt(year as string)
+            parseInt(year as string),
+            collection as string
           ),
           averageValue: null,
           results: []
@@ -1055,6 +1057,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         cardNumber as string,
         brand as string,
         parseInt(year as string),
+        collection as string,
         condition as string
       );
       
@@ -1063,7 +1066,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         playerName as string,
         cardNumber as string,
         brand as string,
-        parseInt(year as string)
+        parseInt(year as string),
+        collection as string
       );
       
       return res.json({

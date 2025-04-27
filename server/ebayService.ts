@@ -23,6 +23,7 @@ export async function searchCardValues(
   cardNumber: string,
   brand: string,
   year: number,
+  collection?: string,
   condition?: string
 ): Promise<{ averageValue: number; results: EbaySearchResult[] }> {
   try {
@@ -34,7 +35,20 @@ export async function searchCardValues(
     // Build search query based on card details
     // Note: We intentionally exclude the condition (PSA grade) from the search
     // to get a wider range of results
-    let keywords = `${playerName} ${brand} ${year} ${cardNumber}`;
+    let keywords = `${playerName} ${brand} ${year}`;
+    
+    // For Heritage cards, add "Heritage" to the search query
+    if (typeof collection === 'string' && collection.toLowerCase().includes('heritage')) {
+      keywords += ' Heritage';
+    }
+    
+    // Only add card number to keywords if it's a simple numeric card number
+    // Complex card numbers like "89B-32" don't search well on eBay
+    if (/^\d+$/.test(cardNumber)) {
+      keywords += ` ${cardNumber}`;
+    }
+    
+    console.log('Searching eBay with keywords:', keywords);
 
     // API request parameters
     const params = {
@@ -138,9 +152,23 @@ export function getEbaySearchUrl(
   cardNumber: string,
   brand: string,
   year: number,
+  collection?: string,
   condition?: string
 ): string {
+  // Build a more effective search query
+  let searchTerms = [`${playerName}`, brand, year.toString()];
+  
+  // Add collection if it's Heritage
+  if (collection && collection.toLowerCase().includes('heritage')) {
+    searchTerms.push('Heritage');
+  }
+  
+  // Only add card number if it's a simple number
+  if (/^\d+$/.test(cardNumber)) {
+    searchTerms.push(cardNumber);
+  }
+  
   // Exclude condition (PSA grade) from the search to get wider range of results
-  let keywords = encodeURIComponent(`${playerName} ${brand} ${year} ${cardNumber}`).trim();
+  let keywords = encodeURIComponent(searchTerms.join(' ')).trim();
   return `https://www.ebay.com/sch/i.html?_nkw=${keywords}&_sacat=0&LH_Complete=1&LH_Sold=1`;
 }
