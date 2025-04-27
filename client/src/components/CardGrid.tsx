@@ -59,6 +59,33 @@ export default function CardGrid() {
       grouped[groupKey].push(card);
     });
     
+    // Calculate card quantities for duplicates within each group
+    Object.keys(grouped).forEach(groupKey => {
+      // Create a map to track quantities
+      const cardMap = new Map<string, { card: CardWithRelations, quantity: number }>();
+      
+      // Track cards by their unique identifiers
+      grouped[groupKey].forEach(card => {
+        // Create a unique identifier for each card (combination of attributes)
+        const cardIdentifier = `${card.playerFirstName}_${card.playerLastName}_${card.cardNumber}_${card.variant || ''}_${card.year || ''}`;
+        
+        if (cardMap.has(cardIdentifier)) {
+          // Increment quantity for existing card
+          const existing = cardMap.get(cardIdentifier)!;
+          existing.quantity += 1;
+        } else {
+          // Add new card to map
+          cardMap.set(cardIdentifier, { card, quantity: 1 });
+        }
+      });
+      
+      // Replace the array with de-duplicated cards
+      grouped[groupKey] = Array.from(cardMap.values()).map(item => ({
+        ...item.card,
+        quantity: item.quantity
+      }));
+    });
+    
     // Sort groups by year (newest first), then alphabetically
     const sortedGroups = Array.from(groups).sort((a: string, b: string) => {
       // Extract year from group name (format: "2024 - Topps Stars of MLB")
@@ -264,7 +291,11 @@ export default function CardGrid() {
               <div className="p-3">
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
                   {groupedCards[group]?.map((card) => (
-                    <CardItem key={card.id} card={card} />
+                    <CardItem 
+                      key={card.id} 
+                      card={card} 
+                      quantity={(card as any).quantity || 1} 
+                    />
                   ))}
                 </div>
               </div>
