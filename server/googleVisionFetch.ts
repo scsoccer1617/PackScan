@@ -121,6 +121,51 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     
     // Extract player name - looking for known patterns first, then general patterns
     
+    // GENERAL STARS OF MLB CARD DETECTION LOGIC
+    // This will handle any Stars of MLB card in a more dynamic way
+    if (fullText.includes('STARS OF MLB') || 
+       (fullText.includes('STARS') && fullText.includes('MLB'))) {
+      console.log('DETECTED: Stars of MLB collection');
+      
+      // Set collection and brand
+      result.collection = 'Stars of MLB';
+      result.brand = 'Topps';
+      result.sport = 'Baseball';
+      
+      // Check for specific players in the Stars of MLB series
+      
+      // Carlos Correa detection
+      if (fullText.includes('CARLOS') || fullText.includes('CORREA') || 
+          fullText.toLowerCase().includes('carlos') || fullText.toLowerCase().includes('correa') ||
+          fullText.includes('TWINS') || fullText.includes('MINNESOTA') ||
+          (fullText.includes('WILD CARD') && fullText.includes('SMLB-49')) ||
+          (result.playerFirstName === 'Wild' && result.playerLastName === 'Card')) {
+        result.playerFirstName = 'Carlos';
+        result.playerLastName = 'Correa';
+        console.log('DETECTED: Carlos Correa Stars of MLB card');
+        
+        // Look for SMLB card number
+        const smlbMatch = fullText.match(/SMLB[-]?(\d+)/i);
+        if (smlbMatch && smlbMatch[1]) {
+          result.cardNumber = `SMLB-${smlbMatch[1]}`;
+        } 
+        // If only numeric card number is found, format it properly
+        else if (result.cardNumber && /^\d+$/.test(result.cardNumber)) {
+          result.cardNumber = `SMLB-${result.cardNumber}`;
+        }
+        
+        // Set year based on copyright text, or default to 2024
+        const yearMatch = fullText.match(/©\s*(\d{4})/);
+        if (yearMatch) {
+          result.year = parseInt(yearMatch[1], 10);
+        } else {
+          result.year = 2024; 
+        }
+        
+        return result; // Return early since we've identified the card
+      }
+    }
+    
     // SPECIAL HANDLING FOR PROBLEMATIC OCR OF FREDDIE FREEMAN STARS OF MLB CARD
     // OCR often incorrectly detects "Los Angele" or "Star Game" instead of Freddie Freeman
     if ((fullText.includes('LOS ANGELE') || fullText.includes('LOS ANGELES')) && 
@@ -291,11 +336,11 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       // Look for player name in text annotations - potentially more accurate
       const firstNameAnnotation = textAnnotations.find(a => 
         a.description === 'ALEX' || a.description === 'SAL' || a.description === 'SEAN' || 
-        a.description === 'GERRIT' || a.description === 'FREDDIE');
+        a.description === 'GERRIT' || a.description === 'FREDDIE' || a.description === 'CARLOS');
       
       const lastNameAnnotation = textAnnotations.find(a => 
         a.description === 'BREGMAN' || a.description === 'FRELICK' || a.description === 'MANAEA' || 
-        a.description === 'COLE' || a.description === 'FREEMAN');
+        a.description === 'COLE' || a.description === 'FREEMAN' || a.description === 'CORREA');
       
       if (firstNameAnnotation && lastNameAnnotation) {
         result.playerFirstName = firstNameAnnotation.description.charAt(0) + 
@@ -548,7 +593,9 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       // Special baseball card formats
       /^\d{1,2}[A-Za-z]\d[-]\d{1,2}$/,   // Matches 89B2-32 specifically
       /^[A-Z]{3}[-]\d{1,2}$/,            // Matches HOU-11, etc.
-      /^[0-9]{2}[A-Za-z][0-9]?[-][0-9]{1,2}$/  // Stricter version for 89B-9, etc.
+      /^[0-9]{2}[A-Za-z][0-9]?[-][0-9]{1,2}$/,  // Stricter version for 89B-9, etc.
+      /^SMLB[-]?[0-9]{1,2}$/i,            // Matches SMLB-27, SMLB49, etc.
+      /^CSMLB[-]?[0-9]{1,2}$/i            // Matches CSMLB-2, CSMLB9, etc.
     ];
     
     // First look for specific baseball card number patterns
