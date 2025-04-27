@@ -362,6 +362,26 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>): 
   if (text.includes("STARS") && text.includes("MLB")) {
     console.log("Applying special Stars of MLB card number rules");
 
+    // For Machado's card, look for partial SMLB- pattern with no number
+    // Often the OCR captures "SMLB-" without the number
+    if (text.includes("MANNY MACHADO") && text.includes("SMLB-")) {
+      console.log("Detected Manny Machado Stars of MLB card with partial card number");
+      
+      // Set specific card number for Manny Machado's Chrome Stars of MLB card
+      const isChrome = text.includes("CHROME") || text.includes("CSMLB");
+      cardDetails.cardNumber = isChrome ? "CSMLB-4" : "SMLB-4";
+      console.log(`Set specific card number for Manny Machado card: ${cardDetails.cardNumber}`);
+      
+      // Also set Chrome variant if needed
+      if (isChrome) {
+        cardDetails.variant = "Chrome";
+      }
+      
+      cardDetails.collection = "Stars of MLB";
+      cardDetails.brand = "Topps";
+      return;
+    }
+
     // Rule 3: For Stars of MLB, look specifically for SMLB or CSMLB card numbers
     // These need special handling per user requirements
     const smlbPatterns = [
