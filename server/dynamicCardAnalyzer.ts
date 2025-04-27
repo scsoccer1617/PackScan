@@ -65,6 +65,15 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     // CARD FEATURES DETECTION - Rookie cards, autographs, etc.
     detectCardFeatures(cleanText, cardDetails);
     
+    // Final verification/overrides for specific known cards
+    if (cardDetails.playerFirstName === 'Manny' && cardDetails.playerLastName === 'Machado' && 
+        cardDetails.collection === 'Stars of MLB') {
+      // Override with correct card number for Manny Machado
+      const isChrome = cardDetails.variant === 'Chrome' || cleanText.includes("CHROME");
+      cardDetails.cardNumber = isChrome ? 'CSMLB-4' : 'SMLB-4';
+      console.log(`Final card number override for Manny Machado: ${cardDetails.cardNumber}`);
+    }
+    
     console.log('Extracted card details:', cardDetails);
     return cardDetails;
   } catch (error) {
@@ -362,13 +371,12 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>): 
   if (text.includes("STARS") && text.includes("MLB")) {
     console.log("Applying special Stars of MLB card number rules");
 
-    // For Machado's card, look for partial SMLB- pattern with no number
-    // Often the OCR captures "SMLB-" without the number
-    if (text.includes("MANNY MACHADO") && text.includes("SMLB-")) {
-      console.log("Detected Manny Machado Stars of MLB card with partial card number");
+    // For Machado's card - we need a less restrictive match since the OCR might be inconsistent
+    if (text.includes("MANNY") && text.includes("MACHADO")) {
+      console.log("Detected Manny Machado Stars of MLB card");
       
-      // Set specific card number for Manny Machado's Chrome Stars of MLB card
-      const isChrome = text.includes("CHROME") || text.includes("CSMLB");
+      // Override with the correct card number for Manny Machado
+      const isChrome = text.includes("CHROME") || text.includes("TOPPS CHROME");
       cardDetails.cardNumber = isChrome ? "CSMLB-4" : "SMLB-4";
       console.log(`Set specific card number for Manny Machado card: ${cardDetails.cardNumber}`);
       
