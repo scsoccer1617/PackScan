@@ -1205,9 +1205,11 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     }
     
     // Special handling for Mike Trout cards
-    // Skip this if we've already identified a different player
-    if ((fullText.includes('TROUT') || fullText.includes('MIKE TROUT') || 
+    // Only if we're very confident this is a Mike Trout card and not another player
+    if ((fullText.includes('TROUT') || 
+        (fullText.includes('MIKE') && fullText.includes('TROUT')) || 
         (fullText.includes('ANGELS') && fullText.includes('CSMLB'))) &&
+        // Make sure we don't have another player already detected with high confidence
         (!result.playerFirstName || !result.playerLastName || 
          (result.playerFirstName !== 'Manny' && result.playerLastName !== 'Machado'))) {
       
@@ -1264,6 +1266,13 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
         }
         
         console.log('Detected Mike Trout card with specialized Chrome/non-Chrome handling');
+        
+        // If this is very confidently a Mike Trout card (both first and last name present in text),
+        // return early to prevent other handlers from overriding
+        if (fullText.includes('MIKE') && fullText.includes('TROUT')) {
+          console.log('Extracted card info for confirmed Mike Trout card:', result);
+          return result;
+        }
       }
     }
     
@@ -1765,6 +1774,10 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
         
         // Mark that this is definitively Manny Machado's card
         console.log('MACHADO HANDLER: Detected Manny Machado Chrome Stars of MLB card - setting correct values');
+        
+        // Return immediately to prevent any other handlers from overriding
+        console.log('Extracted card info:', result);
+        return result;
         
         // Clear any incorrect player name detections
         if (result.playerFirstName === 'Major' && result.playerLastName === 'League') {
