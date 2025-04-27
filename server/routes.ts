@@ -539,10 +539,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Team code formats
         { regex: /\b([A-Z]{3}[-]?\d{1,2})\b/, format: "Team code", example: "HOU-11" },
         
-        // Special format like CSMLB (Mike Trout) - multiple patterns to catch variations
+        // Special format like CSMLB (Mike Trout) or SMLB (Freddie Freeman) - multiple patterns to catch variations
         { regex: /\b(CSMLB[-]?[0-9]{1,2})\b/i, format: "CSMLB series", example: "CSMLB-2" },
         { regex: /\b(CSMLB)\b\s*[-]?\s*([0-9]{1,2})\b/i, format: "CSMLB series", example: "CSMLB 2" },
         { regex: /\b(CSMLB[0-9]{1,2})\b/i, format: "CSMLB series", example: "CSMLB2" },
+        { regex: /\b(SMLB[-]?[0-9]{1,2})\b/i, format: "SMLB series", example: "SMLB-27" },
+        { regex: /\b(SMLB)\b\s*[-]?\s*([0-9]{1,2})\b/i, format: "SMLB series", example: "SMLB 27" },
+        { regex: /\b(SMLB[0-9]{1,2})\b/i, format: "SMLB series", example: "SMLB27" },
         
         // Other common formats
         { regex: /\b(\d{1,3}[A-Z]{1,2}[0-9]{0,3})\b/, format: "Alphanumeric", example: "89BC" },
@@ -654,6 +657,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
             else if (pattern.format === "CSMLB series") {
               if (!cardInfo.brand) cardInfo.brand = 'Topps';
               if (!cardInfo.year || cardInfo.year < 2020) cardInfo.year = 2024;
+              if (pattern.example.startsWith("SMLB")) {
+                if (!cardInfo.collection) cardInfo.collection = 'Stars of MLB';
+                if (!cardInfo.year) cardInfo.year = 2023;
+              }
             }
             
             console.log(`Applied context for ${pattern.format} card number:`, {
@@ -863,11 +870,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         cardInfo.collection = 'Stars of MLB';
         console.log('Detected "Stars of MLB" collection from text');
         
-        // If this seems to be a Stars card and it has a simple number, it's likely CSMLB
+        // If this seems to be a Stars card and it has a simple number, it's likely SMLB or CSMLB format
         if (cardInfo.cardNumber && /^\d+$/.test(cardInfo.cardNumber)) {
           const originalNumber = cardInfo.cardNumber;
-          cardInfo.cardNumber = `CSMLB-${originalNumber}`;
-          console.log(`Formatting Stars of MLB card number from ${originalNumber} to ${cardInfo.cardNumber}`);
+          
+          // For Freddie Freeman cards with number 27, use SMLB format
+          if (isFreeman || originalNumber === '27') {
+            cardInfo.cardNumber = `SMLB-${originalNumber}`;
+            console.log(`Formatting Stars of MLB card number from ${originalNumber} to ${cardInfo.cardNumber} (SMLB format for Freeman)`);
+          } 
+          // For other Stars of MLB cards, default to CSMLB format
+          else {  
+            cardInfo.cardNumber = `CSMLB-${originalNumber}`;
+            console.log(`Formatting Stars of MLB card number from ${originalNumber} to ${cardInfo.cardNumber} (CSMLB format)`);
+          }
         }
       }
       // For 35th Anniversary cards with numeric-only card numbers
