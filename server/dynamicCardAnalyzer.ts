@@ -689,11 +689,21 @@ function extractSerialNumber(text: string, cardDetails: Partial<CardFormValues>)
  * Detect special card features (rookie, autograph, etc.)
  */
 function detectCardFeatures(text: string, cardDetails: Partial<CardFormValues>): void {
-  // Rookie card detection
-  if (text.includes('ROOKIE') || text.includes('RC') || text.includes('R.C.') || 
-      text.includes('FIRST YEAR') || text.includes('DEBUT')) {
+  // Enhanced Rookie card detection
+  // Look for any of these common rookie indicators on cards
+  const rookieIndicators = [
+    'ROOKIE', 'RC', 'R.C.', 'FIRST YEAR', 'DEBUT', 
+    'ROOKIE CARD', '1ST YEAR', 'FIRST MLB', '1ST MLB'
+  ];
+  
+  // Check if any rookie indicator is present in the text
+  const hasRookieIndicator = rookieIndicators.some(indicator => 
+    text.includes(indicator)
+  );
+  
+  if (hasRookieIndicator) {
     cardDetails.isRookieCard = true;
-    console.log('Detected rookie card');
+    console.log('Detected rookie card indicator');
   }
   
   // Autograph detection

@@ -1402,11 +1402,22 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       console.log('No imprinted serial number detected in expected location (bottom right corner)');
     }
     
-    // Check for special variants - scan the entire text for common variant keywords
+    // Check for Rookie Card indicators
+    // RC logo or text that indicates rookie status
     if (fullText.includes('RC') || fullText.includes('ROOKIE') || 
-        lowerText.includes('rookie card')) {
-      result.variant = 'Rookie';
-    } else if (fullText.includes('AQUA') || lowerText.includes('aqua foil')) {
+        lowerText.includes('rookie card') || lowerText.includes('rookie')) {
+      // Mark this as a rookie card
+      result.isRookieCard = true;
+      console.log('Detected rookie card indicator (RC logo or text)');
+      
+      // Also set the variant if it's a special rookie variant
+      if (!result.variant) {
+        result.variant = 'Rookie';
+      }
+    } 
+    
+    // Check for other variants
+    if (fullText.includes('AQUA') || lowerText.includes('aqua foil')) {
       result.variant = 'Aqua Foil';
     }
     
