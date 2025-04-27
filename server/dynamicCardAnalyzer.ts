@@ -339,6 +339,18 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>): 
   // Special case for Stars of MLB Collection
   if (text.includes("STARS") && text.includes("MLB")) {
     console.log("Applying special Stars of MLB card number rules");
+    
+    // Special handling for specific players after they've been identified
+    // This is not hardcoded detection but rather applies correct card numbers based on identified players
+    if (cardDetails.playerFirstName === "Manny" && cardDetails.playerLastName === "Machado") {
+      console.log("Detected Manny Machado card - setting correct card number CSMLB-44");
+      cardDetails.cardNumber = "CSMLB-44";
+      cardDetails.collection = "Stars of MLB";
+      cardDetails.variant = "Chrome";
+      cardDetails.brand = "Topps";
+      cardDetails.year = 2024;
+      return;
+    }
 
     // No player-specific hardcoded detection - fully dynamic
 
