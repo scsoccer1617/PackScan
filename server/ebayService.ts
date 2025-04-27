@@ -35,16 +35,31 @@ export async function searchCardValues(
     // Build search query based on card details
     // Note: We intentionally exclude the condition (PSA grade) from the search
     // to get a wider range of results
-    let keywords = `${playerName} ${brand} ${year}`;
     
-    // For Heritage cards, add "Heritage" to the search query
+    // Split player name into first and last name for more flexible search
+    const nameComponents = playerName.split(' ');
+    const lastName = nameComponents.length > 1 ? nameComponents[nameComponents.length - 1] : playerName;
+    
+    // For special cards like Heritage, we need to be more specific
+    let isHeritage = false;
     if (typeof collection === 'string' && collection.toLowerCase().includes('heritage')) {
-      keywords += ' Heritage';
+      isHeritage = true;
     }
     
-    // Only add card number to keywords if it's a simple numeric card number
-    // Complex card numbers like "89B-32" don't search well on eBay
-    if (/^\d+$/.test(cardNumber)) {
+    // Construct a more flexible search query
+    let keywords = '';
+    
+    if (isHeritage) {
+      // For Heritage cards, we use a more specific format that works better
+      keywords = `${lastName} ${brand} Heritage ${year}`;
+    } else {
+      // For regular cards, we use a broader search
+      keywords = `${lastName} ${brand} ${year}`;
+    }
+    
+    // Try to add card number if appropriate
+    // For Heritage cards, if the card number is numeric, include it
+    if (isHeritage && /^\d+$/.test(cardNumber)) {
       keywords += ` ${cardNumber}`;
     }
     
@@ -52,19 +67,21 @@ export async function searchCardValues(
 
     // API request parameters
     const params = {
-      'OPERATION-NAME': 'findCompletedItems',
+      'OPERATION-NAME': 'findItemsByKeywords',
       'SERVICE-VERSION': '1.0.0',
       'SECURITY-APPNAME': EBAY_APP_ID,
+      'GLOBAL-ID': 'EBAY-US',
       'RESPONSE-DATA-FORMAT': 'JSON',
       'REST-PAYLOAD': true,
       'keywords': keywords,
-      'itemFilter(0).name': 'SoldItemsOnly',
-      'itemFilter(0).value': 'true',
+      'categoryId': '212', // Sports Mem, Cards & Fan Shop
+      'itemFilter(0).name': 'Condition',
+      'itemFilter(0).value': 'Used',
       'itemFilter(1).name': 'ListingType',
       'itemFilter(1).value(0)': 'FixedPrice',
       'itemFilter(1).value(1)': 'Auction',
-      'sortOrder': 'EndTimeSoonest',
-      'paginationInput.entriesPerPage': 10
+      'sortOrder': 'BestMatch',
+      'paginationInput.entriesPerPage': 20 // Increased from 10 to get more results
     };
 
     // Make the API request
@@ -79,13 +96,13 @@ export async function searchCardValues(
     // Check if we have search results
     if (
       data && 
-      data.findCompletedItemsResponse && 
-      data.findCompletedItemsResponse[0] && 
-      data.findCompletedItemsResponse[0].searchResult && 
-      data.findCompletedItemsResponse[0].searchResult[0] && 
-      data.findCompletedItemsResponse[0].searchResult[0].item
+      data.findItemsByKeywordsResponse && 
+      data.findItemsByKeywordsResponse[0] && 
+      data.findItemsByKeywordsResponse[0].searchResult && 
+      data.findItemsByKeywordsResponse[0].searchResult[0] && 
+      data.findItemsByKeywordsResponse[0].searchResult[0].item
     ) {
-      const items = data.findCompletedItemsResponse[0].searchResult[0].item;
+      const items = data.findItemsByKeywordsResponse[0].searchResult[0].item;
       
       // Process each item
       results = items.map((item: any) => {
@@ -155,20 +172,28 @@ export function getEbaySearchUrl(
   collection?: string,
   condition?: string
 ): string {
-  // Build a more effective search query
-  let searchTerms = [`${playerName}`, brand, year.toString()];
+  // Split player name into first and last name for more flexible search
+  const nameComponents = playerName.split(' ');
+  const lastName = nameComponents.length > 1 ? nameComponents[nameComponents.length - 1] : playerName;
   
-  // Add collection if it's Heritage
-  if (collection && collection.toLowerCase().includes('heritage')) {
-    searchTerms.push('Heritage');
+  // Determine if this is a Heritage card
+  const isHeritage = collection && collection.toLowerCase().includes('heritage');
+  
+  // Build search terms using same logic as API search
+  let keywords = '';
+  
+  if (isHeritage) {
+    keywords = `${lastName} ${brand} Heritage ${year}`;
+    if (/^\d+$/.test(cardNumber)) {
+      keywords += ` ${cardNumber}`;
+    }
+  } else {
+    keywords = `${lastName} ${brand} ${year}`;
+    if (/^\d+$/.test(cardNumber)) {
+      keywords += ` ${cardNumber}`;
+    }
   }
   
-  // Only add card number if it's a simple number
-  if (/^\d+$/.test(cardNumber)) {
-    searchTerms.push(cardNumber);
-  }
-  
-  // Exclude condition (PSA grade) from the search to get wider range of results
-  let keywords = encodeURIComponent(searchTerms.join(' ')).trim();
-  return `https://www.ebay.com/sch/i.html?_nkw=${keywords}&_sacat=0&LH_Complete=1&LH_Sold=1`;
+  // Encode for URL
+  return `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(keywords)}&_sacat=0&LH_Complete=1&LH_Sold=1`;
 }
