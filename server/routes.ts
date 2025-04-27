@@ -52,6 +52,19 @@ interface MulterRequest extends Request {
  */
 export async function registerRoutes(app: Express): Promise<Server> {
   const apiPrefix = '/api';
+  
+  // Serve static files from uploads directory
+  const uploadsDir = join(process.cwd(), 'uploads');
+  if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+  }
+  app.use('/uploads', express.static(uploadsDir));
+  
+  // Also try to serve from the old path for backward compatibility
+  const oldUploadsDir = join(process.cwd(), 'dist', 'public', 'uploads');
+  if (fs.existsSync(oldUploadsDir)) {
+    app.use('/uploads', express.static(oldUploadsDir));
+  }
 
   // Basic health check route
   app.get('/health', (_req, res) => {
