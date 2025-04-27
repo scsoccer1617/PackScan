@@ -83,11 +83,6 @@ export default function Collection() {
             <p className="text-sm text-primary-700 font-medium">
               {manualCardCount} cards • Est. value: ${manualTotalValue.toLocaleString()}
             </p>
-            {allCards.length > 0 && (
-              <div className="text-xs text-slate-500 mt-1">
-                <strong>Cards detected:</strong> {allCards.map(card => card.playerLastName).join(', ')}
-              </div>
-            )}
           </div>
           <Button className="bg-primary-100 text-primary-800 hover:bg-primary-200">
             Export

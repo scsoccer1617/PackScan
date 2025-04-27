@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { formatCurrency } from "@/lib/utils";
+import { useState, useEffect } from "react";
 
 interface SportDistribution {
   name: string;
@@ -23,11 +24,71 @@ interface StatsData {
 const COLORS = ['#3b82f6', '#f97316', '#22c55e', '#8b5cf6', '#ec4899'];
 
 export default function StatsCharts() {
-  const { data, isLoading, error } = useQuery<StatsData>({
+  const [directSportData, setDirectSportData] = useState<SportDistribution[]>([]);
+  const [directYearData, setDirectYearData] = useState<YearValue[]>([]);
+  const [isDirectLoading, setIsDirectLoading] = useState(true);
+  
+  // Direct API call to calculate chart data
+  useEffect(() => {
+    async function fetchCardsForStats() {
+      try {
+        setIsDirectLoading(true);
+        const response = await fetch('/api/cards');
+        if (response.ok) {
+          const cards = await response.json();
+          
+          // Calculate sport distribution
+          const sportCounts = {};
+          cards.forEach(card => {
+            const sportName = card.sport?.name || 'Unknown';
+            sportCounts[sportName] = (sportCounts[sportName] || 0) + 1;
+          });
+          
+          const sportDistribution = Object.entries(sportCounts).map(([name, value], index) => ({
+            name,
+            value: value as number,
+            color: COLORS[index % COLORS.length]
+          }));
+          
+          // Calculate year distribution
+          const yearValues = {};
+          cards.forEach(card => {
+            const year = card.year?.toString() || 'Unknown';
+            const value = card.estimatedValue ? Number(card.estimatedValue) : 0;
+            yearValues[year] = (yearValues[year] || 0) + value;
+          });
+          
+          const valueByYear = Object.entries(yearValues).map(([year, value]) => ({
+            year,
+            value: value as number
+          }));
+          
+          console.log("Stats charts - direct data:", {
+            sportDistribution,
+            valueByYear
+          });
+          
+          setDirectSportData(sportDistribution);
+          setDirectYearData(valueByYear);
+        }
+      } catch (error) {
+        console.error("Error fetching cards for stats charts:", error);
+      } finally {
+        setIsDirectLoading(false);
+      }
+    }
+    
+    fetchCardsForStats();
+  }, []);
+  
+  // Reference only - no longer using this data
+  const { isLoading, error } = useQuery<StatsData>({
     queryKey: ['/api/stats/charts'],
+    enabled: false // Disable the query since we're using direct data
   });
 
-  if (isLoading) {
+  // Use loading state while direct data is being fetched
+  if (isDirectLoading) {
     return (
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
         <Card>
@@ -51,38 +112,8 @@ export default function StatsCharts() {
     );
   }
 
-  if (error || !data) {
-    return (
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm font-medium text-slate-500">Cards by Sport</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="h-48 flex items-center justify-center bg-slate-50 rounded">
-              <p className="text-slate-400">No data available</p>
-            </div>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm font-medium text-slate-500">Value by Year</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="h-48 flex items-center justify-center bg-slate-50 rounded">
-              <p className="text-slate-400">No data available</p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  const { sportDistribution, valueByYear } = data;
-
-  // If we have no data, show empty state
-  if (sportDistribution.length === 0 && valueByYear.length === 0) {
+  // If we have no direct data, show empty state
+  if (directSportData.length === 0 && directYearData.length === 0) {
     return (
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
         <Card>
@@ -110,6 +141,7 @@ export default function StatsCharts() {
     );
   }
 
+  // Use direct data from the cards
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
       <Card>
@@ -121,7 +153,7 @@ export default function StatsCharts() {
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie
-                  data={sportDistribution}
+                  data={directSportData}
                   cx="50%"
                   cy="50%"
                   labelLine={false}
@@ -130,7 +162,7 @@ export default function StatsCharts() {
                   dataKey="value"
                   label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
                 >
-                  {sportDistribution.map((entry, index) => (
+                  {directSportData.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                   ))}
                 </Pie>
@@ -149,7 +181,7 @@ export default function StatsCharts() {
           <div className="h-48">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart
-                data={valueByYear}
+                data={directYearData}
                 margin={{
                   top: 5,
                   right: 30,
