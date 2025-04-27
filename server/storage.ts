@@ -479,10 +479,17 @@ export const storage = {
   // Save images to file system
   async saveImage(base64Data: string, filename: string): Promise<string> {
     try {
-      // Create uploads directory if it doesn't exist
-      const uploadsDir = path.join(process.cwd(), 'dist', 'public', 'uploads');
+      // Create uploads directory in both locations for compatibility 
+      // Main uploads dir
+      const uploadsDir = path.join(process.cwd(), 'uploads');
       if (!fs.existsSync(uploadsDir)) {
         fs.mkdirSync(uploadsDir, { recursive: true });
+      }
+      
+      // Also create the old directory structure for backward compatibility
+      const oldUploadsDir = path.join(process.cwd(), 'dist', 'public', 'uploads');
+      if (!fs.existsSync(oldUploadsDir)) {
+        fs.mkdirSync(oldUploadsDir, { recursive: true });
       }
       
       // Extract the actual base64 data (remove the data:image/jpeg;base64, part)
@@ -491,8 +498,12 @@ export const storage = {
         throw new Error('Invalid image data');
       }
       
+      // Save to both locations for compatibility
       const filePath = path.join(uploadsDir, filename);
       fs.writeFileSync(filePath, base64Image, { encoding: 'base64' });
+      
+      const oldFilePath = path.join(oldUploadsDir, filename);
+      fs.writeFileSync(oldFilePath, base64Image, { encoding: 'base64' });
       
       // Return the relative URL for the image
       return `/uploads/${filename}`;

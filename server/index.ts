@@ -1,10 +1,25 @@
 import express, { type Request, Response, NextFunction } from "express";
+import fs from 'fs';
+import path from 'path';
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 
 const app = express();
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ extended: true, limit: '20mb' }));
+
+// Serve static files from the uploads directory
+const uploadsDir = path.join(process.cwd(), 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+app.use('/uploads', express.static(uploadsDir));
+
+// Also try to serve from the old path for backward compatibility
+const oldUploadsDir = path.join(process.cwd(), 'dist', 'public', 'uploads');
+if (fs.existsSync(oldUploadsDir)) {
+  app.use('/uploads', express.static(oldUploadsDir));
+}
 
 app.use((req, res, next) => {
   const start = Date.now();
