@@ -171,8 +171,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         variant: cardData.variant || null,
         serialNumber: cardData.serialNumber || null,
         estimatedValue: cardData.estimatedValue ? Number(cardData.estimatedValue) : 0,
-        frontImageUrl: null,
-        backImageUrl: null,
+        frontImage: null,
+        backImage: null,
         isRookieCard: cardData.isRookieCard || false,
         isAutographed: cardData.isAutographed || false,
         isNumbered: cardData.isNumbered || false,
@@ -187,7 +187,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           cardData.frontImage.split(',')[1],
           frontImageFilename
         );
-        cardInsertData.frontImageUrl = frontImageUrl;
+        cardInsertData.frontImage = frontImageUrl;
       }
       
       // Save back image if provided
@@ -197,7 +197,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           cardData.backImage.split(',')[1],
           backImageFilename
         );
-        cardInsertData.backImageUrl = backImageUrl;
+        cardInsertData.backImage = backImageUrl;
       }
       
       // Insert card to database
@@ -211,8 +211,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             newCard, 
             cardData.sport || '', 
             cardData.brand || '',
-            cardInsertData.frontImageUrl || undefined,
-            cardInsertData.backImageUrl || undefined
+            cardInsertData.frontImage || undefined,
+            cardInsertData.backImage || undefined
           );
           sheetsSaved = true;
         }
@@ -306,7 +306,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           updateData.frontImage.split(',')[1],
           frontImageFilename
         );
-        updateFields.frontImageUrl = frontImageUrl;
+        updateFields.frontImage = frontImageUrl;
       }
       
       // Update back image if provided
@@ -316,7 +316,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           updateData.backImage.split(',')[1],
           backImageFilename
         );
-        updateFields.backImageUrl = backImageUrl;
+        updateFields.backImage = backImageUrl;
       }
       
       // Update the card in the database
@@ -333,8 +333,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             updatedCard,
             sportName,
             brandName,
-            updateFields.frontImageUrl || existingCard.frontImageUrl || undefined,
-            updateFields.backImageUrl || existingCard.backImageUrl || undefined
+            updateFields.frontImage || existingCard.frontImage || undefined,
+            updateFields.backImage || existingCard.backImage || undefined
           );
           sheetsSaved = true;
         }
