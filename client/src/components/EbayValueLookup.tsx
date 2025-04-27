@@ -160,26 +160,29 @@ export default function EbayValueLookup({
 
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
-      <Button 
-        variant="default" 
-        className="w-full bg-blue-600 hover:bg-blue-700" 
-        onClick={openEbaySearch}
-        disabled={loading || !playerName || !cardNumber || !brand || !year}
-      >
-        {loading ? (
-          <>
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            Looking up value...
-          </>
-        ) : (
-          <>
-            <DollarSign className="mr-2 h-4 w-4" />
-            Look up eBay value
-          </>
-        )}
-      </Button>
-      <DialogTrigger asChild className="hidden">
-        <button>Hidden trigger</button>
+      <DialogTrigger asChild>
+        <Button 
+          variant="default" 
+          className="w-full bg-blue-600 hover:bg-blue-700" 
+          onClick={() => {
+            // Open dialog first, then look up values
+            setIsOpen(true);
+            lookupValue();
+          }}
+          disabled={loading || !playerName || !cardNumber || !brand || !year}
+        >
+          {loading ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Looking up value...
+            </>
+          ) : (
+            <>
+              <DollarSign className="mr-2 h-4 w-4" />
+              Look up eBay value
+            </>
+          )}
+        </Button>
       </DialogTrigger>
       
       <DialogContent className="sm:max-w-md">
@@ -204,14 +207,23 @@ export default function EbayValueLookup({
             {results.status === 'unconfigured' ? (
               <div className="p-4 bg-muted rounded-md">
                 <p className="mb-2 text-sm">eBay API is not configured yet. You can still view sold listings on eBay:</p>
-                <Button 
-                  variant="outline" 
-                  className="w-full mt-2"
-                  onClick={() => window.open(results.searchUrl, '_blank')}
-                >
-                  <ExternalLink className="mr-2 h-4 w-4" />
-                  View on eBay
-                </Button>
+                <div className="flex flex-col gap-2">
+                  <Button 
+                    variant="outline" 
+                    className="w-full"
+                    onClick={() => window.open(results.searchUrl, '_blank')}
+                  >
+                    <ExternalLink className="mr-2 h-4 w-4" />
+                    View on eBay
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    className="w-full"
+                    onClick={() => setIsOpen(false)}
+                  >
+                    Back to Card Info
+                  </Button>
+                </div>
               </div>
             ) : (
               <>
@@ -229,14 +241,23 @@ export default function EbayValueLookup({
                   </div>
                 ) : (
                   <div className="p-4 bg-muted rounded-md">
-                    <Button 
-                      variant="default" 
-                      className="w-full mb-3"
-                      onClick={() => window.open(results.searchUrl, '_blank')}
-                    >
-                      <ExternalLink className="mr-2 h-4 w-4" />
-                      View on eBay
-                    </Button>
+                    <div className="flex flex-col gap-2">
+                      <Button 
+                        variant="default" 
+                        className="w-full"
+                        onClick={() => window.open(results.searchUrl, '_blank')}
+                      >
+                        <ExternalLink className="mr-2 h-4 w-4" />
+                        View on eBay
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        className="w-full"
+                        onClick={() => setIsOpen(false)}
+                      >
+                        Back to Card Info
+                      </Button>
+                    </div>
                   </div>
                 )}
                 
