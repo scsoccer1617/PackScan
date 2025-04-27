@@ -443,19 +443,20 @@ export default function SimpleCardForm() {
                 {/* Card Features */}
                 <div className="mt-2">
                   <h3 className="text-sm font-medium text-slate-700 mb-2">Card Features</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="flex flex-wrap gap-6">
                     <FormField
                       control={form.control}
                       name="isRookieCard"
                       render={({ field }) => (
-                        <FormItem className="flex flex-row items-center space-x-3 space-y-0">
+                        <FormItem className="flex flex-row items-center space-x-2 space-y-0">
                           <FormControl>
                             <Checkbox
                               checked={field.value}
                               onCheckedChange={field.onChange}
+                              className="h-5 w-5"
                             />
                           </FormControl>
-                          <FormLabel className="font-normal">Rookie Card</FormLabel>
+                          <FormLabel className="font-normal text-sm ml-2">Rookie Card</FormLabel>
                         </FormItem>
                       )}
                     />
@@ -464,14 +465,15 @@ export default function SimpleCardForm() {
                       control={form.control}
                       name="isAutographed"
                       render={({ field }) => (
-                        <FormItem className="flex flex-row items-center space-x-3 space-y-0">
+                        <FormItem className="flex flex-row items-center space-x-2 space-y-0">
                           <FormControl>
                             <Checkbox
                               checked={field.value}
                               onCheckedChange={field.onChange}
+                              className="h-5 w-5"
                             />
                           </FormControl>
-                          <FormLabel className="font-normal">Autographed</FormLabel>
+                          <FormLabel className="font-normal text-sm ml-2">Autographed</FormLabel>
                         </FormItem>
                       )}
                     />
@@ -480,14 +482,15 @@ export default function SimpleCardForm() {
                       control={form.control}
                       name="isNumbered"
                       render={({ field }) => (
-                        <FormItem className="flex flex-row items-center space-x-3 space-y-0">
+                        <FormItem className="flex flex-row items-center space-x-2 space-y-0">
                           <FormControl>
                             <Checkbox
                               checked={field.value}
                               onCheckedChange={field.onChange}
+                              className="h-5 w-5"
                             />
                           </FormControl>
-                          <FormLabel className="font-normal">Numbered</FormLabel>
+                          <FormLabel className="font-normal text-sm ml-2">Numbered</FormLabel>
                         </FormItem>
                       )}
                     />
