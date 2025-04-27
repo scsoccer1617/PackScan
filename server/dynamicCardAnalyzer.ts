@@ -83,7 +83,27 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>): 
     
     // For Stars of MLB cards, we'll try multiple focused approaches
     
-    // First try: Look for card number followed immediately by a player name
+    // First try: Look for a player name line that's prominent in Stars of MLB cards
+    // This pattern looks for a name that's likely to be the player name (all caps, 2 words)
+    const nameLinePattern = /\n([A-Z]+)\s+([A-Z]+)\s*\n/;
+    const nameLineMatch = text.match(nameLinePattern);
+    
+    if (nameLineMatch) {
+      cardDetails.playerFirstName = nameLineMatch[1].toLowerCase()
+        .split(' ')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+        .join(' ');
+        
+      cardDetails.playerLastName = nameLineMatch[2].toLowerCase()
+        .split(' ')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+        .join(' ');
+      
+      console.log(`Detected Stars of MLB player name from caption: ${cardDetails.playerFirstName} ${cardDetails.playerLastName}`);
+      return;
+    }
+    
+    // Second try: Look for card number followed immediately by a player name
     // Example: "SMLB-27 FREDDIE FREEMAN" or "CSMLB-2 MIKE TROUT"
     const cardNumberNamePattern = /\b(?:SMLB|CSMLB)[-]?\d+\s+([A-Z]+)\s+([A-Z]+)\b/i;
     const cardNumberNameMatch = text.match(cardNumberNamePattern);
@@ -103,7 +123,27 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>): 
       return;
     }
     
-    // Second try: Look for names near team names, which are common in Star of MLB cards
+    // Second try: Look for player name followed by team name and position
+    // Find patterns like "MANNY MACHADO SAN DIEGO PADRES | 3B"
+    const playerTeamPositionPattern = /([A-Z]+)\s+([A-Z]+)\s+([A-Z\s]+)\s*[|]\s*([0-9A-Z]+)/;
+    const playerTeamMatch = text.match(playerTeamPositionPattern);
+    
+    if (playerTeamMatch) {
+      cardDetails.playerFirstName = playerTeamMatch[1].toLowerCase()
+        .split(' ')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+        .join(' ');
+        
+      cardDetails.playerLastName = playerTeamMatch[2].toLowerCase()
+        .split(' ')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+        .join(' ');
+      
+      console.log(`Detected Stars of MLB player name with team and position: ${cardDetails.playerFirstName} ${cardDetails.playerLastName}`);
+      return;
+    }
+    
+    // Third try: Look for names near team names, which are common in Star of MLB cards
     const teams = ['YANKEES', 'RED SOX', 'DODGERS', 'CUBS', 'ANGELS', 'BRAVES', 'TWINS', 'PADRES', 'BREWERS', 'ASTROS'];
     
     for (const team of teams) {
@@ -123,8 +163,8 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>): 
           // Basic validation - verify these look like names
           if (potentialFirstName && potentialLastName && 
               !/[0-9*#@<>]/.test(potentialFirstName + potentialLastName) &&
-              !['MAJOR', 'LEAGUE', 'BASEBALL', 'TRADING', 'CARD', 'TOPPS'].includes(potentialFirstName) &&
-              !['MAJOR', 'LEAGUE', 'BASEBALL', 'TRADING', 'CARD', 'TOPPS'].includes(potentialLastName)) {
+              !['MAJOR', 'LEAGUE', 'BASEBALL', 'TRADING', 'CARD', 'TOPPS', 'SAN', 'LOS'].includes(potentialFirstName) &&
+              !['MAJOR', 'LEAGUE', 'BASEBALL', 'TRADING', 'CARD', 'TOPPS', 'DIEGO', 'ANGELES'].includes(potentialLastName)) {
             
             cardDetails.playerFirstName = potentialFirstName.toLowerCase()
               .split(' ')
@@ -184,6 +224,11 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>): 
         cardDetails.playerFirstName = "Carlos";
         cardDetails.playerLastName = "Correa";
         console.log(`Detected player from card number ${cardDetails.cardNumber}: Carlos Correa`);
+        return;
+      } else if (cardDetails.cardNumber.includes("CSMLB-12") || cardDetails.cardNumber.includes("CSMLB12")) {
+        cardDetails.playerFirstName = "Manny";
+        cardDetails.playerLastName = "Machado";
+        console.log(`Detected player from card number ${cardDetails.cardNumber}: Manny Machado`);
         return;
       }
     }
@@ -368,10 +413,11 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>): 
         console.log(`Detected Stars of MLB card number: ${cardDetails.cardNumber}`);
         
         // Also set the collection and other metadata
+        // Handle Chrome as a variant, not a separate collection
+        cardDetails.collection = "Stars of MLB";
+        
         if (pattern.format.includes("Chrome")) {
-          cardDetails.collection = "Chrome Stars of MLB";
-        } else {
-          cardDetails.collection = "Stars of MLB";
+          cardDetails.variant = "Chrome";
         }
         
         cardDetails.brand = "Topps";
@@ -390,8 +436,11 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>): 
       cardDetails.cardNumber = `${prefix}-${numberMatch[1]}`;
       console.log(`Constructed Stars of MLB card number from numeric part: ${cardDetails.cardNumber}`);
       
-      // Set collection
-      cardDetails.collection = isChrome ? "Chrome Stars of MLB" : "Stars of MLB";
+      // Set collection and handle Chrome as a variant
+      cardDetails.collection = "Stars of MLB";
+      if (isChrome) {
+        cardDetails.variant = "Chrome";
+      }
       cardDetails.brand = "Topps";
       return;
     }
