@@ -1,7 +1,7 @@
 import { useState } from "react";
 import SimpleImageUploader from "@/components/SimpleImageUploader";
 import { Button } from "@/components/ui/button";
-import { ScanSearch } from "lucide-react";
+import { ScanSearch, Edit2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Form, FormField, FormItem, FormLabel, FormControl, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
@@ -21,6 +21,7 @@ export default function SimpleCardForm() {
   const [frontImage, setFrontImage] = useState<string>("");
   const [backImage, setBackImage] = useState<string>("");
   const [showOCRResults, setShowOCRResults] = useState<boolean>(false);
+  const [showFormFields, setShowFormFields] = useState<boolean>(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
   
@@ -63,6 +64,7 @@ export default function SimpleCardForm() {
       // Use the back image for OCR since it contains the card number and details
       await analyzeImage(backImage, form);
       setShowOCRResults(true);
+      setShowFormFields(false); // Hide form fields when showing OCR results
     } catch (error) {
       toast({
         title: "Analysis Failed",
@@ -132,6 +134,7 @@ export default function SimpleCardForm() {
       form.reset();
       setFrontImage("");
       setBackImage("");
+      setShowFormFields(false);
       
       // Invalidate cards query to refresh the collection
       queryClient.invalidateQueries({ queryKey: ['/api/cards'] });
@@ -182,6 +185,18 @@ export default function SimpleCardForm() {
     }
     
     createCardMutation.mutate(data);
+  };
+
+  // Handle cancellation of OCR results view
+  const handleOCRCancel = () => {
+    setShowOCRResults(false);
+    // Show form fields if user cancels OCR
+    setShowFormFields(true);
+  };
+
+  // Handle edit button click to show the form fields 
+  const handleEditClick = () => {
+    setShowFormFields(true);
   };
   
   return (
@@ -240,13 +255,27 @@ export default function SimpleCardForm() {
                 data={ocrData}
                 form={form}
                 onApply={applyOCRResults}
-                onCancel={() => setShowOCRResults(false)}
+                onCancel={handleOCRCancel}
               />
             )}
           </div>
           
-          {/* Hide the form when OCR results are shown */}
-          {!showOCRResults && (
+          {/* Show edit button if we have images but no form fields or OCR results */}
+          {!showOCRResults && !showFormFields && (frontImage || backImage) && (
+            <div className="flex justify-center">
+              <Button 
+                onClick={handleEditClick} 
+                variant="outline" 
+                className="mt-2 mb-4"
+              >
+                <Edit2 className="h-4 w-4 mr-2" />
+                Edit Card Details Manually
+              </Button>
+            </div>
+          )}
+          
+          {/* Show form fields only when explicitly requested */}
+          {!showOCRResults && showFormFields && (
             <Form {...form}>
               <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-4">
                 <FormField
@@ -439,62 +468,62 @@ export default function SimpleCardForm() {
                       </FormItem>
                     )}
                   />
-                  
-                  {/* Card Features */}
-                  <div className="mt-2">
-                    <h3 className="text-sm font-medium text-slate-700 mb-2">Card Features</h3>
-                    <div className="flex flex-wrap gap-6">
-                      <FormField
-                        control={form.control}
-                        name="isRookieCard"
-                        render={({ field }) => (
-                          <FormItem className="flex flex-row items-center space-x-2 space-y-0">
-                            <FormControl>
-                              <Checkbox
-                                checked={field.value}
-                                onCheckedChange={field.onChange}
-                                className="h-5 w-5"
-                              />
-                            </FormControl>
-                            <FormLabel className="font-normal text-sm ml-2">Rookie Card</FormLabel>
-                          </FormItem>
-                        )}
-                      />
-                      
-                      <FormField
-                        control={form.control}
-                        name="isAutographed"
-                        render={({ field }) => (
-                          <FormItem className="flex flex-row items-center space-x-2 space-y-0">
-                            <FormControl>
-                              <Checkbox
-                                checked={field.value}
-                                onCheckedChange={field.onChange}
-                                className="h-5 w-5"
-                              />
-                            </FormControl>
-                            <FormLabel className="font-normal text-sm ml-2">Autographed</FormLabel>
-                          </FormItem>
-                        )}
-                      />
-                      
-                      <FormField
-                        control={form.control}
-                        name="isNumbered"
-                        render={({ field }) => (
-                          <FormItem className="flex flex-row items-center space-x-2 space-y-0">
-                            <FormControl>
-                              <Checkbox
-                                checked={field.value}
-                                onCheckedChange={field.onChange}
-                                className="h-5 w-5"
-                              />
-                            </FormControl>
-                            <FormLabel className="font-normal text-sm ml-2">Numbered</FormLabel>
-                          </FormItem>
-                        )}
-                      />
-                    </div>
+                </div>
+                
+                {/* Card Features */}
+                <div className="mt-2">
+                  <h3 className="text-sm font-medium text-slate-700 mb-2">Card Features</h3>
+                  <div className="flex flex-wrap gap-6">
+                    <FormField
+                      control={form.control}
+                      name="isRookieCard"
+                      render={({ field }) => (
+                        <FormItem className="flex flex-row items-center space-x-2 space-y-0">
+                          <FormControl>
+                            <Checkbox
+                              checked={field.value}
+                              onCheckedChange={field.onChange}
+                              className="h-5 w-5"
+                            />
+                          </FormControl>
+                          <FormLabel className="font-normal text-sm ml-2">Rookie Card</FormLabel>
+                        </FormItem>
+                      )}
+                    />
+                    
+                    <FormField
+                      control={form.control}
+                      name="isAutographed"
+                      render={({ field }) => (
+                        <FormItem className="flex flex-row items-center space-x-2 space-y-0">
+                          <FormControl>
+                            <Checkbox
+                              checked={field.value}
+                              onCheckedChange={field.onChange}
+                              className="h-5 w-5"
+                            />
+                          </FormControl>
+                          <FormLabel className="font-normal text-sm ml-2">Autographed</FormLabel>
+                        </FormItem>
+                      )}
+                    />
+                    
+                    <FormField
+                      control={form.control}
+                      name="isNumbered"
+                      render={({ field }) => (
+                        <FormItem className="flex flex-row items-center space-x-2 space-y-0">
+                          <FormControl>
+                            <Checkbox
+                              checked={field.value}
+                              onCheckedChange={field.onChange}
+                              className="h-5 w-5"
+                            />
+                          </FormControl>
+                          <FormLabel className="font-normal text-sm ml-2">Numbered</FormLabel>
+                        </FormItem>
+                      )}
+                    />
                   </div>
                 </div>
                 

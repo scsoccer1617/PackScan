@@ -4,7 +4,8 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2, AlertCircle, Check, Edit2, Pencil } from 'lucide-react';
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
+import { Loader2, AlertCircle, Check, Pencil } from 'lucide-react';
 import { CardFormValues } from "@shared/schema";
 import { UseFormReturn } from "react-hook-form";
 
@@ -29,7 +30,7 @@ export default function OCRResults({ loading, error, data, onApply, onCancel, fo
   }, [data]);
 
   // Handle input changes
-  const handleInputChange = (field: keyof CardFormValues, value: string | number) => {
+  const handleInputChange = (field: keyof CardFormValues, value: string | number | boolean) => {
     setEditedData(prev => ({
       ...prev,
       [field]: value
@@ -102,8 +103,9 @@ export default function OCRResults({ loading, error, data, onApply, onCancel, fo
   // Function to apply OCR data and hide standard form
   const applyAndUseDirectly = () => {
     if (form) {
-      // Apply all fields from data to the form
-      Object.entries(data).forEach(([key, value]) => {
+      // Apply all fields from edited data to the form
+      const dataToApply = editMode ? editedData : data;
+      Object.entries(dataToApply).forEach(([key, value]) => {
         if (value !== undefined && value !== null) {
           form.setValue(key as any, value);
         }
@@ -144,6 +146,24 @@ export default function OCRResults({ loading, error, data, onApply, onCancel, fo
       <CardContent>
         {editMode ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Sport Dropdown */}
+            <div className="space-y-2">
+              <Label htmlFor="sport">Sport</Label>
+              <Select
+                value={editedData.sport || ''}
+                onValueChange={(value) => handleInputChange('sport', value)}
+              >
+                <SelectTrigger id="sport">
+                  <SelectValue placeholder="Select sport" />
+                </SelectTrigger>
+                <SelectContent>
+                  {["Baseball", "Football", "Basketball", "Hockey", "Soccer", "Other"].map((sport) => (
+                    <SelectItem key={sport} value={sport}>{sport}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
             {/* First row - Player Name */}
             <div className="space-y-2">
               <Label htmlFor="playerFirstName">First Name</Label>
@@ -167,12 +187,19 @@ export default function OCRResults({ loading, error, data, onApply, onCancel, fo
             {/* Second row - Brand and Collection */}
             <div className="space-y-2">
               <Label htmlFor="brand">Brand</Label>
-              <Input
-                id="brand"
+              <Select
                 value={editedData.brand || ''}
-                onChange={(e) => handleInputChange('brand', e.target.value)}
-                placeholder="Card Brand"
-              />
+                onValueChange={(value) => handleInputChange('brand', value)}
+              >
+                <SelectTrigger id="brand">
+                  <SelectValue placeholder="Select brand" />
+                </SelectTrigger>
+                <SelectContent>
+                  {["Topps", "Panini", "Upper Deck", "Bowman", "Fleer", "Donruss", "Score", "Other"].map((brand) => (
+                    <SelectItem key={brand} value={brand}>{brand}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-2">
               <Label htmlFor="collection">Collection</Label>
@@ -228,12 +255,19 @@ export default function OCRResults({ loading, error, data, onApply, onCancel, fo
             {/* Fifth row - Condition */}
             <div className="space-y-2">
               <Label htmlFor="condition">Condition</Label>
-              <Input
-                id="condition"
+              <Select
                 value={editedData.condition || ''}
-                onChange={(e) => handleInputChange('condition', e.target.value)}
-                placeholder="Card Condition"
-              />
+                onValueChange={(value) => handleInputChange('condition', value)}
+              >
+                <SelectTrigger id="condition">
+                  <SelectValue placeholder="Select condition" />
+                </SelectTrigger>
+                <SelectContent>
+                  {["PSA 10", "PSA 9", "PSA 8", "PSA 7", "PSA 6", "PSA 5", "Raw-Mint", "Raw-Good", "Raw-Poor"].map((condition) => (
+                    <SelectItem key={condition} value={condition}>{condition}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
         ) : (
