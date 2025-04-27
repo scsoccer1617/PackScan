@@ -376,7 +376,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Get collection statistics
+  // Get collection statistics (legacy endpoint)
   app.get(`${apiPrefix}/stats`, async (_req, res) => {
     try {
       const stats = await storage.getCollectionStats();
@@ -384,6 +384,104 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error fetching collection stats:', error);
       return res.status(500).json({ error: 'Failed to fetch collection statistics' });
+    }
+  });
+  
+  // Get collection summary for header display
+  app.get(`${apiPrefix}/collection/summary`, async (_req, res) => {
+    try {
+      const allCards = await storage.getCards();
+      const totalValue = allCards.reduce((sum, card) => sum + (card.estimatedValue ? Number(card.estimatedValue) : 0), 0);
+      
+      return res.json({
+        cardCount: allCards.length,
+        totalValue: totalValue
+      });
+    } catch (error) {
+      console.error('Error fetching collection summary:', error);
+      return res.status(500).json({ error: 'Failed to fetch collection summary' });
+    }
+  });
+  
+  // Stats endpoints for the stats page
+  // Get summary stats for the stats page
+  app.get(`${apiPrefix}/stats/summary`, async (_req, res) => {
+    try {
+      const allCards = await storage.getCards();
+      const totalValue = allCards.reduce((sum, card) => 
+        sum + (card.estimatedValue ? Number(card.estimatedValue) : 0), 0);
+      
+      // Calculate change statistics (mock data for now)
+      // In a real app, this would compare to previous month or period
+      const changeValue = 0;
+      const changePercent = 0;
+      
+      return res.json({
+        totalValue,
+        changeValue,
+        changePercent
+      });
+    } catch (error) {
+      console.error('Error fetching stats summary:', error);
+      return res.status(500).json({ error: 'Failed to fetch stats summary' });
+    }
+  });
+  
+  // Get top valuable cards
+  app.get(`${apiPrefix}/stats/top-cards`, async (_req, res) => {
+    try {
+      const topCards = await db.query.cards.findMany({
+        orderBy: desc(schema.cards.estimatedValue),
+        limit: 5,
+        with: {
+          sport: true,
+          brand: true,
+        },
+      });
+      
+      return res.json(topCards);
+    } catch (error) {
+      console.error('Error fetching top cards:', error);
+      return res.status(500).json({ error: 'Failed to fetch top cards' });
+    }
+  });
+  
+  // Get charts data
+  app.get(`${apiPrefix}/stats/charts`, async (_req, res) => {
+    try {
+      const allCards = await storage.getCards();
+      
+      // Value by year
+      const valueByYear = await db.select({
+        year: schema.cards.year,
+        value: sql<string>`sum(CAST(${schema.cards.estimatedValue} AS numeric))`,
+      })
+      .from(schema.cards)
+      .groupBy(schema.cards.year)
+      .orderBy(schema.cards.year);
+      
+      // Cards by sport
+      const sportDistribution = await db.select({
+        name: schema.sports.name,
+        count: sql<number>`count(${schema.cards.id})`,
+      })
+      .from(schema.cards)
+      .innerJoin(schema.sports, eq(schema.cards.sportId, schema.sports.id))
+      .groupBy(schema.sports.name);
+      
+      return res.json({
+        valueByYear: valueByYear.map(y => ({
+          year: String(y.year),
+          value: Number(y.value) || 0,
+        })),
+        sportDistribution: sportDistribution.map(s => ({
+          name: s.name,
+          value: Number(s.count),
+        }))
+      });
+    } catch (error) {
+      console.error('Error fetching charts data:', error);
+      return res.status(500).json({ error: 'Failed to fetch charts data' });
     }
   });
 
