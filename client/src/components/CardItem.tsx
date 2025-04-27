@@ -1,9 +1,10 @@
 import { Card, CardWithRelations } from "@shared/schema";
-import { Trash2 } from "lucide-react";
+import { Trash2, Edit } from "lucide-react";
 import { useState } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { formatCurrency } from "@/lib/utils";
+import EditCardModal from "./EditCardModal";
 
 interface CardItemProps {
   card: Card | CardWithRelations;
@@ -13,6 +14,7 @@ interface CardItemProps {
 
 export default function CardItem({ card, quantity, onDelete }: CardItemProps) {
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const { toast } = useToast();
   
   // Function to check if the card has relations
@@ -135,15 +137,31 @@ export default function CardItem({ card, quantity, onDelete }: CardItemProps) {
             </div>
           </div>
         )}
-        {/* Delete button */}
-        <button 
-          className="absolute top-2 left-2 bg-white/80 hover:bg-red-100 text-red-500 rounded-full p-1.5 transition-colors z-10"
-          onClick={handleDelete}
-          disabled={isDeleting}
-          aria-label="Delete card"
-        >
-          <Trash2 className="w-4 h-4" />
-        </button>
+        {/* Button controls */}
+        <div className="absolute top-2 left-2 flex space-x-1 z-10">
+          {/* Edit button */}
+          <button 
+            className="bg-white/80 hover:bg-blue-100 text-blue-500 rounded-full p-1.5 transition-colors"
+            onClick={(e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              setIsEditModalOpen(true);
+            }}
+            aria-label="Edit card"
+          >
+            <Edit className="w-4 h-4" />
+          </button>
+          
+          {/* Delete button */}
+          <button 
+            className="bg-white/80 hover:bg-red-100 text-red-500 rounded-full p-1.5 transition-colors"
+            onClick={handleDelete}
+            disabled={isDeleting}
+            aria-label="Delete card"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
+        </div>
         
         {card.condition && (
           <div className={`absolute top-2 right-2 ${conditionClass} text-white rounded-full w-8 h-8 flex items-center justify-center text-xs font-bold`}>

@@ -1,0 +1,439 @@
+import { useState, useEffect } from "react";
+import { Card as CardType, CardWithRelations, CardFormValues, cardSchema } from "@shared/schema";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
+
+interface EditCardModalProps {
+  card?: CardWithRelations | null;
+  isOpen: boolean;
+  onClose: () => void;
+}
+
+export default function EditCardModal({ card, isOpen, onClose }: EditCardModalProps) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  // Form setup
+  const form = useForm<CardFormValues>({
+    resolver: zodResolver(cardSchema),
+    defaultValues: {
+      sport: "",
+      playerFirstName: "",
+      playerLastName: "",
+      brand: "",
+      collection: "",
+      cardNumber: "",
+      year: new Date().getFullYear(),
+      variant: "",
+      serialNumber: "",
+      condition: "PSA 9",
+      estimatedValue: 0,
+      isRookieCard: false,
+      isAutographed: false,
+      isNumbered: false,
+      notes: "",
+    },
+  });
+
+  // Update form values when card changes
+  useEffect(() => {
+    if (card) {
+      form.reset({
+        sport: card.sport?.name || "",
+        playerFirstName: card.playerFirstName || "",
+        playerLastName: card.playerLastName || "",
+        brand: card.brand?.name || "",
+        collection: card.collection || "",
+        cardNumber: card.cardNumber || "",
+        year: card.year || new Date().getFullYear(),
+        variant: card.variant || "",
+        serialNumber: card.serialNumber || "",
+        condition: card.condition || "PSA 9",
+        estimatedValue: card.estimatedValue || 0,
+        isRookieCard: card.isRookieCard || false,
+        isAutographed: card.isAutographed || false,
+        isNumbered: card.isNumbered || false,
+        notes: card.notes || "",
+      });
+    }
+  }, [card, form]);
+
+  // Update card mutation
+  const updateCardMutation = useMutation({
+    mutationFn: async (data: CardFormValues) => {
+      if (!card) return null;
+      return apiRequest(`/api/cards/${card.id}`, {
+        method: "PATCH",
+        body: JSON.stringify(data),
+      });
+    },
+    onSuccess: () => {
+      // Invalidate cards query to refresh the list
+      queryClient.invalidateQueries({ queryKey: ['/api/cards'] });
+      // Also invalidate stats
+      queryClient.invalidateQueries({ queryKey: ['/api/collection/summary'] });
+      
+      toast({
+        title: "Card Updated",
+        description: "The card has been successfully updated.",
+      });
+      
+      onClose();
+    },
+    onError: (err) => {
+      console.error("Error updating card:", err);
+      toast({
+        title: "Error",
+        description: "There was an error updating the card. Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleSubmit = (values: CardFormValues) => {
+    updateCardMutation.mutate(values);
+  };
+
+  return (
+    <Dialog open={isOpen} onOpenChange={onClose}>
+      <DialogContent className="max-w-2xl overflow-y-auto max-h-[90vh]">
+        <DialogHeader>
+          <DialogTitle>Edit Card</DialogTitle>
+          <DialogDescription>
+            Update the details for this card.
+          </DialogDescription>
+        </DialogHeader>
+        
+        <Form {...form}>
+          <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-6">
+            {/* Sport Field */}
+            <FormField
+              control={form.control}
+              name="sport"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Sport <span className="text-red-500">*</span></FormLabel>
+                  <Select
+                    onValueChange={field.onChange}
+                    defaultValue={field.value}
+                    value={field.value}
+                  >
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select sport" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      {["Baseball", "Football", "Basketball", "Hockey", "Soccer", "Other"].map((sport) => (
+                        <SelectItem key={sport} value={sport}>{sport}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            
+            {/* Player Name Fields */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+              <FormField
+                control={form.control}
+                name="playerFirstName"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>First Name <span className="text-red-500">*</span></FormLabel>
+                    <FormControl>
+                      <Input placeholder="First name" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              
+              <FormField
+                control={form.control}
+                name="playerLastName"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Last Name <span className="text-red-500">*</span></FormLabel>
+                    <FormControl>
+                      <Input placeholder="Last name" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+            
+            {/* Brand Field */}
+            <FormField
+              control={form.control}
+              name="brand"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Brand <span className="text-red-500">*</span></FormLabel>
+                  <Select
+                    onValueChange={field.onChange}
+                    defaultValue={field.value}
+                    value={field.value}
+                  >
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select brand" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      {["Topps", "Panini", "Upper Deck", "Bowman", "Fleer", "Donruss", "Score", "Other"].map((brand) => (
+                        <SelectItem key={brand} value={brand}>{brand}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            
+            {/* Collection and Card Number Fields */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+              <FormField
+                control={form.control}
+                name="collection"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Collection</FormLabel>
+                    <FormControl>
+                      <Input placeholder="e.g. Chrome, Series 1" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              
+              <FormField
+                control={form.control}
+                name="cardNumber"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Card Number</FormLabel>
+                    <FormControl>
+                      <Input placeholder="e.g. 42, BP-12" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+            
+            {/* Year and Variant Fields */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+              <FormField
+                control={form.control}
+                name="year"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Year <span className="text-red-500">*</span></FormLabel>
+                    <FormControl>
+                      <Input 
+                        type="number" 
+                        placeholder="e.g. 2024" 
+                        {...field} 
+                        onChange={(e) => field.onChange(parseInt(e.target.value) || '')}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              
+              <FormField
+                control={form.control}
+                name="variant"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Variant</FormLabel>
+                    <FormControl>
+                      <Input placeholder="e.g. Refractor, Parallel" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+            
+            {/* Serial Number and Condition Fields */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+              <FormField
+                control={form.control}
+                name="serialNumber"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Serial Number</FormLabel>
+                    <FormControl>
+                      <Input placeholder="e.g. 42/100" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              
+              <FormField
+                control={form.control}
+                name="condition"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Condition <span className="text-red-500">*</span></FormLabel>
+                    <Select
+                      onValueChange={field.onChange}
+                      defaultValue={field.value}
+                      value={field.value}
+                    >
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select condition" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {["PSA 10", "PSA 9", "PSA 8", "PSA 7", "PSA 6", "PSA 5", "Raw-Mint", "Raw-Good", "Raw-Poor"].map((condition) => (
+                          <SelectItem key={condition} value={condition}>{condition}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+            
+            {/* Card Features */}
+            <div className="mt-2">
+              <h3 className="text-sm font-medium text-slate-700 mb-2">Card Features</h3>
+              <div className="flex flex-wrap gap-6">
+                <FormField
+                  control={form.control}
+                  name="isRookieCard"
+                  render={({ field }) => (
+                    <FormItem className="flex flex-row items-center space-x-2 space-y-0">
+                      <FormControl>
+                        <Checkbox
+                          checked={field.value}
+                          onCheckedChange={field.onChange}
+                          className="h-5 w-5"
+                        />
+                      </FormControl>
+                      <FormLabel className="font-normal text-sm ml-2">Rookie Card</FormLabel>
+                    </FormItem>
+                  )}
+                />
+                
+                <FormField
+                  control={form.control}
+                  name="isAutographed"
+                  render={({ field }) => (
+                    <FormItem className="flex flex-row items-center space-x-2 space-y-0">
+                      <FormControl>
+                        <Checkbox
+                          checked={field.value}
+                          onCheckedChange={field.onChange}
+                          className="h-5 w-5"
+                        />
+                      </FormControl>
+                      <FormLabel className="font-normal text-sm ml-2">Autographed</FormLabel>
+                    </FormItem>
+                  )}
+                />
+                
+                <FormField
+                  control={form.control}
+                  name="isNumbered"
+                  render={({ field }) => (
+                    <FormItem className="flex flex-row items-center space-x-2 space-y-0">
+                      <FormControl>
+                        <Checkbox
+                          checked={field.value}
+                          onCheckedChange={field.onChange}
+                          className="h-5 w-5"
+                        />
+                      </FormControl>
+                      <FormLabel className="font-normal text-sm ml-2">Numbered</FormLabel>
+                    </FormItem>
+                  )}
+                />
+              </div>
+            </div>
+            
+            {/* Estimated Value Field */}
+            <FormField
+              control={form.control}
+              name="estimatedValue"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Estimated Value ($) <span className="text-red-500">*</span></FormLabel>
+                  <div className="flex flex-col space-y-2">
+                    <FormControl>
+                      <div className="relative">
+                        <Input
+                          type="number"
+                          placeholder="Card value in USD"
+                          {...field}
+                          value={field.value === 0 ? '' : field.value}
+                          onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
+                          className="pl-7"
+                        />
+                        <div className="absolute inset-y-0 left-0 flex items-center pl-2 pointer-events-none">
+                          <span className="text-gray-500">$</span>
+                        </div>
+                      </div>
+                    </FormControl>
+                  </div>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            
+            {/* Notes Field */}
+            <FormField
+              control={form.control}
+              name="notes"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Notes</FormLabel>
+                  <FormControl>
+                    <Input placeholder="Any additional details about the card" {...field} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            
+            <DialogFooter>
+              <Button 
+                type="button" 
+                variant="outline" 
+                onClick={onClose}
+              >
+                Cancel
+              </Button>
+              <Button 
+                type="submit" 
+                className="bg-green-600 hover:bg-green-500 active:bg-green-700 text-white"
+                disabled={updateCardMutation.isPending}
+              >
+                {updateCardMutation.isPending ? "Updating..." : "Update Card"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </Form>
+      </DialogContent>
+    </Dialog>
+  );
+}
