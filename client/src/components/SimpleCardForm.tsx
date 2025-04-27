@@ -38,7 +38,7 @@ export default function SimpleCardForm() {
       variant: "",
       serialNumber: "",
       condition: "PSA 8", // Changed from PSA 9 to PSA 8 as requested
-      estimatedValue: 200,
+      estimatedValue: 0,
       isRookieCard: false,
       isAutographed: false,
       isNumbered: false,

@@ -291,6 +291,7 @@ export const storage = {
         card.isRookieCard ? 'Yes' : 'No',
         card.isAutographed ? 'Yes' : 'No', 
         card.isNumbered ? 'Yes' : 'No',
+        card.notes || '',
         frontImageUrl || '',
         backImageUrl || '',
         new Date().toISOString(),
