@@ -160,188 +160,75 @@ export default function EbayValueLookup({
 
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
+      <Button 
+        variant="default" 
+        className="w-full bg-blue-600 hover:bg-blue-700" 
+        onClick={() => openEbaySearch()}
+        disabled={!playerName || !cardNumber || !brand || !year}
+      >
+        <ExternalLink className="mr-2 h-4 w-4" />
+        Lookup on eBay
+      </Button>
+      
+      {/* This DialogTrigger is just for the custom value entry dialog, not the main button */}
       <DialogTrigger asChild>
         <Button 
-          variant="default" 
-          className="w-full bg-blue-600 hover:bg-blue-700" 
-          onClick={() => {
-            // Open dialog first, then look up values
-            setIsOpen(true);
-            lookupValue();
-          }}
-          disabled={loading || !playerName || !cardNumber || !brand || !year}
+          variant="outline" 
+          className="w-full mt-2" 
+          onClick={() => setIsOpen(true)}
         >
-          {loading ? (
-            <>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Looking up value...
-            </>
-          ) : (
-            <>
-              <DollarSign className="mr-2 h-4 w-4" />
-              Look up eBay value
-            </>
-          )}
+          <DollarSign className="mr-2 h-4 w-4" />
+          Set Custom Value
         </Button>
       </DialogTrigger>
       
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Card Value Lookup</DialogTitle>
+          <DialogTitle>Set Card Value</DialogTitle>
         </DialogHeader>
         
-        {loading ? (
-          <div className="flex flex-col items-center justify-center py-8">
-            <Loader2 className="h-8 w-8 animate-spin text-primary mb-4" />
-            <p>Looking up recent sales on eBay...</p>
+        <div className="space-y-4">
+          <div className="flex flex-col space-y-1.5">
+            <h3 className="text-lg font-semibold">{fullPlayerName}</h3>
+            <p className="text-sm text-muted-foreground">
+              {brand} {year} {collection ? `${collection} ` : ''}{cardNumber} {condition ? `• ${condition}` : ''}
+            </p>
           </div>
-        ) : results ? (
-          <div className="space-y-4">
-            <div className="flex flex-col space-y-1.5">
-              <h3 className="text-lg font-semibold">{fullPlayerName}</h3>
-              <p className="text-sm text-muted-foreground">
-                {brand} {year} {collection ? `${collection} ` : ''}{cardNumber} {condition ? `• ${condition}` : ''}
-              </p>
-            </div>
-            
-            {results.status === 'unconfigured' ? (
-              <div className="p-4 bg-muted rounded-md">
-                <p className="mb-2 text-sm">eBay API is not configured yet. You can still view sold listings on eBay:</p>
-                <div className="flex flex-col gap-2">
-                  <Button 
-                    variant="outline" 
-                    className="w-full"
-                    onClick={() => window.open(results.searchUrl, '_blank')}
-                  >
-                    <ExternalLink className="mr-2 h-4 w-4" />
-                    View on eBay
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    className="w-full"
-                    onClick={() => setIsOpen(false)}
-                  >
-                    Back to Card Info
-                  </Button>
-                </div>
+          
+          <div className="p-4 bg-muted rounded-md">
+            <Label htmlFor="custom-value" className="text-sm font-medium mb-1 block">
+              Enter Card Value
+            </Label>
+            <div className="flex space-x-2">
+              <div className="relative flex-1">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">$</span>
+                <Input
+                  id="custom-value"
+                  type="number"
+                  min="0.01" 
+                  step="0.01"
+                  placeholder="0.00"
+                  className="pl-7"
+                  value={customValue}
+                  onChange={(e) => setCustomValue(e.target.value)}
+                />
               </div>
-            ) : (
-              <>
-                {results.averageValue ? (
-                  <div className="p-4 bg-muted rounded-md">
-                    <p className="text-sm font-medium">Average value based on {results.results?.length || 0} recent sales:</p>
-                    <h4 className="text-2xl font-bold mt-1">{formatCurrency(results.averageValue)}</h4>
-                    
-                    <Button 
-                      className="w-full mt-4"
-                      onClick={() => handleValueSelect(results.averageValue!)}
-                    >
-                      Use this value
-                    </Button>
-                  </div>
-                ) : (
-                  <div className="p-4 bg-muted rounded-md">
-                    <div className="flex flex-col gap-2">
-                      <Button 
-                        variant="default" 
-                        className="w-full"
-                        onClick={() => window.open(results.searchUrl, '_blank')}
-                      >
-                        <ExternalLink className="mr-2 h-4 w-4" />
-                        View on eBay
-                      </Button>
-                      <Button
-                        variant="secondary"
-                        className="w-full"
-                        onClick={() => setIsOpen(false)}
-                      >
-                        Back to Card Info
-                      </Button>
-                    </div>
-                  </div>
-                )}
-                
-                {results.results?.length > 0 && (
-                  <>
-                    <Separator />
-                    <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
-                      <h4 className="text-sm font-medium">Recent Sales</h4>
-                      
-                      {results.results?.map((result, i) => (
-                        <Card key={i} className="p-3 flex items-start space-x-3">
-                          {result.imageUrl && (
-                            <div className="flex-shrink-0 w-12 h-12 overflow-hidden rounded-sm">
-                              <img 
-                                src={result.imageUrl} 
-                                alt={result.title} 
-                                className="w-full h-full object-cover"
-                              />
-                            </div>
-                          )}
-                          <div className="flex-1 min-w-0">
-                            <h4 className="text-sm font-medium truncate">{result.title}</h4>
-                            <p className="text-xs text-muted-foreground">{result.condition}</p>
-                            <div className="flex justify-between items-center mt-1">
-                              <p className="font-bold">{formatCurrency(result.price)}</p>
-                              <Button 
-                                variant="ghost" 
-                                size="sm" 
-                                className="h-6 px-2"
-                                onClick={() => handleValueSelect(result.price)}
-                              >
-                                Use
-                              </Button>
-                            </div>
-                          </div>
-                        </Card>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </>
-            )}
-            
-            <Separator className="my-2" />
-            
-            <div className="p-4 bg-muted rounded-md">
-              <Label htmlFor="custom-value" className="text-sm font-medium mb-1 block">
-                Enter Custom Value
-              </Label>
-              <div className="flex space-x-2">
-                <div className="relative flex-1">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">$</span>
-                  <Input
-                    id="custom-value"
-                    type="number"
-                    min="0.01" 
-                    step="0.01"
-                    placeholder="0.00"
-                    className="pl-7"
-                    value={customValue}
-                    onChange={(e) => setCustomValue(e.target.value)}
-                  />
-                </div>
-                <Button 
-                  onClick={handleCustomValueSubmit}
-                  disabled={!customValue}
-                >
-                  <Check className="mr-2 h-4 w-4" />
-                  Use
-                </Button>
-              </div>
-            </div>
-            
-            <div className="flex justify-center pt-2">
-              <Button variant="outline" onClick={() => setIsOpen(false)}>
-                Cancel
+              <Button 
+                onClick={handleCustomValueSubmit}
+                disabled={!customValue}
+              >
+                <Check className="mr-2 h-4 w-4" />
+                Save
               </Button>
             </div>
           </div>
-        ) : (
-          <div className="py-6 text-center">
-            <p>Enter card details and click "Look up eBay value" to see recent sales.</p>
+          
+          <div className="flex justify-center pt-2">
+            <Button variant="outline" onClick={() => setIsOpen(false)}>
+              Cancel
+            </Button>
           </div>
-        )}
+        </div>
       </DialogContent>
     </Dialog>
   );
