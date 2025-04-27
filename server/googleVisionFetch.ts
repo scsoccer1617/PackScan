@@ -1174,107 +1174,14 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       console.log('Detected "Stars of MLB" collection');
     }
     
-    // Special handling for "Wild Card" (a common OCR misreading for Carlos Correa)
-    if (fullText.includes('WILD CARD') || 
-       (result.playerFirstName === 'Wild' && result.playerLastName === 'Card')) {
-      result.playerFirstName = 'Carlos';
-      result.playerLastName = 'Correa';
-      result.sport = 'Baseball';
-      // Always set condition to PSA 8 for Carlos Correa
-      result.condition = 'PSA 8';
-      console.log('Setting Carlos Correa (from Wild Card detection) condition to PSA 8');
-      result.brand = 'Topps';
-      result.collection = 'Stars of MLB';
-      
-      // Look for SMLB-49 pattern or just set it directly
-      const smlbMatch = fullText.match(/SMLB[-]?(\d+)/i);
-      if (smlbMatch && smlbMatch[1]) {
-        result.cardNumber = `SMLB-${smlbMatch[1]}`;
-      } else {
-        result.cardNumber = 'SMLB-49';
-      }
-      
-      // Set year to 2024 for Carlos Correa
-      result.year = 2024;
-      
-      // Condition already set above - no need to set it again
-      
-      console.log('CRITICAL FIX: Detected "Wild Card" text - this is a Carlos Correa card');
-      console.log('Applied special handling for Carlos Correa Stars of MLB card SMLB-49 from 2024, condition PSA 8');
-      return result; // Return early since we've identified the card completely
-    }
+    // "Wild Card" can be OCR misreading, but we'll let the dynamic OCR handle it
+    // We'll rely on the generic pattern detection for all players
+    // Note: No more special handling for specific players
     
-    // Special handling for Mike Trout cards
-    // Only if we're very confident this is a Mike Trout card and not another player
-    if ((fullText.includes('TROUT') || 
-        (fullText.includes('MIKE') && fullText.includes('TROUT')) || 
-        (fullText.includes('ANGELS') && fullText.includes('CSMLB'))) &&
-        // Make sure we don't have another player already detected with high confidence
-        (!result.playerFirstName || !result.playerLastName || 
-         (result.playerFirstName !== 'Manny' && result.playerLastName !== 'Machado'))) {
-      
-      console.log('Processing potential Mike Trout card');
-      
-      // If we've already identified Manny Machado, don't override with Mike Trout
-      if (result.playerFirstName === 'Manny' && result.playerLastName === 'Machado') {
-        console.log('Skipping Mike Trout handler as we already detected Manny Machado');
-      } else {
-        result.playerFirstName = 'Mike';
-        result.playerLastName = 'Trout';
-        result.sport = 'Baseball';
-        result.brand = 'Topps';
-        
-        // Look for CSMLB card number format
-        const csmlbMatch = fullText.match(/CSMLB[-\s]?(\d+)/i);
-        if (csmlbMatch) {
-          result.cardNumber = `CSMLB-${csmlbMatch[1]}`;
-          console.log(`Found and reformatted CSMLB card number for Mike Trout: ${result.cardNumber}`);
-          
-          // If we found a CSMLB card number, it's definitely a Chrome card
-          result.collection = 'Chrome Stars of MLB';
-          console.log('Setting Chrome Stars of MLB collection for Mike Trout based on CSMLB card number');
-        } else if (fullText.includes('CHROME') || 
-                  lowerText.includes('chrome') ||
-                  fullText.includes('TOPPS CHROME') || 
-                  lowerText.includes('topps chrome')) {
-          // Check if we can find the number in other formats
-          const numberMatch = textAnnotations.find(a => /^\d+$/.test(a.description) && a.description.length <= 2);
-          
-          if (numberMatch) {
-            result.cardNumber = `CSMLB-${numberMatch.description}`;
-          } else {
-            // Default to CSMLB-2 for Mike Trout Chrome Stars of MLB
-            result.cardNumber = 'CSMLB-2';
-          }
-          
-          // If Chrome appears anywhere on the card, set the correct collection
-          result.collection = 'Chrome Stars of MLB';
-          console.log('Setting Chrome Stars of MLB collection for Mike Trout based on Chrome text detection');
-        } else if (fullText.includes('STARS') && fullText.includes('MLB')) {
-          // If it's just a regular Stars of MLB card (non-Chrome)
-          result.collection = 'Stars of MLB';
-          console.log('Setting collection to "Stars of MLB" for Mike Trout card');
-        }
-        
-        // Set the correct year based on copyright info
-        const yearMatch = fullText.match(/[©\(\s](\d{4})[\s\)]/) || fullText.match(/\b(20\d\d)\b/);
-        if (yearMatch && yearMatch[1]) {
-          result.year = parseInt(yearMatch[1], 10);
-        } else {
-          // Default to 2024 if year not found
-          result.year = 2024;
-        }
-        
-        console.log('Detected Mike Trout card with specialized Chrome/non-Chrome handling');
-        
-        // If this is very confidently a Mike Trout card (both first and last name present in text),
-        // return early to prevent other handlers from overriding
-        if (fullText.includes('MIKE') && fullText.includes('TROUT')) {
-          console.log('Extracted card info for confirmed Mike Trout card:', result);
-          return result;
-        }
-      }
-    }
+    // No player-specific hardcoded detection - fully dynamic OCR
+    
+    // Generic pattern-based detection for all players
+    // Note: All cards will be detected using the same pattern-recognition algorithms without player-specific logic
     
     for (const collection of collections) {
       if (fullText.includes(collection)) {
@@ -1750,11 +1657,6 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     result.condition = 'PSA 8';
     
     // No player-specific checks - fully dynamic OCR
-    
-    // Clear any incorrect player name detections
-    if (result.playerFirstName === 'Major' && result.playerLastName === 'League') {
-      console.log('CRITICAL FIX: Cleared incorrect player name (Major League)');
-    }
     
     // Clear incorrect player name detections
     if (result.playerFirstName === 'Major' && result.playerLastName === 'League') {
