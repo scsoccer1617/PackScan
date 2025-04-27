@@ -10,6 +10,8 @@ import { Loader2, ExternalLink, DollarSign, Check } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 import { apiRequest } from "@/lib/queryClient";
 
+
+
 interface EbayValueResult {
   title: string;
   price: number;
@@ -130,7 +132,29 @@ export default function EbayValueLookup({
 
   // Function to directly open eBay instead of dialog
   const openEbaySearch = () => {
-    const url = getEbaySearchUrl(playerName, cardNumber, brand, year, collection, condition);
+    // Build eBay search URL directly
+    let query = `${brand} ${year} ${playerName} ${cardNumber}`;
+    
+    // Add collection if provided, but handle special collections
+    if (collection) {
+      if (collection.toLowerCase().includes('heritage')) {
+        query = `${brand} ${year} heritage ${playerName}`;
+      } else {
+        query += ` ${collection}`;
+      }
+    }
+    
+    // Construct the URL with search parameters
+    const baseUrl = 'https://www.ebay.com/sch/i.html';
+    const searchParams = new URLSearchParams({
+      _nkw: query,
+      LH_Complete: '1',    // Completed listings
+      LH_Sold: '1',        // Sold listings
+      rt: 'nc',            // No "see other items" 
+      LH_PrefLoc: '1'      // Ships to US
+    });
+    
+    const url = `${baseUrl}?${searchParams.toString()}`;
     window.open(url, '_blank');
   };
 

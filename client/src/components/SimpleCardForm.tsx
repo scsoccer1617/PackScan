@@ -439,10 +439,81 @@ export default function SimpleCardForm() {
                     </FormItem>
                   )}
                 />
+                
+                {/* Card Features */}
+                <div className="mt-2">
+                  <h3 className="text-sm font-medium text-slate-700 mb-2">Card Features</h3>
+                  <div className="grid grid-cols-3 gap-4">
+                    <FormField
+                      control={form.control}
+                      name="isRookieCard"
+                      render={({ field }) => (
+                        <FormItem className="flex flex-row items-center space-x-2 space-y-0">
+                          <FormControl>
+                            <Checkbox
+                              checked={field.value}
+                              onCheckedChange={field.onChange}
+                            />
+                          </FormControl>
+                          <FormLabel className="font-normal">Rookie Card</FormLabel>
+                        </FormItem>
+                      )}
+                    />
+                    
+                    <FormField
+                      control={form.control}
+                      name="isAutographed"
+                      render={({ field }) => (
+                        <FormItem className="flex flex-row items-center space-x-2 space-y-0">
+                          <FormControl>
+                            <Checkbox
+                              checked={field.value}
+                              onCheckedChange={field.onChange}
+                            />
+                          </FormControl>
+                          <FormLabel className="font-normal">Autographed</FormLabel>
+                        </FormItem>
+                      )}
+                    />
+                    
+                    <FormField
+                      control={form.control}
+                      name="isNumbered"
+                      render={({ field }) => (
+                        <FormItem className="flex flex-row items-center space-x-2 space-y-0">
+                          <FormControl>
+                            <Checkbox
+                              checked={field.value}
+                              onCheckedChange={field.onChange}
+                            />
+                          </FormControl>
+                          <FormLabel className="font-normal">Numbered</FormLabel>
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                </div>
               </div>
               
-              {/* Estimated Value Field with eBay Lookup */}
+              {/* eBay Value Lookup and Estimated Value Field */}
               <div className="space-y-2">
+                <FormLabel>Card Value</FormLabel>
+                
+                {/* eBay Value Lookup */}
+                <div className="mb-2">
+                  <EbayValueLookup
+                    playerName={`${form.watch('playerFirstName')} ${form.watch('playerLastName')}`.trim()}
+                    cardNumber={form.watch('cardNumber')}
+                    brand={form.watch('brand')}
+                    year={form.watch('year') || new Date().getFullYear()}
+                    collection={form.watch('collection')}
+                    condition={form.watch('condition')}
+                    onValueSelect={(value) => {
+                      form.setValue('estimatedValue', value);
+                    }}
+                  />
+                </div>
+                
                 <FormField
                   control={form.control}
                   name="estimatedValue"
@@ -467,19 +538,6 @@ export default function SimpleCardForm() {
                         <p className="text-xs text-gray-500">
                           {field.value ? `Display value: ${formatCurrency(field.value)}` : ''}
                         </p>
-                        
-                        {/* eBay Value Lookup */}
-                        <EbayValueLookup
-                          playerName={`${form.watch('playerFirstName')} ${form.watch('playerLastName')}`.trim()}
-                          cardNumber={form.watch('cardNumber')}
-                          brand={form.watch('brand')}
-                          year={form.watch('year') || new Date().getFullYear()}
-                          collection={form.watch('collection')}
-                          condition={form.watch('condition')}
-                          onValueSelect={(value) => {
-                            form.setValue('estimatedValue', value);
-                          }}
-                        />
                       </div>
                       <FormMessage />
                     </FormItem>
