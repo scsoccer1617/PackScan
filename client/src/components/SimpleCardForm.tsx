@@ -1,13 +1,13 @@
 import { useState } from "react";
 import SimpleImageUploader from "@/components/SimpleImageUploader";
 import { Button } from "@/components/ui/button";
-import { ScanSearch, DollarSign } from "lucide-react";
+import { ScanSearch } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Form, FormField, FormItem, FormLabel, FormControl, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { useForm, type SubmitHandler } from "react-hook-form";
+import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { CardFormValues, cardSchema } from "@shared/schema";
 import { useOCR } from "@/hooks/use-ocr";
@@ -16,7 +16,6 @@ import OCRResults from "./OCRResults";
 import EbayValueLookup from "./EbayValueLookup";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
-import { formatCurrency } from "@/lib/utils";
 
 export default function SimpleCardForm() {
   const [frontImage, setFrontImage] = useState<string>("");
@@ -208,7 +207,6 @@ export default function SimpleCardForm() {
                   existingImage={frontImage}
                   onImageCaptured={setFrontImage}
                 />
-
               </div>
               
               <div>
@@ -217,7 +215,6 @@ export default function SimpleCardForm() {
                   existingImage={backImage}
                   onImageCaptured={setBackImage}
                 />
-
               </div>
             </div>
             
@@ -248,178 +245,16 @@ export default function SimpleCardForm() {
             )}
           </div>
           
-          <Form {...form}>
-            <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-4">
-              <FormField
-                control={form.control}
-                name="sport"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Sport <span className="text-red-500">*</span></FormLabel>
-                    <Select
-                      onValueChange={field.onChange}
-                      defaultValue={field.value}
-                      value={field.value}
-                    >
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select sport" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        {["Baseball", "Football", "Basketball", "Hockey", "Soccer", "Other"].map((sport) => (
-                          <SelectItem key={sport} value={sport}>{sport}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              
-              <div className="grid grid-cols-2 gap-4">
+          {/* Hide the form when OCR results are shown */}
+          {!showOCRResults && (
+            <Form {...form}>
+              <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-4">
                 <FormField
                   control={form.control}
-                  name="playerFirstName"
+                  name="sport"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>First Name <span className="text-red-500">*</span></FormLabel>
-                      <FormControl>
-                        <Input placeholder="First name" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                
-                <FormField
-                  control={form.control}
-                  name="playerLastName"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Last Name <span className="text-red-500">*</span></FormLabel>
-                      <FormControl>
-                        <Input placeholder="Last name" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
-              
-              <FormField
-                control={form.control}
-                name="brand"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Brand <span className="text-red-500">*</span></FormLabel>
-                    <Select
-                      onValueChange={field.onChange}
-                      defaultValue={field.value}
-                      value={field.value}
-                    >
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select brand" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        {["Topps", "Panini", "Upper Deck", "Bowman", "Fleer", "Donruss", "Score", "Other"].map((brand) => (
-                          <SelectItem key={brand} value={brand}>{brand}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              
-              <div className="grid grid-cols-2 gap-4">
-                <FormField
-                  control={form.control}
-                  name="collection"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Collection</FormLabel>
-                      <FormControl>
-                        <Input placeholder="e.g. Chrome, Series 1" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                
-                <FormField
-                  control={form.control}
-                  name="cardNumber"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Card Number</FormLabel>
-                      <FormControl>
-                        <Input placeholder="e.g. 42, BP-12" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
-              
-              <div className="grid grid-cols-2 gap-4">
-                <FormField
-                  control={form.control}
-                  name="year"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Year <span className="text-red-500">*</span></FormLabel>
-                      <FormControl>
-                        <Input 
-                          type="number" 
-                          placeholder="e.g. 2024" 
-                          {...field} 
-                          onChange={(e) => field.onChange(parseInt(e.target.value) || '')}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                
-                <FormField
-                  control={form.control}
-                  name="variant"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Variant</FormLabel>
-                      <FormControl>
-                        <Input placeholder="e.g. Refractor, Parallel" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
-              
-              <div className="grid grid-cols-2 gap-4">
-                <FormField
-                  control={form.control}
-                  name="serialNumber"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Serial Number</FormLabel>
-                      <FormControl>
-                        <Input placeholder="e.g. 42/100" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                
-                <FormField
-                  control={form.control}
-                  name="condition"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Condition <span className="text-red-500">*</span></FormLabel>
+                      <FormLabel>Sport <span className="text-red-500">*</span></FormLabel>
                       <Select
                         onValueChange={field.onChange}
                         defaultValue={field.value}
@@ -427,12 +262,12 @@ export default function SimpleCardForm() {
                       >
                         <FormControl>
                           <SelectTrigger>
-                            <SelectValue placeholder="Select condition" />
+                            <SelectValue placeholder="Select sport" />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          {["PSA 10", "PSA 9", "PSA 8", "PSA 7", "PSA 6", "PSA 5", "Raw-Mint", "Raw-Good", "Raw-Poor"].map((condition) => (
-                            <SelectItem key={condition} value={condition}>{condition}</SelectItem>
+                          {["Baseball", "Football", "Basketball", "Hockey", "Soccer", "Other"].map((sport) => (
+                            <SelectItem key={sport} value={sport}>{sport}</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
@@ -441,140 +276,305 @@ export default function SimpleCardForm() {
                   )}
                 />
                 
-                {/* Card Features */}
-                <div className="mt-2">
-                  <h3 className="text-sm font-medium text-slate-700 mb-2">Card Features</h3>
-                  <div className="flex flex-wrap gap-6">
-                    <FormField
-                      control={form.control}
-                      name="isRookieCard"
-                      render={({ field }) => (
-                        <FormItem className="flex flex-row items-center space-x-2 space-y-0">
-                          <FormControl>
-                            <Checkbox
-                              checked={field.value}
-                              onCheckedChange={field.onChange}
-                              className="h-5 w-5"
-                            />
-                          </FormControl>
-                          <FormLabel className="font-normal text-sm ml-2">Rookie Card</FormLabel>
-                        </FormItem>
-                      )}
-                    />
-                    
-                    <FormField
-                      control={form.control}
-                      name="isAutographed"
-                      render={({ field }) => (
-                        <FormItem className="flex flex-row items-center space-x-2 space-y-0">
-                          <FormControl>
-                            <Checkbox
-                              checked={field.value}
-                              onCheckedChange={field.onChange}
-                              className="h-5 w-5"
-                            />
-                          </FormControl>
-                          <FormLabel className="font-normal text-sm ml-2">Autographed</FormLabel>
-                        </FormItem>
-                      )}
-                    />
-                    
-                    <FormField
-                      control={form.control}
-                      name="isNumbered"
-                      render={({ field }) => (
-                        <FormItem className="flex flex-row items-center space-x-2 space-y-0">
-                          <FormControl>
-                            <Checkbox
-                              checked={field.value}
-                              onCheckedChange={field.onChange}
-                              className="h-5 w-5"
-                            />
-                          </FormControl>
-                          <FormLabel className="font-normal text-sm ml-2">Numbered</FormLabel>
-                        </FormItem>
-                      )}
-                    />
-                  </div>
-                </div>
-              </div>
-              
-              {/* Notes Field */}
-              <FormField
-                control={form.control}
-                name="notes"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Notes</FormLabel>
-                    <FormControl>
-                      <Input placeholder="Any additional details about the card" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              
-              {/* eBay Value Lookup and Estimated Value Field */}
-              <div className="space-y-2">
-                <FormLabel>Card Value</FormLabel>
-                
-                {/* eBay Value Lookup */}
-                <div className="mb-2">
-                  <EbayValueLookup
-                    playerName={`${form.watch('playerFirstName')} ${form.watch('playerLastName')}`.trim()}
-                    cardNumber={form.watch('cardNumber')}
-                    brand={form.watch('brand')}
-                    year={form.watch('year') || new Date().getFullYear()}
-                    collection={form.watch('collection')}
-                    condition={form.watch('condition')}
-                    onValueSelect={(value) => {
-                      form.setValue('estimatedValue', value);
-                    }}
+                <div className="grid grid-cols-2 gap-4">
+                  <FormField
+                    control={form.control}
+                    name="playerFirstName"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>First Name <span className="text-red-500">*</span></FormLabel>
+                        <FormControl>
+                          <Input placeholder="First name" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  
+                  <FormField
+                    control={form.control}
+                    name="playerLastName"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Last Name <span className="text-red-500">*</span></FormLabel>
+                        <FormControl>
+                          <Input placeholder="Last name" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
                   />
                 </div>
                 
                 <FormField
                   control={form.control}
-                  name="estimatedValue"
+                  name="brand"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Estimated Value ($) <span className="text-red-500">*</span></FormLabel>
-                      <div className="flex flex-col space-y-2">
+                      <FormLabel>Brand <span className="text-red-500">*</span></FormLabel>
+                      <Select
+                        onValueChange={field.onChange}
+                        defaultValue={field.value}
+                        value={field.value}
+                      >
                         <FormControl>
-                          <div className="relative">
-                            <Input
-                              type="number"
-                              placeholder="Card value in USD"
-                              {...field}
-                              onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
-                              className="pl-7"
-                            />
-                            <div className="absolute inset-y-0 left-0 flex items-center pl-2 pointer-events-none">
-                              <span className="text-gray-500">$</span>
-                            </div>
-                          </div>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select brand" />
+                          </SelectTrigger>
                         </FormControl>
-                      </div>
+                        <SelectContent>
+                          {["Topps", "Panini", "Upper Deck", "Bowman", "Fleer", "Donruss", "Score", "Other"].map((brand) => (
+                            <SelectItem key={brand} value={brand}>{brand}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
-              </div>
-              
-              <div className="pt-4">
-                <p className="text-center text-sm mb-3 text-amber-600 font-medium">
-                  ↓ Click the button below to add this card to your collection ↓
-                </p>
-                <Button 
-                  type="submit" 
-                  className="w-full bg-green-600 hover:bg-green-500 active:bg-green-700 text-white py-6 text-lg font-bold"
-                  disabled={createCardMutation.isPending}
-                >
-                  {createCardMutation.isPending ? "Adding to Collection..." : "ADD TO COLLECTION"}
-                </Button>
-              </div>
-            </form>
-          </Form>
+                
+                <div className="grid grid-cols-2 gap-4">
+                  <FormField
+                    control={form.control}
+                    name="collection"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Collection</FormLabel>
+                        <FormControl>
+                          <Input placeholder="e.g. Chrome, Series 1" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  
+                  <FormField
+                    control={form.control}
+                    name="cardNumber"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Card Number</FormLabel>
+                        <FormControl>
+                          <Input placeholder="e.g. 42, BP-12" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+                
+                <div className="grid grid-cols-2 gap-4">
+                  <FormField
+                    control={form.control}
+                    name="year"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Year <span className="text-red-500">*</span></FormLabel>
+                        <FormControl>
+                          <Input 
+                            type="number" 
+                            placeholder="e.g. 2024" 
+                            {...field} 
+                            onChange={(e) => field.onChange(parseInt(e.target.value) || '')}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  
+                  <FormField
+                    control={form.control}
+                    name="variant"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Variant</FormLabel>
+                        <FormControl>
+                          <Input placeholder="e.g. Refractor, Parallel" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+                
+                <div className="grid grid-cols-2 gap-4">
+                  <FormField
+                    control={form.control}
+                    name="serialNumber"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Serial Number</FormLabel>
+                        <FormControl>
+                          <Input placeholder="e.g. 42/100" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  
+                  <FormField
+                    control={form.control}
+                    name="condition"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Condition <span className="text-red-500">*</span></FormLabel>
+                        <Select
+                          onValueChange={field.onChange}
+                          defaultValue={field.value}
+                          value={field.value}
+                        >
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select condition" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {["PSA 10", "PSA 9", "PSA 8", "PSA 7", "PSA 6", "PSA 5", "Raw-Mint", "Raw-Good", "Raw-Poor"].map((condition) => (
+                              <SelectItem key={condition} value={condition}>{condition}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  
+                  {/* Card Features */}
+                  <div className="mt-2">
+                    <h3 className="text-sm font-medium text-slate-700 mb-2">Card Features</h3>
+                    <div className="flex flex-wrap gap-6">
+                      <FormField
+                        control={form.control}
+                        name="isRookieCard"
+                        render={({ field }) => (
+                          <FormItem className="flex flex-row items-center space-x-2 space-y-0">
+                            <FormControl>
+                              <Checkbox
+                                checked={field.value}
+                                onCheckedChange={field.onChange}
+                                className="h-5 w-5"
+                              />
+                            </FormControl>
+                            <FormLabel className="font-normal text-sm ml-2">Rookie Card</FormLabel>
+                          </FormItem>
+                        )}
+                      />
+                      
+                      <FormField
+                        control={form.control}
+                        name="isAutographed"
+                        render={({ field }) => (
+                          <FormItem className="flex flex-row items-center space-x-2 space-y-0">
+                            <FormControl>
+                              <Checkbox
+                                checked={field.value}
+                                onCheckedChange={field.onChange}
+                                className="h-5 w-5"
+                              />
+                            </FormControl>
+                            <FormLabel className="font-normal text-sm ml-2">Autographed</FormLabel>
+                          </FormItem>
+                        )}
+                      />
+                      
+                      <FormField
+                        control={form.control}
+                        name="isNumbered"
+                        render={({ field }) => (
+                          <FormItem className="flex flex-row items-center space-x-2 space-y-0">
+                            <FormControl>
+                              <Checkbox
+                                checked={field.value}
+                                onCheckedChange={field.onChange}
+                                className="h-5 w-5"
+                              />
+                            </FormControl>
+                            <FormLabel className="font-normal text-sm ml-2">Numbered</FormLabel>
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+                  </div>
+                </div>
+                
+                {/* Notes Field */}
+                <FormField
+                  control={form.control}
+                  name="notes"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Notes</FormLabel>
+                      <FormControl>
+                        <Input placeholder="Any additional details about the card" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                
+                {/* eBay Value Lookup and Estimated Value Field */}
+                <div className="space-y-2">
+                  <FormLabel>Card Value</FormLabel>
+                  
+                  {/* eBay Value Lookup */}
+                  <div className="mb-2">
+                    <EbayValueLookup
+                      playerName={`${form.watch('playerFirstName')} ${form.watch('playerLastName')}`.trim()}
+                      cardNumber={form.watch('cardNumber')}
+                      brand={form.watch('brand')}
+                      year={form.watch('year') || new Date().getFullYear()}
+                      collection={form.watch('collection')}
+                      condition={form.watch('condition')}
+                      onValueSelect={(value) => {
+                        form.setValue('estimatedValue', value);
+                      }}
+                    />
+                  </div>
+                  
+                  <FormField
+                    control={form.control}
+                    name="estimatedValue"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Estimated Value ($) <span className="text-red-500">*</span></FormLabel>
+                        <div className="flex flex-col space-y-2">
+                          <FormControl>
+                            <div className="relative">
+                              <Input
+                                type="number"
+                                placeholder="Card value in USD"
+                                {...field}
+                                onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
+                                className="pl-7"
+                              />
+                              <div className="absolute inset-y-0 left-0 flex items-center pl-2 pointer-events-none">
+                                <span className="text-gray-500">$</span>
+                              </div>
+                            </div>
+                          </FormControl>
+                        </div>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+                
+                <div className="pt-4">
+                  <p className="text-center text-sm mb-3 text-amber-600 font-medium">
+                    ↓ Click the button below to add this card to your collection ↓
+                  </p>
+                  <Button 
+                    type="submit" 
+                    className="w-full bg-green-600 hover:bg-green-500 active:bg-green-700 text-white py-6 text-lg font-bold"
+                    disabled={createCardMutation.isPending}
+                  >
+                    {createCardMutation.isPending ? "Adding to Collection..." : "ADD TO COLLECTION"}
+                  </Button>
+                </div>
+              </form>
+            </Form>
+          )}
         </CardContent>
       </Card>
     </div>
