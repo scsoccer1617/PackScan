@@ -4,14 +4,55 @@ import StatsSummary from "@/components/StatsSummary";
 import StatsCharts from "@/components/StatsCharts";
 import { Card as CardType, CardWithRelations } from "@shared/schema";
 import { formatCurrency } from "@/lib/utils";
+import { useState, useEffect } from "react";
 
 interface TopCard extends CardWithRelations {
   changePercent: number;
 }
 
 export default function Stats() {
+  const [directTopCards, setDirectTopCards] = useState<CardWithRelations[]>([]);
+  const [isDirectLoading, setIsDirectLoading] = useState(true);
+  
+  // Direct API call to get top cards
+  useEffect(() => {
+    async function fetchTopCards() {
+      try {
+        setIsDirectLoading(true);
+        const response = await fetch('/api/cards');
+        if (response.ok) {
+          const allCards = await response.json();
+          
+          // Sort cards by estimated value (highest first)
+          const sortedCards = [...allCards].sort((a, b) => {
+            const valueA = a.estimatedValue ? Number(a.estimatedValue) : 0;
+            const valueB = b.estimatedValue ? Number(b.estimatedValue) : 0;
+            return valueB - valueA;
+          });
+          
+          // Take top 5 cards
+          const topCards = sortedCards.slice(0, 5).map(card => ({
+            ...card,
+            changePercent: 0 // No change data available through direct method
+          }));
+          
+          console.log("Top cards - direct data:", topCards);
+          setDirectTopCards(topCards);
+        }
+      } catch (error) {
+        console.error("Error fetching top cards:", error);
+      } finally {
+        setIsDirectLoading(false);
+      }
+    }
+    
+    fetchTopCards();
+  }, []);
+  
+  // Original query (disabled since we're using direct fetching)
   const { data: topCards, isLoading, error } = useQuery<TopCard[]>({
     queryKey: ['/api/stats/top-cards'],
+    enabled: false
   });
   
   // Helper function to get brand name safely
@@ -38,7 +79,7 @@ export default function Stats() {
         
         <CardContent className="p-0 pt-2">
           <div className="space-y-3">
-            {isLoading ? (
+            {isDirectLoading ? (
               Array(3).fill(0).map((_, index) => (
                 <div key={index} className="flex items-center space-x-3 p-2 animate-pulse">
                   <div className="w-12 h-16 bg-slate-200 rounded"></div>
@@ -52,16 +93,12 @@ export default function Stats() {
                   </div>
                 </div>
               ))
-            ) : error ? (
-              <div className="text-center py-4 text-slate-500">
-                Failed to load top cards
-              </div>
-            ) : !topCards || topCards.length === 0 ? (
+            ) : !directTopCards || directTopCards.length === 0 ? (
               <div className="text-center py-4 text-slate-500">
                 Add cards to see your most valuable items
               </div>
             ) : (
-              topCards.map((card) => (
+              directTopCards.map((card) => (
                 <div key={card.id} className="flex items-center space-x-3 p-2 hover:bg-slate-50 rounded">
                   <div className="w-12 h-16 bg-slate-100 rounded overflow-hidden">
                     {card.frontImage ? (
