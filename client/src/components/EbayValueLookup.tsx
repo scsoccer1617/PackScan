@@ -202,7 +202,6 @@ export default function EbayValueLookup({
                   </div>
                 ) : (
                   <div className="p-4 bg-muted rounded-md">
-                    <p className="text-sm mb-3">No recent sales found through the API, but you can search eBay directly using the link below.</p>
                     <Button 
                       variant="default" 
                       className="w-full mb-3"
@@ -211,34 +210,6 @@ export default function EbayValueLookup({
                       <ExternalLink className="mr-2 h-4 w-4" />
                       View on eBay
                     </Button>
-                    
-                    <div className="grid grid-cols-2 gap-2">
-                      {[5, 10, 15, 20].map(value => (
-                        <Button 
-                          key={value}
-                          variant="outline" 
-                          size="sm"
-                          onClick={() => handleValueSelect(value)}
-                          className="text-xs"
-                        >
-                          Use ${value}
-                        </Button>
-                      ))}
-                    </div>
-                    
-                    <div className="grid grid-cols-2 gap-2 mt-2">
-                      {[25, 30, 50, 100].map(value => (
-                        <Button 
-                          key={value}
-                          variant="outline" 
-                          size="sm"
-                          onClick={() => handleValueSelect(value)}
-                          className="text-xs"
-                        >
-                          Use ${value}
-                        </Button>
-                      ))}
-                    </div>
                   </div>
                 )}
                 
@@ -312,13 +283,9 @@ export default function EbayValueLookup({
               </div>
             </div>
             
-            <div className="flex justify-between pt-2">
+            <div className="flex justify-center pt-2">
               <Button variant="outline" onClick={() => setIsOpen(false)}>
                 Cancel
-              </Button>
-              <Button variant="outline" onClick={() => window.open(results.searchUrl, '_blank')}>
-                <ExternalLink className="mr-2 h-4 w-4" />
-                View on eBay
               </Button>
             </div>
           </div>
