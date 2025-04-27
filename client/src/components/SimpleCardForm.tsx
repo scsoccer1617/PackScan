@@ -443,12 +443,12 @@ export default function SimpleCardForm() {
                 {/* Card Features */}
                 <div className="mt-2">
                   <h3 className="text-sm font-medium text-slate-700 mb-2">Card Features</h3>
-                  <div className="grid grid-cols-3 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <FormField
                       control={form.control}
                       name="isRookieCard"
                       render={({ field }) => (
-                        <FormItem className="flex flex-row items-center space-x-2 space-y-0">
+                        <FormItem className="flex flex-row items-center space-x-3 space-y-0">
                           <FormControl>
                             <Checkbox
                               checked={field.value}
@@ -464,7 +464,7 @@ export default function SimpleCardForm() {
                       control={form.control}
                       name="isAutographed"
                       render={({ field }) => (
-                        <FormItem className="flex flex-row items-center space-x-2 space-y-0">
+                        <FormItem className="flex flex-row items-center space-x-3 space-y-0">
                           <FormControl>
                             <Checkbox
                               checked={field.value}
@@ -480,7 +480,7 @@ export default function SimpleCardForm() {
                       control={form.control}
                       name="isNumbered"
                       render={({ field }) => (
-                        <FormItem className="flex flex-row items-center space-x-2 space-y-0">
+                        <FormItem className="flex flex-row items-center space-x-3 space-y-0">
                           <FormControl>
                             <Checkbox
                               checked={field.value}
@@ -494,6 +494,21 @@ export default function SimpleCardForm() {
                   </div>
                 </div>
               </div>
+              
+              {/* Notes Field */}
+              <FormField
+                control={form.control}
+                name="notes"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Notes</FormLabel>
+                    <FormControl>
+                      <Input placeholder="Any additional details about the card" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
               
               {/* eBay Value Lookup and Estimated Value Field */}
               <div className="space-y-2">
@@ -535,31 +550,12 @@ export default function SimpleCardForm() {
                             </div>
                           </div>
                         </FormControl>
-                        <p className="text-xs text-gray-500">
-                          {field.value ? `Display value: ${formatCurrency(field.value)}` : ''}
-                        </p>
                       </div>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
               </div>
-              
-
-              
-              <FormField
-                control={form.control}
-                name="notes"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Notes</FormLabel>
-                    <FormControl>
-                      <Input placeholder="Any additional details about the card" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
               
               <div className="pt-4">
                 <p className="text-center text-sm mb-3 text-amber-600 font-medium">

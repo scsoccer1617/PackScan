@@ -302,7 +302,7 @@ export const storage = {
           'ID', 'Sport', 'Player First Name', 'Player Last Name', 
           'Brand', 'Collection', 'Card Number', 'Year', 
           'Variant', 'Serial Number', 'Condition', 'Estimated Value',
-          'Rookie Card', 'Autographed', 'Numbered',
+          'Rookie Card', 'Autographed', 'Numbered', 'Notes',
           'Front Image URL', 'Back Image URL', 'Last Updated'
         ].map(header => `"${header}"`).join(',');
         
@@ -371,14 +371,14 @@ export const storage = {
               // Add headers to the new sheet
               await googleSheetsInstance.spreadsheets.values.update({
                 spreadsheetId,
-                range: 'Cards!A1:R1',
+                range: 'Cards!A1:S1',
                 valueInputOption: 'RAW',
                 resource: {
                   values: [[
                     'ID', 'Sport', 'Player First Name', 'Player Last Name', 
                     'Brand', 'Collection', 'Card Number', 'Year', 
                     'Variant', 'Serial Number', 'Condition', 'Estimated Value',
-                    'Rookie Card', 'Autographed', 'Numbered',
+                    'Rookie Card', 'Autographed', 'Numbered', 'Notes',
                     'Front Image URL', 'Back Image URL', 'Last Updated'
                   ]],
                 },
@@ -408,7 +408,7 @@ export const storage = {
           // Insert card data
           await googleSheetsInstance.spreadsheets.values.update({
             spreadsheetId,
-            range: `Cards!A${nextRow}:R${nextRow}`,
+            range: `Cards!A${nextRow}:S${nextRow}`,
             valueInputOption: 'RAW',
             resource: {
               values: [[
@@ -427,6 +427,7 @@ export const storage = {
                 card.isRookieCard ? 'Yes' : 'No',
                 card.isAutographed ? 'Yes' : 'No',
                 card.isNumbered ? 'Yes' : 'No',
+                card.notes || '',
                 frontImageUrl || '',
                 backImageUrl || '',
                 new Date().toISOString(),
