@@ -273,7 +273,7 @@ export default function CardForm() {
         <h2 className="font-semibold text-lg mb-2">Card Images</h2>
         
         <div className="relative">
-          <div className="grid grid-cols-2 gap-4 mb-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-3">
             {/* Front Image */}
             <div className="flex flex-col">
               <div
@@ -466,7 +466,7 @@ export default function CardForm() {
           </div>
           
           {/* Player Information */}
-          <div className="grid grid-cols-2 gap-4 mb-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
             <FormField
               control={form.control}
               name="playerFirstName"
@@ -555,7 +555,7 @@ export default function CardForm() {
           </div>
           
           {/* Card Details - Number and Year */}
-          <div className="grid grid-cols-2 gap-4 mb-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
             <FormField
               control={form.control}
               name="cardNumber"

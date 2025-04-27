@@ -136,7 +136,7 @@ export default function OCRResults({ loading, error, data, onApply, onCancel, fo
       </CardHeader>
       <CardContent>
         {editMode ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {/* Sport Dropdown */}
             <div className="space-y-2">
               <Label htmlFor="sport">Sport</Label>

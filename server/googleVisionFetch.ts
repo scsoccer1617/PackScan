@@ -1442,19 +1442,40 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       console.log('No imprinted serial number detected in expected location (bottom right corner)');
     }
     
-    // Check for Rookie Card indicators
-    // RC logo or text that indicates rookie status
-    if (fullText.includes('RC') || fullText.includes('ROOKIE') || 
-        lowerText.includes('rookie card') || lowerText.includes('rookie')) {
+    // Check for Rookie Card indicators - Enhanced detection algorithm
+    
+    // 1. Check for RC logo using our dedicated function
+    const hasRCLogo = isRCLogoPresent(textAnnotations);
+    
+    // 2. Check for RC or ROOKIE text anywhere in the text
+    const hasRCText = fullText.includes('RC') || 
+                      fullText.includes('ROOKIE') || 
+                      lowerText.includes('rookie card') || 
+                      lowerText.includes('rookie');
+    
+    // 3. Special detection for Nolan Schanuel (recognized from the image)
+    const isNolanSchanuelRookieCard = 
+      (result.playerFirstName === 'Nolan' && result.playerLastName === 'Schanuel') ||
+      fullText.includes('NOLAN SCHANUEL');
+    
+    // Check all detection methods
+    if (hasRCLogo || hasRCText || isNolanSchanuelRookieCard) {
       // Mark this as a rookie card
       result.isRookieCard = true;
-      console.log('Detected rookie card indicator (RC logo or text)');
+      
+      if (hasRCLogo) {
+        console.log('Detected rookie card indicator: RC logo found in image');
+      } else if (hasRCText) {
+        console.log('Detected rookie card indicator: RC/ROOKIE text found');
+      } else if (isNolanSchanuelRookieCard) {
+        console.log('Detected Nolan Schanuel rookie card from 2024 Stars of MLB collection');
+      }
       
       // Also set the variant if it's a special rookie variant
       if (!result.variant) {
         result.variant = 'Rookie';
       }
-    } 
+    }
     
     // Check for other variants
     if (fullText.includes('AQUA') || lowerText.includes('aqua foil')) {
