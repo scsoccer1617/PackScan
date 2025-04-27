@@ -1749,41 +1749,11 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     // Set a default condition
     result.condition = 'PSA 8';
     
-    // CRITICAL: Special check for Manny Machado Chrome Stars of MLB card
-    if (fullText.includes('MANNY') || fullText.includes('MACHADO') || 
-        fullText.toLowerCase().includes('manny') || fullText.toLowerCase().includes('machado') || 
-        fullText.includes('SAN DIEGO') || fullText.includes('PADRES')) {
-      
-      console.log('MACHADO HANDLER: Detected Manny Machado card indicators');
-      
-      // If we have Chrome or shiny card indicators
-      if (fullText.includes('CHROME') || 
-          fullText.toLowerCase().includes('chrome') || 
-          fullText.includes('CSMLB') || 
-          result.collection === 'Chrome Stars of MLB') {
-        
-        // Set player info
-        result.playerFirstName = 'Manny';
-        result.playerLastName = 'Machado';
-        result.collection = 'Chrome Stars of MLB';
-        result.cardNumber = 'CSMLB-44';
-        result.sport = 'Baseball';
-        result.brand = 'Topps';
-        result.year = 2024;
-        result.condition = 'PSA 8';
-        
-        // Mark that this is definitively Manny Machado's card
-        console.log('MACHADO HANDLER: Detected Manny Machado Chrome Stars of MLB card - setting correct values');
-        
-        // Return immediately to prevent any other handlers from overriding
-        console.log('Extracted card info:', result);
-        return result;
-        
-        // Clear any incorrect player name detections
-        if (result.playerFirstName === 'Major' && result.playerLastName === 'League') {
-          console.log('CRITICAL FIX: Cleared incorrect player name (Major League)');
-        }
-      }
+    // No player-specific checks - fully dynamic OCR
+    
+    // Clear any incorrect player name detections
+    if (result.playerFirstName === 'Major' && result.playerLastName === 'League') {
+      console.log('CRITICAL FIX: Cleared incorrect player name (Major League)');
     }
     
     // Clear incorrect player name detections
