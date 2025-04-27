@@ -6,8 +6,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ChevronDown, ChevronUp, Filter, SortDesc } from "lucide-react";
 
-// Group cards by collection
-type CardsByCollection = {
+// Group cards by Year + Brand + Collection
+type CardsByGroup = {
   [key: string]: CardWithRelations[];
 };
 
@@ -19,68 +19,87 @@ export default function CardGrid() {
     queryKey: ['/api/cards'],
   });
 
-  const [groupedCards, setGroupedCards] = useState<CardsByCollection>({});
-  const [allCollections, setAllCollections] = useState<string[]>([]);
+  const [groupedCards, setGroupedCards] = useState<CardsByGroup>({});
+  const [allGroups, setAllGroups] = useState<string[]>([]);
   const [sortOption, setSortOption] = useState<SortOption>("newest");
-  const [expandedCollections, setExpandedCollections] = useState<Set<string>>(new Set());
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   
-  // Toggle collection expansion
-  const toggleCollection = (collection: string) => {
-    const newExpanded = new Set(expandedCollections);
-    if (newExpanded.has(collection)) {
-      newExpanded.delete(collection);
+  // Toggle group expansion
+  const toggleGroup = (group: string) => {
+    const newExpanded = new Set(expandedGroups);
+    if (newExpanded.has(group)) {
+      newExpanded.delete(group);
     } else {
-      newExpanded.add(collection);
+      newExpanded.add(group);
     }
-    setExpandedCollections(newExpanded);
+    setExpandedGroups(newExpanded);
   };
   
-  // Process cards into collections when data changes
+  // Process cards into groups with Year + Brand + Collection format
   useEffect(() => {
     if (!cards || cards.length === 0) return;
     
-    const grouped: CardsByCollection = {};
-    const collections: Set<string> = new Set();
+    const grouped: CardsByGroup = {};
+    const groups: Set<string> = new Set();
     
-    // Group cards by collection
+    // Group cards by Year + Brand + Collection
     cards.forEach(card => {
-      const collection = card.collection || "Uncategorized";
-      collections.add(collection);
+      const year = card.year || 'Unknown Year';
+      const brand = card.brand?.name || 'Unknown Brand';
+      const collection = card.collection || 'Uncategorized';
       
-      if (!grouped[collection]) {
-        grouped[collection] = [];
+      // Create group label in format: "2024 - Topps Stars of MLB"
+      const groupKey = `${year} - ${brand} ${collection}`;
+      groups.add(groupKey);
+      
+      if (!grouped[groupKey]) {
+        grouped[groupKey] = [];
       }
       
-      grouped[collection].push(card);
+      grouped[groupKey].push(card);
     });
     
-    // Sort collections alphabetically, but put "Uncategorized" at the end
-    const sortedCollections = Array.from(collections).sort((a, b) => {
-      if (a === "Uncategorized") return 1;
-      if (b === "Uncategorized") return -1;
+    // Sort groups by year (newest first), then alphabetically
+    const sortedGroups = Array.from(groups).sort((a: string, b: string) => {
+      // Extract year from group name (format: "2024 - Topps Stars of MLB")
+      const yearA = parseInt(a.split(' - ')[0]) || 0;
+      const yearB = parseInt(b.split(' - ')[0]) || 0;
+      
+      // Sort by year descending first
+      if (yearB !== yearA) {
+        return yearB - yearA;
+      }
+      
+      // If years are equal, sort alphabetically
       return a.localeCompare(b);
     });
     
-    // Apply sorting to each collection group
-    Object.keys(grouped).forEach(collection => {
+    // Apply sorting to each group
+    Object.keys(grouped).forEach(group => {
       switch (sortOption) {
         case "newest":
-          grouped[collection].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+          grouped[group].sort((a: CardWithRelations, b: CardWithRelations) => 
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
           break;
         case "oldest":
-          grouped[collection].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+          grouped[group].sort((a: CardWithRelations, b: CardWithRelations) => 
+            new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
           break;
         case "name-asc":
-          grouped[collection].sort((a, b) => `${a.playerFirstName} ${a.playerLastName}`.localeCompare(`${b.playerFirstName} ${b.playerLastName}`));
+          grouped[group].sort((a: CardWithRelations, b: CardWithRelations) => 
+            `${a.playerFirstName} ${a.playerLastName}`.localeCompare(`${b.playerFirstName} ${b.playerLastName}`));
           break;
         case "name-desc":
-          grouped[collection].sort((a, b) => `${b.playerFirstName} ${b.playerLastName}`.localeCompare(`${a.playerFirstName} ${a.playerLastName}`));
+          grouped[group].sort((a: CardWithRelations, b: CardWithRelations) => 
+            `${b.playerFirstName} ${b.playerLastName}`.localeCompare(`${a.playerFirstName} ${a.playerLastName}`));
           break;
         case "value-high":
-          grouped[collection].sort((a, b) => (b.estimatedValue || 0) - (a.estimatedValue || 0));
+          grouped[group].sort((a: CardWithRelations, b: CardWithRelations) => 
+            Number(b.estimatedValue || 0) - Number(a.estimatedValue || 0));
           break;
         case "value-low":
-          grouped[collection].sort((a, b) => (a.estimatedValue || 0) - (b.estimatedValue || 0));
+          grouped[group].sort((a: CardWithRelations, b: CardWithRelations) => 
+            Number(a.estimatedValue || 0) - Number(b.estimatedValue || 0));
           break;
         default:
           break;
@@ -88,13 +107,13 @@ export default function CardGrid() {
     });
     
     setGroupedCards(grouped);
-    setAllCollections(sortedCollections);
+    setAllGroups(sortedGroups);
     
-    // Auto-expand all collections when first loading
-    if (expandedCollections.size === 0) {
-      setExpandedCollections(new Set(sortedCollections));
+    // Auto-expand all groups when first loading
+    if (expandedGroups.size === 0) {
+      setExpandedGroups(new Set(sortedGroups));
     }
-  }, [cards, sortOption]);
+  }, [cards, sortOption, expandedGroups]);
 
   if (isLoading) {
     return (
@@ -177,39 +196,39 @@ export default function CardGrid() {
         
         <div className="mt-2 text-xs text-slate-500 flex items-center">
           <Filter className="h-3 w-3 mr-1" />
-          <span>Displaying {cards.length} cards in {allCollections.length} collections</span>
+          <span>Displaying {cards.length} cards in {allGroups.length} groups</span>
         </div>
       </div>
       
-      {/* Card Collections */}
+      {/* Card Groups (Year + Brand + Collection) */}
       <div className="space-y-4">
-        {allCollections.map(collection => (
+        {allGroups.map(group => (
           <div 
-            key={collection} 
+            key={group} 
             className="border border-slate-200 rounded-lg overflow-hidden bg-white"
           >
             <button 
               className="w-full flex items-center justify-between p-3 bg-slate-50 hover:bg-slate-100 transition-colors"
-              onClick={() => toggleCollection(collection)}
+              onClick={() => toggleGroup(group)}
             >
               <div className="flex items-center">
-                <h2 className="text-lg font-bold text-slate-800">{collection}</h2>
+                <h2 className="text-lg font-bold text-slate-800">{group}</h2>
                 <span className="ml-2 bg-slate-200 text-slate-700 text-xs font-medium px-2 py-1 rounded-full">
-                  {groupedCards[collection]?.length || 0}
+                  {groupedCards[group]?.length || 0}
                 </span>
               </div>
               
-              {expandedCollections.has(collection) ? (
+              {expandedGroups.has(group) ? (
                 <ChevronUp className="h-5 w-5 text-slate-500" />
               ) : (
                 <ChevronDown className="h-5 w-5 text-slate-500" />
               )}
             </button>
             
-            {expandedCollections.has(collection) && (
+            {expandedGroups.has(group) && (
               <div className="p-3">
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-                  {groupedCards[collection]?.map((card) => (
+                  {groupedCards[group]?.map((card) => (
                     <CardItem key={card.id} card={card} />
                   ))}
                 </div>
