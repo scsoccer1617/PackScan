@@ -1,10 +1,12 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, ExternalLink, DollarSign } from "lucide-react";
+import { Loader2, ExternalLink, DollarSign, Check } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 import { apiRequest } from "@/lib/queryClient";
 
@@ -48,6 +50,7 @@ export default function EbayValueLookup({
   const [isOpen, setIsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<EbayValueResponse | null>(null);
+  const [customValue, setCustomValue] = useState<string>('');
   const { toast } = useToast();
 
   // Format the player name for display (combine first and last name)
@@ -109,6 +112,20 @@ export default function EbayValueLookup({
       title: "Value Applied",
       description: `Card value set to ${formatCurrency(value)}`,
     });
+  };
+  
+  const handleCustomValueSubmit = () => {
+    const value = parseFloat(customValue);
+    if (isNaN(value) || value <= 0) {
+      toast({
+        title: "Invalid value",
+        description: "Please enter a valid positive number",
+        variant: "destructive"
+      });
+      return;
+    }
+    
+    handleValueSelect(value);
   };
 
   return (
@@ -185,15 +202,43 @@ export default function EbayValueLookup({
                   </div>
                 ) : (
                   <div className="p-4 bg-muted rounded-md">
-                    <p className="text-sm">No recent sales found for this exact card.</p>
+                    <p className="text-sm mb-3">No recent sales found through the API, but you can search eBay directly using the link below.</p>
                     <Button 
-                      variant="outline" 
-                      className="w-full mt-2"
+                      variant="default" 
+                      className="w-full mb-3"
                       onClick={() => window.open(results.searchUrl, '_blank')}
                     >
                       <ExternalLink className="mr-2 h-4 w-4" />
                       View on eBay
                     </Button>
+                    
+                    <div className="grid grid-cols-2 gap-2">
+                      {[5, 10, 15, 20].map(value => (
+                        <Button 
+                          key={value}
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => handleValueSelect(value)}
+                          className="text-xs"
+                        >
+                          Use ${value}
+                        </Button>
+                      ))}
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-2 mt-2">
+                      {[25, 30, 50, 100].map(value => (
+                        <Button 
+                          key={value}
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => handleValueSelect(value)}
+                          className="text-xs"
+                        >
+                          Use ${value}
+                        </Button>
+                      ))}
+                    </div>
                   </div>
                 )}
                 
@@ -236,6 +281,36 @@ export default function EbayValueLookup({
                 )}
               </>
             )}
+            
+            <Separator className="my-2" />
+            
+            <div className="p-4 bg-muted rounded-md">
+              <Label htmlFor="custom-value" className="text-sm font-medium mb-1 block">
+                Enter Custom Value
+              </Label>
+              <div className="flex space-x-2">
+                <div className="relative flex-1">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">$</span>
+                  <Input
+                    id="custom-value"
+                    type="number"
+                    min="0.01" 
+                    step="0.01"
+                    placeholder="0.00"
+                    className="pl-7"
+                    value={customValue}
+                    onChange={(e) => setCustomValue(e.target.value)}
+                  />
+                </div>
+                <Button 
+                  onClick={handleCustomValueSubmit}
+                  disabled={!customValue}
+                >
+                  <Check className="mr-2 h-4 w-4" />
+                  Use
+                </Button>
+              </div>
+            </div>
             
             <div className="flex justify-between pt-2">
               <Button variant="outline" onClick={() => setIsOpen(false)}>
