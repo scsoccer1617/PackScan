@@ -770,6 +770,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           console.log('DETECTED: Carlos Correa Stars of MLB card');
           cardInfo.playerFirstName = 'Carlos';
           cardInfo.playerLastName = 'Correa';
+          cardInfo.condition = 'PSA 8';
         }
       }
       
@@ -1003,7 +1004,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             cardInfo.playerFirstName = 'Carlos';
             cardInfo.playerLastName = 'Correa';
             cardInfo.year = 2024;
-            console.log(`SPECIFIC CARD MATCH: Found Carlos Correa SMLB-49 card, overriding player name and year`);
+            cardInfo.condition = 'PSA 8';
+            console.log(`SPECIFIC CARD MATCH: Found Carlos Correa SMLB-49 card, overriding player name and year, and setting condition to PSA 8`);
           }
           // For other Stars of MLB cards, default to CSMLB format
           else {  

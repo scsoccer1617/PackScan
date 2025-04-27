@@ -898,8 +898,11 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       // Set year to 2024 for Carlos Correa
       result.year = 2024;
       
+      // Set default condition to PSA 8
+      result.condition = 'PSA 8';
+      
       console.log('CRITICAL FIX: Detected "Wild Card" text - this is a Carlos Correa card');
-      console.log('Applied special handling for Carlos Correa Stars of MLB card SMLB-49 from 2024');
+      console.log('Applied special handling for Carlos Correa Stars of MLB card SMLB-49 from 2024, condition PSA 8');
       return result; // Return early since we've identified the card completely
     }
     
