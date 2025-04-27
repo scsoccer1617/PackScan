@@ -77,7 +77,9 @@ export default function ImagePreview({
             className={`relative rounded-lg border-2 ${frontImage ? 'border-slate-300' : 'border-dashed border-slate-400'} bg-slate-50 h-36 flex flex-col items-center justify-center overflow-hidden`}
           >
             {frontImage ? (
-              <img src={frontImage} alt="Card front preview" className="object-contain w-full h-full" />
+              <div className="w-full h-full flex items-center justify-center overflow-hidden">
+                <img src={frontImage} alt="Card front preview" className="object-cover w-full h-full" />
+              </div>
             ) : (
               <div className="flex flex-col items-center justify-center p-4">
                 <Camera className="h-8 w-8 text-slate-400 mb-2" />
@@ -113,7 +115,9 @@ export default function ImagePreview({
             className={`relative rounded-lg border-2 ${backImage ? 'border-slate-300' : 'border-dashed border-slate-400'} bg-slate-50 h-36 flex flex-col items-center justify-center overflow-hidden`}
           >
             {backImage ? (
-              <img src={backImage} alt="Card back preview" className="object-contain w-full h-full" />
+              <div className="w-full h-full flex items-center justify-center overflow-hidden">
+                <img src={backImage} alt="Card back preview" className="object-cover w-full h-full" />
+              </div>
             ) : (
               <div className="flex flex-col items-center justify-center p-4">
                 <Camera className="h-8 w-8 text-slate-400 mb-2" />

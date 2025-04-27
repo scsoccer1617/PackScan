@@ -94,22 +94,24 @@ export default function CardItem({ card, onDelete }: CardItemProps) {
       <div className="aspect-w-2 aspect-h-3 relative bg-slate-200 overflow-hidden">
         {card.frontImage ? (
           <>
-            <img 
-              src={card.frontImage.startsWith('http') ? card.frontImage : 
-                 (card.frontImage.startsWith('/') ? `${window.location.origin}${card.frontImage}` : `${window.location.origin}/${card.frontImage}`)} 
-              alt={`${card.playerFirstName} ${card.playerLastName} card`} 
-              className="object-contain w-full h-full transform hover:scale-105 transition-transform duration-300" 
-              onError={(e) => {
-                console.log('Image failed to load:', card.frontImage);
-                // If image fails to load, show placeholder
-                (e.target as HTMLImageElement).style.display = 'none';
-                const parent = (e.target as HTMLImageElement).parentElement;
-                if (parent) {
-                  const fallback = parent.querySelector('.image-fallback');
-                  if (fallback) fallback.classList.remove('hidden');
-                }
-              }}
-            />
+            <div className="w-full h-full flex items-center justify-center overflow-hidden">
+              <img 
+                src={card.frontImage.startsWith('http') ? card.frontImage : 
+                   (card.frontImage.startsWith('/') ? `${window.location.origin}${card.frontImage}` : `${window.location.origin}/${card.frontImage}`)} 
+                alt={`${card.playerFirstName} ${card.playerLastName} card`} 
+                className="object-cover w-full h-full transform hover:scale-105 transition-transform duration-300" 
+                onError={(e) => {
+                  console.log('Image failed to load:', card.frontImage);
+                  // If image fails to load, show placeholder
+                  (e.target as HTMLImageElement).style.display = 'none';
+                  const parent = (e.target as HTMLImageElement).parentElement;
+                  if (parent) {
+                    const fallback = parent.querySelector('.image-fallback');
+                    if (fallback) fallback.classList.remove('hidden');
+                  }
+                }}
+              />
+            </div>
             {/* Hidden fallback that appears if image fails to load */}
             <div className="flex items-center justify-center h-full hidden image-fallback">
               <div className="text-center">
