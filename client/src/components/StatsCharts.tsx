@@ -90,13 +90,13 @@ export default function StatsCharts() {
   // Use loading state while direct data is being fetched
   if (isDirectLoading) {
     return (
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+      <div className="grid grid-cols-1 gap-4 mb-4">
         <Card>
           <CardHeader>
             <CardTitle className="text-sm font-medium text-slate-500">Cards by Sport</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="h-48 flex items-center justify-center bg-slate-50 rounded animate-pulse"></div>
+            <div className="h-60 flex items-center justify-center bg-slate-50 rounded animate-pulse"></div>
           </CardContent>
         </Card>
         
@@ -105,7 +105,7 @@ export default function StatsCharts() {
             <CardTitle className="text-sm font-medium text-slate-500">Value by Year</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="h-48 flex items-center justify-center bg-slate-50 rounded animate-pulse"></div>
+            <div className="h-60 flex items-center justify-center bg-slate-50 rounded animate-pulse"></div>
           </CardContent>
         </Card>
       </div>
@@ -115,13 +115,13 @@ export default function StatsCharts() {
   // If we have no direct data, show empty state
   if (directSportData.length === 0 && directYearData.length === 0) {
     return (
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+      <div className="grid grid-cols-1 gap-4 mb-4">
         <Card>
           <CardHeader>
             <CardTitle className="text-sm font-medium text-slate-500">Cards by Sport</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="h-48 flex items-center justify-center bg-slate-50 rounded">
+            <div className="h-60 flex items-center justify-center bg-slate-50 rounded">
               <p className="text-slate-400">Add cards to see statistics</p>
             </div>
           </CardContent>
@@ -132,7 +132,7 @@ export default function StatsCharts() {
             <CardTitle className="text-sm font-medium text-slate-500">Value by Year</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="h-48 flex items-center justify-center bg-slate-50 rounded">
+            <div className="h-60 flex items-center justify-center bg-slate-50 rounded">
               <p className="text-slate-400">Add cards to see statistics</p>
             </div>
           </CardContent>
@@ -143,13 +143,13 @@ export default function StatsCharts() {
 
   // Use direct data from the cards
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+    <div className="grid grid-cols-1 gap-4 mb-4">
       <Card>
         <CardHeader>
           <CardTitle className="text-sm font-medium text-slate-500">Cards by Sport</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="h-48">
+          <div className="h-60">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie
@@ -157,7 +157,7 @@ export default function StatsCharts() {
                   cx="50%"
                   cy="50%"
                   labelLine={false}
-                  outerRadius={60}
+                  outerRadius={75}
                   fill="#8884d8"
                   dataKey="value"
                   label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
@@ -178,25 +178,28 @@ export default function StatsCharts() {
           <CardTitle className="text-sm font-medium text-slate-500">Value by Year</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="h-48">
+          <div className="h-60">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart
                 data={directYearData}
                 margin={{
                   top: 5,
                   right: 30,
-                  left: 20,
+                  left: 30,
                   bottom: 5,
                 }}
               >
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="year" />
-                <YAxis tickFormatter={(value) => {
-                  if (typeof value === 'number') {
-                    return formatCurrency(value).replace('$', '');
-                  }
-                  return value;
-                }} />
+                <YAxis 
+                  width={50}
+                  tickFormatter={(value) => {
+                    if (typeof value === 'number') {
+                      return formatCurrency(value).replace('$', '');
+                    }
+                    return value;
+                  }} 
+                />
                 <Tooltip 
                   formatter={(value: any) => {
                     if (typeof value === 'number') {
