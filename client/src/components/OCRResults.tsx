@@ -376,12 +376,9 @@ export default function OCRResults({ loading, error, data, onApply, onCancel, fo
           </div>
         )}
       </CardContent>
-      <CardFooter className="flex justify-between">
+      <CardFooter className="flex justify-end">
         <Button variant="outline" onClick={onCancel}>
-          Cancel
-        </Button>
-        <Button onClick={applyAndUseDirectly} className="bg-blue-600 hover:bg-blue-500">
-          Use These Details
+          Close
         </Button>
       </CardFooter>
     </Card>

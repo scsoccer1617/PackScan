@@ -288,7 +288,7 @@ export default function SimpleCardForm() {
                         <Input
                           type="number"
                           placeholder="Card value in USD"
-                          value={form.watch('estimatedValue') || ''}
+                          value={form.watch('estimatedValue') === 0 ? '' : form.watch('estimatedValue')}
                           onChange={(e) => form.setValue('estimatedValue', parseFloat(e.target.value) || 0)}
                           className="pl-7"
                         />
@@ -300,9 +300,6 @@ export default function SimpleCardForm() {
                     
                     {/* Add to Collection button */}
                     <div className="pt-4">
-                      <p className="text-center text-sm mb-3 text-amber-600 font-medium">
-                        ↓ Click the button below to add this card to your collection ↓
-                      </p>
                       <Button 
                         onClick={form.handleSubmit(handleSubmit)}
                         className="w-full bg-green-600 hover:bg-green-500 active:bg-green-700 text-white py-6 text-lg font-bold"
@@ -619,6 +616,7 @@ export default function SimpleCardForm() {
                                 type="number"
                                 placeholder="Card value in USD"
                                 {...field}
+                                value={field.value === 0 ? '' : field.value}
                                 onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
                                 className="pl-7"
                               />
@@ -635,9 +633,6 @@ export default function SimpleCardForm() {
                 </div>
                 
                 <div className="pt-4">
-                  <p className="text-center text-sm mb-3 text-amber-600 font-medium">
-                    ↓ Click the button below to add this card to your collection ↓
-                  </p>
                   <Button 
                     type="submit" 
                     className="w-full bg-green-600 hover:bg-green-500 active:bg-green-700 text-white py-6 text-lg font-bold"
