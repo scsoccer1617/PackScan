@@ -31,6 +31,7 @@ interface EbayValueLookupProps {
   cardNumber: string;
   brand: string;
   year: number;
+  collection?: string;
   condition?: string;
   onValueSelect: (value: number) => void;
 }
@@ -39,7 +40,8 @@ export default function EbayValueLookup({
   playerName, 
   cardNumber, 
   brand, 
-  year, 
+  year,
+  collection,
   condition,
   onValueSelect 
 }: EbayValueLookupProps) {
@@ -64,23 +66,18 @@ export default function EbayValueLookup({
     try {
       setLoading(true);
       
-      // Build query params
-      const params = new URLSearchParams({
-        playerName,
-        cardNumber,
-        brand,
-        year: year.toString()
-      });
-      
-      // Add condition if provided
-      if (condition) {
-        params.append('condition', condition);
-      }
-      
-      // Make API request
+      // Make API request to our new eBay endpoint
       const data = await apiRequest<EbayValueResponse>({
-        url: `/api/card-value?${params.toString()}`,
-        method: 'GET'
+        url: '/api/ebay/search-values',
+        method: 'POST',
+        body: {
+          playerName,
+          cardNumber,
+          brand,
+          year,
+          collection,
+          condition
+        }
       });
       
       setResults(data);
@@ -156,7 +153,7 @@ export default function EbayValueLookup({
             <div className="flex flex-col space-y-1.5">
               <h3 className="text-lg font-semibold">{fullPlayerName}</h3>
               <p className="text-sm text-muted-foreground">
-                {brand} {year} {cardNumber} {condition ? `• ${condition}` : ''}
+                {brand} {year} {collection ? `${collection} ` : ''}{cardNumber} {condition ? `• ${condition}` : ''}
               </p>
             </div>
             

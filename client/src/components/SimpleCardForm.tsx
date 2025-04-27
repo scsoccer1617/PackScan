@@ -474,6 +474,7 @@ export default function SimpleCardForm() {
                           cardNumber={form.watch('cardNumber')}
                           brand={form.watch('brand')}
                           year={form.watch('year') || new Date().getFullYear()}
+                          collection={form.watch('collection')}
                           condition={form.watch('condition')}
                           onValueSelect={(value) => {
                             form.setValue('estimatedValue', value);
