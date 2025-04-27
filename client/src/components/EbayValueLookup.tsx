@@ -128,31 +128,34 @@ export default function EbayValueLookup({
     handleValueSelect(value);
   };
 
+  // Function to directly open eBay instead of dialog
+  const openEbaySearch = () => {
+    const url = getEbaySearchUrl(playerName, cardNumber, brand, year, collection, condition);
+    window.open(url, '_blank');
+  };
+
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
-      <DialogTrigger asChild>
-        <Button 
-          variant="outline" 
-          className="w-full" 
-          onClick={(e) => {
-            e.preventDefault();
-            lookupValue();
-            setIsOpen(true);
-          }}
-          disabled={loading || !playerName || !cardNumber || !brand || !year}
-        >
-          {loading ? (
-            <>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Looking up value...
-            </>
-          ) : (
-            <>
-              <DollarSign className="mr-2 h-4 w-4" />
-              Look up eBay value
-            </>
-          )}
-        </Button>
+      <Button 
+        variant="default" 
+        className="w-full bg-blue-600 hover:bg-blue-700" 
+        onClick={openEbaySearch}
+        disabled={loading || !playerName || !cardNumber || !brand || !year}
+      >
+        {loading ? (
+          <>
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            Looking up value...
+          </>
+        ) : (
+          <>
+            <DollarSign className="mr-2 h-4 w-4" />
+            Look up eBay value
+          </>
+        )}
+      </Button>
+      <DialogTrigger asChild className="hidden">
+        <button>Hidden trigger</button>
       </DialogTrigger>
       
       <DialogContent className="sm:max-w-md">
