@@ -249,30 +249,73 @@ export default function SimpleCardForm() {
             
             {/* OCR Results Dialog */}
             {showOCRResults && (
-              <OCRResults
-                loading={ocrLoading}
-                error={ocrError}
-                data={ocrData}
-                form={form}
-                onApply={applyOCRResults}
-                onCancel={handleOCRCancel}
-              />
+              <>
+                <OCRResults
+                  loading={ocrLoading}
+                  error={ocrError}
+                  data={ocrData}
+                  form={form}
+                  onApply={applyOCRResults}
+                  onCancel={handleOCRCancel}
+                />
+                
+                {/* Show eBay lookup and value fields when OCR data is available */}
+                {!ocrLoading && !ocrError && ocrData && (
+                  <div className="mt-6 space-y-4 border-t border-gray-200 pt-4">
+                    <h3 className="text-lg font-medium text-slate-700">Card Value</h3>
+                    
+                    {/* eBay Value Lookup */}
+                    <div className="mb-4">
+                      <EbayValueLookup
+                        playerName={`${ocrData.playerFirstName || ''} ${ocrData.playerLastName || ''}`.trim()}
+                        cardNumber={ocrData.cardNumber || ''}
+                        brand={ocrData.brand || ''}
+                        year={ocrData.year || new Date().getFullYear()}
+                        collection={ocrData.collection || ''}
+                        condition={ocrData.condition || ''}
+                        onValueSelect={(value) => {
+                          form.setValue('estimatedValue', value);
+                        }}
+                      />
+                    </div>
+                    
+                    {/* Estimated Value Field */}
+                    <div className="space-y-2">
+                      <FormLabel>Estimated Value ($)</FormLabel>
+                      <div className="relative">
+                        <Input
+                          type="number"
+                          placeholder="Card value in USD"
+                          value={form.watch('estimatedValue') || ''}
+                          onChange={(e) => form.setValue('estimatedValue', parseFloat(e.target.value) || 0)}
+                          className="pl-7"
+                        />
+                        <div className="absolute inset-y-0 left-0 flex items-center pl-2 pointer-events-none">
+                          <span className="text-gray-500">$</span>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    {/* Add to Collection button */}
+                    <div className="pt-4">
+                      <p className="text-center text-sm mb-3 text-amber-600 font-medium">
+                        ↓ Click the button below to add this card to your collection ↓
+                      </p>
+                      <Button 
+                        onClick={form.handleSubmit(handleSubmit)}
+                        className="w-full bg-green-600 hover:bg-green-500 active:bg-green-700 text-white py-6 text-lg font-bold"
+                        disabled={createCardMutation.isPending}
+                      >
+                        {createCardMutation.isPending ? "Adding to Collection..." : "ADD TO COLLECTION"}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </div>
           
-          {/* Show edit button if we have images but no form fields or OCR results */}
-          {!showOCRResults && !showFormFields && (frontImage || backImage) && (
-            <div className="flex justify-center">
-              <Button 
-                onClick={handleEditClick} 
-                variant="outline" 
-                className="mt-2 mb-4"
-              >
-                <Edit2 className="h-4 w-4 mr-2" />
-                Edit Card Details Manually
-              </Button>
-            </div>
-          )}
+          {/* We don't show the Edit Card Details Manually button as requested */}
           
           {/* Show form fields only when explicitly requested */}
           {!showOCRResults && showFormFields && (

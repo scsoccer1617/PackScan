@@ -134,7 +134,7 @@ export default function OCRResults({ loading, error, data, onApply, onCancel, fo
             className="h-8 px-2"
           >
             <Pencil className="h-4 w-4 mr-1" />
-            {editMode ? "View" : "Edit"}
+            {editMode ? "View" : "Edit Card Details"}
           </Button>
         </div>
         <CardDescription>
@@ -268,6 +268,54 @@ export default function OCRResults({ loading, error, data, onApply, onCancel, fo
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+
+            {/* Card Features */}
+            <div className="col-span-2 space-y-2 mt-4">
+              <Label>Card Features</Label>
+              <div className="flex flex-wrap gap-6">
+                <div className="flex items-center space-x-2">
+                  <input 
+                    type="checkbox" 
+                    id="isRookieCard" 
+                    checked={editedData.isRookieCard || false}
+                    onChange={(e) => handleInputChange('isRookieCard', e.target.checked)}
+                    className="h-4 w-4 rounded border-gray-300"
+                  />
+                  <Label htmlFor="isRookieCard" className="font-normal text-sm">Rookie Card</Label>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <input 
+                    type="checkbox" 
+                    id="isAutographed" 
+                    checked={editedData.isAutographed || false}
+                    onChange={(e) => handleInputChange('isAutographed', e.target.checked)}
+                    className="h-4 w-4 rounded border-gray-300"
+                  />
+                  <Label htmlFor="isAutographed" className="font-normal text-sm">Autographed</Label>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <input 
+                    type="checkbox" 
+                    id="isNumbered" 
+                    checked={editedData.isNumbered || false}
+                    onChange={(e) => handleInputChange('isNumbered', e.target.checked)}
+                    className="h-4 w-4 rounded border-gray-300"
+                  />
+                  <Label htmlFor="isNumbered" className="font-normal text-sm">Numbered</Label>
+                </div>
+              </div>
+            </div>
+
+            {/* Notes field */}
+            <div className="col-span-2 space-y-2 mt-2">
+              <Label htmlFor="notes">Notes</Label>
+              <Input
+                id="notes"
+                value={editedData.notes || ''}
+                onChange={(e) => handleInputChange('notes', e.target.value)}
+                placeholder="Any additional details about the card"
+              />
             </div>
           </div>
         ) : (
