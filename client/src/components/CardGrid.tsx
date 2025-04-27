@@ -12,7 +12,7 @@ type CardsByGroup = {
 };
 
 // Sort types
-type SortOption = "newest" | "oldest" | "name-asc" | "name-desc" | "value-high" | "value-low";
+type SortOption = "newest" | "oldest" | "name-asc" | "name-desc" | "value-high" | "value-low" | "card-number";
 
 export default function CardGrid() {
   const { data: cards, isLoading, error } = useQuery<CardWithRelations[]>({
@@ -21,7 +21,7 @@ export default function CardGrid() {
 
   const [groupedCards, setGroupedCards] = useState<CardsByGroup>({});
   const [allGroups, setAllGroups] = useState<string[]>([]);
-  const [sortOption, setSortOption] = useState<SortOption>("newest");
+  const [sortOption, setSortOption] = useState<SortOption>("card-number");
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   
   // Toggle group expansion
@@ -101,6 +101,27 @@ export default function CardGrid() {
           grouped[group].sort((a: CardWithRelations, b: CardWithRelations) => 
             Number(a.estimatedValue || 0) - Number(b.estimatedValue || 0));
           break;
+        case "card-number":
+          grouped[group].sort((a: CardWithRelations, b: CardWithRelations) => {
+            // Helper function to extract numeric portion from card number
+            const extractNumber = (cardNum: string): number => {
+              // Extract numbers from strings like "SMLB-27", "CSMLB-12", "27", etc.
+              const matches = cardNum.match(/(\d+)/);
+              return matches ? parseInt(matches[0]) : 0;
+            };
+            
+            // Sort primarily by the numeric part of the card number
+            const numA = extractNumber(a.cardNumber);
+            const numB = extractNumber(b.cardNumber);
+            
+            if (numA !== numB) {
+              return numA - numB; // Ascending numeric order
+            }
+            
+            // If numeric parts are the same, sort alphabetically by full card number
+            return a.cardNumber.localeCompare(b.cardNumber);
+          });
+          break;
         default:
           break;
       }
@@ -168,6 +189,7 @@ export default function CardGrid() {
     { value: "name-desc", label: "Name (Z-A)" },
     { value: "value-high", label: "Value (High-Low)" },
     { value: "value-low", label: "Value (Low-High)" },
+    { value: "card-number", label: "Card Number" },
   ];
 
   return (
