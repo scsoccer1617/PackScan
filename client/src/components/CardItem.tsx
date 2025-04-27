@@ -161,10 +161,14 @@ export default function CardItem({ card, quantity, onDelete }: CardItemProps) {
             {card.estimatedValue ? formatCurrency(Number(card.estimatedValue)) : 'N/A'}
           </span>
           <div className="flex flex-col items-end">
-            <span className="text-xs text-slate-400">#{card.cardNumber}</span>
-            {quantity && quantity > 1 && (
-              <span className="text-xs font-semibold text-secondary-500">x{quantity}</span>
-            )}
+            <div className="flex items-center">
+              <span className="text-xs text-slate-400">#{card.cardNumber}</span>
+              {quantity && quantity > 1 && (
+                <span className="ml-1.5 text-xs font-bold bg-secondary-100 text-secondary-700 px-1.5 py-0.5 rounded-full">
+                  x{quantity}
+                </span>
+              )}
+            </div>
           </div>
         </div>
       </div>

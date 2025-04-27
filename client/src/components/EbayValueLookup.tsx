@@ -229,7 +229,7 @@ export default function EbayValueLookup({
               <>
                 {results.averageValue ? (
                   <div className="p-4 bg-muted rounded-md">
-                    <p className="text-sm font-medium">Average value based on {results.results.length} recent sales:</p>
+                    <p className="text-sm font-medium">Average value based on {results.results?.length || 0} recent sales:</p>
                     <h4 className="text-2xl font-bold mt-1">{formatCurrency(results.averageValue)}</h4>
                     
                     <Button 
@@ -261,13 +261,13 @@ export default function EbayValueLookup({
                   </div>
                 )}
                 
-                {results.results.length > 0 && (
+                {results.results?.length > 0 && (
                   <>
                     <Separator />
                     <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
                       <h4 className="text-sm font-medium">Recent Sales</h4>
                       
-                      {results.results.map((result, i) => (
+                      {results.results?.map((result, i) => (
                         <Card key={i} className="p-3 flex items-start space-x-3">
                           {result.imageUrl && (
                             <div className="flex-shrink-0 w-12 h-12 overflow-hidden rounded-sm">
