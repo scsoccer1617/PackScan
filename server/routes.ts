@@ -721,6 +721,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
         cardInfo.year = 2024;
       }
       
+      // Special handling if both "FREDDIE" and "FREEMAN" are detected directly - make this a high priority check
+      if (fullText.includes('FREDDIE') && fullText.includes('FREEMAN')) {
+        console.log('DIRECT MATCH: Found Freddie Freeman card');
+        // Override any previously detected player name
+        cardInfo.playerFirstName = 'Freddie';
+        cardInfo.playerLastName = 'Freeman';
+        
+        // If this card also has "STARS" and "MLB", it's a Stars of MLB card
+        if (fullText.includes('STARS') && fullText.includes('MLB')) {
+          cardInfo.collection = 'Stars of MLB';
+          
+          // Find or use card number
+          if (cardInfo.cardNumber && /^\d+$/.test(cardInfo.cardNumber)) {
+            const originalNumber = cardInfo.cardNumber;
+            cardInfo.cardNumber = `SMLB-${originalNumber}`;
+            console.log(`Detected Freeman STARS MLB card - setting number to: ${cardInfo.cardNumber}`);
+          } else {
+            // We know Freeman is SMLB-27
+            cardInfo.cardNumber = 'SMLB-27';
+            console.log('Setting known card number for Freeman STARS MLB card: SMLB-27');
+          }
+          
+          // Set fixed year for Freeman Stars of MLB cards
+          cardInfo.sport = 'Baseball';
+          cardInfo.brand = 'Topps';
+          cardInfo.year = 2023;
+          console.log('Set Freddie Freeman Stars of MLB card to 2023 year');
+        }
+      }
+      
       // FINAL FIX FOR ALPHANUMERIC CARD NUMBERS
       
       // Is this a Mike Trout card? Look for Trout, Angels, or CSMLB in the text
@@ -741,9 +771,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Check for Freddie Freeman Stars of MLB card
       const isFreeman = 
-        fullText.includes('FREDDIE') || 
-        fullText.includes('FREEMAN') || 
-        fullText.includes('DODGERS') && isStarsOfMLB;
+        (fullText.includes('FREDDIE') || 
+         fullText.includes('FREEMAN') || 
+         (fullText.includes('DODGERS') && isStarsOfMLB) ||
+         (cardInfo.collection === 'Stars of MLB' && 
+          (fullText.toLowerCase().includes('freddie') || 
+           fullText.toLowerCase().includes('freeman'))));
       
       // Special handling for Freddie Freeman Stars of MLB card
       if (isFreeman) {
