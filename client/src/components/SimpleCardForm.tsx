@@ -332,7 +332,7 @@ export default function SimpleCardForm() {
                   )}
                 />
                 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+                <div className="form-grid mb-4">
                   <FormField
                     control={form.control}
                     name="playerFirstName"
@@ -389,7 +389,7 @@ export default function SimpleCardForm() {
                   )}
                 />
                 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+                <div className="form-grid mb-4">
                   <FormField
                     control={form.control}
                     name="collection"
@@ -419,7 +419,7 @@ export default function SimpleCardForm() {
                   />
                 </div>
                 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+                <div className="form-grid mb-4">
                   <FormField
                     control={form.control}
                     name="year"
@@ -454,7 +454,7 @@ export default function SimpleCardForm() {
                   />
                 </div>
                 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+                <div className="form-grid mb-4">
                   <FormField
                     control={form.control}
                     name="serialNumber"
