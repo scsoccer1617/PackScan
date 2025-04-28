@@ -125,6 +125,11 @@ export default function OCRResults({ loading, error, data, onApply, onCancel, fo
       onApply(editMode ? editedData : data);
     }
   };
+  
+  // Handle edit mode toggle without closing the OCR results
+  const toggleEditMode = () => {
+    setEditMode(!editMode);
+  };
 
   return (
     <Card className="w-full mt-4 border border-slate-200">
@@ -418,11 +423,11 @@ export default function OCRResults({ loading, error, data, onApply, onCancel, fo
       </CardContent>
       <CardFooter className="flex justify-between">
         <Button variant="outline" onClick={onCancel}>
-          Close
+          Cancel
         </Button>
         {!editMode ? (
           <Button
-            onClick={() => setEditMode(true)}
+            onClick={toggleEditMode}
             className="bg-blue-600 hover:bg-blue-500 text-white"
           >
             Edit Card Details
@@ -430,8 +435,12 @@ export default function OCRResults({ loading, error, data, onApply, onCancel, fo
         ) : (
           <Button
             onClick={() => {
-              applyAndUseDirectly();
+              // Apply changes to the current data view (without hiding it)
               setEditMode(false);
+              // Update our data with edited values
+              setEditedData(prevData => ({...prevData}));
+              // Use the edited data for display
+              setData(editedData);
             }}
             className="bg-green-600 hover:bg-green-500 text-white"
           >
