@@ -361,18 +361,9 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>): 
   if (text.includes("STARS") && text.includes("MLB")) {
     console.log("Applying special Stars of MLB card number rules");
     
-    // Special handling for specific players after they've been identified
-    // This is not hardcoded detection but rather applies correct card numbers based on identified players
-    if (cardDetails.playerFirstName === "Manny" && cardDetails.playerLastName === "Machado") {
-      console.log("Detected Manny Machado card - setting correct card number CSMLB-44");
-      cardDetails.cardNumber = "CSMLB-44";
-      cardDetails.collection = "Stars of MLB";
-      cardDetails.variant = "Chrome";
-      cardDetails.brand = "Topps";
-      cardDetails.year = 2024;
-      return;
-    }
-
+    // No special handling for specific players
+    // Dynamic detection of card information only
+    
     // No player-specific hardcoded detection - fully dynamic
 
     // Look for all possible patterns of Stars of MLB card numbers
@@ -440,16 +431,8 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>): 
     
     // If we get here, we didn't find a specific Stars of MLB card number pattern
     // Look for plain numbers that might be part of a SMLB card number
-    // Special detection for known players' card numbers - still fully dynamic by using name detection
-    if (cardDetails.playerFirstName === "Manny" && cardDetails.playerLastName === "Machado") {
-      console.log("Detected Manny Machado - setting known card number CSMLB-44");
-      // We know from external verification that Machado's card number is CSMLB-44
-      cardDetails.cardNumber = "CSMLB-44";
-      cardDetails.collection = "Stars of MLB";
-      cardDetails.variant = "Chrome";
-      cardDetails.brand = "Topps";
-      return;
-    }
+    // No hardcoded player detection - only dynamic analysis
+    // Let the system detect card numbers naturally
     
     // Updated to support two-digit or higher card numbers (up to 999)
     // Exclude numbers that are likely part of stats/text and not card numbers
