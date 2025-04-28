@@ -73,4 +73,18 @@
     height: 100%;
     object-fit: cover;
   }
+  
+  /* Mobile-friendly form styles */
+  .form-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 1rem;
+    margin-bottom: 1rem;
+  }
+  
+  @media (min-width: 640px) {
+    .form-grid {
+      grid-template-columns: 1fr 1fr;
+    }
+  }
 }

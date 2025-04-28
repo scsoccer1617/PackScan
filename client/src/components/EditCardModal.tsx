@@ -152,7 +152,7 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
             />
             
             {/* Player Name Fields */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+            <div className="form-grid">
               <FormField
                 control={form.control}
                 name="playerFirstName"
@@ -211,7 +211,7 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
             />
             
             {/* Collection and Card Number Fields */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+            <div className="form-grid">
               <FormField
                 control={form.control}
                 name="collection"
@@ -242,7 +242,7 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
             </div>
             
             {/* Year and Variant Fields */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+            <div className="form-grid">
               <FormField
                 control={form.control}
                 name="year"
@@ -278,7 +278,7 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
             </div>
             
             {/* Serial Number and Condition Fields */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+            <div className="form-grid">
               <FormField
                 control={form.control}
                 name="serialNumber"
