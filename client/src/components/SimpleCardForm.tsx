@@ -83,13 +83,14 @@ export default function SimpleCardForm() {
       if (value !== undefined && value !== null) {
         // Special handling for boolean values
         if (key === 'isRookieCard' || key === 'isAutographed' || key === 'isNumbered') {
-          form.setValue(key as any, Boolean(value));
+          form.setValue(key as any, value === true);
         } else {
           form.setValue(key as any, value);
         }
       }
     });
     setShowOCRResults(false);
+    setShowFormFields(true); // Show form fields with OCR data applied
     
     toast({
       title: "OCR Results Applied",

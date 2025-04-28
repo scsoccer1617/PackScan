@@ -118,10 +118,21 @@ export function useOCR(): OCRResult {
         if (cardInfo.variant) form.setValue('variant', cardInfo.variant);
         if (cardInfo.serialNumber) form.setValue('serialNumber', cardInfo.serialNumber);
         
+        // Set boolean flags properly
+        // Make sure we include isRookieCard in the cardInfo object too
+        cardInfo.isRookieCard = result.data.isRookieCard === true; 
+        cardInfo.isAutographed = result.data.isAutographed === true;
+        cardInfo.isNumbered = result.data.isNumbered === true;
+      
         // Set rookie card checkbox if detected in the OCR results
-        if (result.data.isRookieCard) {
+        if (result.data.isRookieCard === true) {
+          console.log("Setting rookie card to true in form");
           form.setValue('isRookieCard', true);
         }
+        
+        // Also set the other boolean fields
+        form.setValue('isAutographed', result.data.isAutographed === true);
+        form.setValue('isNumbered', result.data.isNumbered === true);
         
         if (cardInfo.condition) {
           form.setValue('condition', cardInfo.condition);
