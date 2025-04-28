@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import CardItem from "./CardItem";
 import { Card, CardWithRelations } from "@shared/schema";
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ChevronDown, ChevronUp, Filter, SortDesc } from "lucide-react";
@@ -20,7 +20,7 @@ export default function CardGrid() {
   });
   
   // Add separate debugging effect
-  React.useEffect(() => {
+  useEffect(() => {
     if (cards) {
       console.log('Card images in collection:');
       cards.forEach((card: CardWithRelations) => {
