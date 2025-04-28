@@ -343,46 +343,54 @@ export default function OCRResults({ loading, error, data, onApply, onCancel, fo
             <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
               {data.sport && (
                 <div className="col-span-2 py-1 border-b border-gray-100">
-                  <span className="font-medium text-slate-700">Sport:</span> 
+                  <span className="font-medium text-slate-700">Sport: </span>
                   <span className="text-slate-900">{data.sport}</span>
                 </div>
               )}
               
               <div className="col-span-2 py-1 border-b border-gray-100">
-                <span className="font-medium text-slate-700">Player:</span> <span className="text-slate-900">{data.playerFirstName || ''} {data.playerLastName || ''}</span>
+                <span className="font-medium text-slate-700">Player: </span>
+                <span className="text-slate-900">{data.playerFirstName || ''} {data.playerLastName || ''}</span>
               </div>
               
               <div className="py-1 border-b border-gray-100">
-                <span className="font-medium text-slate-700">Brand:</span> <span className="text-slate-900">{data.brand || 'Not detected'}</span>
+                <span className="font-medium text-slate-700">Brand: </span>
+                <span className="text-slate-900">{data.brand || 'Not detected'}</span>
               </div>
               
               <div className="py-1 border-b border-gray-100">
-                <span className="font-medium text-slate-700">Collection:</span> <span className="text-slate-900">{data.collection || 'Not detected'}</span>
+                <span className="font-medium text-slate-700">Collection: </span>
+                <span className="text-slate-900">{data.collection || 'Not detected'}</span>
               </div>
               
               <div className="py-1 border-b border-gray-100">
-                <span className="font-medium text-slate-700">Card #:</span> <span className="text-slate-900">{data.cardNumber || 'Not detected'}</span>
+                <span className="font-medium text-slate-700">Card #: </span>
+                <span className="text-slate-900">{data.cardNumber || 'Not detected'}</span>
               </div>
               
               <div className="py-1 border-b border-gray-100">
-                <span className="font-medium text-slate-700">Year:</span> <span className="text-slate-900">{data.year && data.year > 0 ? data.year : 'Not detected'}</span>
+                <span className="font-medium text-slate-700">Year: </span>
+                <span className="text-slate-900">{data.year && data.year > 0 ? data.year : 'Not detected'}</span>
               </div>
               
               <div className="py-1 border-b border-gray-100">
-                <span className="font-medium text-slate-700">Variant:</span> <span className="text-slate-900">{data.variant || 'Not detected'}</span>
+                <span className="font-medium text-slate-700">Variant: </span>
+                <span className="text-slate-900">{data.variant || 'Not detected'}</span>
               </div>
               
               <div className="py-1 border-b border-gray-100">
-                <span className="font-medium text-slate-700">Serial #:</span> <span className="text-slate-900">{data.serialNumber || 'None'}</span>
+                <span className="font-medium text-slate-700">Serial #: </span>
+                <span className="text-slate-900">{data.serialNumber || 'None'}</span>
               </div>
               
               <div className="col-span-2 py-1 border-b border-gray-100">
-                <span className="font-medium text-slate-700">Condition:</span> <span className="text-slate-900">{data.condition || 'Not detected'}</span>
+                <span className="font-medium text-slate-700">Condition: </span>
+                <span className="text-slate-900">{data.condition || 'Not detected'}</span>
               </div>
               
               {/* Card Features */}
               <div className="col-span-2 py-2">
-                <span className="font-medium text-slate-700 block mb-1">Card Features:</span>
+                <span className="font-medium text-slate-700 block mb-1">Card Features: </span>
                 <div className="flex flex-wrap gap-3">
                   {data.isRookieCard === true && (
                     <span className="inline-flex items-center rounded-full bg-green-100 px-2 py-1 text-xs font-medium text-green-800">
