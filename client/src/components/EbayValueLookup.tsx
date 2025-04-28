@@ -1,28 +1,7 @@
-import { useState, useRef } from 'react';
+import { useMemo } from 'react';
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { ExternalLink } from "lucide-react";
-import { formatCurrency } from "@/lib/utils";
-import { apiRequest } from "@/lib/queryClient";
-
-// Define interfaces
-interface EbayValueResult {
-  title: string;
-  price: number;
-  currency: string;
-  url: string;
-  imageUrl: string;
-  condition: string;
-  endTime: string;
-}
-
-interface EbayValueResponse {
-  status: 'success' | 'unconfigured';
-  message?: string;
-  searchUrl: string;
-  averageValue: number | null;
-  results: EbayValueResult[];
-}
 
 interface EbayValueLookupProps {
   playerName: string;
@@ -44,29 +23,11 @@ export default function EbayValueLookup({
   onValueSelect 
 }: EbayValueLookupProps) {
   const { toast } = useToast();
-  const [isLoading, setIsLoading] = useState(false);
-  const clickTimeoutRef = useRef<number | null>(null);
   
-  // Function to directly open eBay in a new window/tab
-  const openEbaySearch = () => {
-    // Prevent multiple rapid clicks
-    if (isLoading) return;
-    
-    // Debounce to prevent multiple windows from opening
-    if (clickTimeoutRef.current) {
-      window.clearTimeout(clickTimeoutRef.current);
-    }
-    
-    setIsLoading(true);
-    
+  // Create the eBay search URL
+  const ebayUrl = useMemo(() => {
     if (!playerName || !cardNumber || !brand || !year) {
-      toast({
-        title: "Missing card information",
-        description: "Please provide player name, card number, brand, and year before searching eBay.",
-        variant: "destructive"
-      });
-      setIsLoading(false);
-      return;
+      return '';
     }
     
     // Build eBay search URL directly
@@ -91,41 +52,44 @@ export default function EbayValueLookup({
       LH_PrefLoc: '1'      // Ships to US
     });
     
-    const url = `${baseUrl}?${searchParams.toString()}`;
-    
-    // Schedule the window.open call
-    clickTimeoutRef.current = window.setTimeout(() => {
-      try {
-        // Open eBay in a new tab/window, which keeps our app open
-        const newWindow = window.open(url, '_blank', 'noopener,noreferrer');
-        
-        // Check if window was successfully opened
-        if (!newWindow || newWindow.closed || typeof newWindow.closed === 'undefined') {
-          toast({
-            title: "Popup blocked",
-            description: "Please allow popups for this site to open eBay search results.",
-            variant: "destructive"
-          });
-        }
-      } catch (error) {
-        console.error("Error opening eBay window:", error);
-      } finally {
-        setIsLoading(false);
-        clickTimeoutRef.current = null;
-      }
-    }, 100);
+    return `${baseUrl}?${searchParams.toString()}`;
+  }, [playerName, cardNumber, brand, year, collection]);
+  
+  // Show warning if card information is missing
+  const handleMissingInfo = () => {
+    if (!playerName || !cardNumber || !brand || !year) {
+      toast({
+        title: "Missing card information",
+        description: "Please provide player name, card number, brand, and year before searching eBay.",
+        variant: "destructive"
+      });
+    }
   };
 
-  // Simple button-only interface
+  // Render a regular anchor tag styled as a button
   return (
-    <Button 
-      variant="default" 
-      className="w-full bg-blue-600 hover:bg-blue-700" 
-      onClick={openEbaySearch}
-      disabled={isLoading || !playerName || !cardNumber || !brand || !year}
-    >
-      <ExternalLink className="mr-2 h-4 w-4" />
-      {isLoading ? "Opening eBay..." : "Lookup on eBay"}
-    </Button>
+    <div className="w-full">
+      {ebayUrl ? (
+        <a 
+          href={ebayUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="w-full inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-blue-600 hover:bg-blue-700 text-white h-10 px-4 py-2"
+        >
+          <ExternalLink className="mr-2 h-4 w-4" />
+          Lookup on eBay
+        </a>
+      ) : (
+        <Button 
+          variant="default" 
+          className="w-full bg-blue-600 hover:bg-blue-700" 
+          onClick={handleMissingInfo}
+          disabled={!playerName || !cardNumber || !brand || !year}
+        >
+          <ExternalLink className="mr-2 h-4 w-4" />
+          Lookup on eBay
+        </Button>
+      )}
+    </div>
   );
 }

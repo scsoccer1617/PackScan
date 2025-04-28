@@ -124,32 +124,34 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
         <Form {...form}>
           <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-6">
             {/* Sport Field */}
-            <FormField
-              control={form.control}
-              name="sport"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Sport <span className="text-red-500">*</span></FormLabel>
-                  <Select
-                    onValueChange={field.onChange}
-                    defaultValue={field.value}
-                    value={field.value}
-                  >
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select sport" />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      {["Baseball", "Football", "Basketball", "Hockey", "Soccer", "Other"].map((sport) => (
-                        <SelectItem key={sport} value={sport}>{sport}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
+            <div className="form-grid">
+              <FormField
+                control={form.control}
+                name="sport"
+                render={({ field }) => (
+                  <FormItem className="col-span-1 md:col-span-2">
+                    <FormLabel>Sport <span className="text-red-500">*</span></FormLabel>
+                    <Select
+                      onValueChange={field.onChange}
+                      defaultValue={field.value}
+                      value={field.value}
+                    >
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select sport" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {["Baseball", "Football", "Basketball", "Hockey", "Soccer", "Other"].map((sport) => (
+                          <SelectItem key={sport} value={sport}>{sport}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
             
             {/* Player Name Fields */}
             <div className="form-grid">
@@ -183,32 +185,34 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
             </div>
             
             {/* Brand Field */}
-            <FormField
-              control={form.control}
-              name="brand"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Brand <span className="text-red-500">*</span></FormLabel>
-                  <Select
-                    onValueChange={field.onChange}
-                    defaultValue={field.value}
-                    value={field.value}
-                  >
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select brand" />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      {["Topps", "Panini", "Upper Deck", "Bowman", "Fleer", "Donruss", "Score", "Other"].map((brand) => (
-                        <SelectItem key={brand} value={brand}>{brand}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
+            <div className="form-grid">
+              <FormField
+                control={form.control}
+                name="brand"
+                render={({ field }) => (
+                  <FormItem className="col-span-1 md:col-span-2">
+                    <FormLabel>Brand <span className="text-red-500">*</span></FormLabel>
+                    <Select
+                      onValueChange={field.onChange}
+                      defaultValue={field.value}
+                      value={field.value}
+                    >
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select brand" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {["Topps", "Panini", "Upper Deck", "Bowman", "Fleer", "Donruss", "Score", "Other"].map((brand) => (
+                          <SelectItem key={brand} value={brand}>{brand}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
             
             {/* Collection and Card Number Fields */}
             <div className="form-grid">
@@ -382,48 +386,52 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
             </div>
             
             {/* Estimated Value Field */}
-            <FormField
-              control={form.control}
-              name="estimatedValue"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Estimated Value ($) <span className="text-red-500">*</span></FormLabel>
-                  <div className="flex flex-col space-y-2">
-                    <FormControl>
-                      <div className="relative">
-                        <Input
-                          type="number"
-                          placeholder="Card value in USD"
-                          {...field}
-                          value={field.value === 0 ? '' : field.value}
-                          onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
-                          className="pl-7"
-                        />
-                        <div className="absolute inset-y-0 left-0 flex items-center pl-2 pointer-events-none">
-                          <span className="text-gray-500">$</span>
+            <div className="form-grid">
+              <FormField
+                control={form.control}
+                name="estimatedValue"
+                render={({ field }) => (
+                  <FormItem className="col-span-1 md:col-span-2">
+                    <FormLabel>Estimated Value ($) <span className="text-red-500">*</span></FormLabel>
+                    <div className="flex flex-col space-y-2">
+                      <FormControl>
+                        <div className="relative">
+                          <Input
+                            type="number"
+                            placeholder="Card value in USD"
+                            {...field}
+                            value={field.value === 0 ? '' : field.value}
+                            onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
+                            className="pl-7"
+                          />
+                          <div className="absolute inset-y-0 left-0 flex items-center pl-2 pointer-events-none">
+                            <span className="text-gray-500">$</span>
+                          </div>
                         </div>
-                      </div>
-                    </FormControl>
-                  </div>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
+                      </FormControl>
+                    </div>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
             
             {/* Notes Field */}
-            <FormField
-              control={form.control}
-              name="notes"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Notes</FormLabel>
-                  <FormControl>
-                    <Input placeholder="Any additional details about the card" {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
+            <div className="form-grid">
+              <FormField
+                control={form.control}
+                name="notes"
+                render={({ field }) => (
+                  <FormItem className="col-span-1 md:col-span-2">
+                    <FormLabel>Notes</FormLabel>
+                    <FormControl>
+                      <Input placeholder="Any additional details about the card" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
             
             <DialogFooter>
               <Button 
