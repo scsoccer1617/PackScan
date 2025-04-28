@@ -457,12 +457,12 @@ export default function CardForm() {
           <h2 className="font-semibold text-lg mb-3">Card Details</h2>
           
           {/* Sport Selection */}
-          <div className="mb-4">
+          <div className="form-grid">
             <FormField
               control={form.control}
               name="sport"
               render={({ field }) => (
-                <FormItem>
+                <FormItem className="col-span-1 md:col-span-2">
                   <FormLabel className="text-sm font-medium text-slate-700">Sport *</FormLabel>
                   <div className="flex flex-wrap gap-2">
                     {sportOptions.map((sport) => (
@@ -488,7 +488,7 @@ export default function CardForm() {
           </div>
           
           {/* Player Information */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+          <div className="form-grid">
             <FormField
               control={form.control}
               name="playerFirstName"
@@ -499,7 +499,6 @@ export default function CardForm() {
                     <Input 
                       placeholder="Mike" 
                       {...field} 
-                      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
                     />
                   </FormControl>
                   <FormMessage />
@@ -516,7 +515,6 @@ export default function CardForm() {
                     <Input 
                       placeholder="Trout" 
                       {...field} 
-                      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
                     />
                   </FormControl>
                   <FormMessage />
@@ -526,12 +524,12 @@ export default function CardForm() {
           </div>
           
           {/* Card Brand */}
-          <div className="mb-4">
+          <div className="form-grid">
             <FormField
               control={form.control}
               name="brand"
               render={({ field }) => (
-                <FormItem>
+                <FormItem className="col-span-1 md:col-span-2">
                   <FormLabel className="text-sm font-medium text-slate-700">Brand *</FormLabel>
                   <Select 
                     onValueChange={field.onChange} 
@@ -539,7 +537,7 @@ export default function CardForm() {
                     defaultValue={field.value}
                   >
                     <FormControl>
-                      <SelectTrigger className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
+                      <SelectTrigger>
                         <SelectValue placeholder="Select brand" />
                       </SelectTrigger>
                     </FormControl>
@@ -556,18 +554,17 @@ export default function CardForm() {
           </div>
           
           {/* Collection */}
-          <div className="mb-4">
+          <div className="form-grid">
             <FormField
               control={form.control}
               name="collection"
               render={({ field }) => (
-                <FormItem>
+                <FormItem className="col-span-1 md:col-span-2">
                   <FormLabel className="text-sm font-medium text-slate-700">Collection</FormLabel>
                   <FormControl>
                     <Input 
                       placeholder="Series Two" 
                       {...field} 
-                      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
                     />
                   </FormControl>
                   <FormMessage />
@@ -577,7 +574,7 @@ export default function CardForm() {
           </div>
           
           {/* Card Details - Number and Year */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+          <div className="form-grid">
             <FormField
               control={form.control}
               name="cardNumber"
@@ -588,7 +585,6 @@ export default function CardForm() {
                     <Input 
                       placeholder="27" 
                       {...field} 
-                      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
                     />
                   </FormControl>
                   <FormMessage />
@@ -608,7 +604,6 @@ export default function CardForm() {
                       {...field}
                       value={field.value?.toString() || ''}
                       onChange={(e) => field.onChange(parseInt(e.target.value) || '')}
-                      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
                     />
                   </FormControl>
                   <FormMessage />
@@ -617,8 +612,8 @@ export default function CardForm() {
             />
           </div>
           
-          {/* Variant */}
-          <div className="mb-4">
+          {/* Variant and Serial Number */}
+          <div className="form-grid">
             <FormField
               control={form.control}
               name="variant"
@@ -629,17 +624,13 @@ export default function CardForm() {
                     <Input 
                       placeholder="Base, Aqua Foil, etc." 
                       {...field} 
-                      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
                     />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
               )}
             />
-          </div>
-          
-          {/* Serial Number */}
-          <div className="mb-4">
+            
             <FormField
               control={form.control}
               name="serialNumber"
@@ -650,11 +641,10 @@ export default function CardForm() {
                     <Input 
                       placeholder="" 
                       {...field} 
-                      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
                     />
                   </FormControl>
                   <FormMessage />
-                  <p className="text-xs text-slate-500 mt-1">If your card has a serial number printed on it</p>
+                  <p className="text-xs text-slate-500 mt-1">If numbered card</p>
                 </FormItem>
               )}
             />
