@@ -369,8 +369,8 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
                     <FormItem className="flex flex-row items-center space-x-2 space-y-0">
                       <FormControl>
                         <Checkbox
-                          checked={field.value}
-                          onCheckedChange={field.onChange}
+                          checked={field.value === true}
+                          onCheckedChange={(checked) => field.onChange(checked === true)}
                           className="h-5 w-5"
                         />
                       </FormControl>

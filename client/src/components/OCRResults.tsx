@@ -279,8 +279,11 @@ export default function OCRResults({ loading, error, data, onApply, onCancel, fo
                   <input 
                     type="checkbox" 
                     id="isRookieCard" 
-                    checked={editedData.isRookieCard || false}
-                    onChange={(e) => handleInputChange('isRookieCard', e.target.checked)}
+                    checked={editedData.isRookieCard === true}
+                    onChange={(e) => {
+                      handleInputChange('isRookieCard', e.target.checked === true);
+                      console.log("OCR Rookie checkbox changed to:", e.target.checked);
+                    }}
                     className="h-4 w-4 rounded border-gray-300"
                   />
                   <Label htmlFor="isRookieCard" className="font-normal text-sm">Rookie Card</Label>
@@ -289,8 +292,8 @@ export default function OCRResults({ loading, error, data, onApply, onCancel, fo
                   <input 
                     type="checkbox" 
                     id="isAutographed" 
-                    checked={editedData.isAutographed || false}
-                    onChange={(e) => handleInputChange('isAutographed', e.target.checked)}
+                    checked={editedData.isAutographed === true}
+                    onChange={(e) => handleInputChange('isAutographed', e.target.checked === true)}
                     className="h-4 w-4 rounded border-gray-300"
                   />
                   <Label htmlFor="isAutographed" className="font-normal text-sm">Autographed</Label>
@@ -299,8 +302,8 @@ export default function OCRResults({ loading, error, data, onApply, onCancel, fo
                   <input 
                     type="checkbox" 
                     id="isNumbered" 
-                    checked={editedData.isNumbered || false}
-                    onChange={(e) => handleInputChange('isNumbered', e.target.checked)}
+                    checked={editedData.isNumbered === true}
+                    onChange={(e) => handleInputChange('isNumbered', e.target.checked === true)}
                     className="h-4 w-4 rounded border-gray-300"
                   />
                   <Label htmlFor="isNumbered" className="font-normal text-sm">Numbered</Label>
@@ -383,17 +386,17 @@ export default function OCRResults({ loading, error, data, onApply, onCancel, fo
                       Rookie Card
                     </span>
                   )}
-                  {data.isAutographed && (
+                  {data.isAutographed === true && (
                     <span className="inline-flex items-center rounded-full bg-blue-100 px-2 py-1 text-xs font-medium text-blue-800">
                       Autographed
                     </span>
                   )}
-                  {data.isNumbered && (
+                  {data.isNumbered === true && (
                     <span className="inline-flex items-center rounded-full bg-purple-100 px-2 py-1 text-xs font-medium text-purple-800">
                       Numbered
                     </span>
                   )}
-                  {!data.isRookieCard && !data.isAutographed && !data.isNumbered && (
+                  {data.isRookieCard !== true && data.isAutographed !== true && data.isNumbered !== true && (
                     <span className="text-gray-500 text-xs">None detected</span>
                   )}
                 </div>
