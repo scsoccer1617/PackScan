@@ -143,9 +143,9 @@ export default function OCRResults({ loading, error, data, onApply, onCancel, fo
       </CardHeader>
       <CardContent>
         {editMode ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="form-grid">
             {/* Sport Dropdown */}
-            <div className="space-y-2">
+            <div className="space-y-2 col-span-1 md:col-span-2">
               <Label htmlFor="sport">Sport</Label>
               <Select
                 value={editedData.sport || ''}
@@ -162,11 +162,8 @@ export default function OCRResults({ loading, error, data, onApply, onCancel, fo
               </Select>
             </div>
 
-            {/* Empty cell for grid alignment */}
-            <div className="hidden sm:block"></div>
-
-            {/* First row - Player Name - Now full width on mobile */}
-            <div className="space-y-2 col-span-1">
+            {/* First row - Player Name */}
+            <div className="space-y-2">
               <Label htmlFor="playerFirstName">First Name</Label>
               <Input
                 id="playerFirstName"
@@ -175,7 +172,7 @@ export default function OCRResults({ loading, error, data, onApply, onCancel, fo
                 placeholder="Player First Name"
               />
             </div>
-            <div className="space-y-2 col-span-1">
+            <div className="space-y-2">
               <Label htmlFor="playerLastName">Last Name</Label>
               <Input
                 id="playerLastName"
@@ -186,7 +183,7 @@ export default function OCRResults({ loading, error, data, onApply, onCancel, fo
             </div>
 
             {/* Second row - Brand and Collection */}
-            <div className="space-y-2 col-span-1">
+            <div className="space-y-2">
               <Label htmlFor="brand">Brand</Label>
               <Select
                 value={editedData.brand || ''}
@@ -202,7 +199,7 @@ export default function OCRResults({ loading, error, data, onApply, onCancel, fo
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-2 col-span-1">
+            <div className="space-y-2">
               <Label htmlFor="collection">Collection</Label>
               <Input
                 id="collection"
@@ -213,7 +210,7 @@ export default function OCRResults({ loading, error, data, onApply, onCancel, fo
             </div>
 
             {/* Third row - Card Number and Year */}
-            <div className="space-y-2 col-span-1">
+            <div className="space-y-2">
               <Label htmlFor="cardNumber">Card Number</Label>
               <Input
                 id="cardNumber"
@@ -222,7 +219,7 @@ export default function OCRResults({ loading, error, data, onApply, onCancel, fo
                 placeholder="Card Number"
               />
             </div>
-            <div className="space-y-2 col-span-1">
+            <div className="space-y-2">
               <Label htmlFor="year">Year</Label>
               <Input
                 id="year"
@@ -234,7 +231,7 @@ export default function OCRResults({ loading, error, data, onApply, onCancel, fo
             </div>
 
             {/* Fourth row - Variant and Serial Number */}
-            <div className="space-y-2 col-span-1">
+            <div className="space-y-2">
               <Label htmlFor="variant">Variant</Label>
               <Input
                 id="variant"
@@ -243,7 +240,7 @@ export default function OCRResults({ loading, error, data, onApply, onCancel, fo
                 placeholder="Card Variant"
               />
             </div>
-            <div className="space-y-2 col-span-1">
+            <div className="space-y-2">
               <Label htmlFor="serialNumber">Serial Number</Label>
               <Input
                 id="serialNumber"
@@ -254,7 +251,7 @@ export default function OCRResults({ loading, error, data, onApply, onCancel, fo
             </div>
 
             {/* Fifth row - Condition */}
-            <div className="space-y-2 col-span-1">
+            <div className="space-y-2 col-span-1 md:col-span-2">
               <Label htmlFor="condition">Condition</Label>
               <Select
                 value={editedData.condition || ''}
