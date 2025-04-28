@@ -63,6 +63,7 @@
     height: 0;
     padding-bottom: 140%; /* Fixed 7:10 aspect ratio */
     overflow: hidden;
+    background-color: #f1f5f9;
   }
   
   .card-image {
@@ -71,7 +72,21 @@
     left: 0;
     width: 100%;
     height: 100%;
-    object-fit: cover;
+    object-fit: contain; /* Use contain to show entire card without cropping */
+    background-color: #f1f5f9;
+  }
+  
+  /* Fallback placeholder styles */
+  .image-fallback {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: #f1f5f9;
   }
   
   /* Mobile-friendly form styles */
