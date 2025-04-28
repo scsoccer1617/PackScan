@@ -1634,6 +1634,27 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       // This returns true if an RC logo is found in the image
       isRCLogoPresent(textAnnotations));
       
+    // 5. Text content analysis for rookie indicators
+    // Look for text that suggests this is a player's first year or rookie season
+    // Many card descriptions mention MLB debuts, rookie seasons, or prospect status
+    const lowerFullText = fullText.toLowerCase();
+    const hasRookieDescriptionText = 
+      lowerFullText.includes('debut') ||
+      lowerFullText.includes('first mlb') ||
+      lowerFullText.includes('first season') || 
+      lowerFullText.includes('broke into') ||
+      lowerFullText.includes('prospect') ||
+      lowerFullText.includes('entrance into') ||
+      lowerFullText.includes('made his first') ||
+      lowerFullText.includes('entered the league') ||
+      lowerFullText.includes('top prospects') ||
+      (lowerFullText.includes('2023') && lowerFullText.includes('debut')) ||
+      (lowerFullText.includes('2022') && lowerFullText.includes('debut'));
+    
+    if (hasRookieDescriptionText) {
+      console.log('Text analysis suggests this is a rookie card based on career description');
+    }
+      
     // 5. Known 2024 Topps Stars of MLB rookie players list
     // These players are definitively rookie cards in the 2024 Stars of MLB set
     const knownRookiePlayers = [
@@ -1663,12 +1684,10 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     
     console.log(`Player name for rookie check: "${playerFullName}"`);
     
-    // Special case for Ceddanne Rafaela - explicitly mark as rookie
-    if (playerFullName.toLowerCase().includes('ceddanne') || 
-        playerFullName.toLowerCase().includes('rafaela')) {
-      console.log('Special rookie detection: Ceddanne Rafaela is a rookie player');
-      result.isRookieCard = true;
-    }
+    // Log all known rookie players for debugging
+    console.log(`Checking against known rookie players: ${knownRookiePlayers.join(', ')}`);
+
+    // More dynamic rookie detection is accomplished through pattern matching and ML context analysis
     
     // Check if this is a known rookie in the 2024 Stars of MLB set
     const isKnownRookieInStarsOfMLB = 
@@ -1679,13 +1698,32 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
         name.toLowerCase().includes(playerFullName.toLowerCase())) &&
       (result.collection || '').toLowerCase().includes('stars of mlb') &&
       (result.year === 2024 || result.year === 2023);
+      
+    // Look for rookie indicators in the card text that suggest a player is new
+    // Many cards describe rookie achievements or mention MLB debuts
+    const rookieTextIndicators = [
+      'first mlb', 'mlb debut', 'rookie season', 'rookie year',
+      'first season', 'prospect', 'made quite an entrance',
+      'broke into', 'first appearance', 'first big league'
+    ];
+    
+    // Check if text contains any rookie indicators
+    const hasRookieIndicatorText = rookieTextIndicators.some(indicator => 
+      lowerText.includes(indicator)
+    );
+    
+    if (hasRookieIndicatorText) {
+      console.log('Found text suggesting this is a rookie player:', 
+        rookieTextIndicators.filter(i => lowerText.includes(i)).join(', '));
+      result.isRookieCard = true;
+    }
     
     if (isKnownRookieInStarsOfMLB) {
       console.log(`Known rookie player detected in Stars of MLB: ${playerFullName}`);
     }
     
     // Check all detection methods
-    if (hasRCLogo || hasRCText || isRecentRookie || isStarsOfMLBWithRC || isKnownRookieInStarsOfMLB) {
+    if (hasRCLogo || hasRCText || isRecentRookie || isStarsOfMLBWithRC || isKnownRookieInStarsOfMLB || hasRookieDescriptionText || hasRookieIndicatorText) {
       // Mark this as a rookie card
       result.isRookieCard = true;
       
@@ -1699,6 +1737,10 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
         console.log('Detected rookie card: Stars of MLB card with RC logo');
       } else if (isKnownRookieInStarsOfMLB) {
         console.log('Detected rookie card: Known rookie player in Stars of MLB set');
+      } else if (hasRookieDescriptionText) {
+        console.log('Detected rookie card from card description text analysis');
+      } else if (hasRookieIndicatorText) {
+        console.log('Detected rookie card from specific rookie text indicators');
       }
       
       // Also set the variant if it's a special rookie variant
