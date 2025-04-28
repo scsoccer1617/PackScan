@@ -17,6 +17,15 @@ type SortOption = "newest" | "oldest" | "name-asc" | "name-desc" | "value-high" 
 export default function CardGrid() {
   const { data: cards, isLoading, error } = useQuery<CardWithRelations[]>({
     queryKey: ['/api/cards'],
+    onSuccess: (data) => {
+      // Log all image paths for debugging
+      console.log('Card images in collection:');
+      data.forEach(card => {
+        if (card.frontImage) {
+          console.log(`Card ID ${card.id}: ${card.frontImage}`);
+        }
+      });
+    }
   });
 
   const [groupedCards, setGroupedCards] = useState<CardsByGroup>({});

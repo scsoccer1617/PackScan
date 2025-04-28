@@ -99,7 +99,7 @@ export default function CardItem({ card, quantity, onDelete }: CardItemProps) {
           <>
             <img 
               src={card.frontImage.startsWith('http') ? card.frontImage : 
-                 (card.frontImage.startsWith('/') ? `${window.location.origin}${card.frontImage}` : `${window.location.origin}/${card.frontImage}`)} 
+                 card.frontImage.startsWith('/') ? card.frontImage : `/${card.frontImage}`} 
               alt={`${card.playerFirstName} ${card.playerLastName} card`} 
               className="card-image transform hover:scale-105 transition-transform duration-300" 
               onError={(e) => {
