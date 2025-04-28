@@ -1516,9 +1516,38 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       // Try to detect by looking at the image itself for visual patterns
       // This returns true if an RC logo is found in the image
       isRCLogoPresent(textAnnotations));
+      
+    // 5. Known 2024 Topps Stars of MLB rookie players list
+    // These players are definitively rookie cards in the 2024 Stars of MLB set
+    const knownRookiePlayers = [
+      'Ceddanne Rafaela',
+      'Jordan Walker',
+      'Elly De La Cruz',
+      'Sal Frelick',
+      'Masyn Winn',
+      'Garrett Crochet',
+      'Matt Wallner'
+    ];
+    
+    // Build a player name for comparison
+    const playerFullName = result.playerFirstName && result.playerLastName
+      ? `${result.playerFirstName} ${result.playerLastName}`
+      : '';
+    
+    // Check if this is a known rookie in the 2024 Stars of MLB set
+    const isKnownRookieInStarsOfMLB = 
+      playerFullName && 
+      knownRookiePlayers.some(name => 
+        playerFullName.toLowerCase() === name.toLowerCase()) &&
+      (result.collection || '').toLowerCase().includes('stars of mlb') &&
+      (result.year === 2024 || result.year === 2023);
+    
+    if (isKnownRookieInStarsOfMLB) {
+      console.log(`Known rookie player detected in Stars of MLB: ${playerFullName}`);
+    }
     
     // Check all detection methods
-    if (hasRCLogo || hasRCText || isRecentRookie || isStarsOfMLBWithRC) {
+    if (hasRCLogo || hasRCText || isRecentRookie || isStarsOfMLBWithRC || isKnownRookieInStarsOfMLB) {
       // Mark this as a rookie card
       result.isRookieCard = true;
       
@@ -1530,6 +1559,8 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
         console.log('Detected potential rookie card based on year and collection');
       } else if (isStarsOfMLBWithRC) {
         console.log('Detected rookie card: Stars of MLB card with RC logo');
+      } else if (isKnownRookieInStarsOfMLB) {
+        console.log('Detected rookie card: Known rookie player in Stars of MLB set');
       }
       
       // Also set the variant if it's a special rookie variant
