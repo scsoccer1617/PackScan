@@ -148,11 +148,13 @@ export default function OCRResults({ loading, error, data, onApply, onCancel, fo
             <div className="space-y-2 col-span-1 md:col-span-2">
               <Label htmlFor="sport">Sport</Label>
               <Select
-                value={editedData.sport || ''}
+                value={editedData.sport || 'Baseball'}
                 onValueChange={(value) => handleInputChange('sport', value)}
               >
                 <SelectTrigger id="sport">
-                  <SelectValue placeholder="Select sport" />
+                  <SelectValue placeholder="Select sport">
+                    {editedData.sport || 'Baseball'}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {["Baseball", "Football", "Basketball", "Hockey", "Soccer", "Other"].map((sport) => (
@@ -325,6 +327,7 @@ export default function OCRResults({ loading, error, data, onApply, onCancel, fo
             <div className="bg-green-50 border border-green-100 rounded-lg p-3">
               <h3 className="font-semibold text-green-800 mb-1 text-sm">Card Analysis Results</h3>
               <p className="text-sm text-green-700">
+                {data.sport ? `${data.sport} • ` : ''}
                 {data.playerFirstName || data.playerLastName ? 
                   `${data.playerFirstName || ''} ${data.playerLastName || ''} • ` : ''}
                 {data.year ? `${data.year} ` : ''}
