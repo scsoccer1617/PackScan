@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { ExternalLink } from "lucide-react";
@@ -44,15 +44,28 @@ export default function EbayValueLookup({
   onValueSelect 
 }: EbayValueLookupProps) {
   const { toast } = useToast();
+  const [isLoading, setIsLoading] = useState(false);
+  const clickTimeoutRef = useRef<number | null>(null);
   
   // Function to directly open eBay in a new window/tab
   const openEbaySearch = () => {
+    // Prevent multiple rapid clicks
+    if (isLoading) return;
+    
+    // Debounce to prevent multiple windows from opening
+    if (clickTimeoutRef.current) {
+      window.clearTimeout(clickTimeoutRef.current);
+    }
+    
+    setIsLoading(true);
+    
     if (!playerName || !cardNumber || !brand || !year) {
       toast({
         title: "Missing card information",
         description: "Please provide player name, card number, brand, and year before searching eBay.",
         variant: "destructive"
       });
+      setIsLoading(false);
       return;
     }
     
@@ -80,8 +93,27 @@ export default function EbayValueLookup({
     
     const url = `${baseUrl}?${searchParams.toString()}`;
     
-    // Open eBay in a new tab/window, which keeps our app open
-    window.open(url, '_blank', 'noopener,noreferrer');
+    // Schedule the window.open call
+    clickTimeoutRef.current = window.setTimeout(() => {
+      try {
+        // Open eBay in a new tab/window, which keeps our app open
+        const newWindow = window.open(url, '_blank', 'noopener,noreferrer');
+        
+        // Check if window was successfully opened
+        if (!newWindow || newWindow.closed || typeof newWindow.closed === 'undefined') {
+          toast({
+            title: "Popup blocked",
+            description: "Please allow popups for this site to open eBay search results.",
+            variant: "destructive"
+          });
+        }
+      } catch (error) {
+        console.error("Error opening eBay window:", error);
+      } finally {
+        setIsLoading(false);
+        clickTimeoutRef.current = null;
+      }
+    }, 100);
   };
 
   // Simple button-only interface
@@ -90,10 +122,10 @@ export default function EbayValueLookup({
       variant="default" 
       className="w-full bg-blue-600 hover:bg-blue-700" 
       onClick={openEbaySearch}
-      disabled={!playerName || !cardNumber || !brand || !year}
+      disabled={isLoading || !playerName || !cardNumber || !brand || !year}
     >
       <ExternalLink className="mr-2 h-4 w-4" />
-      Lookup on eBay
+      {isLoading ? "Opening eBay..." : "Lookup on eBay"}
     </Button>
   );
 }
