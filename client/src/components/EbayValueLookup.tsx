@@ -170,17 +170,7 @@ export default function EbayValueLookup({
         Lookup on eBay
       </Button>
       
-      {/* This DialogTrigger is just for the custom value entry dialog, not the main button */}
-      <DialogTrigger asChild>
-        <Button 
-          variant="outline" 
-          className="w-full mt-2" 
-          onClick={() => setIsOpen(true)}
-        >
-          <DollarSign className="mr-2 h-4 w-4" />
-          Set Custom Value
-        </Button>
-      </DialogTrigger>
+      {/* Removed "Set Custom Value" button as requested */}
       
       <DialogContent className="sm:max-w-md">
         <DialogHeader>

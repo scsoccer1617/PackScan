@@ -370,8 +370,33 @@ export default function OCRResults({ loading, error, data, onApply, onCancel, fo
                 <span className="font-medium text-slate-700">Serial #:</span> <span className="text-slate-900">{data.serialNumber || 'None'}</span>
               </div>
               
-              <div className="col-span-2 py-1">
+              <div className="col-span-2 py-1 border-b border-gray-100">
                 <span className="font-medium text-slate-700">Condition:</span> <span className="text-slate-900">{data.condition || 'Not detected'}</span>
+              </div>
+              
+              {/* Card Features */}
+              <div className="col-span-2 py-2">
+                <span className="font-medium text-slate-700 block mb-1">Card Features:</span>
+                <div className="flex flex-wrap gap-3">
+                  {data.isRookieCard && (
+                    <span className="inline-flex items-center rounded-full bg-green-100 px-2 py-1 text-xs font-medium text-green-800">
+                      Rookie Card
+                    </span>
+                  )}
+                  {data.isAutographed && (
+                    <span className="inline-flex items-center rounded-full bg-blue-100 px-2 py-1 text-xs font-medium text-blue-800">
+                      Autographed
+                    </span>
+                  )}
+                  {data.isNumbered && (
+                    <span className="inline-flex items-center rounded-full bg-purple-100 px-2 py-1 text-xs font-medium text-purple-800">
+                      Numbered
+                    </span>
+                  )}
+                  {!data.isRookieCard && !data.isAutographed && !data.isNumbered && (
+                    <span className="text-gray-500 text-xs">None detected</span>
+                  )}
+                </div>
               </div>
             </div>
           </div>
