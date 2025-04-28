@@ -438,11 +438,9 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
         ) : (
           <Button
             onClick={() => {
-              // Apply changes to the current data view (without hiding it)
-              // Update the display data with our edited values
-              setData({...editedData});
-              // Exit edit mode
-              setEditMode(false);
+              // Apply changes to the form and proceed with saving
+              // This will use our edited data and apply it to the form
+              applyAndUseDirectly();
             }}
             className="bg-green-600 hover:bg-green-500 text-white"
           >
