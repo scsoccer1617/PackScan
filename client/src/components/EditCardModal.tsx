@@ -48,6 +48,13 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
   // Update form values when card changes
   useEffect(() => {
     if (card) {
+      // Debug log to help with boolean values
+      console.log("Card data:", {
+        id: card.id,
+        playerName: `${card.playerFirstName} ${card.playerLastName}`,
+        isRookieCard: card.isRookieCard, 
+        isRookieCardType: typeof card.isRookieCard
+      });
       form.reset({
         sport: card.sport?.name || "",
         playerFirstName: card.playerFirstName || "",
@@ -60,9 +67,9 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
         serialNumber: card.serialNumber || "",
         condition: card.condition || "PSA 9",
         estimatedValue: typeof card.estimatedValue === 'string' ? parseFloat(card.estimatedValue) : (card.estimatedValue || 0),
-        isRookieCard: card.isRookieCard || false,
-        isAutographed: card.isAutographed || false,
-        isNumbered: card.isNumbered || false,
+        isRookieCard: Boolean(card.isRookieCard),
+        isAutographed: Boolean(card.isAutographed),
+        isNumbered: Boolean(card.isNumbered),
         notes: card.notes || "",
       });
     }

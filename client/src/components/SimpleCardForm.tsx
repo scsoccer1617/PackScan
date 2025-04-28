@@ -167,8 +167,8 @@ export default function SimpleCardForm() {
   // Handle cancellation of OCR results view
   const handleOCRCancel = () => {
     setShowOCRResults(false);
-    // Show form fields if user cancels OCR
-    setShowFormFields(true);
+    // Don't show form fields when user cancels OCR
+    setShowFormFields(false);
   };
 
   // Handle edit button click to show the form fields 
