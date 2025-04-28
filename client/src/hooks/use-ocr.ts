@@ -91,18 +91,8 @@ export function useOCR(): OCRResult {
         console.log("CLIENT FIX: Updated to use Chrome variant for Stars of MLB card with CSMLB card number.");
       }
       
-      // Specific fix for Manny Machado Stars of MLB Chrome (CSMLB-44)
-      if (cardInfo.cardNumber === "CSMLB-44" && cardInfo.playerFirstName === "Mike" && cardInfo.playerLastName === "Trout") {
-        // Potentially a Manny Machado card misidentified as Mike Trout
-        console.log("CLIENT FIX: Detected CSMLB-44 with Mike Trout - this is potentially a Manny Machado card.");
-        
-        // We'll raise a warning without automatically changing the data
-        toast({
-          title: "Card may need review",
-          description: "This appears to be card CSMLB-44 which may be a Manny Machado card. Please verify player name.",
-          variant: "destructive"
-        });
-      }
+      // No player-specific hardcoded logic
+      // Let the system use dynamic OCR detection only
       
       setData(cardInfo);
       
