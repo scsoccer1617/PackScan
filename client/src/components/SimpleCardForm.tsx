@@ -173,10 +173,12 @@ export default function SimpleCardForm() {
     createCardMutation.mutate(data);
   };
 
-  // Handle cancellation of OCR results view
+  // Handle cancellation of OCR results view - keep results visible
   const handleOCRCancel = () => {
-    setShowOCRResults(false);
-    // Don't show form fields when user cancels OCR
+    // When user clicks Cancel in edit mode, just return to the OCR results view
+    // but don't hide the OCR results completely
+    setShowOCRResults(true);
+    // Don't show form fields, just the OCR results
     setShowFormFields(false);
   };
 

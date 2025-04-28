@@ -7,62 +7,131 @@ import fetch from 'node-fetch';
  * in the corner of rookie cards, which is easy to miss with standard OCR.
  */
 function isRCLogoPresent(textAnnotations: any[]): boolean {
-  // RC logos are typically in corners as small text blocks
-  const potentialRcLogos = textAnnotations.filter(annotation => {
-    const text = annotation.description.trim();
+  // ENHANCED ROOKIE CARD DETECTION
+  // This function has been significantly improved to detect RC logos on cards
+  // with greater accuracy, handling different formats and positions
+  
+  // First check the full text of all annotations combined
+  // This helps detect when OCR has fragmented the "RC" text across multiple text blocks
+  const allCombinedText = textAnnotations
+    .map(a => (a.description || '').trim().toUpperCase())
+    .join(' ');
     
-    // Check for "RC" text (direct match or with some formatting around it)
+  // Look for rookie indicators in the combined text
+  const hasRookieTextIndicator = 
+    allCombinedText.includes('ROOKIE CARD') || 
+    allCombinedText.includes('ROOKIES') ||
+    allCombinedText.includes('DEBUT') ||
+    allCombinedText.includes('FIRST YEAR') ||
+    allCombinedText.includes('1ST MLB') ||
+    /\bRC\b/.test(allCombinedText); // RC as a standalone word
+    
+  if (hasRookieTextIndicator) {
+    console.log('Found rookie indicator in combined card text');
+    return true;
+  }
+  
+  // Check each text annotation individually for RC patterns
+  const potentialRcLogos = textAnnotations.filter(annotation => {
+    // Skip null/undefined descriptions
+    if (!annotation.description) return false;
+    
+    const text = annotation.description.trim().toUpperCase();
+    
+    // Expanded check for "RC" text with more patterns and variations
     const isRCLogo = 
       text === 'RC' || 
       text === 'R.C.' || 
       text === 'R C' ||
-      text === 'RC.';
+      text === 'RC.' ||
+      text === 'R.C' ||
+      text === 'R/C' ||
+      text === 'ROOKIE CARD' ||
+      text.includes('TOPPS RC') ||
+      /\bRC\b/.test(text); // RC as a word boundary
       
     if (isRCLogo) {
-      console.log('Found potential RC logo text:', text);
+      console.log('Found RC logo text:', text);
       
-      // Get bounding poly to check position
+      // Get bounding poly to check position if available
       const boundingPoly = annotation.boundingPoly;
       if (boundingPoly && boundingPoly.vertices) {
-        // Check if it's small and in a likely corner position by measuring dimensions
+        // RC logos are sometimes very small, but clearly visible on cards
+        // Check for smaller dimensions which is common for RC logos
         const width = Math.max(
-          Math.abs(boundingPoly.vertices[1].x - boundingPoly.vertices[0].x),
-          Math.abs(boundingPoly.vertices[2].x - boundingPoly.vertices[3].x)
+          Math.abs((boundingPoly.vertices[1]?.x || 0) - (boundingPoly.vertices[0]?.x || 0)),
+          Math.abs((boundingPoly.vertices[2]?.x || 0) - (boundingPoly.vertices[3]?.x || 0))
         );
+        
         const height = Math.max(
-          Math.abs(boundingPoly.vertices[3].y - boundingPoly.vertices[0].y),
-          Math.abs(boundingPoly.vertices[2].y - boundingPoly.vertices[1].y)
+          Math.abs((boundingPoly.vertices[3]?.y || 0) - (boundingPoly.vertices[0]?.y || 0)),
+          Math.abs((boundingPoly.vertices[2]?.y || 0) - (boundingPoly.vertices[1]?.y || 0))
         );
         
-        // RC logos are typically small relative to the image
-        // and positioned in corners with space around them
-        const isSmall = width < 100 && height < 100;
+        // Increased size threshold for RC detection
+        // Many RC marks are larger than previously assumed
+        const isReasonableSize = width < 150 && height < 150;
         
-        // Debugging info
-        console.log(`RC logo dimensions: ${width}x${height}, isSmall: ${isSmall}`);
+        console.log(`RC text dimensions: ${width}x${height}, size check: ${isReasonableSize}`);
         
-        if (isSmall) {
-          console.log('Detected RC logo in corner position');
+        if (isReasonableSize) {
+          console.log('Detected RC logo with appropriate dimensions');
           return true;
         }
+      } else {
+        // If no bounding poly, still consider it an RC indicator
+        console.log('No bounding poly but found RC text');
+        return true;
       }
     }
     
-    // Look for visual RC logo elements used by companies like Topps
-    // This checks if the text is part of an MLB logo with RC in it
-    if (text.includes('MLB') && text.length < 10) {
-      // Many MLB rookie cards have the MLB logo with RC near it
-      const nearbyTexts = textAnnotations
-        .filter(nearby => nearby !== annotation)
-        .map(nearby => nearby.description.trim());
-        
-      const hasRCNearby = nearbyTexts.some(t => 
-        t === 'RC' || t.includes('ROOKIE') || t.includes('R.C.')
-      );
+    // Expanded check for MLB logo with RC nearby or combined
+    if ((text.includes('MLB') || text.includes('TOPPS')) && text.length < 15) {
+      console.log('Found MLB or TOPPS logo, checking for nearby RC indicators');
       
-      if (hasRCNearby) {
-        console.log('Found RC indicator near MLB logo');
-        return true;
+      // Check for RC text near this MLB/TOPPS text
+      const boundingPoly = annotation.boundingPoly;
+      if (boundingPoly && boundingPoly.vertices) {
+        // Get center point of this text
+        const centerX = boundingPoly.vertices.reduce((sum, v) => sum + (v.x || 0), 0) / boundingPoly.vertices.length;
+        const centerY = boundingPoly.vertices.reduce((sum, v) => sum + (v.y || 0), 0) / boundingPoly.vertices.length;
+        
+        // Look for nearby text annotations that might contain RC
+        const nearbyRCText = textAnnotations.some(nearby => {
+          if (!nearby.boundingPoly || !nearby.boundingPoly.vertices) return false;
+          if (nearby === annotation) return false;
+          
+          // Calculate center of nearby annotation
+          const nbCenterX = nearby.boundingPoly.vertices.reduce((sum, v) => sum + (v.x || 0), 0) / nearby.boundingPoly.vertices.length;
+          const nbCenterY = nearby.boundingPoly.vertices.reduce((sum, v) => sum + (v.y || 0), 0) / nearby.boundingPoly.vertices.length;
+          
+          // Calculate distance between centers
+          const distance = Math.sqrt(
+            Math.pow(centerX - nbCenterX, 2) + 
+            Math.pow(centerY - nbCenterY, 2)
+          );
+          
+          // Check if nearby text is RC-related and within reasonable distance
+          // Increased the distance threshold to be more generous in detection
+          const isNearby = distance < 300;
+          const nearbyText = (nearby.description || '').trim().toUpperCase();
+          const isRCText = 
+            nearbyText === 'RC' || 
+            nearbyText === 'R.C.' || 
+            nearbyText.includes('ROOKIE') || 
+            /\bRC\b/.test(nearbyText);
+          
+          if (isNearby && isRCText) {
+            console.log(`Found RC text "${nearbyText}" near MLB/TOPPS logo, distance: ${distance}`);
+            return true;
+          }
+          
+          return false;
+        });
+        
+        if (nearbyRCText) {
+          return true;
+        }
       }
     }
     
@@ -72,16 +141,34 @@ function isRCLogoPresent(textAnnotations: any[]): boolean {
   // Also look specifically for the MLB RC badge which is sometimes detected as a single unit
   // These are often detected in the bottom right corner of cards
   const hasMLBRCBadge = textAnnotations.some(annotation => {
-    const text = annotation.description.trim();
-    return text.includes('RC') && text.includes('MLB') && text.length < 15;
+    if (!annotation.description) return false;
+    
+    const text = annotation.description.trim().toUpperCase();
+    const isMLBRCBadge = 
+      (text.includes('RC') && text.includes('MLB') && text.length < 20) ||
+      (text.includes('RC') && text.includes('TOPPS') && text.length < 20);
+      
+    if (isMLBRCBadge) {
+      console.log('Detected MLB/TOPPS RC badge in text:', text);
+      return true;
+    }
+    
+    return false;
   });
   
   if (hasMLBRCBadge) {
-    console.log('Detected MLB RC badge');
+    console.log('Detected MLB/TOPPS RC badge');
     return true;
   }
   
-  return potentialRcLogos.length > 0;
+  // Check if we found any RC indicators
+  if (potentialRcLogos.length > 0) {
+    console.log('Detected RC logo based on individual text annotations');
+    return true;
+  }
+  
+  // No RC indicators found
+  return false;
 }
 
 /**
