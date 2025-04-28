@@ -10,8 +10,17 @@ function isRCLogoPresent(textAnnotations: any[]): boolean {
   // RC logos are typically in corners as small text blocks
   const potentialRcLogos = textAnnotations.filter(annotation => {
     const text = annotation.description.trim();
-    // Exact match for "RC" text
-    if (text === 'RC') {
+    
+    // Check for "RC" text (direct match or with some formatting around it)
+    const isRCLogo = 
+      text === 'RC' || 
+      text === 'R.C.' || 
+      text === 'R C' ||
+      text === 'RC.';
+      
+    if (isRCLogo) {
+      console.log('Found potential RC logo text:', text);
+      
       // Get bounding poly to check position
       const boundingPoly = annotation.boundingPoly;
       if (boundingPoly && boundingPoly.vertices) {
@@ -29,14 +38,48 @@ function isRCLogoPresent(textAnnotations: any[]): boolean {
         // and positioned in corners with space around them
         const isSmall = width < 100 && height < 100;
         
+        // Debugging info
+        console.log(`RC logo dimensions: ${width}x${height}, isSmall: ${isSmall}`);
+        
         if (isSmall) {
           console.log('Detected RC logo in corner position');
           return true;
         }
       }
     }
+    
+    // Look for visual RC logo elements used by companies like Topps
+    // This checks if the text is part of an MLB logo with RC in it
+    if (text.includes('MLB') && text.length < 10) {
+      // Many MLB rookie cards have the MLB logo with RC near it
+      const nearbyTexts = textAnnotations
+        .filter(nearby => nearby !== annotation)
+        .map(nearby => nearby.description.trim());
+        
+      const hasRCNearby = nearbyTexts.some(t => 
+        t === 'RC' || t.includes('ROOKIE') || t.includes('R.C.')
+      );
+      
+      if (hasRCNearby) {
+        console.log('Found RC indicator near MLB logo');
+        return true;
+      }
+    }
+    
     return false;
   });
+  
+  // Also look specifically for the MLB RC badge which is sometimes detected as a single unit
+  // These are often detected in the bottom right corner of cards
+  const hasMLBRCBadge = textAnnotations.some(annotation => {
+    const text = annotation.description.trim();
+    return text.includes('RC') && text.includes('MLB') && text.length < 15;
+  });
+  
+  if (hasMLBRCBadge) {
+    console.log('Detected MLB RC badge');
+    return true;
+  }
   
   return potentialRcLogos.length > 0;
 }
@@ -1464,9 +1507,18 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       // Check if the player is in a known rookie set/collection
       ((result.collection || '').toLowerCase().includes('stars of mlb') ||
        (result.collection || '').toLowerCase().includes('35th anniversary'));
+       
+    // 4. Specific Stars of MLB RC logo detection
+    // Many Stars of MLB rookie cards have a special RC badge in the bottom right corner
+    // This is often very small and can be missed by OCR
+    const isStarsOfMLBWithRC = 
+      ((result.collection || '').toLowerCase().includes('stars of mlb') && 
+      // Try to detect by looking at the image itself for visual patterns
+      // This returns true if an RC logo is found in the image
+      isRCLogoPresent(textAnnotations));
     
     // Check all detection methods
-    if (hasRCLogo || hasRCText || isRecentRookie) {
+    if (hasRCLogo || hasRCText || isRecentRookie || isStarsOfMLBWithRC) {
       // Mark this as a rookie card
       result.isRookieCard = true;
       
@@ -1476,6 +1528,8 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
         console.log('Detected rookie card indicator: RC/ROOKIE text found');
       } else if (isRecentRookie) {
         console.log('Detected potential rookie card based on year and collection');
+      } else if (isStarsOfMLBWithRC) {
+        console.log('Detected rookie card: Stars of MLB card with RC logo');
       }
       
       // Also set the variant if it's a special rookie variant
