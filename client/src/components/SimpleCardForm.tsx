@@ -76,9 +76,17 @@ export default function SimpleCardForm() {
   
   // Apply OCR results to form
   const applyOCRResults = (data: Partial<CardFormValues>) => {
+    // Debug log to check the incoming data
+    console.log("Applying OCR results to form:", data);
+    
     Object.entries(data).forEach(([key, value]) => {
       if (value !== undefined && value !== null) {
-        form.setValue(key as any, value);
+        // Special handling for boolean values
+        if (key === 'isRookieCard' || key === 'isAutographed' || key === 'isNumbered') {
+          form.setValue(key as any, Boolean(value));
+        } else {
+          form.setValue(key as any, value);
+        }
       }
     });
     setShowOCRResults(false);
