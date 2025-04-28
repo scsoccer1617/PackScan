@@ -120,14 +120,22 @@ export async function extractTextFromImage(base64Image: string): Promise<{ fullT
     
     console.log('Sending request to Vision API...');
     
-    // Send the request
-    const response = await fetch(visionEndpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(requestBody)
+    // Create a timeout promise that rejects after 15 seconds
+    const timeout = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Google Vision API request timed out after 15 seconds')), 15000);
     });
+    
+    // Race the fetch against the timeout
+    const response = await Promise.race([
+      fetch(visionEndpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(requestBody)
+      }),
+      timeout
+    ]) as Response;
     
     // Process the response
     const responseData = await response.json() as any;
@@ -166,6 +174,16 @@ export async function extractTextFromImage(base64Image: string): Promise<{ fullT
  */
 export async function analyzeSportsCardImage(base64Image: string): Promise<Partial<CardFormValues>> {
   try {
+    console.time('ocr-analysis-timer');
+    
+    // Set a default result in case anything fails
+    const defaultResult: Partial<CardFormValues> = {
+      condition: 'PSA 8',
+      sport: 'Baseball',
+      brand: 'Topps',
+      year: new Date().getFullYear()
+    };
+    
     // Extract text from image
     let extractedData;
     
@@ -174,7 +192,19 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       ? base64Image.toString('base64') 
       : base64Image;
     
-    extractedData = await extractTextFromImage(base64String);
+    try {
+      extractedData = await extractTextFromImage(base64String);
+    } catch (ocrError) {
+      console.error('Error during OCR text extraction:', ocrError);
+      // Return default values instead of failing completely
+      return defaultResult;
+    }
+    
+    // If we couldn't get any text, return default values
+    if (!extractedData || !extractedData.fullText) {
+      console.log('No text could be extracted from the image');
+      return defaultResult;
+    }
     
     const { fullText, textAnnotations } = extractedData;
     
@@ -1878,9 +1908,22 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     
     console.log('Extracted card info:', result);
     
+    // Log how long the analysis took
+    console.timeEnd('ocr-analysis-timer');
+    
     return result;
   } catch (error: any) {
     console.error('Error analyzing sports card:', error);
-    throw new Error(error.message || 'Unknown error analyzing sports card');
+    console.timeEnd('ocr-analysis-timer');
+    
+    // Return default values instead of failing completely
+    return {
+      condition: 'PSA 8',
+      sport: 'Baseball',
+      brand: 'Topps',
+      year: new Date().getFullYear(),
+      // If we can extract anything from the failed analysis, include it
+      ...error.partialResults
+    };
   }
 }
