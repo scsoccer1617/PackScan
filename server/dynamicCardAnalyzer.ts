@@ -45,6 +45,7 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     const cardDetails: Partial<CardFormValues> = {
       condition: 'PSA 8', // Default condition per requirements
       estimatedValue: 0, // Default value
+      sport: 'Baseball', // Default sport
     };
     
     // Parse all extracted text
@@ -64,6 +65,26 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     
     // CARD FEATURES DETECTION - Rookie cards, autographs, etc.
     detectCardFeatures(cleanText, cardDetails);
+    
+    // SPORT DETECTION - Try to detect the sport if not already set
+    // Sport detection should happen after other metadata extraction
+    if (!cardDetails.sport) {
+      cardDetails.sport = "Baseball"; // Default to Baseball
+    }
+    
+    // Check sport overrides based on text content
+    if (cleanText.match(/FOOTBALL|NFL|QUARTERBACK|TOUCHDOWN|RECEIVER|FIELD GOAL|TACKLE/i)) {
+      cardDetails.sport = "Football";
+      console.log("Sport detected: Football");
+    } else if (cleanText.match(/BASKETBALL|NBA|SLAM DUNK|POINT GUARD|FORWARD|CENTER|COURT|REBOUND/i)) {
+      cardDetails.sport = "Basketball";
+      console.log("Sport detected: Basketball");
+    } else if (cleanText.match(/HOCKEY|NHL|GOALIE|ICE RINK|PUCK|PENALTY|STANLEY CUP/i)) {
+      cardDetails.sport = "Hockey";
+      console.log("Sport detected: Hockey");
+    } else {
+      console.log("Sport detected: Baseball (default)");
+    }
     
     // No player-specific overrides - fully dynamic
     
@@ -644,25 +665,7 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>)
     }
   }
   
-  // Set sport (default to Baseball for now)
-  if (!cardDetails.sport) {
-    cardDetails.sport = "Baseball";
-    
-    // Baseball confirmation keywords
-    if (text.match(/baseball|MLB|Major League Baseball|pitcher|catcher|outfield|infield|RBI|ERA|BREWERS|YANKEES|DODGERS/i)) {
-      cardDetails.sport = "Baseball";
-    }
-    // Try to detect other sports
-    else if (text.match(/football|NFL|quarterback|touchdown|receiver|field goal|tackle/i)) {
-      cardDetails.sport = "Football";
-    } else if (text.match(/basketball|NBA|slam dunk|point guard|forward|center|court|rebound/i)) {
-      cardDetails.sport = "Basketball";
-    } else if (text.match(/hockey|NHL|goalie|ice rink|puck|penalty|Stanley Cup/i)) {
-      cardDetails.sport = "Hockey";
-    }
-    
-    console.log(`Setting sport to ${cardDetails.sport}`);
-  }
+  // Note: Sport detection is now handled in the main analyzeSportsCardImage function
 }
 
 /**
