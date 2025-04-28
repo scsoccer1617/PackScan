@@ -82,6 +82,28 @@
     margin-bottom: 1rem;
   }
   
+  /* Make labels for form fields consistent in size and alignment */
+  .form-grid label {
+    display: block;
+    width: 100%;
+    margin-bottom: 0.5rem;
+    font-weight: 500;
+    color: #475569;
+  }
+  
+  /* Make all form fields take up full width of their container */
+  .form-grid input, 
+  .form-grid select,
+  .form-grid [role="combobox"] {
+    width: 100%;
+    box-sizing: border-box;
+  }
+  
+  /* Ensure form fields are consistently sized */
+  .form-grid > div {
+    width: 100%;
+  }
+  
   @media (min-width: 640px) {
     .form-grid {
       grid-template-columns: 1fr 1fr;

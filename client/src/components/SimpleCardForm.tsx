@@ -306,34 +306,34 @@ export default function SimpleCardForm() {
           {!showOCRResults && showFormFields && (
             <Form {...form}>
               <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-4">
-                <FormField
-                  control={form.control}
-                  name="sport"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Sport <span className="text-red-500">*</span></FormLabel>
-                      <Select
-                        onValueChange={field.onChange}
-                        defaultValue={field.value}
-                        value={field.value}
-                      >
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select sport" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {["Baseball", "Football", "Basketball", "Hockey", "Soccer", "Other"].map((sport) => (
-                            <SelectItem key={sport} value={sport}>{sport}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                
                 <div className="form-grid mb-4">
+                  <FormField
+                    control={form.control}
+                    name="sport"
+                    render={({ field }) => (
+                      <FormItem className="col-span-1 md:col-span-2">
+                        <FormLabel>Sport <span className="text-red-500">*</span></FormLabel>
+                        <Select
+                          onValueChange={field.onChange}
+                          defaultValue={field.value}
+                          value={field.value}
+                        >
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select sport" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {["Baseball", "Football", "Basketball", "Hockey", "Soccer", "Other"].map((sport) => (
+                              <SelectItem key={sport} value={sport}>{sport}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                
                   <FormField
                     control={form.control}
                     name="playerFirstName"
@@ -363,32 +363,34 @@ export default function SimpleCardForm() {
                   />
                 </div>
                 
-                <FormField
-                  control={form.control}
-                  name="brand"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Brand <span className="text-red-500">*</span></FormLabel>
-                      <Select
-                        onValueChange={field.onChange}
-                        defaultValue={field.value}
-                        value={field.value}
-                      >
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select brand" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {["Topps", "Panini", "Upper Deck", "Bowman", "Fleer", "Donruss", "Score", "Other"].map((brand) => (
-                            <SelectItem key={brand} value={brand}>{brand}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+                <div className="form-grid mb-4">
+                  <FormField
+                    control={form.control}
+                    name="brand"
+                    render={({ field }) => (
+                      <FormItem className="col-span-1 md:col-span-2">
+                        <FormLabel>Brand <span className="text-red-500">*</span></FormLabel>
+                        <Select
+                          onValueChange={field.onChange}
+                          defaultValue={field.value}
+                          value={field.value}
+                        >
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select brand" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {["Topps", "Panini", "Upper Deck", "Bowman", "Fleer", "Donruss", "Score", "Other"].map((brand) => (
+                              <SelectItem key={brand} value={brand}>{brand}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
                 
                 <div className="form-grid mb-4">
                   <FormField
@@ -556,44 +558,48 @@ export default function SimpleCardForm() {
                 </div>
                 
                 {/* Notes Field */}
-                <FormField
-                  control={form.control}
-                  name="notes"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Notes</FormLabel>
-                      <FormControl>
-                        <Input placeholder="Any additional details about the card" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+                <div className="form-grid mb-4">
+                  <FormField
+                    control={form.control}
+                    name="notes"
+                    render={({ field }) => (
+                      <FormItem className="col-span-1 md:col-span-2">
+                        <FormLabel>Notes</FormLabel>
+                        <FormControl>
+                          <Input placeholder="Any additional details about the card" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
                 
                 {/* eBay Value Lookup and Estimated Value Field */}
-                <div className="space-y-2">
-                  <FormLabel>Card Value</FormLabel>
-                  
-                  {/* eBay Value Lookup */}
-                  <div className="mb-2">
-                    <EbayValueLookup
-                      playerName={`${form.watch('playerFirstName')} ${form.watch('playerLastName')}`.trim()}
-                      cardNumber={form.watch('cardNumber')}
-                      brand={form.watch('brand')}
-                      year={form.watch('year') || new Date().getFullYear()}
-                      collection={form.watch('collection')}
-                      condition={form.watch('condition')}
-                      onValueSelect={(value) => {
-                        form.setValue('estimatedValue', value);
-                      }}
-                    />
+                <div className="form-grid mb-4">
+                  <div className="col-span-1 md:col-span-2">
+                    <FormLabel>Card Value</FormLabel>
+                    
+                    {/* eBay Value Lookup */}
+                    <div className="mb-4">
+                      <EbayValueLookup
+                        playerName={`${form.watch('playerFirstName')} ${form.watch('playerLastName')}`.trim()}
+                        cardNumber={form.watch('cardNumber')}
+                        brand={form.watch('brand')}
+                        year={form.watch('year') || new Date().getFullYear()}
+                        collection={form.watch('collection')}
+                        condition={form.watch('condition')}
+                        onValueSelect={(value) => {
+                          form.setValue('estimatedValue', value);
+                        }}
+                      />
+                    </div>
                   </div>
                   
                   <FormField
                     control={form.control}
                     name="estimatedValue"
                     render={({ field }) => (
-                      <FormItem>
+                      <FormItem className="col-span-1 md:col-span-2">
                         <FormLabel>Estimated Value ($) <span className="text-red-500">*</span></FormLabel>
                         <div className="flex flex-col space-y-2">
                           <FormControl>
