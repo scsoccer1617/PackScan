@@ -80,9 +80,8 @@ export default function EbayValueLookup({
     
     const url = `${baseUrl}?${searchParams.toString()}`;
     
-    // Navigate directly to eBay - the user will need to use the back button
-    // to return to our application
-    window.location.href = url;
+    // Open eBay in a new tab/window, which keeps our app open
+    window.open(url, '_blank', 'noopener,noreferrer');
   };
 
   // Simple button-only interface
