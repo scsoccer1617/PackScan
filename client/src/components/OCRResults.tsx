@@ -21,6 +21,13 @@ interface OCRResultsProps {
 export default function OCRResults({ loading, error, data, onApply, onCancel, form }: OCRResultsProps) {
   const [editMode, setEditMode] = useState(false);
   const [editedData, setEditedData] = useState<Partial<CardFormValues>>({});
+  
+  // Debug log to check if isRookieCard is properly set
+  useEffect(() => {
+    if (data) {
+      console.log("OCR Results rookie card status:", data.isRookieCard);
+    }
+  }, [data]);
 
   // When OCR data changes, update our local state
   useEffect(() => {
