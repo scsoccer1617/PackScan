@@ -18,8 +18,10 @@ interface OCRResultsProps {
   form?: UseFormReturn<CardFormValues>;
 }
 
-export default function OCRResults({ loading, error, data, onApply, onCancel, form }: OCRResultsProps) {
+export default function OCRResults({ loading, error, data: initialData, onApply, onCancel, form }: OCRResultsProps) {
   const [editMode, setEditMode] = useState(false);
+  // Use state to manage our working copy of data that we can directly modify
+  const [data, setData] = useState<Partial<CardFormValues>>({});
   const [editedData, setEditedData] = useState<Partial<CardFormValues>>({});
   
   // Debug log to check if isRookieCard is properly set
@@ -29,12 +31,13 @@ export default function OCRResults({ loading, error, data, onApply, onCancel, fo
     }
   }, [data]);
 
-  // When OCR data changes, update our local state
+  // When initial OCR data changes, update our local state
   useEffect(() => {
-    if (data) {
-      setEditedData(data);
+    if (initialData) {
+      setData(initialData);
+      setEditedData(initialData);
     }
-  }, [data]);
+  }, [initialData]);
 
   // Handle input changes
   const handleInputChange = (field: keyof CardFormValues, value: string | number | boolean) => {
@@ -96,7 +99,7 @@ export default function OCRResults({ loading, error, data, onApply, onCancel, fo
         </AlertDescription>
         <div className="mt-4">
           <Button variant="outline" size="sm" onClick={onCancel}>
-            Close
+            Cancel
           </Button>
         </div>
       </Alert>
@@ -436,11 +439,10 @@ export default function OCRResults({ loading, error, data, onApply, onCancel, fo
           <Button
             onClick={() => {
               // Apply changes to the current data view (without hiding it)
+              // Update the display data with our edited values
+              setData({...editedData});
+              // Exit edit mode
               setEditMode(false);
-              // Update our data with edited values
-              setEditedData(prevData => ({...prevData}));
-              // Use the edited data for display
-              setData(editedData);
             }}
             className="bg-green-600 hover:bg-green-500 text-white"
           >
