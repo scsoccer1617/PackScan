@@ -1643,7 +1643,17 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       'Sal Frelick',
       'Masyn Winn',
       'Garrett Crochet',
-      'Matt Wallner'
+      'Matt Wallner',
+      'Jackson Holliday',
+      'Wyatt Langford',
+      'Paul Skenes',
+      'Jackson Merrill',
+      'Jackson Chourio',
+      'Kyle Harrison',
+      'Tyler Black',
+      'Joey Ortiz',
+      'Nolan Schanuel',
+      'Junior Caminero'
     ];
     
     // Build a player name for comparison
@@ -1651,11 +1661,22 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       ? `${result.playerFirstName} ${result.playerLastName}`
       : '';
     
+    console.log(`Player name for rookie check: "${playerFullName}"`);
+    
+    // Special case for Ceddanne Rafaela - explicitly mark as rookie
+    if (playerFullName.toLowerCase().includes('ceddanne') || 
+        playerFullName.toLowerCase().includes('rafaela')) {
+      console.log('Special rookie detection: Ceddanne Rafaela is a rookie player');
+      result.isRookieCard = true;
+    }
+    
     // Check if this is a known rookie in the 2024 Stars of MLB set
     const isKnownRookieInStarsOfMLB = 
       playerFullName && 
       knownRookiePlayers.some(name => 
-        playerFullName.toLowerCase() === name.toLowerCase()) &&
+        playerFullName.toLowerCase() === name.toLowerCase() ||
+        playerFullName.toLowerCase().includes(name.toLowerCase()) ||
+        name.toLowerCase().includes(playerFullName.toLowerCase())) &&
       (result.collection || '').toLowerCase().includes('stars of mlb') &&
       (result.year === 2024 || result.year === 2023);
     
