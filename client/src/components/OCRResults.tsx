@@ -378,7 +378,7 @@ export default function OCRResults({ loading, error, data, onApply, onCancel, fo
               <div className="col-span-2 py-2">
                 <span className="font-medium text-slate-700 block mb-1">Card Features:</span>
                 <div className="flex flex-wrap gap-3">
-                  {data.isRookieCard && (
+                  {data.isRookieCard === true && (
                     <span className="inline-flex items-center rounded-full bg-green-100 px-2 py-1 text-xs font-medium text-green-800">
                       Rookie Card
                     </span>
