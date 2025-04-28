@@ -327,13 +327,9 @@ export default function OCRResults({ loading, error, data, onApply, onCancel, fo
             <div className="bg-green-50 border border-green-100 rounded-lg p-3">
               <h3 className="font-semibold text-green-800 mb-1 text-sm">Card Analysis Results</h3>
               
-              {data.sport && (
-                <div className="mb-1 bg-green-100 inline-block px-2 py-0.5 rounded text-green-800 font-medium text-sm">
-                  Sport: {data.sport}
-                </div>
-              )}
-              
               <p className="text-sm text-green-700">
+                {data.sport ? `${data.sport} ` : ''}
+                {data.sport && (data.playerFirstName || data.playerLastName) ? '• ' : ''}
                 {data.playerFirstName || data.playerLastName ? 
                   `${data.playerFirstName || ''} ${data.playerLastName || ''} • ` : ''}
                 {data.year ? `${data.year} ` : ''}
@@ -346,9 +342,9 @@ export default function OCRResults({ loading, error, data, onApply, onCancel, fo
             {/* Detailed results grid */}
             <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
               {data.sport && (
-                <div className="col-span-2 py-2 border-b border-gray-100 bg-slate-50 rounded-md p-2 mb-1">
-                  <span className="font-semibold text-slate-800">Sport:</span> 
-                  <span className="text-slate-900 ml-2 bg-white px-2 py-0.5 rounded border border-slate-200">{data.sport}</span>
+                <div className="col-span-2 py-1 border-b border-gray-100">
+                  <span className="font-medium text-slate-700">Sport:</span> 
+                  <span className="text-slate-900">{data.sport}</span>
                 </div>
               )}
               
