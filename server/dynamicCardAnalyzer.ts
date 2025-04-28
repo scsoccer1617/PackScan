@@ -648,14 +648,20 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>)
   if (!cardDetails.sport) {
     cardDetails.sport = "Baseball";
     
+    // Baseball confirmation keywords
+    if (text.match(/baseball|MLB|Major League Baseball|pitcher|catcher|outfield|infield|RBI|ERA|BREWERS|YANKEES|DODGERS/i)) {
+      cardDetails.sport = "Baseball";
+    }
     // Try to detect other sports
-    if (text.includes("FOOTBALL") || text.includes("NFL")) {
+    else if (text.match(/football|NFL|quarterback|touchdown|receiver|field goal|tackle/i)) {
       cardDetails.sport = "Football";
-    } else if (text.includes("BASKETBALL") || text.includes("NBA")) {
+    } else if (text.match(/basketball|NBA|slam dunk|point guard|forward|center|court|rebound/i)) {
       cardDetails.sport = "Basketball";
-    } else if (text.includes("HOCKEY") || text.includes("NHL")) {
+    } else if (text.match(/hockey|NHL|goalie|ice rink|puck|penalty|Stanley Cup/i)) {
       cardDetails.sport = "Hockey";
     }
+    
+    console.log(`Setting sport to ${cardDetails.sport}`);
   }
 }
 
