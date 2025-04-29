@@ -112,7 +112,12 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
   };
 
   return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
+    <Dialog 
+      open={isOpen} 
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+    >
       <DialogContent className="max-w-2xl overflow-y-auto max-h-[90vh]">
         <DialogHeader>
           <DialogTitle>Edit Card</DialogTitle>
@@ -437,7 +442,10 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
               <Button 
                 type="button" 
                 variant="outline" 
-                onClick={onClose}
+                onClick={(e) => {
+                  e.preventDefault();
+                  onClose();
+                }}
               >
                 Cancel
               </Button>
