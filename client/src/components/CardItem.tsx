@@ -92,18 +92,28 @@ export default function CardItem({ card, quantity, onDelete }: CardItemProps) {
 
   const conditionNumber = card.condition ? card.condition.split(" ")[1] : "";
 
+  // Function to extract just the filename from an image path
+  function extractFilename(path: string): string {
+    // Try different extraction approaches
+    if (path.includes('/')) {
+      return path.split('/').pop() || path;
+    }
+    return path;
+  }
+
   return (
     <div className="rounded-lg overflow-hidden border border-slate-200 bg-white card-shadow hover:shadow-md transition-all duration-300 hover:border-secondary-300">
       <div className="card-image-container relative bg-slate-200">
         {card.frontImage ? (
-          <div className="card-image-wrapper relative">
-            {/* Direct image rendering from image path */}
+          <div className="card-image-wrapper relative" data-card-id={card.id}>
+            {/* Special component that attempts various loading strategies */}
             <img 
-              src={`http://${window.location.host}/${card.frontImage.replace(/^\//, '')}`}
-              alt={`${card.playerFirstName} ${card.playerLastName} card`} 
+              src={`/uploads/${extractFilename(card.frontImage)}`}
+              alt={`${card.playerFirstName} ${card.playerLastName} card`}
               className="card-image"
+              loading="eager"
               onError={(e) => {
-                console.log('Direct image failed to load:', card.frontImage);
+                console.log(`Image failed for card ${card.id}:`, card.frontImage);
                 e.currentTarget.style.display = 'none';
                 e.currentTarget.parentElement?.classList.add('fallback-active');
               }}
