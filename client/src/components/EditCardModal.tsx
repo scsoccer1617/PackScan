@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useEffect } from "react";
 import { Card as CardType, CardWithRelations, CardFormValues, cardSchema } from "@shared/schema";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
@@ -22,8 +22,6 @@ interface EditCardModalProps {
 export default function EditCardModal({ card, isOpen, onClose }: EditCardModalProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  // Track local open state to help with proper closing
-  const [localIsOpen, setLocalIsOpen] = useState(isOpen);
 
   // Form setup
   const form = useForm<CardFormValues>({
@@ -46,11 +44,6 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
       notes: "",
     },
   });
-
-  // Sync local state with props
-  useEffect(() => {
-    setLocalIsOpen(isOpen);
-  }, [isOpen]);
 
   // Update form values when card changes
   useEffect(() => {
@@ -102,8 +95,8 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
         description: "The card has been successfully updated.",
       });
       
-      // Use handleClose to ensure proper state updates
-      handleClose();
+      // Close the modal
+      onClose();
     },
     onError: (err) => {
       console.error("Error updating card:", err);
@@ -119,23 +112,15 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
     updateCardMutation.mutate(values);
   };
 
-  // Create handleClose function that will properly close the modal
-  const handleClose = () => {
-    setLocalIsOpen(false);
-    onClose();
-  };
-
   return (
     <Dialog 
-      open={localIsOpen} 
+      open={isOpen} 
       onOpenChange={(open) => {
-        if (!open) handleClose();
+        if (!open) onClose();
       }}
     >
       <DialogContent 
         className="max-w-2xl overflow-y-auto max-h-[90vh]"
-        onEscapeKeyDown={handleClose}
-        onInteractOutside={handleClose}
       >
         <DialogHeader>
           <DialogTitle>Edit Card</DialogTitle>
@@ -457,16 +442,14 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
             </div>
             
             <DialogFooter>
-              <Button 
-                type="button" 
-                variant="outline" 
-                onClick={(e) => {
-                  e.preventDefault();
-                  handleClose();
-                }}
-              >
-                Cancel
-              </Button>
+              <DialogClose asChild>
+                <Button 
+                  type="button" 
+                  variant="outline"
+                >
+                  Cancel
+                </Button>
+              </DialogClose>
               <Button 
                 type="submit" 
                 className="bg-green-600 hover:bg-green-500 active:bg-green-700 text-white"
