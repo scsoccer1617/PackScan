@@ -15,20 +15,7 @@ interface CardItemProps {
 export default function CardItem({ card, quantity, onDelete }: CardItemProps) {
   const [isDeleting, setIsDeleting] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-  const [imageLoaded, setImageLoaded] = useState(true); // Assume image works until proven otherwise
   const { toast } = useToast();
-  
-  // Simple check when card data changes
-  useEffect(() => {
-    // Always start with image being loaded until proven otherwise
-    setImageLoaded(true);
-    
-    // For debugging, log the image path we're trying to use
-    if (!card.frontImage) {
-      console.log('No image path available for card:', card.id);
-      setImageLoaded(false);
-    }
-  }, [card.id, card.frontImage]);
   
   // Function to check if the card has relations
   const hasRelations = (card: Card | CardWithRelations): card is CardWithRelations => {
@@ -110,38 +97,35 @@ export default function CardItem({ card, quantity, onDelete }: CardItemProps) {
       <div className="card-image-container relative bg-slate-200">
         {card.frontImage ? (
           <div className="card-image-wrapper relative">
-            {/* We'll use a simpler approach with direct image rendering */}
+            {/* Super simplified image rendering with direct path */}
             <img 
-              src={card.frontImage.startsWith('/') ? card.frontImage : `/${card.frontImage}`}
+              src={`/${card.frontImage.replace(/^\//, '')}`}
               alt={`${card.playerFirstName} ${card.playerLastName} card`} 
-              className="card-image transform hover:scale-105 transition-transform duration-300"
-              onLoad={() => setImageLoaded(true)}
-              onError={() => {
-                console.log('Image failed to load:', card.frontImage);
-                setImageLoaded(false);
+              className="card-image"
+              onError={(e) => {
+                console.log('Basic image failed to load:', card.frontImage);
+                e.currentTarget.style.display = 'none';
+                e.currentTarget.parentElement?.classList.add('fallback-active');
               }}
-              style={{ display: imageLoaded ? 'block' : 'none' }}
             />
             
-            {!imageLoaded && (
-              <div className="fallback-content">
-                <div className="text-center">
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 mx-auto text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                  </svg>
-                  <p className="text-xs text-slate-500 mt-2">Image not available</p>
-                </div>
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="card-image-wrapper">
             <div className="fallback-content">
               <div className="text-center">
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 mx-auto text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                 </svg>
-                <p className="text-xs text-slate-500 mt-2">No image available</p>
+                <p className="text-xs text-slate-500 mt-2">Card Image</p>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="card-image-wrapper fallback-active">
+            <div className="fallback-content">
+              <div className="text-center">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 mx-auto text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+                <p className="text-xs text-slate-500 mt-2">No Image</p>
               </div>
             </div>
           </div>
