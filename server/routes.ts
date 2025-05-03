@@ -147,93 +147,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: 'Image not found' });
       }
       
-      // This mapping ensures we serve the correct image for each card ID
-      // regardless of what's in the database
-      const hardcodedImageMapById = {
-        // Maps card IDs to specific image files in attached_assets
-        20: 'frelick_front_2024_topps_35year.jpg',    // Sal Frelick
-        22: 'manaea_front_2024_topps_series2.jpg',    // Sean Manaea
-        23: 'bregman_front_2024_topps_35year.jpg',    // Alex Bregman
-        24: 'cole_front_2021_topps_heritage.jpg',     // Gerrit Cole
-        25: 'freedman_front_2023_topps_smlb.jpg',     // Freddie Freeman
-        27: 'trout_front_2024_topps_chrome.jpg',      // Mike Trout
-        28: 'machado_front_2024_topps_csmlb.jpg',     // Manny Machado
-        29: 'correa_front_2024_topps_smlb.jpg',       // Anthony Volpe (using Correa)
-        30: 'cole_front_2021_topps_heritage.jpg',     // Nolan Schanuel 
-        31: 'bregman_front_2024_topps_35year.jpg',    // Royce Lewis
-        32: 'freedman_front_2023_topps_smlb.jpg',     // Adley Rutschman
-        33: 'bregman_front_2024_topps_35year.jpg',    // Alex Bregman
-        34: 'manaea_front_2024_topps_series2.jpg',    // Sonny Gray
-        35: 'frelick_front_2024_topps_35year.jpg',    // Sal Frelick
-        36: 'trout_front_2024_topps_chrome.jpg',      // Shohei Ohtani
-        37: 'frelick_front_2024_topps_35year.jpg',    // Masyn Winn
-        38: 'trout_front_2024_topps_chrome.jpg',      // Jose Ramirez
-        39: 'correa_front_2024_topps_smlb.jpg',       // Carlos Correa
-        40: 'rafaela_front_2024_topps_smlb.jpg',      // Ceddanne Rafaela
-        42: 'manaea_front_2024_topps_series2.jpg',    // Nolan Arenado
-        44: 'machado_front_2024_topps_csmlb.jpg',     // Manny Machado (Chrome)
-        45: 'correa_front_2024_topps_smlb.jpg',       // Francisco Lindor
-      };
-      
-      // Try to find image based on card ID
-      const hardcodedImage = hardcodedImageMapById[id];
-      
-      if (hardcodedImage) {
-        const attachedAssetsPath = join(process.cwd(), 'attached_assets', hardcodedImage);
-        
-        if (fs.existsSync(attachedAssetsPath)) {
-          console.log(`Found hardcoded image for card ID ${id}: ${attachedAssetsPath}`);
-          res.setHeader('Content-Type', 'image/jpeg');
-          res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-          return res.sendFile(attachedAssetsPath);
-        }
-      }
-      
       // Get the image path from the card data
       const imagePath = card[side];
       
-      // List of places to look for the image if no hardcoded mapping exists
-      const possiblePaths = [
-        // Path with uploads prefix
-        join(process.cwd(), 'uploads', imagePath.replace(/^\/uploads\//, '')),
-        // Direct path
-        join(process.cwd(), imagePath.replace(/^\//, '')),
-        // Just filename
-        join(process.cwd(), 'uploads', imagePath.split('/').pop()),
-        // In attached_assets
-        join(process.cwd(), 'attached_assets', imagePath.split('/').pop()),
-      ];
-      
-      let foundPath = null;
-      
-      // Find the first existing path
-      for (const p of possiblePaths) {
-        if (fs.existsSync(p)) {
-          foundPath = p;
-          console.log(`Found image at ${foundPath}`);
-          break;
+      // For attached_assets paths
+      if (imagePath.startsWith('/attached_assets/')) {
+        const filePath = join(process.cwd(), imagePath.replace(/^\//, ''));
+        if (fs.existsSync(filePath)) {
+          console.log(`Serving attached asset: ${filePath}`);
+          res.setHeader('Content-Type', 'image/jpeg');
+          res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+          return res.sendFile(filePath);
         }
       }
       
-      if (!foundPath) {
-        // Try matching player name with attached_assets
-        const playerPattern = `${card.playerFirstName?.toLowerCase()}_${card.playerLastName?.toLowerCase()}_${req.params.side}`;
-        const attachedAssetsDir = join(process.cwd(), 'attached_assets');
-        if (fs.existsSync(attachedAssetsDir)) {
-          const files = fs.readdirSync(attachedAssetsDir);
-          const matchingFile = files.find(file => file.toLowerCase().includes(playerPattern));
-          
-          if (matchingFile) {
-            foundPath = join(attachedAssetsDir, matchingFile);
-            console.log(`Found image with player pattern: ${foundPath}`);
-          }
+      // For uploads paths
+      if (imagePath.startsWith('/uploads/')) {
+        const filePath = join(process.cwd(), imagePath.replace(/^\//, ''));
+        if (fs.existsSync(filePath)) {
+          console.log(`Serving uploaded image: ${filePath}`);
+          res.setHeader('Content-Type', 'image/jpeg');
+          res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+          return res.sendFile(filePath);
         }
       }
       
-      if (foundPath) {
+      // If no path prefix, try looking in both locations
+      const attachedAssetsPath = join(process.cwd(), 'attached_assets', imagePath.split('/').pop());
+      const uploadsPath = join(process.cwd(), 'uploads', imagePath.split('/').pop());
+      
+      if (fs.existsSync(attachedAssetsPath)) {
+        console.log(`Serving from attached_assets: ${attachedAssetsPath}`);
         res.setHeader('Content-Type', 'image/jpeg');
         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-        return res.sendFile(foundPath);
+        return res.sendFile(attachedAssetsPath);
+      }
+      
+      if (fs.existsSync(uploadsPath)) {
+        console.log(`Serving from uploads: ${uploadsPath}`);
+        res.setHeader('Content-Type', 'image/jpeg');
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        return res.sendFile(uploadsPath);
       }
       
       // Failed to find the image
