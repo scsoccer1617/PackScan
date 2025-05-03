@@ -99,9 +99,10 @@ export default function CardItem({ card, quantity, onDelete }: CardItemProps) {
     }
   }, [card.id, card.frontImage]);
 
-  // Use state to try different image paths if the first one fails
+  // Define state for image loading
   const [imagePath, setImagePath] = useState<string | null>(null);
   const [pathIndex, setPathIndex] = useState(0);
+  const [imageError, setImageError] = useState(false);
   
   // Generate multiple possible paths for the image
   useEffect(() => {
@@ -124,38 +125,37 @@ export default function CardItem({ card, quantity, onDelete }: CardItemProps) {
     
     // Set the initial path
     setImagePath(paths[pathIndex]);
-  }, [card.frontImage, pathIndex, card.playerFirstName, card.playerLastName, card.year, card.collection]);
+    console.log(`Card ${card.id} trying path ${pathIndex}: ${paths[pathIndex]}`);
+  }, [card.frontImage, pathIndex, card.playerFirstName, card.playerLastName, card.year, card.collection, card.id]);
   
   // Handle image error by trying the next path
   const handleImageError = () => {
-    console.error('Failed to load image:', imagePath);
+    console.error(`Failed to load image path ${pathIndex}:`, imagePath);
     if (pathIndex < 3) {
       // Try the next path
       setPathIndex(pathIndex + 1);
     } else {
       // All paths failed, show fallback
-      const wrapper = document.querySelector(`#card-${card.id} .card-image-wrapper`);
-      if (wrapper) {
-        wrapper.classList.add('image-error');
-      }
+      setImageError(true);
     }
   };
 
   return (
-    <div className="rounded-lg overflow-hidden border border-slate-200 bg-white card-shadow hover:shadow-md transition-all duration-300 hover:border-secondary-300">
+    <div id={`card-${card.id}`} className="rounded-lg overflow-hidden border border-slate-200 bg-white card-shadow hover:shadow-md transition-all duration-300 hover:border-secondary-300">
       <div className="card-image-container relative bg-slate-100">
         {card.frontImage ? (
-          <div className="card-image-wrapper relative">
+          <div className={`card-image-wrapper relative ${imageError ? 'image-error' : ''}`}>
             {/* Try multiple image sources if needed */}
-            <img 
-              src={formatImageUrl(card.frontImage)}
-              alt={`${card.playerFirstName} ${card.playerLastName} card`}
-              className="card-image"
-              onError={(e) => {
-                console.error('Failed to load image:', card.frontImage);
-                e.currentTarget.parentElement?.classList.add('image-error');
-              }}
-            />
+            {imagePath && (
+              <img 
+                key={imagePath} // Key helps React know when to recreate the image element
+                src={imagePath}
+                alt={`${card.playerFirstName} ${card.playerLastName} card`}
+                className="card-image"
+                onError={handleImageError}
+                loading="eager"
+              />
+            )}
             
             <div className="fallback-content">
               <div className="text-center">
