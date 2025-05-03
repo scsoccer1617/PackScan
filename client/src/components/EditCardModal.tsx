@@ -22,6 +22,8 @@ interface EditCardModalProps {
 export default function EditCardModal({ card, isOpen, onClose }: EditCardModalProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  // Track local open state to help with proper closing
+  const [localIsOpen, setLocalIsOpen] = useState(isOpen);
 
   // Form setup
   const form = useForm<CardFormValues>({
@@ -44,6 +46,11 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
       notes: "",
     },
   });
+
+  // Sync local state with props
+  useEffect(() => {
+    setLocalIsOpen(isOpen);
+  }, [isOpen]);
 
   // Update form values when card changes
   useEffect(() => {
@@ -95,7 +102,8 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
         description: "The card has been successfully updated.",
       });
       
-      onClose();
+      // Use handleClose to ensure proper state updates
+      handleClose();
     },
     onError: (err) => {
       console.error("Error updating card:", err);
@@ -111,14 +119,24 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
     updateCardMutation.mutate(values);
   };
 
+  // Create handleClose function that will properly close the modal
+  const handleClose = () => {
+    setLocalIsOpen(false);
+    onClose();
+  };
+
   return (
     <Dialog 
-      open={isOpen} 
+      open={localIsOpen} 
       onOpenChange={(open) => {
-        if (!open) onClose();
+        if (!open) handleClose();
       }}
     >
-      <DialogContent className="max-w-2xl overflow-y-auto max-h-[90vh]">
+      <DialogContent 
+        className="max-w-2xl overflow-y-auto max-h-[90vh]"
+        onEscapeKeyDown={handleClose}
+        onInteractOutside={handleClose}
+      >
         <DialogHeader>
           <DialogTitle>Edit Card</DialogTitle>
           <DialogDescription>
@@ -444,7 +462,7 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
                 variant="outline" 
                 onClick={(e) => {
                   e.preventDefault();
-                  onClose();
+                  handleClose();
                 }}
               >
                 Cancel
