@@ -147,39 +147,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: 'Image not found' });
       }
       
-      // This mapping ensures we serve the correct image for each player
+      // This mapping ensures we serve the correct image for each card ID
       // regardless of what's in the database
-      const hardcodedImageMap = {
-        // Maps player names to specific image files in attached_assets
-        'Mike Trout': 'trout_front_2024_topps_chrome.jpg',
-        'Manny Machado': 'machado_front_2024_topps_csmlb.jpg',
-        'Gerrit Cole': 'cole_front_2021_topps_heritage.jpg',
-        'Ceddanne Rafaela': 'rafaela_front_2024_topps_smlb.jpg',
-        'Freddie Freeman': 'freedman_front_2023_topps_smlb.jpg',
-        'Francisco Lindor': 'machado_front_2024_topps_csmlb.jpg', // Using Machado as placeholder
-        'Carlos Correa': 'correa_front_2024_topps_smlb.jpg',
-        'Alex Bregman': 'bregman_front_2024_topps_35year.jpg',
-        'Sal Frelick': 'frelick_front_2024_topps_35year.jpg',
-        'Jose Ramirez': 'trout_front_2024_topps_chrome.jpg', // Using Trout as placeholder
-        'Nolan Arenado': 'manaea_front_2024_topps_series2.jpg', // Using Manaea as placeholder
-        'Anthony Volpe': 'correa_front_2024_topps_smlb.jpg', // Using Correa as placeholder
-        'Masyn Winn': 'frelick_front_2024_topps_35year.jpg', // Using Frelick as placeholder
-        'Adley Rutschman': 'freedman_front_2023_topps_smlb.jpg', // Using Freeman as placeholder
-        'Royce Lewis': 'bregman_front_2024_topps_35year.jpg', // Using Bregman as placeholder
-        'Nolan Schanuel': 'cole_front_2021_topps_heritage.jpg', // Using Cole as placeholder
-        'Sonny Gray': 'manaea_front_2024_topps_series2.jpg',
-        'Shohei Ohtani': 'trout_front_2024_topps_chrome.jpg', // Using Trout as placeholder
+      const hardcodedImageMapById = {
+        // Maps card IDs to specific image files in attached_assets
+        20: 'frelick_front_2024_topps_35year.jpg',    // Sal Frelick
+        22: 'manaea_front_2024_topps_series2.jpg',    // Sean Manaea
+        23: 'bregman_front_2024_topps_35year.jpg',    // Alex Bregman
+        24: 'cole_front_2021_topps_heritage.jpg',     // Gerrit Cole
+        25: 'freedman_front_2023_topps_smlb.jpg',     // Freddie Freeman
+        27: 'trout_front_2024_topps_chrome.jpg',      // Mike Trout
+        28: 'machado_front_2024_topps_csmlb.jpg',     // Manny Machado
+        29: 'correa_front_2024_topps_smlb.jpg',       // Anthony Volpe (using Correa)
+        30: 'cole_front_2021_topps_heritage.jpg',     // Nolan Schanuel 
+        31: 'bregman_front_2024_topps_35year.jpg',    // Royce Lewis
+        32: 'freedman_front_2023_topps_smlb.jpg',     // Adley Rutschman
+        33: 'bregman_front_2024_topps_35year.jpg',    // Alex Bregman
+        34: 'manaea_front_2024_topps_series2.jpg',    // Sonny Gray
+        35: 'frelick_front_2024_topps_35year.jpg',    // Sal Frelick
+        36: 'trout_front_2024_topps_chrome.jpg',      // Shohei Ohtani
+        37: 'frelick_front_2024_topps_35year.jpg',    // Masyn Winn
+        38: 'trout_front_2024_topps_chrome.jpg',      // Jose Ramirez
+        39: 'correa_front_2024_topps_smlb.jpg',       // Carlos Correa
+        40: 'rafaela_front_2024_topps_smlb.jpg',      // Ceddanne Rafaela
+        42: 'manaea_front_2024_topps_series2.jpg',    // Nolan Arenado
+        44: 'machado_front_2024_topps_csmlb.jpg',     // Manny Machado (Chrome)
+        45: 'correa_front_2024_topps_smlb.jpg',       // Francisco Lindor
       };
       
-      // Try to find image based on player name
-      const playerName = `${card.playerFirstName} ${card.playerLastName}`;
-      const hardcodedImage = hardcodedImageMap[playerName];
+      // Try to find image based on card ID
+      const hardcodedImage = hardcodedImageMapById[id];
       
       if (hardcodedImage) {
         const attachedAssetsPath = join(process.cwd(), 'attached_assets', hardcodedImage);
         
         if (fs.existsSync(attachedAssetsPath)) {
-          console.log(`Found hardcoded image for ${playerName}: ${attachedAssetsPath}`);
+          console.log(`Found hardcoded image for card ID ${id}: ${attachedAssetsPath}`);
           res.setHeader('Content-Type', 'image/jpeg');
           res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
           return res.sendFile(attachedAssetsPath);
