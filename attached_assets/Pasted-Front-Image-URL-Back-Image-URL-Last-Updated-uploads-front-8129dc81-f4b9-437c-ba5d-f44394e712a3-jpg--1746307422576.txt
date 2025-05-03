@@ -1,0 +1,25 @@
+Front Image URL	Back Image URL	Last Updated
+/uploads/front_8129dc81-f4b9-437c-ba5d-f44394e712a3.jpg	/uploads/back_e28fcc8f-d43d-447d-94f5-0b90f27b6c0e.jpg	2025-04-26T17:23:55.213Z
+/uploads/front_8f406497-ba8d-4277-94a2-c2f0d6a07d03.jpg	/uploads/back_ccf6c8b3-7ab8-4fa5-b545-06e08876abf9.jpg	2025-04-26T18:07:44.214Z
+/uploads/front_13f82788-ebc8-427f-8a07-2c9b300c775d.jpg	/uploads/back_e0163a54-9032-43ec-88fd-cf673a632c30.jpg	2025-04-26T18:28:56.601Z
+/uploads/front_49f545ba-a01a-4a4e-888f-e112da960ec5.jpg	/uploads/back_c677a2df-4d66-4397-b808-12c7e6213985.jpg	2025-04-26T21:36:37.446Z
+/uploads/front_30a3619b-69a3-49a0-aba8-94ee4d9bf74a.jpg	/uploads/back_ac0c7b2f-722b-400b-bc69-2879ecb9c8ff.jpg	2025-04-27T14:04:11.549Z
+/uploads/front_d0f137cb-27e5-42f6-b70f-a53e59fa47e9.jpg	/uploads/back_e52dbdbf-d207-4da8-8e13-0321da15c516.jpg	2025-04-27T14:44:55.842Z
+/uploads/1745782254517_Trout_front.jpg	/uploads/1745782254523_Trout_back.jpg	2025-04-27T19:30:55.008Z
+/uploads/1745785721118_Machado_front.jpg	/uploads/1745785721128_Machado_back.jpg	2025-04-27T20:28:42.188Z
+/uploads/1745790593490_Volpe_front.jpg	/uploads/1745790593497_Volpe_back.jpg	2025-04-27T21:49:54.241Z
+/uploads/1745791833108_Schanuel_front.jpg	/uploads/1745791833113_Schanuel_back.jpg	2025-04-27T22:10:33.788Z
+/uploads/1745792025505_Lewis_front.jpg	/uploads/1745792025510_Lewis_back.jpg	2025-04-27T22:13:45.812Z
+/uploads/1745796442080_Rutschman_front.jpg	/uploads/1745796442086_Rutschman_back.jpg	2025-04-27T23:27:22.836Z
+/uploads/1745796845930_Bregman_front.jpg	/uploads/1745796845936_Bregman_back.jpg	2025-04-27T23:34:06.469Z
+/uploads/1745797140216_Gray_front.jpg	/uploads/1745797140221_Gray_back.jpg	2025-04-27T23:39:00.545Z
+/uploads/1745841448384_Frelick_front.jpg	/uploads/1745841448392_Frelick_back.jpg	2025-04-28T11:57:29.260Z
+/uploads/1745841615200_Ohtani_front.jpg	/uploads/1745841615206_Ohtani_back.jpg	2025-04-28T12:00:15.791Z
+/uploads/1745866266968_Winn_front.jpg	/uploads/1745866266992_Winn_back.jpg	2025-04-28T18:51:07.796Z
+/uploads/1745866766706_Ramirez_front.jpg	/uploads/1745866766728_Ramirez_back.jpg	2025-04-28T18:59:27.468Z
+/uploads/1745867110234_Correa_front.jpg	/uploads/1745867110248_Correa_back.jpg	2025-04-28T19:05:10.984Z
+/uploads/1745867368006_Rafaela_front.jpg	/uploads/1745867368012_Rafaela_back.jpg	2025-04-28T19:09:28.903Z
+/uploads/1745868308634_Arenado_front.jpg	/uploads/1745868308654_Arenado_back.jpg	2025-04-28T19:25:09.405Z
+/uploads/1745868675251_Arenado_front.jpg	/uploads/1745868675272_Arenado_back.jpg	2025-04-28T19:31:16.029Z
+/uploads/1745869132483_Machado_front.jpg	/uploads/1745869132489_Machado_back.jpg	2025-04-28T19:38:53.496Z
+/uploads/1745871754339_Lindor_front.jpg	/uploads/1745871754347_Lindor_back.jpg	2025-04-28T20:22:35.174Z

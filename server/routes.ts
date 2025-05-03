@@ -150,44 +150,80 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Get the image path from the card data
       const imagePath = card[side];
       
-      // For attached_assets paths
-      if (imagePath.startsWith('/attached_assets/')) {
-        const filePath = join(process.cwd(), imagePath.replace(/^\//, ''));
-        if (fs.existsSync(filePath)) {
-          console.log(`Serving attached asset: ${filePath}`);
+      // Primary approach: Try to directly use the exact path from the database
+      if (imagePath.startsWith('/')) {
+        // Check if the file exists at the exact path
+        const exactFilePath = join(process.cwd(), imagePath.replace(/^\//, ''));
+        if (fs.existsSync(exactFilePath)) {
+          console.log(`Serving from original path: ${exactFilePath}`);
           res.setHeader('Content-Type', 'image/jpeg');
           res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-          return res.sendFile(filePath);
+          return res.sendFile(exactFilePath);
         }
       }
       
-      // For uploads paths
-      if (imagePath.startsWith('/uploads/')) {
-        const filePath = join(process.cwd(), imagePath.replace(/^\//, ''));
-        if (fs.existsSync(filePath)) {
-          console.log(`Serving uploaded image: ${filePath}`);
-          res.setHeader('Content-Type', 'image/jpeg');
-          res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-          return res.sendFile(filePath);
-        }
+      // Secondary approaches for fallbacks
+      
+      // Try to extract filename and look in both uploads and attached_assets
+      const filename = imagePath.split('/').pop();
+      const uploadsPath = join(process.cwd(), 'uploads', filename);
+      const attachedAssetsPath = join(process.cwd(), 'attached_assets', filename);
+      
+      // Check uploads directory
+      if (fs.existsSync(uploadsPath)) {
+        console.log(`Serving from uploads fallback: ${uploadsPath}`);
+        res.setHeader('Content-Type', 'image/jpeg');
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        return res.sendFile(uploadsPath);
       }
       
-      // If no path prefix, try looking in both locations
-      const attachedAssetsPath = join(process.cwd(), 'attached_assets', imagePath.split('/').pop());
-      const uploadsPath = join(process.cwd(), 'uploads', imagePath.split('/').pop());
-      
+      // Check attached_assets directory
       if (fs.existsSync(attachedAssetsPath)) {
-        console.log(`Serving from attached_assets: ${attachedAssetsPath}`);
+        console.log(`Serving from attached_assets fallback: ${attachedAssetsPath}`);
         res.setHeader('Content-Type', 'image/jpeg');
         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
         return res.sendFile(attachedAssetsPath);
       }
       
-      if (fs.existsSync(uploadsPath)) {
-        console.log(`Serving from uploads: ${uploadsPath}`);
-        res.setHeader('Content-Type', 'image/jpeg');
-        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-        return res.sendFile(uploadsPath);
+      // Try to find an image with player name in it
+      const playerName = `${card.playerFirstName?.toLowerCase() || ''}_${card.playerLastName?.toLowerCase() || ''}`;
+      const sideText = req.params.side.toLowerCase();
+      
+      const attachedAssetsDir = join(process.cwd(), 'attached_assets');
+      const uploadsDir = join(process.cwd(), 'uploads');
+      
+      // Look in attached_assets for filename with player name
+      if (fs.existsSync(attachedAssetsDir)) {
+        const files = fs.readdirSync(attachedAssetsDir);
+        const matchingFile = files.find(file => 
+          file.toLowerCase().includes(playerName) && 
+          file.toLowerCase().includes(sideText)
+        );
+        
+        if (matchingFile) {
+          const playerMatchPath = join(attachedAssetsDir, matchingFile);
+          console.log(`Serving from player name match in attached_assets: ${playerMatchPath}`);
+          res.setHeader('Content-Type', 'image/jpeg');
+          res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+          return res.sendFile(playerMatchPath);
+        }
+      }
+      
+      // Look in uploads for filename with player name
+      if (fs.existsSync(uploadsDir)) {
+        const files = fs.readdirSync(uploadsDir);
+        const matchingFile = files.find(file => 
+          file.toLowerCase().includes(playerName) && 
+          file.toLowerCase().includes(sideText)
+        );
+        
+        if (matchingFile) {
+          const playerMatchPath = join(uploadsDir, matchingFile);
+          console.log(`Serving from player name match in uploads: ${playerMatchPath}`);
+          res.setHeader('Content-Type', 'image/jpeg');
+          res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+          return res.sendFile(playerMatchPath);
+        }
       }
       
       // Failed to find the image
