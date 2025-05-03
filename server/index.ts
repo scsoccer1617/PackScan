@@ -22,9 +22,12 @@ app.use('/uploads', express.static(uploadsDir, {
     } else if (path.endsWith('.png')) {
       res.setHeader('Content-Type', 'image/png');
     }
-    // Set cache control headers to ensure images are properly cached
-    res.setHeader('Cache-Control', 'public, max-age=31536000');
+    // Disable caching for debugging purposes
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
   },
+  maxAge: 0, // Don't cache during development/debugging
   fallthrough: true, // Continue to next middleware if file not found
 }));
 
@@ -43,10 +46,27 @@ app.use('/uploads', (req, res, next) => {
   next();
 });
 
-// Alternative path for backward compatibility
+// Alternative paths for backward compatibility
 const oldUploadsDir = path.join(process.cwd(), 'dist', 'public', 'uploads');
 if (fs.existsSync(oldUploadsDir)) {
-  app.use('/uploads', express.static(oldUploadsDir));
+  app.use('/uploads', express.static(oldUploadsDir, {
+    setHeaders: (res) => {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    },
+    maxAge: 0
+  }));
+}
+
+// Also serve images directly from attached_assets as a fallback
+const attachedAssetsDir = path.join(process.cwd(), 'attached_assets');
+if (fs.existsSync(attachedAssetsDir)) {
+  app.use('/attached_assets', express.static(attachedAssetsDir, {
+    setHeaders: (res) => {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Content-Type', 'image/jpeg');
+    },
+    maxAge: 0
+  }));
 }
 
 app.use((req, res, next) => {

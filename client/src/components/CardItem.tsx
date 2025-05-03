@@ -92,19 +92,67 @@ export default function CardItem({ card, quantity, onDelete }: CardItemProps) {
 
   const conditionNumber = card.condition ? card.condition.split(" ")[1] : "";
 
+  // Use useEffect to log the image state
+  useEffect(() => {
+    if (card.frontImage) {
+      console.log(`Card ID ${card.id}: ${card.frontImage}`);
+    }
+  }, [card.id, card.frontImage]);
+
+  // Use state to try different image paths if the first one fails
+  const [imagePath, setImagePath] = useState<string | null>(null);
+  const [pathIndex, setPathIndex] = useState(0);
+  
+  // Generate multiple possible paths for the image
+  useEffect(() => {
+    if (!card.frontImage) return;
+    
+    // Try different path formats
+    const paths = [
+      // Original card.frontImage path (with /uploads/ added if needed)
+      card.frontImage.startsWith('/uploads/') ? card.frontImage : `/uploads/${card.frontImage}`,
+      
+      // Try attaching /uploads/ to the base filename without a path
+      `/uploads/${card.frontImage.split('/').pop()}`,
+      
+      // Try attaching /attached_assets/ to the player name for fallbacks
+      `/attached_assets/${card.playerFirstName?.toLowerCase()}_${card.playerLastName?.toLowerCase()}_front_${card.year}_topps_${card.collection?.toLowerCase()}.jpg`,
+      
+      // Try a direct path to attached_assets
+      `/attached_assets/${card.frontImage.split('/').pop()}`
+    ];
+    
+    // Set the initial path
+    setImagePath(paths[pathIndex]);
+  }, [card.frontImage, pathIndex, card.playerFirstName, card.playerLastName, card.year, card.collection]);
+  
+  // Handle image error by trying the next path
+  const handleImageError = () => {
+    console.error('Failed to load image:', imagePath);
+    if (pathIndex < 3) {
+      // Try the next path
+      setPathIndex(pathIndex + 1);
+    } else {
+      // All paths failed, show fallback
+      const wrapper = document.querySelector(`#card-${card.id} .card-image-wrapper`);
+      if (wrapper) {
+        wrapper.classList.add('image-error');
+      }
+    }
+  };
+
   return (
     <div className="rounded-lg overflow-hidden border border-slate-200 bg-white card-shadow hover:shadow-md transition-all duration-300 hover:border-secondary-300">
-      <div className="card-image-container relative bg-slate-200">
+      <div className="card-image-container relative bg-slate-100">
         {card.frontImage ? (
           <div className="card-image-wrapper relative">
-            {/* Direct image with proper URL structure */}
+            {/* Try multiple image sources if needed */}
             <img 
-              src={card.frontImage.startsWith('/uploads/') ? card.frontImage : `/uploads/${card.frontImage}`}
+              src={formatImageUrl(card.frontImage)}
               alt={`${card.playerFirstName} ${card.playerLastName} card`}
               className="card-image"
               onError={(e) => {
                 console.error('Failed to load image:', card.frontImage);
-                e.currentTarget.style.display = 'none';
                 e.currentTarget.parentElement?.classList.add('image-error');
               }}
             />
@@ -114,7 +162,7 @@ export default function CardItem({ card, quantity, onDelete }: CardItemProps) {
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 mx-auto text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                 </svg>
-                <p className="text-xs text-slate-500 mt-2">Card Image</p>
+                <p className="text-xs text-slate-500 mt-2">Image not found</p>
               </div>
             </div>
           </div>

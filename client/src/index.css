@@ -85,28 +85,29 @@
     position: relative; /* Ensure z-index works properly */
   }
   
-  /* Fallback content is always positioned behind the image */
+  /* Initially hide fallback content completely */
   .fallback-content {
     position: absolute;
     top: 0;
     left: 0;
     width: 100%;
     height: 100%;
-    display: flex;
+    display: none; /* Hide by default */
     align-items: center;
     justify-content: center;
     background-color: #f1f5f9;
-    z-index: 0;
+    z-index: 10; /* Higher z-index than images */
   }
   
-  /* When an image error occurs, we show the fallback */
+  /* Only when an error occurs, show the fallback */
   .card-image-wrapper.image-error .fallback-content {
-    z-index: 2;
+    display: flex; /* Show when error class is added */
   }
   
-  /* Fix for Safari and some browsers where image might flash before error */
+  /* Hide the image when error occurs */
   .card-image-wrapper.image-error img {
-    display: none !important;
+    visibility: hidden;
+    opacity: 0;
   }
   
   /* Mobile-friendly form styles */
