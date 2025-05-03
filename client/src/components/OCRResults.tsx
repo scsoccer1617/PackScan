@@ -425,19 +425,35 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
         )}
       </CardContent>
       <CardFooter className="flex justify-between">
-        <Button variant="outline" onClick={onCancel}>
+        <Button 
+          variant="outline" 
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onCancel();
+          }}
+        >
           Cancel
         </Button>
         {!editMode ? (
           <Button
-            onClick={toggleEditMode}
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              toggleEditMode();
+            }}
             className="bg-blue-600 hover:bg-blue-500 text-white"
           >
             Edit Card Details
           </Button>
         ) : (
           <Button
-            onClick={() => {
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
               // Apply changes to the form and proceed with saving
               // This will use our edited data and apply it to the form
               applyAndUseDirectly();
