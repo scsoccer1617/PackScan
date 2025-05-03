@@ -179,8 +179,6 @@ export default function SimpleCardForm() {
     setShowOCRResults(false);
     // Reset form fields visibility to default state
     setShowFormFields(false);
-    // Clear OCR data so we start fresh on next scan
-    setOcrData(null);
   };
 
   // Handle edit button click to show the form fields 
