@@ -20,26 +20,11 @@ export default function CardItem({ card, quantity, onDelete }: CardItemProps) {
   
   // Simple check when card data changes
   useEffect(() => {
+    // Always start with image being loaded until proven otherwise
+    setImageLoaded(true);
+    
     // For debugging, log the image path we're trying to use
-    if (card.frontImage) {
-      console.log('Card image path:', card.frontImage);
-      
-      // Directly check if the image is accessible
-      fetch(card.frontImage.startsWith('/') ? card.frontImage : `/${card.frontImage}`, { method: 'HEAD' })
-        .then(response => {
-          if (response.ok) {
-            setImageLoaded(true);
-            console.log('Image exists:', card.frontImage);
-          } else {
-            setImageLoaded(false);
-            console.log('Image does not exist:', card.frontImage);
-          }
-        })
-        .catch(err => {
-          console.error('Error checking image:', err);
-          setImageLoaded(false);
-        });
-    } else {
+    if (!card.frontImage) {
       console.log('No image path available for card:', card.id);
       setImageLoaded(false);
     }
@@ -126,17 +111,19 @@ export default function CardItem({ card, quantity, onDelete }: CardItemProps) {
         {card.frontImage ? (
           <div className="card-image-wrapper relative">
             {/* We'll use a simpler approach with direct image rendering */}
-            {imageLoaded ? (
-              <img 
-                src={card.frontImage.startsWith('/') ? card.frontImage : `/${card.frontImage}`}
-                alt={`${card.playerFirstName} ${card.playerLastName} card`} 
-                className="card-image transform hover:scale-105 transition-transform duration-300"
-                onError={() => {
-                  console.log('Simple image failed to load:', card.frontImage);
-                  setImageLoaded(false);
-                }}
-              />
-            ) : (
+            <img 
+              src={card.frontImage.startsWith('/') ? card.frontImage : `/${card.frontImage}`}
+              alt={`${card.playerFirstName} ${card.playerLastName} card`} 
+              className="card-image transform hover:scale-105 transition-transform duration-300"
+              onLoad={() => setImageLoaded(true)}
+              onError={() => {
+                console.log('Image failed to load:', card.frontImage);
+                setImageLoaded(false);
+              }}
+              style={{ display: imageLoaded ? 'block' : 'none' }}
+            />
+            
+            {!imageLoaded && (
               <div className="fallback-content">
                 <div className="text-center">
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 mx-auto text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
