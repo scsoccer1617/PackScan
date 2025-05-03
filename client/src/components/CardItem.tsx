@@ -122,14 +122,14 @@ export default function CardItem({ card, quantity, onDelete }: CardItemProps) {
   };
 
   // Get the image path using the new API endpoint
-  const initialPath = card.id ? `/api/card-image/${card.id}/front` : null;
+  const initialPath = card.id ? `/api/card-image/${card.id}/front` : '';
 
   return (
     <div id={`card-${card.id}`} className="rounded-lg overflow-hidden border border-slate-200 bg-white card-shadow hover:shadow-md transition-all duration-300 hover:border-secondary-300">
-      <div className="card-image-container relative">
+      <div className="card-image-container">
         {card.frontImage ? (
-          <div className={`card-image-wrapper relative ${imageError ? 'image-error' : ''}`}>
-            {/* Simple image with error handling */}
+          <div className={`card-image-wrapper ${imageError ? 'image-error' : ''}`}>
+            {/* Image with proper styling to fill the gray area */}
             <img 
               src={initialPath}
               alt={`${card.playerFirstName} ${card.playerLastName} card`}
@@ -138,6 +138,7 @@ export default function CardItem({ card, quantity, onDelete }: CardItemProps) {
                 console.error('Failed to load image:', initialPath);
                 setImageError(true);
               }}
+              style={{ width: '100%', height: '100%', objectFit: 'fill' }}
             />
             
             <div className="fallback-content">
