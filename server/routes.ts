@@ -127,6 +127,81 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(500).json({ error: 'Failed to fetch card' });
     }
   });
+  
+  // Get a card image by ID and side (front/back)
+  app.get(`${apiPrefix}/card-image/:id/:side`, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) {
+        return res.status(400).json({ error: 'Invalid card ID' });
+      }
+      
+      const side = req.params.side === 'front' ? 'frontImage' : 'backImage';
+      
+      // Get the card to find image path
+      const card = await db.query.cards.findFirst({
+        where: eq(cards.id, id)
+      });
+      
+      if (!card || !card[side]) {
+        return res.status(404).json({ error: 'Image not found' });
+      }
+      
+      // Get the image path from the card data
+      const imagePath = card[side];
+      
+      // List of places to look for the image
+      const possiblePaths = [
+        // Path with uploads prefix
+        join(process.cwd(), 'uploads', imagePath.replace(/^\/uploads\//, '')),
+        // Direct path
+        join(process.cwd(), imagePath.replace(/^\//, '')),
+        // Just filename
+        join(process.cwd(), 'uploads', imagePath.split('/').pop()),
+        // In attached_assets
+        join(process.cwd(), 'attached_assets', imagePath.split('/').pop()),
+      ];
+      
+      let foundPath = null;
+      
+      // Find the first existing path
+      for (const p of possiblePaths) {
+        if (fs.existsSync(p)) {
+          foundPath = p;
+          console.log(`Found image at ${foundPath}`);
+          break;
+        }
+      }
+      
+      if (!foundPath) {
+        // Try matching player name with attached_assets
+        const playerPattern = `${card.playerFirstName?.toLowerCase()}_${card.playerLastName?.toLowerCase()}_${req.params.side}`;
+        const attachedAssetsDir = join(process.cwd(), 'attached_assets');
+        if (fs.existsSync(attachedAssetsDir)) {
+          const files = fs.readdirSync(attachedAssetsDir);
+          const matchingFile = files.find(file => file.toLowerCase().includes(playerPattern));
+          
+          if (matchingFile) {
+            foundPath = join(attachedAssetsDir, matchingFile);
+            console.log(`Found image with player pattern: ${foundPath}`);
+          }
+        }
+      }
+      
+      if (foundPath) {
+        res.setHeader('Content-Type', 'image/jpeg');
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        return res.sendFile(foundPath);
+      }
+      
+      // Failed to find the image
+      console.log(`Image not found for card ${id}, side ${side}, path ${imagePath}`);
+      return res.status(404).json({ error: 'Image not found' });
+    } catch (error) {
+      console.error('Error serving card image:', error);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+  });
 
   // Create a new card
   app.post(`${apiPrefix}/cards`, async (req, res) => {

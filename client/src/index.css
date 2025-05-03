@@ -85,28 +85,48 @@
     position: relative; /* Ensure z-index works properly */
   }
   
-  /* Initially hide fallback content completely */
+  /* Make card images display properly with proper dimensions */
+  .card-image-container {
+    height: 240px;
+    overflow: hidden;
+    background-color: #f8f9fa;
+    position: relative;
+  }
+  
+  .card-image {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    object-position: center;
+    display: block;
+  }
+  
+  /* Fallback content when image fails to load */
   .fallback-content {
     position: absolute;
     top: 0;
     left: 0;
     width: 100%;
     height: 100%;
-    display: none; /* Hide by default */
+    display: flex;
     align-items: center;
     justify-content: center;
     background-color: #f1f5f9;
-    z-index: 10; /* Higher z-index than images */
+    z-index: 1;
   }
   
-  /* Only when an error occurs, show the fallback */
+  /* Initially hide fallback content behind the image */
+  .card-image-wrapper:not(.image-error) .fallback-content {
+    opacity: 0;
+  }
+  
+  /* Show fallback content when image error occurs */
   .card-image-wrapper.image-error .fallback-content {
-    display: flex; /* Show when error class is added */
+    opacity: 1;
   }
   
-  /* Hide the image when error occurs */
+  /* Hide the actual image element when there's an error */
   .card-image-wrapper.image-error img {
-    visibility: hidden;
     opacity: 0;
   }
   

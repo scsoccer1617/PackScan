@@ -99,63 +99,46 @@ export default function CardItem({ card, quantity, onDelete }: CardItemProps) {
     }
   }, [card.id, card.frontImage]);
 
-  // Define state for image loading
-  const [imagePath, setImagePath] = useState<string | null>(null);
-  const [pathIndex, setPathIndex] = useState(0);
+  // Simple approach: use state to track if image loaded successfully
   const [imageError, setImageError] = useState(false);
-  
-  // Generate multiple possible paths for the image
-  useEffect(() => {
-    if (!card.frontImage) return;
-    
-    // Try different path formats
-    const paths = [
-      // Original card.frontImage path (with /uploads/ added if needed)
-      card.frontImage.startsWith('/uploads/') ? card.frontImage : `/uploads/${card.frontImage}`,
+
+  // Get a list of possible image paths to try
+  const getImagePaths = () => {
+    if (!card.frontImage) return [];
+
+    return [
+      // Path 1: Direct path with uploads prefix
+      `/uploads/${card.frontImage}`,
       
-      // Try attaching /uploads/ to the base filename without a path
+      // Path 2: Extract filename only
       `/uploads/${card.frontImage.split('/').pop()}`,
       
-      // Try attaching /attached_assets/ to the player name for fallbacks
-      `/attached_assets/${card.playerFirstName?.toLowerCase()}_${card.playerLastName?.toLowerCase()}_front_${card.year}_topps_${card.collection?.toLowerCase()}.jpg`,
+      // Path 3: Try matching pattern in attached_assets
+      `/attached_assets/${card.playerFirstName?.toLowerCase()}_${card.playerLastName?.toLowerCase()}_front.jpg`,
       
-      // Try a direct path to attached_assets
-      `/attached_assets/${card.frontImage.split('/').pop()}`
+      // Path 4: Try standard naming format for attached_assets
+      `/attached_assets/${card.playerFirstName?.toLowerCase()}_${card.playerLastName?.toLowerCase()}_front_${card.year || '2024'}_topps.jpg`
     ];
-    
-    // Set the initial path
-    setImagePath(paths[pathIndex]);
-    console.log(`Card ${card.id} trying path ${pathIndex}: ${paths[pathIndex]}`);
-  }, [card.frontImage, pathIndex, card.playerFirstName, card.playerLastName, card.year, card.collection, card.id]);
-  
-  // Handle image error by trying the next path
-  const handleImageError = () => {
-    console.error(`Failed to load image path ${pathIndex}:`, imagePath);
-    if (pathIndex < 3) {
-      // Try the next path
-      setPathIndex(pathIndex + 1);
-    } else {
-      // All paths failed, show fallback
-      setImageError(true);
-    }
   };
+
+  // Get the image path using the new API endpoint
+  const initialPath = card.id ? `/api/card-image/${card.id}/front` : null;
 
   return (
     <div id={`card-${card.id}`} className="rounded-lg overflow-hidden border border-slate-200 bg-white card-shadow hover:shadow-md transition-all duration-300 hover:border-secondary-300">
-      <div className="card-image-container relative bg-slate-100">
+      <div className="card-image-container relative">
         {card.frontImage ? (
           <div className={`card-image-wrapper relative ${imageError ? 'image-error' : ''}`}>
-            {/* Try multiple image sources if needed */}
-            {imagePath && (
-              <img 
-                key={imagePath} // Key helps React know when to recreate the image element
-                src={imagePath}
-                alt={`${card.playerFirstName} ${card.playerLastName} card`}
-                className="card-image"
-                onError={handleImageError}
-                loading="eager"
-              />
-            )}
+            {/* Simple image with error handling */}
+            <img 
+              src={initialPath}
+              alt={`${card.playerFirstName} ${card.playerLastName} card`}
+              className="card-image"
+              onError={(e) => {
+                console.error('Failed to load image:', initialPath);
+                setImageError(true);
+              }}
+            />
             
             <div className="fallback-content">
               <div className="text-center">
