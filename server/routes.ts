@@ -147,129 +147,177 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: 'Card not found' });
       }
       
-      // Direct mapping from card ID to the correct image file
+      // Direct mapping from card ID to exact original image paths from database export
       const imageMap = {
         20: {
-          front: 'frelick_front_2024_topps_35year.jpg',
-          back: 'frelick_back_2024_35year.jpg'
+          front: '/uploads/front_8129dc81-f4b9-437c-ba5d-f44394e712a3.jpg',
+          back: '/uploads/back_e28fcc8f-d43d-447d-94f5-0b90f27b6c0e.jpg'
         },
         22: {
-          front: 'manaea_front_2024_topps_series2.jpg',
-          back: 'manaea_back_2024_topps_series2.jpg'
+          front: '/uploads/front_8f406497-ba8d-4277-94a2-c2f0d6a07d03.jpg',
+          back: '/uploads/back_ccf6c8b3-7ab8-4fa5-b545-06e08876abf9.jpg'
         },
         23: {
-          front: 'bregman_front_2024_topps_35year.jpg',
-          back: 'bregman_back_2024_topps_35year.jpg'
+          front: '/uploads/front_13f82788-ebc8-427f-8a07-2c9b300c775d.jpg',
+          back: '/uploads/back_e0163a54-9032-43ec-88fd-cf673a632c30.jpg'
         },
         24: {
-          front: 'cole_front_2021_topps_heritage.jpg',
-          back: 'cole_back_2021_topps_heritage.jpg'
+          front: '/uploads/front_49f545ba-a01a-4a4e-888f-e112da960ec5.jpg',
+          back: '/uploads/back_c677a2df-4d66-4397-b808-12c7e6213985.jpg'
         },
         25: {
-          front: 'freedman_front_2023_topps_smlb.jpg',
-          back: 'freedman_back_2023_topps_smlb.jpg'
+          front: '/uploads/front_30a3619b-69a3-49a0-aba8-94ee4d9bf74a.jpg',
+          back: '/uploads/back_ac0c7b2f-722b-400b-bc69-2879ecb9c8ff.jpg'
         },
         26: {
-          front: 'correa_front_2024_topps_smlb.jpg',
-          back: 'correa_back_2024_topps_smlb.jpg'
+          front: '/uploads/front_d0f137cb-27e5-42f6-b70f-a53e59fa47e9.jpg',
+          back: '/uploads/back_e52dbdbf-d207-4da8-8e13-0321da15c516.jpg'
         },
         27: {
-          front: 'trout_front_2024_topps_chrome.jpg',
-          back: 'trout_back_2024_topps_chrome.jpg'
+          front: '/uploads/1745782254517_Trout_front.jpg',
+          back: '/uploads/1745782254523_Trout_back.jpg'
         },
         28: {
-          front: 'machado_front_2024_topps_csmlb.jpg',
-          back: 'machado_back_2024_topps_csmlb.jpg'
+          front: '/uploads/1745785721118_Machado_front.jpg',
+          back: '/uploads/1745785721128_Machado_back.jpg'
         },
         29: {
-          front: 'correa_front_2024_topps_smlb.jpg',
-          back: 'correa_back_2024_topps_smlb.jpg'
+          front: '/uploads/1745790593490_Volpe_front.jpg',
+          back: '/uploads/1745790593497_Volpe_back.jpg'
         },
         30: {
-          front: 'cole_front_2021_topps_heritage.jpg',
-          back: 'cole_back_2021_topps_heritage.jpg'
+          front: '/uploads/1745791833108_Schanuel_front.jpg',
+          back: '/uploads/1745791833113_Schanuel_back.jpg'
         },
         31: {
-          front: 'bregman_front_2024_topps_35year.jpg',
-          back: 'bregman_back_2024_topps_35year.jpg'
+          front: '/uploads/1745792025505_Lewis_front.jpg',
+          back: '/uploads/1745792025510_Lewis_back.jpg'
         },
         32: {
-          front: 'freedman_front_2023_topps_smlb.jpg',
-          back: 'freedman_back_2023_topps_smlb.jpg'
+          front: '/uploads/1745796442080_Rutschman_front.jpg',
+          back: '/uploads/1745796442086_Rutschman_back.jpg'
         },
         33: {
-          front: 'bregman_front_2024_topps_35year.jpg',
-          back: 'bregman_back_2024_topps_35year.jpg'
+          front: '/uploads/1745796845930_Bregman_front.jpg',
+          back: '/uploads/1745796845936_Bregman_back.jpg'
         },
         34: {
-          front: 'manaea_front_2024_topps_series2.jpg',
-          back: 'manaea_back_2024_topps_series2.jpg'
+          front: '/uploads/1745797140216_Gray_front.jpg',
+          back: '/uploads/1745797140221_Gray_back.jpg'
         },
         35: {
-          front: 'frelick_front_2024_topps_35year.jpg',
-          back: 'frelick_back_2024_35year.jpg'
+          front: '/uploads/1745841448384_Frelick_front.jpg',
+          back: '/uploads/1745841448392_Frelick_back.jpg'
         },
         36: {
-          front: 'trout_front_2024_topps_chrome.jpg',
-          back: 'trout_back_2024_topps_chrome.jpg'
+          front: '/uploads/1745841615200_Ohtani_front.jpg',
+          back: '/uploads/1745841615206_Ohtani_back.jpg'
         },
         37: {
-          front: 'frelick_front_2024_topps_35year.jpg',
-          back: 'frelick_back_2024_35year.jpg'
+          front: '/uploads/1745866266968_Winn_front.jpg',
+          back: '/uploads/1745866266992_Winn_back.jpg'
         },
         38: {
-          front: 'trout_front_2024_topps_chrome.jpg',
-          back: 'trout_back_2024_topps_chrome.jpg'
+          front: '/uploads/1745866766706_Ramirez_front.jpg',
+          back: '/uploads/1745866766728_Ramirez_back.jpg'
         },
         39: {
-          front: 'correa_front_2024_topps_smlb.jpg',
-          back: 'correa_back_2024_topps_smlb.jpg'
+          front: '/uploads/1745867110234_Correa_front.jpg',
+          back: '/uploads/1745867110248_Correa_back.jpg'
         },
         40: {
-          front: 'rafaela_front_2024_topps_smlb.jpg',
-          back: 'rafaela_back_2024_topps_smlb.jpg'
+          front: '/uploads/1745867368006_Rafaela_front.jpg',
+          back: '/uploads/1745867368012_Rafaela_back.jpg'
         },
         41: {
-          front: 'manaea_front_2024_topps_series2.jpg',
-          back: 'manaea_back_2024_topps_series2.jpg'
+          front: '/uploads/1745868308634_Arenado_front.jpg',
+          back: '/uploads/1745868308654_Arenado_back.jpg'
         },
         42: {
-          front: 'manaea_front_2024_topps_series2.jpg',
-          back: 'manaea_back_2024_topps_series2.jpg'
+          front: '/uploads/1745868308634_Arenado_front.jpg',
+          back: '/uploads/1745868308654_Arenado_back.jpg'
+        },
+        43: {
+          front: '/uploads/1745868675251_Arenado_front.jpg',
+          back: '/uploads/1745868675272_Arenado_back.jpg'
         },
         44: {
-          front: 'machado_front_2024_topps_csmlb.jpg',
-          back: 'machado_back_2024_topps_csmlb.jpg'
+          front: '/uploads/1745869132483_Machado_front.jpg',
+          back: '/uploads/1745869132489_Machado_back.jpg'
         },
         45: {
-          front: 'correa_front_2024_topps_smlb.jpg',
-          back: 'correa_back_2024_topps_smlb.jpg'
+          front: '/uploads/1745871754339_Lindor_front.jpg',
+          back: '/uploads/1745871754347_Lindor_back.jpg'
         },
       };
       
-      // Get the filename for this card and side
-      const imageFileName = imageMap[id]?.[side];
+      // Get the path for this card and side
+      const imagePath = imageMap[id]?.[side];
       
-      if (!imageFileName) {
+      if (!imagePath) {
         console.log(`No image mapping found for card ${id}, side ${side}`);
         return res.status(404).json({ error: 'Image mapping not found' });
       }
       
       // Build the path to the file
-      const filePath = join(process.cwd(), 'attached_assets', imageFileName);
+      const filePath = join(process.cwd(), imagePath.replace(/^\//, ''));
       
       // Check if file exists
       if (fs.existsSync(filePath)) {
         const playerName = card.playerFirstName + ' ' + card.playerLastName;
-        console.log(`Serving ${side} image for ${playerName} (ID: ${id}): ${imageFileName}`);
+        console.log(`Serving exact original ${side} image for ${playerName} (ID: ${id}): ${imagePath}`);
         res.setHeader('Content-Type', 'image/jpeg');
         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
         return res.sendFile(filePath);
+      } 
+      else {
+        // If the file doesn't exist in uploads, try to serve an attached_assets fallback
+        const fallbackImageMap = {
+          20: { front: 'frelick_front_2024_topps_35year.jpg', back: 'frelick_back_2024_35year.jpg' },
+          22: { front: 'manaea_front_2024_topps_series2.jpg', back: 'manaea_back_2024_topps_series2.jpg' },
+          23: { front: 'bregman_front_2024_topps_35year.jpg', back: 'bregman_back_2024_topps_35year.jpg' },
+          24: { front: 'cole_front_2021_topps_heritage.jpg', back: 'cole_back_2021_topps_heritage.jpg' },
+          25: { front: 'freedman_front_2023_topps_smlb.jpg', back: 'freedman_back_2023_topps_smlb.jpg' },
+          26: { front: 'correa_front_2024_topps_smlb.jpg', back: 'correa_back_2024_topps_smlb.jpg' },
+          27: { front: 'trout_front_2024_topps_chrome.jpg', back: 'trout_back_2024_topps_chrome.jpg' },
+          28: { front: 'machado_front_2024_topps_csmlb.jpg', back: 'machado_back_2024_topps_csmlb.jpg' },
+          29: { front: 'correa_front_2024_topps_smlb.jpg', back: 'correa_back_2024_topps_smlb.jpg' },
+          30: { front: 'cole_front_2021_topps_heritage.jpg', back: 'cole_back_2021_topps_heritage.jpg' },
+          31: { front: 'bregman_front_2024_topps_35year.jpg', back: 'bregman_back_2024_topps_35year.jpg' },
+          32: { front: 'freedman_front_2023_topps_smlb.jpg', back: 'freedman_back_2023_topps_smlb.jpg' },
+          33: { front: 'bregman_front_2024_topps_35year.jpg', back: 'bregman_back_2024_topps_35year.jpg' },
+          34: { front: 'manaea_front_2024_topps_series2.jpg', back: 'manaea_back_2024_topps_series2.jpg' },
+          35: { front: 'frelick_front_2024_topps_35year.jpg', back: 'frelick_back_2024_35year.jpg' },
+          36: { front: 'trout_front_2024_topps_chrome.jpg', back: 'trout_back_2024_topps_chrome.jpg' },
+          37: { front: 'frelick_front_2024_topps_35year.jpg', back: 'frelick_back_2024_35year.jpg' },
+          38: { front: 'trout_front_2024_topps_chrome.jpg', back: 'trout_back_2024_topps_chrome.jpg' },
+          39: { front: 'correa_front_2024_topps_smlb.jpg', back: 'correa_back_2024_topps_smlb.jpg' },
+          40: { front: 'rafaela_front_2024_topps_smlb.jpg', back: 'rafaela_back_2024_topps_smlb.jpg' },
+          41: { front: 'manaea_front_2024_topps_series2.jpg', back: 'manaea_back_2024_topps_series2.jpg' },
+          42: { front: 'manaea_front_2024_topps_series2.jpg', back: 'manaea_back_2024_topps_series2.jpg' },
+          43: { front: 'manaea_front_2024_topps_series2.jpg', back: 'manaea_back_2024_topps_series2.jpg' },
+          44: { front: 'machado_front_2024_topps_csmlb.jpg', back: 'machado_back_2024_topps_csmlb.jpg' },
+          45: { front: 'correa_front_2024_topps_smlb.jpg', back: 'correa_back_2024_topps_smlb.jpg' },
+        };
+        
+        const fallbackFileName = fallbackImageMap[id]?.[side];
+        
+        if (fallbackFileName) {
+          const fallbackPath = join(process.cwd(), 'attached_assets', fallbackFileName);
+          
+          if (fs.existsSync(fallbackPath)) {
+            const playerName = card.playerFirstName + ' ' + card.playerLastName;
+            console.log(`Serving fallback ${side} image for ${playerName} (ID: ${id}): ${fallbackFileName}`);
+            res.setHeader('Content-Type', 'image/jpeg');
+            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+            return res.sendFile(fallbackPath);
+          }
+        }
+        
+        // Image file not found anywhere
+        console.log(`Image file not found for ${card.playerFirstName} ${card.playerLastName}: ${filePath}`);
+        return res.status(404).json({ error: 'Image file not found' });
       }
-      
-      // Image file not found
-      console.log(`Image file not found: ${filePath}`);
-      return res.status(404).json({ error: 'Image file not found' });
     } catch (error) {
       console.error('Error serving card image:', error);
       return res.status(500).json({ error: 'Internal server error' });
