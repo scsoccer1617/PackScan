@@ -205,9 +205,53 @@ export const storage = {
   },
 
   async deleteCard(id: number) {
+    // First retrieve the card to be deleted so we can get its data
+    const cardToDelete = await this.getCardById(id);
+    
+    // Delete the card from the database
     const [deletedCard] = await db.delete(schema.cards)
       .where(eq(schema.cards.id, id))
       .returning();
+    
+    // Remove from Google Sheets if possible
+    if (googleSheetsInstance && spreadsheetId && cardToDelete) {
+      try {
+        // Find the row with this card ID in the spreadsheet
+        const response = await googleSheetsInstance.spreadsheets.values.get({
+          spreadsheetId,
+          range: 'Cards!A:A', // Get all values in column A (ID column)
+        });
+        
+        const rows = response.data.values || [];
+        let rowIndex = -1;
+        
+        // Find the row with matching card ID
+        for (let i = 0; i < rows.length; i++) {
+          if (rows[i][0] === id.toString()) {
+            rowIndex = i + 1; // +1 because spreadsheet rows are 1-indexed
+            break;
+          }
+        }
+        
+        if (rowIndex > 1) { // Skip header row (row 1)
+          console.log(`Deleting card ${id} from Google Sheets row ${rowIndex}`);
+          
+          // Clear the row in the spreadsheet
+          await googleSheetsInstance.spreadsheets.values.clear({
+            spreadsheetId,
+            range: `Cards!A${rowIndex}:S${rowIndex}`,
+          });
+          
+          console.log(`Successfully deleted card ${id} from Google Sheets`);
+        } else {
+          console.log(`Card ${id} not found in Google Sheets, no deletion needed`);
+        }
+      } catch (error) {
+        console.error(`Error deleting card ${id} from Google Sheets:`, error);
+        // Continue even if Google Sheets deletion fails
+      }
+    }
+    
     return deletedCard;
   },
 
