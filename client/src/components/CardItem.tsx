@@ -18,25 +18,32 @@ export default function CardItem({ card, quantity, onDelete }: CardItemProps) {
   const [imageLoaded, setImageLoaded] = useState(true); // Assume image works until proven otherwise
   const { toast } = useToast();
   
-  // Preload check for the image
+  // Simple check when card data changes
   useEffect(() => {
+    // For debugging, log the image path we're trying to use
     if (card.frontImage) {
-      const imgPath = card.frontImage.startsWith('http') 
-        ? card.frontImage 
-        : card.frontImage.startsWith('/') 
-          ? card.frontImage 
-          : `/${card.frontImage}`;
-          
-      // Create a test image to see if it loads
-      const img = new Image();
-      img.onload = () => setImageLoaded(true);
-      img.onerror = () => {
-        console.log(`Preload check failed for image: ${imgPath}`);
-        setImageLoaded(false);
-      };
-      img.src = imgPath;
+      console.log('Card image path:', card.frontImage);
+      
+      // Directly check if the image is accessible
+      fetch(card.frontImage.startsWith('/') ? card.frontImage : `/${card.frontImage}`, { method: 'HEAD' })
+        .then(response => {
+          if (response.ok) {
+            setImageLoaded(true);
+            console.log('Image exists:', card.frontImage);
+          } else {
+            setImageLoaded(false);
+            console.log('Image does not exist:', card.frontImage);
+          }
+        })
+        .catch(err => {
+          console.error('Error checking image:', err);
+          setImageLoaded(false);
+        });
+    } else {
+      console.log('No image path available for card:', card.id);
+      setImageLoaded(false);
     }
-  }, [card.frontImage]);
+  }, [card.id, card.frontImage]);
   
   // Function to check if the card has relations
   const hasRelations = (card: Card | CardWithRelations): card is CardWithRelations => {
@@ -117,33 +124,19 @@ export default function CardItem({ card, quantity, onDelete }: CardItemProps) {
     <div className="rounded-lg overflow-hidden border border-slate-200 bg-white card-shadow hover:shadow-md transition-all duration-300 hover:border-secondary-300">
       <div className="card-image-container relative bg-slate-200">
         {card.frontImage ? (
-          <>
-            <div className={`card-image-wrapper relative ${!imageLoaded ? 'image-error' : ''}`}>
+          <div className="card-image-wrapper relative">
+            {/* We'll use a simpler approach with direct image rendering */}
+            {imageLoaded ? (
               <img 
-                src={
-                  // Full URLs should be used as-is
-                  card.frontImage.startsWith('http') ? card.frontImage : 
-                  // Ensure proper formatting of relative paths
-                  card.frontImage.startsWith('/') ? card.frontImage : `/${card.frontImage}`
-                } 
+                src={card.frontImage.startsWith('/') ? card.frontImage : `/${card.frontImage}`}
                 alt={`${card.playerFirstName} ${card.playerLastName} card`} 
-                className="card-image transform hover:scale-105 transition-transform duration-300" 
-                onLoad={() => setImageLoaded(true)}
-                onError={(e) => {
-                  console.log('Image failed to load:', card.frontImage);
-                  // Mark image as failed to load
+                className="card-image transform hover:scale-105 transition-transform duration-300"
+                onError={() => {
+                  console.log('Simple image failed to load:', card.frontImage);
                   setImageLoaded(false);
-                  // If image fails to load, show placeholder
-                  (e.target as HTMLImageElement).style.display = 'none';
-                  // Make sure the parent can be found and add the error class
-                  const parent = (e.target as HTMLImageElement).closest('.card-image-wrapper');
-                  if (parent) {
-                    parent.classList.add('image-error');
-                  }
                 }}
               />
-              
-              {/* Fallback that appears if image fails to load */}
+            ) : (
               <div className="fallback-content">
                 <div className="text-center">
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 mx-auto text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -152,10 +145,10 @@ export default function CardItem({ card, quantity, onDelete }: CardItemProps) {
                   <p className="text-xs text-slate-500 mt-2">Image not available</p>
                 </div>
               </div>
-            </div>
-          </>
+            )}
+          </div>
         ) : (
-          <div className="card-image-wrapper image-error">
+          <div className="card-image-wrapper">
             <div className="fallback-content">
               <div className="text-center">
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 mx-auto text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
