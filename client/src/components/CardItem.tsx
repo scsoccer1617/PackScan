@@ -1,6 +1,6 @@
 import { Card, CardWithRelations } from "@shared/schema";
 import { Trash2, Edit } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { formatCurrency } from "@/lib/utils";
@@ -15,7 +15,28 @@ interface CardItemProps {
 export default function CardItem({ card, quantity, onDelete }: CardItemProps) {
   const [isDeleting, setIsDeleting] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [imageLoaded, setImageLoaded] = useState(true); // Assume image works until proven otherwise
   const { toast } = useToast();
+  
+  // Preload check for the image
+  useEffect(() => {
+    if (card.frontImage) {
+      const imgPath = card.frontImage.startsWith('http') 
+        ? card.frontImage 
+        : card.frontImage.startsWith('/') 
+          ? card.frontImage 
+          : `/${card.frontImage}`;
+          
+      // Create a test image to see if it loads
+      const img = new Image();
+      img.onload = () => setImageLoaded(true);
+      img.onerror = () => {
+        console.log(`Preload check failed for image: ${imgPath}`);
+        setImageLoaded(false);
+      };
+      img.src = imgPath;
+    }
+  }, [card.frontImage]);
   
   // Function to check if the card has relations
   const hasRelations = (card: Card | CardWithRelations): card is CardWithRelations => {
@@ -97,17 +118,25 @@ export default function CardItem({ card, quantity, onDelete }: CardItemProps) {
       <div className="card-image-container relative bg-slate-200">
         {card.frontImage ? (
           <>
-            <div className="card-image-wrapper relative">
+            <div className={`card-image-wrapper relative ${!imageLoaded ? 'image-error' : ''}`}>
               <img 
-                src={card.frontImage.startsWith('http') ? card.frontImage : 
-                   card.frontImage.startsWith('/') ? card.frontImage : `/${card.frontImage}`} 
+                src={
+                  // Full URLs should be used as-is
+                  card.frontImage.startsWith('http') ? card.frontImage : 
+                  // Ensure proper formatting of relative paths
+                  card.frontImage.startsWith('/') ? card.frontImage : `/${card.frontImage}`
+                } 
                 alt={`${card.playerFirstName} ${card.playerLastName} card`} 
                 className="card-image transform hover:scale-105 transition-transform duration-300" 
+                onLoad={() => setImageLoaded(true)}
                 onError={(e) => {
                   console.log('Image failed to load:', card.frontImage);
+                  // Mark image as failed to load
+                  setImageLoaded(false);
                   // If image fails to load, show placeholder
                   (e.target as HTMLImageElement).style.display = 'none';
-                  const parent = (e.target as HTMLImageElement).parentElement;
+                  // Make sure the parent can be found and add the error class
+                  const parent = (e.target as HTMLImageElement).closest('.card-image-wrapper');
                   if (parent) {
                     parent.classList.add('image-error');
                   }

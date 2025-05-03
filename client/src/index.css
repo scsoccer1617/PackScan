@@ -104,6 +104,11 @@
     z-index: 2;
   }
   
+  /* Fix for Safari and some browsers where image might flash before error */
+  .card-image-wrapper.image-error img {
+    display: none !important;
+  }
+  
   /* Mobile-friendly form styles */
   .form-grid {
     display: grid;
