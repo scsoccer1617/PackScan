@@ -92,30 +92,20 @@ export default function CardItem({ card, quantity, onDelete }: CardItemProps) {
 
   const conditionNumber = card.condition ? card.condition.split(" ")[1] : "";
 
-  // Function to extract just the filename from an image path
-  function extractFilename(path: string): string {
-    // Try different extraction approaches
-    if (path.includes('/')) {
-      return path.split('/').pop() || path;
-    }
-    return path;
-  }
-
   return (
     <div className="rounded-lg overflow-hidden border border-slate-200 bg-white card-shadow hover:shadow-md transition-all duration-300 hover:border-secondary-300">
       <div className="card-image-container relative bg-slate-200">
         {card.frontImage ? (
-          <div className="card-image-wrapper relative" data-card-id={card.id}>
-            {/* Special component that attempts various loading strategies */}
+          <div className="card-image-wrapper relative">
+            {/* Simple direct image with absolute URL */}
             <img 
-              src={`/uploads/${extractFilename(card.frontImage)}`}
+              src={card.frontImage}
               alt={`${card.playerFirstName} ${card.playerLastName} card`}
               className="card-image"
-              loading="eager"
               onError={(e) => {
-                console.log(`Image failed for card ${card.id}:`, card.frontImage);
+                console.error('Failed to load image:', card.frontImage);
                 e.currentTarget.style.display = 'none';
-                e.currentTarget.parentElement?.classList.add('fallback-active');
+                e.currentTarget.parentElement?.classList.add('image-error');
               }}
             />
             
@@ -129,7 +119,7 @@ export default function CardItem({ card, quantity, onDelete }: CardItemProps) {
             </div>
           </div>
         ) : (
-          <div className="card-image-wrapper fallback-active">
+          <div className="card-image-wrapper image-error">
             <div className="fallback-content">
               <div className="text-center">
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 mx-auto text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">

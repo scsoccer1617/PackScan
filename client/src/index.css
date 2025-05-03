@@ -99,15 +99,14 @@
     z-index: 0;
   }
   
-  /* When a fallback is active, show the fallback content */
-  .card-image-wrapper.fallback-active .fallback-content {
-    z-index: 10; /* Higher z-index to ensure visibility */
+  /* When an image error occurs, we show the fallback */
+  .card-image-wrapper.image-error .fallback-content {
+    z-index: 2;
   }
   
   /* Fix for Safari and some browsers where image might flash before error */
-  .card-image-wrapper.fallback-active img {
+  .card-image-wrapper.image-error img {
     display: none !important;
-    visibility: hidden;
   }
   
   /* Mobile-friendly form styles */
