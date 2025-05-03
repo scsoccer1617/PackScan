@@ -97,13 +97,13 @@ export default function CardItem({ card, quantity, onDelete }: CardItemProps) {
       <div className="card-image-container relative bg-slate-200">
         {card.frontImage ? (
           <div className="card-image-wrapper relative">
-            {/* Super simplified image rendering with direct path */}
+            {/* Direct image rendering from image path */}
             <img 
-              src={`/${card.frontImage.replace(/^\//, '')}`}
+              src={`http://${window.location.host}/${card.frontImage.replace(/^\//, '')}`}
               alt={`${card.playerFirstName} ${card.playerLastName} card`} 
               className="card-image"
               onError={(e) => {
-                console.log('Basic image failed to load:', card.frontImage);
+                console.log('Direct image failed to load:', card.frontImage);
                 e.currentTarget.style.display = 'none';
                 e.currentTarget.parentElement?.classList.add('fallback-active');
               }}

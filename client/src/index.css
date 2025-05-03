@@ -80,8 +80,9 @@
   .card-image {
     width: 100%;
     height: 100%;
-    object-fit: cover; /* Changed back to cover for better display */
+    object-fit: cover; /* Important for consistent card display */
     z-index: 1;
+    position: relative; /* Ensure z-index works properly */
   }
   
   /* Fallback content is always positioned behind the image */
@@ -100,12 +101,13 @@
   
   /* When a fallback is active, show the fallback content */
   .card-image-wrapper.fallback-active .fallback-content {
-    z-index: 2;
+    z-index: 10; /* Higher z-index to ensure visibility */
   }
   
   /* Fix for Safari and some browsers where image might flash before error */
   .card-image-wrapper.fallback-active img {
     display: none !important;
+    visibility: hidden;
   }
   
   /* Mobile-friendly form styles */
