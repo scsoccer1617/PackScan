@@ -8,14 +8,42 @@ const app = express();
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ extended: true, limit: '20mb' }));
 
-// Serve static files from the uploads directory
+// Enhanced static file serving for uploads
 const uploadsDir = path.join(process.cwd(), 'uploads');
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
-app.use('/uploads', express.static(uploadsDir));
 
-// Also try to serve from the old path for backward compatibility
+// Set correct MIME types and cache settings for image files
+app.use('/uploads', express.static(uploadsDir, {
+  setHeaders: (res, path) => {
+    if (path.endsWith('.jpg') || path.endsWith('.jpeg')) {
+      res.setHeader('Content-Type', 'image/jpeg');
+    } else if (path.endsWith('.png')) {
+      res.setHeader('Content-Type', 'image/png');
+    }
+    // Set cache control headers to ensure images are properly cached
+    res.setHeader('Cache-Control', 'public, max-age=31536000');
+  },
+  fallthrough: true, // Continue to next middleware if file not found
+}));
+
+// Log all requests to the uploads directory for debugging
+app.use('/uploads', (req, res, next) => {
+  console.log(`Requesting image: ${req.path}`);
+  
+  // Check if file exists
+  const filePath = path.join(uploadsDir, req.path);
+  if (fs.existsSync(filePath)) {
+    console.log(`Image file exists: ${filePath}`);
+  } else {
+    console.log(`Image file NOT found: ${filePath}`);
+  }
+  
+  next();
+});
+
+// Alternative path for backward compatibility
 const oldUploadsDir = path.join(process.cwd(), 'dist', 'public', 'uploads');
 if (fs.existsSync(oldUploadsDir)) {
   app.use('/uploads', express.static(oldUploadsDir));

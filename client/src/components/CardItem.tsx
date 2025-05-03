@@ -97,9 +97,9 @@ export default function CardItem({ card, quantity, onDelete }: CardItemProps) {
       <div className="card-image-container relative bg-slate-200">
         {card.frontImage ? (
           <div className="card-image-wrapper relative">
-            {/* Simple direct image with absolute URL */}
+            {/* Direct image with proper URL structure */}
             <img 
-              src={card.frontImage}
+              src={card.frontImage.startsWith('/uploads/') ? card.frontImage : `/uploads/${card.frontImage}`}
               alt={`${card.playerFirstName} ${card.playerLastName} card`}
               className="card-image"
               onError={(e) => {
