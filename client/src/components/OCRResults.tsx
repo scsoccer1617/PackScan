@@ -110,7 +110,7 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
     return null;
   }
   
-  // Function to apply OCR data and hide standard form
+  // Function to apply OCR data and maintain OCR results display
   const applyAndUseDirectly = () => {
     if (form) {
       // Apply all fields from edited data to the form
@@ -121,8 +121,10 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
         }
       });
       
-      // Hide OCR dialog and proceed with the form data
-      onCancel();
+      // Update the data state with the edited data to show updated values
+      setData(editedData);
+      // Exit edit mode but keep OCR results visible
+      setEditMode(false);
     } else {
       // If no form is provided, just call the regular onApply
       onApply(editMode ? editedData : data);
