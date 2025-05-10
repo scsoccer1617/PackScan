@@ -35,21 +35,25 @@ export default function EbayValueLookup({
     // Build eBay search URL directly
     let query = '';
     
-    // Format query based on card type
-    if (collection && collection.toLowerCase().includes('heritage')) {
-      // Heritage cards need special handling
-      query = `${brand} ${year} heritage ${playerName} #${cardNumber}`;
-    } else if (collection) {
-      // Normal cards with collection
-      query = `${brand} ${year} ${collection} ${playerName} #${cardNumber}`;
-    } else {
-      // Cards without collection
-      query = `${brand} ${year} ${playerName} #${cardNumber}`;
+    // Build the base query with core card information
+    query = `${brand} ${year}`;
+    
+    // Add collection if available
+    if (collection) {
+      query += ` ${collection}`;
     }
     
-    // Add variant to the query if present
+    // Add variant if available
     if (variant) {
-      query = `${brand} ${year} ${variant} ${collection || ''} ${playerName} #${cardNumber}`.trim();
+      query += ` ${variant}`;
+    }
+    
+    // Add player name and card number
+    query += ` ${playerName} #${cardNumber}`;
+    
+    // Special handling for Heritage cards
+    if (collection && collection.toLowerCase().includes('heritage')) {
+      query = `${brand} ${year} heritage ${playerName} #${cardNumber}`;
     }
     
     // Log the search query for debugging
