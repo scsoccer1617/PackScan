@@ -9,6 +9,7 @@ interface EbayValueLookupProps {
   brand: string;
   year: number;
   collection?: string;
+  variant?: string;
   condition?: string;
   onValueSelect: (value: number) => void;
 }
@@ -19,6 +20,7 @@ export default function EbayValueLookup({
   brand, 
   year,
   collection,
+  variant,
   condition,
   onValueSelect 
 }: EbayValueLookupProps) {
@@ -33,14 +35,33 @@ export default function EbayValueLookup({
     // Build eBay search URL directly
     let query = `${brand} ${year} ${playerName} #${cardNumber}`;
     
-    // Add collection if provided, but handle special collections
+    // Special handling for cards with variants and collections
     if (collection) {
+      // For Heritage cards, use specific format
       if (collection.toLowerCase().includes('heritage')) {
         query = `${brand} ${year} heritage ${playerName} #${cardNumber}`;
-      } else {
+      } 
+      // For Stars of MLB with Chrome variant
+      else if (collection === 'Stars of MLB' && variant === 'Chrome') {
+        query = `${brand} ${year} chrome stars of mlb ${playerName} #${cardNumber}`;
+      } 
+      // For Stars of MLB regular (non-Chrome)
+      else if (collection === 'Stars of MLB') {
+        query = `${brand} ${year} stars of mlb ${playerName} #${cardNumber}`;
+      }
+      // For other collections, just append the collection name
+      else {
         query += ` ${collection}`;
       }
     }
+    
+    // If there's a variant but it wasn't handled in the special cases above, add it
+    if (variant && !query.toLowerCase().includes(variant.toLowerCase()) && 
+        !(collection === 'Stars of MLB' && variant === 'Chrome')) {
+      query += ` ${variant}`;
+    }
+    
+    console.log('eBay search query:', query); // Debug log
     
     // Construct the URL with search parameters
     const baseUrl = 'https://www.ebay.com/sch/i.html';
@@ -53,7 +74,7 @@ export default function EbayValueLookup({
     });
     
     return `${baseUrl}?${searchParams.toString()}`;
-  }, [playerName, cardNumber, brand, year, collection]);
+  }, [playerName, cardNumber, brand, year, collection, variant]);
   
   // Show warning if card information is missing
   const handleMissingInfo = () => {
