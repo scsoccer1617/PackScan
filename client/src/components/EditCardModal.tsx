@@ -407,7 +407,6 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
                     brand={form.watch('brand')}
                     year={form.watch('year') || new Date().getFullYear()}
                     collection={form.watch('collection')}
-                    variant={form.watch('variant')}
                     condition={form.watch('condition')}
                     onValueSelect={(value) => {
                       form.setValue('estimatedValue', value);

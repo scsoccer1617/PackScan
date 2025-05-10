@@ -259,7 +259,6 @@ export default function SimpleCardForm() {
                         brand={ocrData.brand || ''}
                         year={ocrData.year || new Date().getFullYear()}
                         collection={ocrData.collection || ''}
-                        variant={ocrData.variant || ''}
                         condition={ocrData.condition || ''}
                         onValueSelect={(value) => {
                           form.setValue('estimatedValue', value);
@@ -589,7 +588,6 @@ export default function SimpleCardForm() {
                         brand={form.watch('brand')}
                         year={form.watch('year') || new Date().getFullYear()}
                         collection={form.watch('collection')}
-                        variant={form.watch('variant')}
                         condition={form.watch('condition')}
                         onValueSelect={(value) => {
                           form.setValue('estimatedValue', value);
