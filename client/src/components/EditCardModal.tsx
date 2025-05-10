@@ -12,6 +12,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import EbayValueLookup from "./EbayValueLookup";
 
 interface EditCardModalProps {
   card?: CardWithRelations | null;
@@ -390,6 +391,28 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
                     </FormItem>
                   )}
                 />
+              </div>
+            </div>
+            
+            {/* eBay Value Lookup and Estimated Value Field */}
+            <div className="form-grid mb-4">
+              <div className="col-span-1 md:col-span-2">
+                <FormLabel>Card Value</FormLabel>
+                
+                {/* eBay Value Lookup */}
+                <div className="mb-4">
+                  <EbayValueLookup
+                    playerName={`${form.watch('playerFirstName')} ${form.watch('playerLastName')}`.trim()}
+                    cardNumber={form.watch('cardNumber')}
+                    brand={form.watch('brand')}
+                    year={form.watch('year') || new Date().getFullYear()}
+                    collection={form.watch('collection')}
+                    condition={form.watch('condition')}
+                    onValueSelect={(value) => {
+                      form.setValue('estimatedValue', value);
+                    }}
+                  />
+                </div>
               </div>
             </div>
             
