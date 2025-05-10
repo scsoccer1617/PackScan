@@ -78,18 +78,8 @@ export function useOCR(): OCRResult {
         console.log("CLIENT FIX: Cleared invalid player name. Server will attempt to find proper name.");
       }
       
-      // Client-side Chrome Stars of MLB detection fix
-      if (cardInfo.cardNumber?.startsWith("CSMLB-")) {
-        console.log("CLIENT FIX: Detected CSMLB card number. Setting Chrome variant instead of changing collection.");
-        
-        cardInfo = {
-          ...cardInfo,
-          collection: "Stars of MLB",
-          variant: "Chrome"
-        };
-        
-        console.log("CLIENT FIX: Updated to use Chrome variant for Stars of MLB card with CSMLB card number.");
-      }
+      // Removed client-side Chrome Stars of MLB detection fix
+      // to allow users to set their own collection names
       
       // No player-specific hardcoded logic
       // Let the system use dynamic OCR detection only
