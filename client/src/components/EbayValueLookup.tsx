@@ -10,6 +10,7 @@ interface EbayValueLookupProps {
   year: number;
   collection?: string;
   condition?: string;
+  variant?: string;
   onValueSelect: (value: number) => void;
 }
 
@@ -20,6 +21,7 @@ export default function EbayValueLookup({
   year,
   collection,
   condition,
+  variant,
   onValueSelect 
 }: EbayValueLookupProps) {
   const { toast } = useToast();
@@ -31,16 +33,27 @@ export default function EbayValueLookup({
     }
     
     // Build eBay search URL directly
-    let query = `${brand} ${year} ${playerName} #${cardNumber}`;
+    let query = '';
     
-    // Add collection if provided, but handle special collections
-    if (collection) {
-      if (collection.toLowerCase().includes('heritage')) {
-        query = `${brand} ${year} heritage ${playerName} #${cardNumber}`;
-      } else {
-        query += ` ${collection}`;
-      }
+    // Format query based on card type
+    if (collection && collection.toLowerCase().includes('heritage')) {
+      // Heritage cards need special handling
+      query = `${brand} ${year} heritage ${playerName} #${cardNumber}`;
+    } else if (collection) {
+      // Normal cards with collection
+      query = `${brand} ${year} ${collection} ${playerName} #${cardNumber}`;
+    } else {
+      // Cards without collection
+      query = `${brand} ${year} ${playerName} #${cardNumber}`;
     }
+    
+    // Add variant to the query if present
+    if (variant) {
+      query = `${brand} ${year} ${variant} ${collection || ''} ${playerName} #${cardNumber}`.trim();
+    }
+    
+    // Log the search query for debugging
+    console.log('eBay search query:', JSON.stringify(query));
     
     // Construct the URL with search parameters
     const baseUrl = 'https://www.ebay.com/sch/i.html';
@@ -53,7 +66,7 @@ export default function EbayValueLookup({
     });
     
     return `${baseUrl}?${searchParams.toString()}`;
-  }, [playerName, cardNumber, brand, year, collection]);
+  }, [playerName, cardNumber, brand, year, collection, condition, variant]);
   
   // Show warning if card information is missing
   const handleMissingInfo = () => {
