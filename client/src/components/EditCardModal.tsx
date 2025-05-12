@@ -116,18 +116,24 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
         body: JSON.stringify(data),
       });
     },
-    onSuccess: () => {
+    onSuccess: async () => {
       // Invalidate cards query to refresh the list
-      queryClient.invalidateQueries({ queryKey: ['/api/cards'] });
+      await queryClient.invalidateQueries({ queryKey: ['/api/cards'] });
       // Also invalidate stats
-      queryClient.invalidateQueries({ queryKey: ['/api/collection/summary'] });
+      await queryClient.invalidateQueries({ queryKey: ['/api/collection/summary'] });
+      
+      // Ensure the card data is fully refreshed before closing
+      if (card && card.id) {
+        console.log(`Explicitly refreshing card data for ID: ${card.id}`);
+        await queryClient.invalidateQueries({ queryKey: [`/api/cards/${card.id}`] });
+      }
       
       toast({
         title: "Card Updated",
-        description: "The card has been successfully updated.",
+        description: "The card has been successfully updated with your changes.",
       });
       
-      // Close the modal
+      // Close the modal (data will be refreshed)
       onClose();
     },
     onError: (err) => {
@@ -432,20 +438,39 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
                 
                 {/* eBay Value Lookup */}
                 <div className="mb-4">
-                  {/* We'll use a useEffect in this component for debugging instead */}
-                  <EbayValueLookup
-                    playerName={`${form.watch('playerFirstName')} ${form.watch('playerLastName')}`.trim()}
-                    cardNumber={form.watch('cardNumber')}
-                    brand={form.watch('brand')}
-                    year={form.watch('year') || new Date().getFullYear()}
-                    collection={form.watch('collection')}
-                    variant={form.watch('variant')}
-                    condition={form.watch('condition')}
-                    key={`ebay-lookup-${form.watch('collection')}`} // Force re-render on collection change
-                    onValueSelect={(value) => {
-                      form.setValue('estimatedValue', value);
-                    }}
-                  />
+                  {/* IIFE to capture current form values ensuring persistence */}
+                  {(() => {
+                    // Use IIFE to capture current form values
+                    const currentCollection = form.watch('collection');
+                    const currentValues = {
+                      playerName: `${form.watch('playerFirstName')} ${form.watch('playerLastName')}`.trim(),
+                      cardNumber: form.watch('cardNumber'),
+                      brand: form.watch('brand'),
+                      year: form.watch('year') || new Date().getFullYear(),
+                      collection: currentCollection, // Explicitly capture collection
+                      variant: form.watch('variant'),
+                      condition: form.watch('condition'),
+                    };
+                    
+                    // Debug log values being passed to eBay lookup
+                    console.log('Values passed to eBay lookup:', currentValues);
+                    
+                    return (
+                      <EbayValueLookup
+                        playerName={currentValues.playerName}
+                        cardNumber={currentValues.cardNumber}
+                        brand={currentValues.brand}
+                        year={currentValues.year}
+                        collection={currentValues.collection}
+                        variant={currentValues.variant}
+                        condition={currentValues.condition}
+                        key={`ebay-lookup-${Date.now()}`} // Force re-render on every render
+                        onValueSelect={(value) => {
+                          form.setValue('estimatedValue', value);
+                        }}
+                      />
+                    );
+                  })()}
                 </div>
               </div>
             </div>

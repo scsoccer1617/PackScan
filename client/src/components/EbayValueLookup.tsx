@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { ExternalLink } from "lucide-react";
@@ -26,9 +26,14 @@ export default function EbayValueLookup({
 }: EbayValueLookupProps) {
   const { toast } = useToast();
   
-  // Log props on mount and when they change
-  useEffect(() => {
-    console.log('EbayValueLookup component received props:', {
+  // Create the eBay search URL
+  const ebayUrl = useMemo(() => {
+    if (!playerName || !cardNumber || !brand || !year) {
+      return '';
+    }
+    
+    // Debug log
+    console.log('EbayValueLookup building search with:', {
       playerName,
       cardNumber,
       brand,
@@ -37,13 +42,6 @@ export default function EbayValueLookup({
       variant,
       condition
     });
-  }, [playerName, cardNumber, brand, year, collection, variant, condition]);
-  
-  // Create the eBay search URL
-  const ebayUrl = useMemo(() => {
-    if (!playerName || !cardNumber || !brand || !year) {
-      return '';
-    }
     
     // Build eBay search URL directly
     let query = '';
@@ -51,7 +49,7 @@ export default function EbayValueLookup({
     // Build the base query with core card information
     query = `${brand} ${year}`;
     
-    // Add collection if available
+    // IMPORTANT: Collection name must include any suffixes like "v2"
     if (collection) {
       query += ` ${collection}`;
     }
