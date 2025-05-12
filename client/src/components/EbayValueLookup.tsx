@@ -56,7 +56,15 @@ export default function EbayValueLookup({
       query = `${brand} ${year} heritage ${playerName} #${cardNumber}`;
     }
     
-    // Log the search query for debugging
+    // Enhanced debugging to track what's happening
+    console.log('eBay lookup props received:', {
+      playerName,
+      cardNumber,
+      brand,
+      year,
+      collection,
+      variant
+    });
     console.log('eBay search query:', JSON.stringify(query));
     
     // Construct the URL with search parameters

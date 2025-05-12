@@ -401,6 +401,16 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
                 
                 {/* eBay Value Lookup */}
                 <div className="mb-4">
+                  {/* Debug card info before eBay lookup */}
+                  {console.log('EditCardModal form values before eBay lookup:', {
+                    playerFirstName: form.watch('playerFirstName'),
+                    playerLastName: form.watch('playerLastName'),
+                    cardNumber: form.watch('cardNumber'),
+                    brand: form.watch('brand'),
+                    year: form.watch('year'),
+                    collection: form.watch('collection'),
+                    variant: form.watch('variant')
+                  })}
                   <EbayValueLookup
                     playerName={`${form.watch('playerFirstName')} ${form.watch('playerLastName')}`.trim()}
                     cardNumber={form.watch('cardNumber')}
