@@ -117,24 +117,34 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
       });
     },
     onSuccess: async () => {
-      // Invalidate cards query to refresh the list
-      await queryClient.invalidateQueries({ queryKey: ['/api/cards'] });
-      // Also invalidate stats
-      await queryClient.invalidateQueries({ queryKey: ['/api/collection/summary'] });
-      
-      // Ensure the card data is fully refreshed before closing
-      if (card && card.id) {
-        console.log(`Explicitly refreshing card data for ID: ${card.id}`);
-        await queryClient.invalidateQueries({ queryKey: [`/api/cards/${card.id}`] });
+      try {
+        // Invalidate cards query to refresh the list
+        await queryClient.invalidateQueries({ queryKey: ['/api/cards'] });
+        // Also invalidate stats
+        await queryClient.invalidateQueries({ queryKey: ['/api/collection/summary'] });
+        
+        // Ensure the card data is fully refreshed before closing
+        if (card && card.id) {
+          console.log(`Explicitly refreshing card data for ID: ${card.id}`);
+          await queryClient.invalidateQueries({ queryKey: [`/api/cards/${card.id}`] });
+        }
+        
+        toast({
+          title: "Card Updated",
+          description: "The card has been successfully updated with your changes.",
+        });
+        
+        // Close the modal
+        onClose();
+        
+        // Reload the page to ensure all data is fresh
+        console.log("Reloading page to refresh all data...");
+        setTimeout(() => {
+          window.location.reload();
+        }, 300); // Small delay to allow the toast to show
+      } catch (error) {
+        console.error("Error during card update cleanup:", error);
       }
-      
-      toast({
-        title: "Card Updated",
-        description: "The card has been successfully updated with your changes.",
-      });
-      
-      // Close the modal (data will be refreshed)
-      onClose();
     },
     onError: (err) => {
       console.error("Error updating card:", err);
