@@ -49,14 +49,19 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
   // Update form values when card changes
   useEffect(() => {
     if (card) {
-      // Debug log to help with boolean values
-      console.log("Card data:", {
+      // Enhanced debugging to track exactly what values are loaded from the backend
+      console.log("Card data loaded from backend:", {
         id: card.id,
         playerName: `${card.playerFirstName} ${card.playerLastName}`,
-        isRookieCard: card.isRookieCard, 
+        collection: card.collection,
+        variant: card.variant,
+        cardNumber: card.cardNumber,
+        isRookieCard: card.isRookieCard,
         isRookieCardType: typeof card.isRookieCard
       });
-      form.reset({
+      
+      // Log card data before loading into form
+      const formData = {
         sport: card.sport?.name || "",
         playerFirstName: card.playerFirstName || "",
         playerLastName: card.playerLastName || "",
@@ -72,7 +77,11 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
         isAutographed: Boolean(card.isAutographed),
         isNumbered: Boolean(card.isNumbered),
         notes: card.notes || "",
-      });
+      };
+      
+      console.log("Form data being loaded:", formData);
+      
+      form.reset(formData);
     }
   }, [card, form]);
 
