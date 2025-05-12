@@ -220,7 +220,11 @@ export default function CardItem({ card, quantity, onDelete }: CardItemProps) {
       <EditCardModal 
         card={hasRelations(card) ? card : null}
         isOpen={isEditModalOpen}
-        onClose={() => setIsEditModalOpen(false)}
+        onClose={() => {
+          // Force refresh card data before closing
+          queryClient.invalidateQueries({ queryKey: ['/api/cards'] });
+          setIsEditModalOpen(false);
+        }}
       />
     </div>
   );

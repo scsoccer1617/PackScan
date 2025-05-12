@@ -26,6 +26,19 @@ export default function EbayValueLookup({
 }: EbayValueLookupProps) {
   const { toast } = useToast();
   
+  // Log props on mount and when they change
+  useEffect(() => {
+    console.log('EbayValueLookup component received props:', {
+      playerName,
+      cardNumber,
+      brand,
+      year,
+      collection,
+      variant,
+      condition
+    });
+  }, [playerName, cardNumber, brand, year, collection, variant, condition]);
+  
   // Create the eBay search URL
   const ebayUrl = useMemo(() => {
     if (!playerName || !cardNumber || !brand || !year) {

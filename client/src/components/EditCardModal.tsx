@@ -84,11 +84,33 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
       form.reset(formData);
     }
   }, [card, form]);
+  
+  // Monitor form value changes for debugging
+  useEffect(() => {
+    const collection = form.watch('collection');
+    console.log(`Collection value changed to: "${collection}"`);
+    
+    // Log all current form values for debugging
+    const formValues = {
+      playerFirstName: form.watch('playerFirstName'),
+      playerLastName: form.watch('playerLastName'),
+      cardNumber: form.watch('cardNumber'),
+      brand: form.watch('brand'),
+      year: form.watch('year'),
+      collection,
+      variant: form.watch('variant')
+    };
+    console.log('Current form values:', formValues);
+  }, [form.watch('collection')]);
 
   // Update card mutation
   const updateCardMutation = useMutation({
     mutationFn: async (data: CardFormValues) => {
       if (!card) return null;
+      
+      // Log what's being saved to the server
+      console.log('Saving card data to server:', data);
+      
       return apiRequest(`/api/cards/${card.id}`, {
         method: "PATCH",
         body: JSON.stringify(data),
@@ -410,16 +432,7 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
                 
                 {/* eBay Value Lookup */}
                 <div className="mb-4">
-                  {/* Debug card info before eBay lookup */}
-                  {console.log('EditCardModal form values before eBay lookup:', {
-                    playerFirstName: form.watch('playerFirstName'),
-                    playerLastName: form.watch('playerLastName'),
-                    cardNumber: form.watch('cardNumber'),
-                    brand: form.watch('brand'),
-                    year: form.watch('year'),
-                    collection: form.watch('collection'),
-                    variant: form.watch('variant')
-                  })}
+                  {/* We'll use a useEffect in this component for debugging instead */}
                   <EbayValueLookup
                     playerName={`${form.watch('playerFirstName')} ${form.watch('playerLastName')}`.trim()}
                     cardNumber={form.watch('cardNumber')}
@@ -428,6 +441,7 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
                     collection={form.watch('collection')}
                     variant={form.watch('variant')}
                     condition={form.watch('condition')}
+                    key={`ebay-lookup-${form.watch('collection')}`} // Force re-render on collection change
                     onValueSelect={(value) => {
                       form.setValue('estimatedValue', value);
                     }}
