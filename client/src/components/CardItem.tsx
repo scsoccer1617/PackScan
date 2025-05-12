@@ -15,6 +15,7 @@ interface CardItemProps {
 export default function CardItem({ card, quantity, onDelete }: CardItemProps) {
   const [isDeleting, setIsDeleting] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [refreshedCard, setRefreshedCard] = useState<CardWithRelations | null>(null);
   const { toast } = useToast();
   
   // Function to check if the card has relations
@@ -98,6 +99,27 @@ export default function CardItem({ card, quantity, onDelete }: CardItemProps) {
       console.log(`Card ID ${card.id}: ${card.frontImage}`);
     }
   }, [card.id, card.frontImage]);
+  
+  // Function to fetch the latest card data from the server
+  const fetchLatestCardData = async (cardId: number) => {
+    try {
+      console.log(`Fetching latest data for card ID ${cardId}`);
+      const response = await fetch(`/api/cards/${cardId}`);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch card: ${response.status}`);
+      }
+      const data = await response.json();
+      console.log('Fetched latest card data:', data);
+      if (data.success && data.data) {
+        setRefreshedCard(data.data);
+        return data.data;
+      }
+      return null;
+    } catch (error) {
+      console.error('Error fetching card data:', error);
+      return null;
+    }
+  };
 
   // Simple approach: use state to track if image loaded successfully
   const [imageError, setImageError] = useState(false);
@@ -167,9 +189,15 @@ export default function CardItem({ card, quantity, onDelete }: CardItemProps) {
           {/* Edit button */}
           <button 
             className="bg-white/80 hover:bg-blue-100 text-blue-500 rounded-full p-1.5 transition-colors"
-            onClick={(e) => {
+            onClick={async (e) => {
               e.stopPropagation();
               e.preventDefault();
+              
+              // Fetch fresh card data before opening modal
+              if (card && card.id) {
+                await fetchLatestCardData(card.id);
+              }
+              
               setIsEditModalOpen(true);
             }}
             aria-label="Edit card"
@@ -218,11 +246,13 @@ export default function CardItem({ card, quantity, onDelete }: CardItemProps) {
       
       {/* Edit Card Modal */}
       <EditCardModal 
-        card={hasRelations(card) ? card : null}
+        card={refreshedCard || (hasRelations(card) ? card : null)}
         isOpen={isEditModalOpen}
         onClose={() => {
           // Force refresh card data before closing
           queryClient.invalidateQueries({ queryKey: ['/api/cards'] });
+          // Clear the refreshed card when closing
+          setRefreshedCard(null);
           setIsEditModalOpen(false);
         }}
       />
