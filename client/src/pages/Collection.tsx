@@ -45,7 +45,7 @@ export default function Collection() {
   });
 
   return (
-    <div className="p-4 pb-24">
+    <div className="p-4">
       {/* Filter and Sort Options */}
       <div className="flex items-center justify-between mb-4">
         <div className="relative flex-1 max-w-xs">
@@ -92,6 +92,9 @@ export default function Collection() {
       
       {/* Card Grid */}
       <CardGrid />
+      
+      {/* Bottom spacer to prevent content from being hidden behind navigation */}
+      <div className="h-28 w-full mt-8"></div>
     </div>
   );
 }

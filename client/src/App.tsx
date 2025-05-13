@@ -17,13 +17,16 @@ function App() {
       <div className="max-w-lg mx-auto min-h-screen flex flex-col bg-white relative">
         <Header activeTab={activeTab} setActiveTab={setActiveTab} />
         
-        <main className="flex-1 overflow-y-auto pb-20">
+        <main className="flex-1 overflow-y-auto">
           <Switch>
             <Route path="/" component={() => <AddCard />} />
             <Route path="/collection" component={() => <Collection />} />
             <Route path="/stats" component={() => <Stats />} />
             <Route component={NotFound} />
           </Switch>
+          
+          {/* Global bottom spacer for all pages */}
+          <div className="w-full h-24"></div>
         </main>
         
         <BottomNavigation activeTab={activeTab} setActiveTab={setActiveTab} />
