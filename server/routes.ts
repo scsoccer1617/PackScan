@@ -440,6 +440,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: 'Invalid card ID' });
       }
 
+      // Log the update data for debugging
+      console.log(`[DEBUG] Card update request for ID ${cardId}:`, JSON.stringify(req.body, null, 2));
+      
       // Get the existing card
       const existingCard = await db.query.cards.findFirst({
         where: eq(cards.id, cardId)
@@ -448,6 +451,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!existingCard) {
         return res.status(404).json({ error: 'Card not found' });
       }
+      
+      // Log the existing card data for comparison
+      console.log(`[DEBUG] Existing card data for ID ${cardId}:`, JSON.stringify(existingCard, null, 2));
 
       // Parse and validate update data
       const updateData = cardSchema.parse(req.body);
@@ -753,11 +759,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const cardId = parseInt(req.params.id);
       
-      // Fetch the card with relations
-      const card = await storage.getCardById(cardId);
+      // Fetch the card with relations - directly from the database for the most up-to-date data
+      const card = await db.query.cards.findFirst({
+        where: eq(cards.id, cardId),
+        with: {
+          sport: true,
+          brand: true
+        }
+      });
+      
       if (!card) {
         return res.status(404).json({ success: false, error: 'Card not found' });
       }
+      
+      // Log card data for debugging
+      console.log(`[DEBUG] Card data for eBay URL generation (ID: ${cardId}):`, JSON.stringify({
+        id: card.id,
+        collection: card.collection,
+        playerName: `${card.playerFirstName} ${card.playerLastName}`,
+        sport: card.sport?.name,
+        brand: card.brand?.name
+      }, null, 2));
       
       // Get related data
       const sport = card.sportId ? await getSportNameById(card.sportId) : '';
@@ -773,12 +795,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       query = `${brand} ${card.year}`;
       
       // Add collection if available - this comes directly from the database
+      // Critical part: Always include the full collection name including any v2 suffix
       if (card.collection) {
+        // Explicitly log the collection value for debugging 
+        console.log(`[DEBUG] Collection value used in eBay URL: "${card.collection}"`);
         query += ` ${card.collection}`;
       }
       
       // Add variant if available
       if (card.variant) {
+        console.log(`[DEBUG] Variant value used in eBay URL: "${card.variant}"`);
         query += ` ${card.variant}`;
       }
       
