@@ -449,7 +449,6 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
                 
                 {/* eBay Value Lookup */}
                 <div className="mb-4">
-                  {/* Client-side eBay Lookup with form values */}
                   <EbayValueLookup
                     playerName={`${form.watch('playerFirstName')} ${form.watch('playerLastName')}`.trim()}
                     cardNumber={form.watch('cardNumber')}

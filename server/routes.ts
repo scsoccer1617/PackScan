@@ -148,7 +148,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       // Direct mapping from card ID to exact original image paths from database export
-      const imageMap = {
+      const imageMap: Record<number, { front: string, back: string }> = {
+        // New cards added during recent OCR tests
+        1: {
+          front: '/uploads/1746536468855_Rafaela_front.jpg',
+          back: '/uploads/1746536468863_Rafaela_back.jpg'
+        },
+        2: {
+          front: '/uploads/1745869132483_Machado_front.jpg',
+          back: '/uploads/1745869132489_Machado_back.jpg'
+        },
+        3: {
+          front: '/uploads/1747126631533_Machado_front.jpg',
+          back: '/uploads/1747126631541_Machado_back.jpg'
+        },
         20: {
           front: '/uploads/front_8129dc81-f4b9-437c-ba5d-f44394e712a3.jpg',
           back: '/uploads/back_e28fcc8f-d43d-447d-94f5-0b90f27b6c0e.jpg'

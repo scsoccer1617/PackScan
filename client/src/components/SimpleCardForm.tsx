@@ -274,7 +274,6 @@ export default function SimpleCardForm() {
                     <div className="mb-4">
                       {/* Use client-side EbayValueLookup with current form values */}
                       <div className="mt-2 pt-2 border-gray-200">
-                        <h4 className="text-sm font-medium text-slate-700 mb-2">eBay Lookup</h4>
                         <EbayValueLookup
                           playerName={`${form.watch('playerFirstName')} ${form.watch('playerLastName')}`.trim()}
                           cardNumber={form.watch('cardNumber')}
