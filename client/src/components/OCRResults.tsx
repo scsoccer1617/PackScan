@@ -111,7 +111,7 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
   }
   
   // Function to apply OCR data and maintain OCR results display
-  const applyAndUseDirectly = () => {
+  const applyAndUseDirectly = async () => {
     if (form) {
       // Apply all fields from edited data to the form
       const dataToApply = editMode ? editedData : data;
@@ -120,6 +120,19 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
           form.setValue(key as any, value);
         }
       });
+      
+      // Immediately submit the form to save changes to the database
+      console.log("Automatically submitting form to save OCR results to database...");
+      try {
+        // Programmatically trigger form submission
+        await form.handleSubmit((values) => {
+          console.log("Form submitted with values:", values);
+        })();
+        
+        console.log("OCR form data successfully saved to database");
+      } catch (error) {
+        console.error("Error saving OCR results to database:", error);
+      }
       
       // Update the data state with the edited data to show updated values
       setData(editedData);

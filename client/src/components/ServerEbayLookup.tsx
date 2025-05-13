@@ -5,7 +5,7 @@ import { ExternalLink, Loader2 } from "lucide-react";
 import { useQuery } from '@tanstack/react-query';
 
 interface ServerEbayLookupProps {
-  cardId: number;
+  cardId?: number | null;
   onValueSelect: (value: number) => void;
 }
 
@@ -79,6 +79,14 @@ export default function ServerEbayLookup({ cardId, onValueSelect }: ServerEbayLo
     );
   }
 
+  if (!cardId) {
+    return (
+      <div className="text-gray-500 text-center p-2">
+        Save card to database first to generate eBay lookup.
+      </div>
+    );
+  }
+  
   if (error || !data) {
     return (
       <div className="text-red-500 text-center p-2">

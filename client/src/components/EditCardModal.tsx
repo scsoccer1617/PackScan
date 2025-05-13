@@ -457,17 +457,9 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
                     />
                   ) : (
                     // Fallback for new cards (no ID yet)
-                    <EbayValueLookup
-                      playerName={`${form.watch('playerFirstName')} ${form.watch('playerLastName')}`.trim()}
-                      cardNumber={form.watch('cardNumber')}
-                      brand={form.watch('brand')}
-                      year={form.watch('year') || new Date().getFullYear()}
-                      collection={form.watch('collection')}
-                      variant={form.watch('variant')}
-                      condition={form.watch('condition')}
-                      onValueSelect={(value) => {
-                        form.setValue('estimatedValue', value);
-                      }}
+                    <ServerEbayLookup
+                      cardId={card?.id}
+                      onValueSelect={(value) => form.setValue('estimatedValue', value)}
                     />
                   )}
                 </div>
