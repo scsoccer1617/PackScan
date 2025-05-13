@@ -449,19 +449,17 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
                 
                 {/* eBay Value Lookup */}
                 <div className="mb-4">
-                  {/* Server-side Generated eBay URL (when editing existing card) */}
-                  {card && card.id ? (
-                    <ServerEbayLookup 
-                      cardId={card.id} 
-                      onValueSelect={(value) => form.setValue('estimatedValue', value)} 
-                    />
-                  ) : (
-                    // Fallback for new cards (no ID yet)
-                    <ServerEbayLookup
-                      cardId={card?.id}
-                      onValueSelect={(value) => form.setValue('estimatedValue', value)}
-                    />
-                  )}
+                  {/* Client-side eBay Lookup with form values */}
+                  <EbayValueLookup
+                    playerName={`${form.watch('playerFirstName')} ${form.watch('playerLastName')}`.trim()}
+                    cardNumber={form.watch('cardNumber')}
+                    brand={form.watch('brand')}
+                    year={form.watch('year') || new Date().getFullYear()}
+                    collection={form.watch('collection')}
+                    variant={form.watch('variant')}
+                    condition={form.watch('condition')}
+                    onValueSelect={(value) => form.setValue('estimatedValue', value)}
+                  />
                 </div>
               </div>
             </div>

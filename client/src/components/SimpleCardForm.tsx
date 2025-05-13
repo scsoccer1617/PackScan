@@ -272,30 +272,22 @@ export default function SimpleCardForm() {
                     
                     {/* eBay Value Lookup */}
                     <div className="mb-4">
-                      {savedCardId ? (
-                        // If we have a card ID, use ServerEbayLookup
-                        <div className="mt-2 pt-2 border-t border-gray-200">
-                          <h4 className="text-sm font-medium text-slate-700 mb-2">eBay Lookup</h4>
-                          <ServerEbayLookup 
-                            cardId={savedCardId}
-                            onValueSelect={(value) => form.setValue('estimatedValue', value)}
-                          />
-                        </div>
-                      ) : (
-                        // First save the card data to get an ID before using ServerEbayLookup
-                        <Button
-                          type="button"
-                          variant="default"
-                          className="mb-4"
-                          onClick={() => {
-                            // Trigger form submission to save the card data first
-                            const values = form.getValues();
-                            createCardMutation.mutate(values);
+                      {/* Use client-side EbayValueLookup with current form values */}
+                      <div className="mt-2 pt-2 border-gray-200">
+                        <h4 className="text-sm font-medium text-slate-700 mb-2">eBay Lookup</h4>
+                        <EbayValueLookup
+                          playerName={`${form.watch('playerFirstName')} ${form.watch('playerLastName')}`.trim()}
+                          cardNumber={form.watch('cardNumber')}
+                          brand={form.watch('brand')}
+                          year={form.watch('year') || new Date().getFullYear()}
+                          collection={form.watch('collection')}
+                          variant={form.watch('variant')}
+                          condition={form.watch('condition')}
+                          onValueSelect={(value) => {
+                            form.setValue('estimatedValue', value);
                           }}
-                        >
-                          Save Card and Get eBay Value
-                        </Button>
-                      )}
+                        />
+                      </div>
                     </div>
                     
                     {/* Estimated Value Field */}
