@@ -13,11 +13,40 @@ export default function ServerEbayLookup({ cardId, onValueSelect }: ServerEbayLo
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
 
+  // Define the response type
+  interface ServerResponse {
+    success: boolean;
+    data?: {
+      url: string;
+      query: string;
+      card: {
+        id: number;
+        collection: string;
+        playerName: string;
+        cardNumber: string;
+        brand: string;
+        year: number;
+        variant: string | null;
+      }
+    };
+    error?: string;
+  }
+
   // Use TanStack Query to fetch eBay URL from server
-  const { data, isLoading: isUrlLoading, error } = useQuery({
+  const { data, isLoading: isUrlLoading, error } = useQuery<ServerResponse>({
     queryKey: [`/api/cards/${cardId}/ebay-url`],
     enabled: !!cardId, // Only run if cardId is provided
   });
+  
+  // Log data when it changes
+  useEffect(() => {
+    if (data) {
+      console.log(`Server eBay URL fetch successful for card ${cardId}:`, data);
+    }
+    if (error) {
+      console.error(`Server eBay URL fetch failed for card ${cardId}:`, error);
+    }
+  }, [data, error, cardId]);
 
   useEffect(() => {
     if (error) {
@@ -50,16 +79,22 @@ export default function ServerEbayLookup({ cardId, onValueSelect }: ServerEbayLo
     );
   }
 
-  if (error || !data || !data.success) {
+  if (error || !data) {
     return (
       <div className="text-red-500 text-center p-2">
         Failed to generate eBay URL. Please try again.
       </div>
     );
   }
-
-  const ebayUrl = data.data.url;
-  const queryString = data.data.query;
+  
+  // Safely extract data from the response
+  const ebayUrl = !data.success || !data.data 
+    ? '' 
+    : data.data.url;
+    
+  const queryString = !data.success || !data.data
+    ? '' 
+    : data.data.query;
 
   return (
     <div className="space-y-2">
