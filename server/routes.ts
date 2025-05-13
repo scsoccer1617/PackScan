@@ -747,6 +747,85 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     }
   });
+  
+  // Generate eBay search URL for a specific card
+  app.get(`${apiPrefix}/cards/:id/ebay-url`, async (req, res) => {
+    try {
+      const cardId = parseInt(req.params.id);
+      
+      // Fetch the card with relations
+      const card = await storage.getCardById(cardId);
+      if (!card) {
+        return res.status(404).json({ success: false, error: 'Card not found' });
+      }
+      
+      // Get related data
+      const sport = card.sportId ? await getSportNameById(card.sportId) : '';
+      const brand = card.brandId ? await getBrandNameById(card.brandId) : '';
+      
+      // Generate the eBay search query
+      const playerName = `${card.playerFirstName} ${card.playerLastName}`.trim();
+      
+      // Build eBay search URL directly
+      let query = '';
+      
+      // Build the base query with core card information
+      query = `${brand} ${card.year}`;
+      
+      // Add collection if available - this comes directly from the database
+      if (card.collection) {
+        query += ` ${card.collection}`;
+      }
+      
+      // Add variant if available
+      if (card.variant) {
+        query += ` ${card.variant}`;
+      }
+      
+      // Add player name and card number
+      query += ` ${playerName} #${card.cardNumber}`;
+      
+      // Special handling for Heritage cards
+      if (card.collection && card.collection.toLowerCase().includes('heritage')) {
+        query = `${brand} ${card.year} heritage ${playerName} #${card.cardNumber}`;
+      }
+      
+      // Log the query for debugging
+      console.log('Server-generated eBay search query:', JSON.stringify(query));
+      
+      // Construct the URL with search parameters
+      const baseUrl = 'https://www.ebay.com/sch/i.html';
+      const searchParams = new URLSearchParams({
+        _nkw: query,
+        LH_Complete: '1',    // Completed listings
+        LH_Sold: '1',        // Sold listings
+        rt: 'nc',            // No "related" results
+        LH_PrefLoc: '1'      // US-only listings
+      });
+      
+      const ebayUrl = `${baseUrl}?${searchParams.toString()}`;
+      
+      return res.json({ 
+        success: true, 
+        data: {
+          url: ebayUrl,
+          query,
+          card: {
+            id: card.id,
+            collection: card.collection,
+            playerName,
+            cardNumber: card.cardNumber,
+            brand,
+            year: card.year,
+            variant: card.variant
+          }
+        } 
+      });
+    } catch (error) {
+      console.error('Error generating eBay URL:', error);
+      return res.status(500).json({ success: false, error: 'Failed to generate eBay URL' });
+    }
+  });
 
   // Utility functions
   async function getSportNameById(sportId: number): Promise<string> {

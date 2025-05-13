@@ -13,6 +13,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import EbayValueLookup from "./EbayValueLookup";
+import ServerEbayLookup from "./ServerEbayLookup";
 
 interface EditCardModalProps {
   card?: CardWithRelations | null;
@@ -448,39 +449,27 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
                 
                 {/* eBay Value Lookup */}
                 <div className="mb-4">
-                  {/* IIFE to capture current form values ensuring persistence */}
-                  {(() => {
-                    // Use IIFE to capture current form values
-                    const currentCollection = form.watch('collection');
-                    const currentValues = {
-                      playerName: `${form.watch('playerFirstName')} ${form.watch('playerLastName')}`.trim(),
-                      cardNumber: form.watch('cardNumber'),
-                      brand: form.watch('brand'),
-                      year: form.watch('year') || new Date().getFullYear(),
-                      collection: currentCollection, // Explicitly capture collection
-                      variant: form.watch('variant'),
-                      condition: form.watch('condition'),
-                    };
-                    
-                    // Debug log values being passed to eBay lookup
-                    console.log('Values passed to eBay lookup:', currentValues);
-                    
-                    return (
-                      <EbayValueLookup
-                        playerName={currentValues.playerName}
-                        cardNumber={currentValues.cardNumber}
-                        brand={currentValues.brand}
-                        year={currentValues.year}
-                        collection={currentValues.collection}
-                        variant={currentValues.variant}
-                        condition={currentValues.condition}
-                        key={`ebay-lookup-${Date.now()}`} // Force re-render on every render
-                        onValueSelect={(value) => {
-                          form.setValue('estimatedValue', value);
-                        }}
-                      />
-                    );
-                  })()}
+                  {/* Server-side Generated eBay URL (when editing existing card) */}
+                  {card && card.id ? (
+                    <ServerEbayLookup 
+                      cardId={card.id} 
+                      onValueSelect={(value) => form.setValue('estimatedValue', value)} 
+                    />
+                  ) : (
+                    // Fallback for new cards (no ID yet)
+                    <EbayValueLookup
+                      playerName={`${form.watch('playerFirstName')} ${form.watch('playerLastName')}`.trim()}
+                      cardNumber={form.watch('cardNumber')}
+                      brand={form.watch('brand')}
+                      year={form.watch('year') || new Date().getFullYear()}
+                      collection={form.watch('collection')}
+                      variant={form.watch('variant')}
+                      condition={form.watch('condition')}
+                      onValueSelect={(value) => {
+                        form.setValue('estimatedValue', value);
+                      }}
+                    />
+                  )}
                 </div>
               </div>
             </div>
