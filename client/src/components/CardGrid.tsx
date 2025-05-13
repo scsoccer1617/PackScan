@@ -245,7 +245,7 @@ export default function CardGrid() {
   ];
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 mb-16">
       {/* Sort and filter controls */}
       <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 mb-4">
         <div className="flex items-center justify-between">

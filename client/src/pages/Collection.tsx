@@ -45,7 +45,7 @@ export default function Collection() {
   });
 
   return (
-    <div className="p-4">
+    <div className="p-4 pb-24">
       {/* Filter and Sort Options */}
       <div className="flex items-center justify-between mb-4">
         <div className="relative flex-1 max-w-xs">
