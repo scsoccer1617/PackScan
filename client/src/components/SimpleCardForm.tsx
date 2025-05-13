@@ -22,6 +22,7 @@ export default function SimpleCardForm() {
   const [backImage, setBackImage] = useState<string>("");
   const [showOCRResults, setShowOCRResults] = useState<boolean>(false);
   const [showFormFields, setShowFormFields] = useState<boolean>(false);
+  const [savedCardId, setSavedCardId] = useState<number | null>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
   
@@ -116,11 +117,28 @@ export default function SimpleCardForm() {
       });
     },
     onSuccess: (data) => {
-      // Reset the form
-      form.reset();
-      setFrontImage("");
-      setBackImage("");
-      setShowFormFields(false);
+      // Store the new card ID for eBay lookup
+      if (data && data.card && data.card.id) {
+        setSavedCardId(data.card.id);
+        console.log("Card saved successfully with ID:", data.card.id);
+        
+        // If we're in the middle of OCR workflow, don't reset the form
+        if (!showOCRResults) {
+          // Reset the form only if not in OCR workflow
+          form.reset();
+          setFrontImage("");
+          setBackImage("");
+          setShowFormFields(false);
+        }
+      } else {
+        // Reset the form if normal workflow (not OCR)
+        if (!showOCRResults) {
+          form.reset();
+          setFrontImage("");
+          setBackImage("");
+          setShowFormFields(false);
+        }
+      }
       
       // Invalidate cards query to refresh the collection
       queryClient.invalidateQueries({ queryKey: ['/api/cards'] });
@@ -253,18 +271,30 @@ export default function SimpleCardForm() {
                     
                     {/* eBay Value Lookup */}
                     <div className="mb-4">
-                      <EbayValueLookup
-                        playerName={`${ocrData.playerFirstName || ''} ${ocrData.playerLastName || ''}`.trim()}
-                        cardNumber={ocrData.cardNumber || ''}
-                        brand={ocrData.brand || ''}
-                        year={ocrData.year || new Date().getFullYear()}
-                        collection={ocrData.collection || ''}
-                        variant={ocrData.variant || ''}
-                        condition={ocrData.condition || ''}
-                        onValueSelect={(value) => {
-                          form.setValue('estimatedValue', value);
-                        }}
-                      />
+                      {savedCardId ? (
+                        // If we have a card ID, use ServerEbayLookup
+                        <div className="mt-2 pt-2 border-t border-gray-200">
+                          <h4 className="text-sm font-medium text-slate-700 mb-2">eBay Lookup</h4>
+                          <ServerEbayLookup 
+                            cardId={savedCardId}
+                            onValueSelect={(value) => form.setValue('estimatedValue', value)}
+                          />
+                        </div>
+                      ) : (
+                        // First save the card data to get an ID before using ServerEbayLookup
+                        <Button
+                          type="button"
+                          variant="default"
+                          className="mb-4"
+                          onClick={() => {
+                            // Trigger form submission to save the card data first
+                            const values = form.getValues();
+                            createCardMutation.mutate(values);
+                          }}
+                        >
+                          Save Card and Get eBay Value
+                        </Button>
+                      )}
                     </div>
                     
                     {/* Estimated Value Field */}
