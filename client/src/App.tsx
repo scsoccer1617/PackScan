@@ -14,10 +14,10 @@ function App() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <div className="max-w-lg mx-auto min-h-screen flex flex-col bg-white relative pb-16">
+      <div className="max-w-lg mx-auto min-h-screen flex flex-col bg-white relative">
         <Header activeTab={activeTab} setActiveTab={setActiveTab} />
         
-        <main className="flex-1 overflow-y-auto pb-6">
+        <main className="flex-1 overflow-y-auto pb-20">
           <Switch>
             <Route path="/" component={() => <AddCard />} />
             <Route path="/collection" component={() => <Collection />} />

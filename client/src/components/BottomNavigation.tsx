@@ -21,7 +21,7 @@ export default function BottomNavigation({ activeTab, setActiveTab }: BottomNavi
   };
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 shadow-lg flex justify-around items-center h-16 max-w-lg mx-auto">
+    <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 shadow-lg flex justify-around items-center h-16 max-w-lg mx-auto z-50">
       <button 
         className={`flex flex-col items-center justify-center w-1/3 h-full ${activeTab === 'add' ? 'text-primary-600' : 'text-slate-500'}`}
         onClick={() => handleNavigate('add')}

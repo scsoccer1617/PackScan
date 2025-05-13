@@ -160,7 +160,7 @@ export default function CardItem({ card, quantity, onDelete }: CardItemProps) {
                 console.error('Failed to load image:', initialPath);
                 setImageError(true);
               }}
-              style={{ width: '100%', height: '100%', objectFit: 'fill' }}
+              style={{ width: '100%', height: '100%', objectFit: 'contain', maxHeight: '200px' }}
             />
             
             <div className="fallback-content">
