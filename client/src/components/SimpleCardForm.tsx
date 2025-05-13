@@ -14,6 +14,7 @@ import { useOCR } from "@/hooks/use-ocr";
 import { useToast } from "@/hooks/use-toast";
 import OCRResults from "./OCRResults";
 import EbayValueLookup from "./EbayValueLookup";
+import ServerEbayLookup from "./ServerEbayLookup";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 
