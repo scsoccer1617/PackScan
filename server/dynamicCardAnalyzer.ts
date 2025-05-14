@@ -502,24 +502,55 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>): 
   }
   
   // For non-Stars of MLB cards, use the general patterns
-  // Card number patterns to look for
+  // Card number patterns to look for - enhanced with more formats
   const cardNumberPatterns = [
+    // Special collection identifiers
+    { regex: /\b(SMLB-\d{1,3})\b/i, format: "Stars of MLB", example: "SMLB-48", collection: "Stars of MLB" },
+    { regex: /\b(CSMLB-\d{1,3})\b/i, format: "Chrome Stars of MLB", example: "CSMLB-12", collection: "Stars of MLB", variant: "Chrome" },
+    { regex: /\b(HNT-\d{1,3}[A-Z]?)\b/i, format: "Heritage", example: "HNT-25B", collection: "Heritage" },
+    { regex: /\b(SSP-\d{1,3})\b/i, format: "Super Short Print", example: "SSP-12" },
+    { regex: /\b(AG-\d{1,3}[A-Z]?)\b/i, format: "Allen & Ginter", example: "AG-25", collection: "Allen & Ginter" },
+    { regex: /\b(GQ-\d{1,3}[A-Z]?)\b/i, format: "Gypsy Queen", example: "GQ-237", collection: "Gypsy Queen" },
+    { regex: /\b(TS\d-\d{1,3})\b/i, format: "Topps Series", example: "TS1-125", collection: "Series One" },
+    { regex: /\b(TS1-\d{1,3})\b/i, format: "Topps Series 1", example: "TS1-125", collection: "Series One" },
+    { regex: /\b(TS2-\d{1,3})\b/i, format: "Topps Series 2", example: "TS2-354", collection: "Series Two" },
+    { regex: /\b(TSHRT-\d{1,3})\b/i, format: "Topps Short Print", example: "TSHRT-12" },
+    { regex: /\b(TSSCT-\d{1,3})\b/i, format: "Topps Special Collection", example: "TSSCT-7" },
+    
     // Baseball special formats
-    { regex: /\b(\d{1,2}[Bb][^a-zA-Z0-9\s][0-9]{1,2})\b/, format: "35th Anniversary", example: "89B-9" },
-    { regex: /\b(\d{1,2}[Bb]\d[-]?\d{1,2})\b/, format: "35th Anniversary", example: "89B2-32" },
-    { regex: /\b(\d{1,2}[Bb][-]?\d{1,2})\b/, format: "35th Anniversary", example: "89B-32" },
+    { regex: /\b(\d{1,2}[Bb][^a-zA-Z0-9\s][0-9]{1,2})\b/, format: "35th Anniversary", example: "89B-9", collection: "35th Anniversary" },
+    { regex: /\b(\d{1,2}[Bb]\d[-]?\d{1,2})\b/, format: "35th Anniversary", example: "89B2-32", collection: "35th Anniversary" },
+    { regex: /\b(\d{1,2}[Bb][-]?\d{1,2})\b/, format: "35th Anniversary", example: "89B-32", collection: "35th Anniversary" },
+    
+    // Football/Basketball/Hockey specialized formats
+    { regex: /\b([A-Z]{1,3}-\d{1,3}[A-Z]?)\b/, format: "Prefix-Number", example: "PZM-55" },
+    { regex: /\b(PR-[A-Z]{2,3})\b/, format: "Prizm", example: "PR-LBJ", collection: "Prizm" },
+    { regex: /\b([A-Z]{2}-[A-Z]{2,3})\b/, format: "Two-letter codes", example: "GS-SC" },
+    { regex: /\b([A-Z]{2}-\d{1,3})\b/, format: "Set code", example: "RC-23" },
     
     // Team code formats
     { regex: /\b([A-Z]{3}[-]?\d{1,2})\b/, format: "Team code", example: "HOU-11" },
     
+    // Autograph/jersey card formats
+    { regex: /\b(A-[A-Z]{2,4})\b/, format: "Autograph", example: "A-MM" },
+    { regex: /\b(AUTO-[A-Z]{2,4})\b/, format: "Autograph", example: "AUTO-TB" },
+    { regex: /\b(J-[A-Z]{2,4})\b/, format: "Jersey", example: "J-KG" },
+    { regex: /\b(JC-[A-Z]{2,4})\b/, format: "Jersey Card", example: "JC-JT" },
+    { regex: /\b(GU-[A-Z]{2,4})\b/, format: "Game Used", example: "GU-MB" },
+    { regex: /\b(RPJ-[A-Z]{2,4})\b/, format: "Rookie Patch", example: "RPJ-JH" },
+    
     // Other common formats
     { regex: /\b(\d{1,3}[A-Z]{1,2}[0-9]{0,3})\b/, format: "Alphanumeric", example: "89BC" },
     { regex: /\b(\d{1,3}[A-Z]?\-\d{1,3})\b/, format: "Numbered with dash", example: "89-32" },
+    { regex: /\b(CARD\s*\d{1,3})\b/i, format: "Card format", example: "CARD 27" },
     
-    // Simple numeric card numbers (should be tried last)
-    { regex: /\bCARD ([0-9]{1,3})\b/i, format: "Card number", example: "Card 27" },
+    // Simple number formats - these should be last to avoid false positives
+    { regex: /CARD ([0-9]{1,3})\b/i, format: "Card number", example: "Card 27" },
     { regex: /\bNO\.\s*([0-9]{1,3})\b/i, format: "No. format", example: "No. 35" },
     { regex: /\b#\s*([0-9]{1,3})\b/, format: "Hash format", example: "#47" },
+    { regex: /\b(?:NO|CARD|NUMBER)\s*([0-9]{1,3})\b/i, format: "Named number", example: "NUMBER 123" },
+    
+    // Only use pure numbers as a last resort to avoid false matches
     { regex: /\b([0-9]{1,3})\b/, format: "Simple number", example: "42" }
   ];
   
@@ -533,11 +564,33 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>): 
       // Set the card number
       cardDetails.cardNumber = detectedCardNumber;
       
-      // Set collection for specific formats
+      // Set collection from pattern if provided and not already set
+      if (pattern.collection && !cardDetails.collection) {
+        cardDetails.collection = pattern.collection;
+        console.log(`Setting collection from card number pattern: ${pattern.collection}`);
+      }
+      
+      // Set variant from pattern if provided and not already set
+      if (pattern.variant && !cardDetails.variant) {
+        cardDetails.variant = pattern.variant;
+        console.log(`Setting variant from card number pattern: ${pattern.variant}`);
+      }
+      
+      // Set collection for 35th Anniversary cards
       if (pattern.format === "35th Anniversary" && !cardDetails.collection) {
         cardDetails.collection = "35th Anniversary";
         cardDetails.brand = "Topps";
         cardDetails.year = 2024;
+      }
+      
+      // For series cards with TS prefix, set brand to Topps if not already set
+      if ((detectedCardNumber.startsWith('TS1-') || detectedCardNumber.startsWith('TS2-')) && !cardDetails.brand) {
+        cardDetails.brand = "Topps";
+      }
+      
+      // For Heritage cards with HNT prefix, set brand to Topps if not already set
+      if (detectedCardNumber.startsWith('HNT-') && !cardDetails.brand) {
+        cardDetails.brand = "Topps";
       }
       
       return;
@@ -604,13 +657,78 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>)
     }
   }
   
-  // Collection detection
+  // Collection detection with expanded patterns for different card sets
   const collectionPatterns = [
+    // Baseball collections
     { regex: /\bSTARS\s*OF\s*MLB\b/, name: "Stars of MLB" },
     { regex: /\bSERIES\s*ONE\b|\bSERIES\s*1\b/, name: "Series One" },
     { regex: /\bSERIES\s*TWO\b|\bSERIES\s*2\b/, name: "Series Two" },
+    { regex: /\bSERIES\s*THREE\b|\bSERIES\s*3\b/, name: "Series Three" },
     { regex: /\b35TH\s*ANNIVERSARY\b/, name: "35th Anniversary" },
-    { regex: /\bHERITAGE\b/, name: "Heritage" }
+    { regex: /\bHERITAGE\b/, name: "Heritage" },
+    { regex: /\bTRIBUTE\b/, name: "Tribute" },
+    { regex: /\bALLEN\s*(&|AND)?\s*GINTER\b|\bA&G\b/, name: "Allen & Ginter" },
+    { regex: /\bGYPSY\s*QUEEN\b/, name: "Gypsy Queen" },
+    { regex: /\bSTADIUM\s*CLUB\b/, name: "Stadium Club" },
+    { regex: /\bFINEST\b/, name: "Finest" },
+    { regex: /\bTRIPLE\s*THREADS\b/, name: "Triple Threads" },
+    { regex: /\bCLEAR\b/, name: "Clear" },
+    { regex: /\bFIVE\s*STAR\b/, name: "Five Star" },
+    { regex: /\bBOWMAN\s*DRAFT\b/, name: "Bowman Draft" },
+    { regex: /\bBOWMAN\s*CHROME\b/, name: "Bowman Chrome" },
+    { regex: /\bUPDATE\s*SERIES\b/, name: "Update Series" },
+    { regex: /\bOPENING\s*DAY\b/, name: "Opening Day" },
+    
+    // Football collections
+    { regex: /\bPRISTINE\b/, name: "Pristine" },
+    { regex: /\bPRISM\b/, name: "Prizm" },
+    { regex: /\bCERTIFIED\b/, name: "Certified" },
+    { regex: /\bSELECT\b/, name: "Select" },
+    { regex: /\bPREST(I|l)GE\b/, name: "Prestige" },
+    { regex: /\bSCORE\b/, name: "Score" },
+    { regex: /\bPLAYBOOK\b/, name: "Playbook" },
+    { regex: /\bCONTENDERS\b/, name: "Contenders" },
+    { regex: /\bENDORSED\b/, name: "Endorsed" },
+    { regex: /\bNATIONAL\s*TREASURES\b/, name: "National Treasures" },
+    { regex: /\bLUXURY\s*SUITE\b/, name: "Luxury Suite" },
+    { regex: /\bIMMACULATE\b|\bIMMACULATE\s*COLLECTION\b/, name: "Immaculate Collection" },
+    { regex: /\bELITE\b|\bELITE\s*SERIES\b/, name: "Elite Series" },
+    { regex: /\bGOLD\s*STANDARD\b/, name: "Gold Standard" },
+    { regex: /\bABSOLUTE\b/, name: "Absolute" },
+    { regex: /\bDONRUSS\s*ELITE\b/, name: "Donruss Elite" },
+    { regex: /\bDONRUSS\s*OPTIC\b/, name: "Donruss Optic" },
+    
+    // Basketball collections
+    { regex: /\bHOOPS\b/, name: "Hoops" },
+    { regex: /\bPRIZM\b/, name: "Prizm" },
+    { regex: /\bCOURT\s*KINGS\b/, name: "Court Kings" },
+    { regex: /\bDONRUSS\b/, name: "Donruss" },
+    { regex: /\bMOSAIC\b/, name: "Mosaic" },
+    { regex: /\bREVOLUTION\b/, name: "Revolution" },
+    { regex: /\bSTATUS\b/, name: "Status" },
+    { regex: /\bFLAIR\b/, name: "Flair" },
+    { regex: /\bCHRONICLES\b/, name: "Chronicles" },
+    
+    // Hockey collections
+    { regex: /\bUPPER\s*DECK\s*SERIES\s*ONE\b|\bUD\s*SERIES\s*1\b/, name: "Upper Deck Series One" },
+    { regex: /\bUPPER\s*DECK\s*SERIES\s*TWO\b|\bUD\s*SERIES\s*2\b/, name: "Upper Deck Series Two" },
+    { regex: /\bSP\s*AUTHENTIC\b|\bSPA\b/, name: "SP Authentic" },
+    { regex: /\bSP\s*GAME\s*USED\b/, name: "SP Game Used" },
+    { regex: /\bO-PEE-CHEE\b|\bOPC\b/, name: "O-Pee-Chee" },
+    { regex: /\bULTIMATE\s*COLLECTION\b/, name: "Ultimate Collection" },
+    { regex: /\bCLEAR\s*CUT\b/, name: "Clear Cut" },
+    { regex: /\bALLURE\b/, name: "Allure" },
+    { regex: /\bPREMIER\b/, name: "Premier" },
+    
+    // Soccer collections
+    { regex: /\bMATCH\s*ATTAX\b/, name: "Match Attax" },
+    { regex: /\bSELECT\b/, name: "Select" },
+    { regex: /\bPRIZM\b/, name: "Prizm" },
+    { regex: /\bDONRUSS\b/, name: "Donruss" },
+    { regex: /\bCHROME\b/, name: "Chrome" },
+    { regex: /\bFINEST\b/, name: "Finest" },
+    { regex: /\bSTADIUM\s*CLUB\b/, name: "Stadium Club" },
+    { regex: /\bMERLIN\b/, name: "Merlin" }
   ];
   
   // Special case for Stars of MLB Collection
@@ -699,20 +817,79 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>)
  *   (like paragraph text that might mention "10 of 25 players" or similar)
  */
 function extractSerialNumber(text: string, cardDetails: Partial<CardFormValues>): void {
-  // REFINED APPROACH:
+  // ENHANCED APPROACH for serial number detection:
   // Since we don't have position data in this function, we need to be extremely cautious
   // about detecting serial numbers from card stats or other text that might match the pattern
   
-  // We'll be much more restrictive in the plain text analyzer:
-  // - Only process standalone serial numbers (i.e., not embedded in larger text)
-  // - Don't set a serial number from this function at all - leave it to the Vision API
-  //   which can properly detect the position
+  // We'll use contextual clues to increase accuracy:
+  // 1. Serial numbers are almost always at the very end of the detected text
+  // 2. They are typically preceded by spacing or special formatting
+  // 3. They follow specific formats like NNN/NNN
+  // 4. They are often paired with words like "NUMBERED" or "LIMITED EDITION"
   
-  // This function will do nothing - the proper serial number detection happens in 
-  // the Vision API with position detection. This avoids false positives.
+  // Check for specific serial number formats with careful context validation
   
-  console.log('Skipping serial number detection in plain text analyzer - will be handled by Vision API with position data');
-  return;
+  // First, clean and prepare the text
+  const lines = text.split('\n');
+  const lastFewLines = lines.slice(-3); // Look only at last few lines
+  const lastLineText = lastFewLines.join(' ');
+  
+  // Check if there are strong serial number indicator phrases
+  const hasSerialIndicators = /NUMBERED|LIMITED|SERIAL|EDITION OF|\/\d+$|OF \d+$/.test(lastLineText);
+  
+  if (hasSerialIndicators) {
+    console.log('Found potential serial number indicators in last lines');
+    
+    // Different serial number patterns to try
+    const serialPatterns = [
+      // Format: 123/999
+      { regex: /(\d{1,4})\s*\/\s*(\d{1,4})(?!\d)/, format: "fraction" },
+      
+      // Format: 123 OF 999
+      { regex: /(\d{1,4})\s+OF\s+(\d{1,4})(?!\d)/i, format: "of text" },
+      
+      // Format: NUMBERED TO 999 (for cards like "1 of 1" that don't show the serial)
+      { regex: /NUMBERED\s+TO\s+(\d{1,4})(?!\d)/i, format: "numbered to" },
+      
+      // Format: LIMITED EDITION xxx/xxx
+      { regex: /LIMITED\s+EDITION\s+(\d{1,4})\s*\/\s*(\d{1,4})(?!\d)/i, format: "limited edition" },
+      
+      // Format: xxx/xxx written very explicitly to avoid false positives
+      { regex: /^(\d{1,4})\s*\/\s*(\d{1,4})$/, format: "standalone fraction" }
+    ];
+    
+    for (const pattern of serialPatterns) {
+      const match = lastLineText.match(pattern.regex);
+      
+      if (match) {
+        console.log(`Detected serial number (${pattern.format} format)`);
+        
+        // For formats with both numerator and denominator
+        if (pattern.format === "fraction" || pattern.format === "of text" || 
+            pattern.format === "limited edition" || pattern.format === "standalone fraction") {
+          
+          const serialNumber = match[1];
+          const totalCards = match[2];
+          cardDetails.serialNumber = `${serialNumber}/${totalCards}`;
+          console.log(`Set serial number: ${cardDetails.serialNumber}`);
+          return;
+        }
+        
+        // For "numbered to" format
+        if (pattern.format === "numbered to") {
+          // We don't know the actual serial number, just the print run
+          const totalCards = match[1];
+          // Use a placeholder indicating it's one of a limited run
+          cardDetails.serialNumber = `x/${totalCards}`;
+          console.log(`Set approximate serial number: ${cardDetails.serialNumber}`);
+          return;
+        }
+      }
+    }
+  }
+  
+  // No valid serial number found
+  console.log('No reliable serial number found in plain text analysis');
 }
 
 /**
