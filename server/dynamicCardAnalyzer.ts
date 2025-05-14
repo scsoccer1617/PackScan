@@ -405,39 +405,77 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>): 
     }
   }
   
-  // Pattern 2: Try to find player name using positional analysis - sometimes the name is positioned
-  // near a team name or position indicator like "PITCHER", "INFIELDER", etc.
-  const teams = ['YANKEES', 'RED SOX', 'DODGERS', 'CUBS', 'ANGELS', 'BRAVES', 'TWINS', 'PADRES', 'BREWERS'];
-  const positions = ['PITCHER', 'CATCHER', 'INFIELDER', 'OUTFIELDER'];
+  // Approach 3: Try to find player name using positional analysis 
+  // Player names are often positioned near a team name or position indicator
+  
+  // Expanded list of MLB teams
+  const mlbTeams = [
+    'YANKEES', 'RED SOX', 'DODGERS', 'CUBS', 'ANGELS', 'BRAVES', 'TWINS', 'PADRES', 'BREWERS',
+    'ASTROS', 'MARINERS', 'CARDINALS', 'BLUE JAYS', 'ORIOLES', 'RANGERS', 'METS', 'PHILLIES',
+    'NATIONALS', 'MARLINS', 'PIRATES', 'REDS', 'DIAMONDBACKS', 'ROCKIES', 'GIANTS', 'ATHLETICS',
+    'WHITE SOX', 'ROYALS', 'TIGERS', 'GUARDIANS', 'RAYS'
+  ];
+  
+  // Expanded list of positions across sports
+  const positions = [
+    // Baseball
+    'PITCHER', 'CATCHER', 'INFIELDER', 'OUTFIELDER', 'SHORTSTOP', 'FIRST BASE', 'SECOND BASE', 
+    'THIRD BASE', 'LEFT FIELD', 'RIGHT FIELD', 'CENTER FIELD', 'DESIGNATED HITTER',
+    
+    // Other sports positions
+    'QUARTERBACK', 'RUNNING BACK', 'WIDE RECEIVER', 'TIGHT END', 'LINEBACKER', 'CORNERBACK',
+    'SAFETY', 'KICKER', 'PUNTER', 'GUARD', 'FORWARD', 'CENTER', 'POINT GUARD', 'SHOOTING GUARD',
+    'GOALIE', 'DEFENSEMAN', 'LEFT WING', 'RIGHT WING'
+  ];
   
   // Search for a team name or position, then look for nearby words that might be a player name
-  for (const keyword of [...teams, ...positions]) {
+  for (const keyword of [...mlbTeams, ...positions]) {
     if (text.includes(keyword)) {
       const index = text.indexOf(keyword);
-      const beforeKeyword = text.substring(0, index).trim().split(' ');
+      const beforeKeyword = text.substring(0, index).trim().split(/\s+/);
       
       // Take the last few words before the team/position as the potential name
       if (beforeKeyword.length >= 2) {
         const firstName = beforeKeyword[beforeKeyword.length - 2];
         const lastName = beforeKeyword[beforeKeyword.length - 1];
         
+        // Skip if undefined or empty strings
+        if (!firstName || !lastName || firstName.length < 2 || lastName.length < 2) {
+          continue;
+        }
+        
         // Basic validation
-        if (!/[0-9*#@<>]/.test(firstName + lastName) && 
-            !sportKeywords.includes(firstName) && 
-            !sportKeywords.includes(lastName) &&
-            !excludedPlayerNames.includes(`${firstName} ${lastName}`)) {
-          
+        const isValidNamePart = (part: string) => {
+          return part.length >= 2 && // Reasonable length
+                 /^[A-Z]/.test(part) && // Starts with capital letter
+                 !/[0-9*#@<>]/.test(part) && // No digits or special chars
+                 !/MLB|NFL|NBA|NHL/.test(part); // Not a league abbreviation
+        };
+        
+        // Check if either part matches excluded terms
+        const isExcluded = excludedTerms.some(term => 
+          firstName.includes(term) || lastName.includes(term) ||
+          term.includes(firstName) || term.includes(lastName)
+        );
+        
+        // Skip if either part matches sport keywords
+        const isSportTerm = sportKeywords.some(term => 
+          firstName.includes(term) || lastName.includes(term) ||
+          term.includes(firstName) || term.includes(lastName)
+        );
+        
+        if (isValidNamePart(firstName) && isValidNamePart(lastName) && !isExcluded && !isSportTerm) {
           cardDetails.playerFirstName = firstName.toLowerCase()
             .split(' ')
-            .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+            .map((word: string) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
             .join(' ');
             
           cardDetails.playerLastName = lastName.toLowerCase()
             .split(' ')
-            .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+            .map((word: string) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
             .join(' ');
           
-          console.log(`Detected player name (pattern 2): ${cardDetails.playerFirstName} ${cardDetails.playerLastName}`);
+          console.log(`Detected player name near team/position: ${cardDetails.playerFirstName} ${cardDetails.playerLastName}`);
           return;
         }
       }
