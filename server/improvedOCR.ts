@@ -62,7 +62,7 @@ export async function handleCardImageAnalysis(req: MulterRequest, res: Response)
     
     // Race the analysis against the timeout
     const cardInfoPromise = analyzeSportsCardImage(req.file.buffer.toString('base64'));
-    const cardInfo = await Promise.race([cardInfoPromise, timeout])
+    let cardInfo = await Promise.race([cardInfoPromise, timeout])
       .catch(error => {
         console.error('Analysis timeout or error:', error);
         // Return default values if timeout occurs
@@ -74,6 +74,21 @@ export async function handleCardImageAnalysis(req: MulterRequest, res: Response)
           errorMessage: 'Analysis timed out, please try again with a clearer image'
         };
       });
+    
+    // Ensure we always have valid data to return to the client
+    if (!cardInfo || typeof cardInfo !== 'object') {
+      console.error('Invalid card info returned from analysis:', cardInfo);
+      // Provide a default fallback if the result is invalid
+      cardInfo = {
+        condition: 'PSA 8',
+        sport: 'Baseball',
+        brand: 'Topps',
+        year: new Date().getFullYear(),
+        playerFirstName: 'Unknown',
+        playerLastName: 'Player',
+        errorMessage: 'Analysis result was invalid, please try again with a clearer image'
+      };
+    }
     
     // Log the OCR results
     console.log('OCR results:', JSON.stringify(cardInfo, null, 2));
