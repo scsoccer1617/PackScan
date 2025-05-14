@@ -72,25 +72,191 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       cardDetails.sport = "Baseball"; // Default to Baseball
     }
     
-    // Enhanced sport detection with more comprehensive keyword lists
-    if (cleanText.match(/FOOTBALL|NFL|QUARTERBACK|QB|TOUCHDOWN|TD|RECEIVER|WR|RB|RUNNING BACK|FIELD GOAL|TACKLE|YARDS|OFFENSIVE|DEFENSIVE|COACH|PASS|PUNT|KICK|BOWL|LINEMAN|DRAFT|GUARD|COLTS|BENGALS|COWBOYS|GIANTS|PACKERS|SEAHAWKS|CHIEFS|BRONCOS|PATRIOTS|VIKINGS|FALCONS|SAINTS/i)) {
+    // IMPROVED SPORT DETECTION WITH WEIGHTED SCORING SYSTEM
+    // This system uses a points-based approach to determine the most likely sport
+    // by counting specific keywords for each sport in the text
+    
+    // First, check for explicit sport indicators that should override everything else
+    if (cleanText.match(/\bBASEBALL CARD\b|\bMAJOR LEAGUE BASEBALL\b|\bMLB\b/i)) {
+      cardDetails.sport = "Baseball";
+      console.log("Sport detected (explicit indicator): Baseball");
+      return; // Skip further sport detection
+    } 
+    else if (cleanText.match(/\bFOOTBALL CARD\b|\bNATIONAL FOOTBALL LEAGUE\b|\bNFL\b/i)) {
       cardDetails.sport = "Football";
-      console.log("Sport detected: Football");
-    } else if (cleanText.match(/BASKETBALL|NBA|SLAM DUNK|POINT GUARD|PG|SHOOTING GUARD|SG|SMALL FORWARD|SF|POWER FORWARD|PF|CENTER|C|COURT|REBOUND|PLAYOFFS|FINALS|DRAFT|LAKERS|CELTICS|BULLS|WARRIORS|KNICKS|NETS|HEAT|MAVERICKS|SPURS|ROCKETS|RAPTORS|BUCKS|CAVALIERS|SUNS|NUGGETS/i)) {
+      console.log("Sport detected (explicit indicator): Football");
+      return; // Skip further sport detection
+    } 
+    else if (cleanText.match(/\bBASKETBALL CARD\b|\bNATIONAL BASKETBALL ASSOCIATION\b|\bNBA\b/i)) {
       cardDetails.sport = "Basketball";
-      console.log("Sport detected: Basketball");
-    } else if (cleanText.match(/HOCKEY|NHL|GOALIE|ICE RINK|PUCK|PENALTY|STANLEY CUP|PLAYOFFS|DEFENSEMAN|FORWARD|LEFT WING|RIGHT WING|LW|RW|CENTER|BLUE LINE|BRUINS|CANADIENS|RED WINGS|BLACKHAWKS|RANGERS|MAPLE LEAFS|FLYERS|PENGUINS|OILERS|FLAMES|AVALANCHE|GOLDEN KNIGHTS|LIGHTNING/i)) {
+      console.log("Sport detected (explicit indicator): Basketball");
+      return; // Skip further sport detection
+    } 
+    else if (cleanText.match(/\bHOCKEY CARD\b|\bNATIONAL HOCKEY LEAGUE\b|\bNHL\b/i)) {
       cardDetails.sport = "Hockey";
-      console.log("Sport detected: Hockey");
-    } else if (cleanText.match(/SOCCER|FOOTBALL CLUB|FC|FIFA|WORLD CUP|PREMIER LEAGUE|LA LIGA|BUNDESLIGA|SERIE A|LIGUE 1|MLS|FORWARD|STRIKER|MIDFIELDER|DEFENDER|GOALKEEPER|GK|GOAL|BARCELONA|REAL MADRID|MANCHESTER|LIVERPOOL|CHELSEA|ARSENAL|BAYERN|PSG|JUVENTUS|INTER|AC MILAN/i)) {
+      console.log("Sport detected (explicit indicator): Hockey");
+      return; // Skip further sport detection
+    } 
+    else if (cleanText.match(/\bSOCCER CARD\b|\bMAJOR LEAGUE SOCCER\b|\bMLS\b|\bFIFA\b/i)) {
       cardDetails.sport = "Soccer";
-      console.log("Sport detected: Soccer");
-    } else if (cleanText.match(/BASEBALL|MLB|PITCHER|P|CATCHER|C|INFIELDER|OUTFIELDER|SS|1B|2B|3B|OF|DH|DESIGNATED HITTER|SHORTSTOP|HOMERUN|HOME RUN|WORLD SERIES|ALL-STAR|MVP|ROOKIE|TOPPS|BOWMAN|HERITAGE|CHROME|PANINI|DONRUSS|STADIUM CLUB|YANKEES|RED SOX|DODGERS|CUBS|GIANTS|CARDINALS|BRAVES|ASTROS|PHILLIES|NATIONALS|METS|BLUE JAYS|ANGELS|RANGERS/i)) {
+      console.log("Sport detected (explicit indicator): Soccer");
+      return; // Skip further sport detection
+    }
+    
+    // For card collections with known sports
+    if (cleanText.includes("STARS OF MLB") || cleanText.includes("SMLB-")) {
       cardDetails.sport = "Baseball";
-      console.log("Sport detected: Baseball");
+      console.log("Sport detected (from collection): Baseball");
+      return;
+    }
+    
+    // Initialize scores for each sport
+    let baseballScore = 0;
+    let footballScore = 0; 
+    let basketballScore = 0;
+    let hockeyScore = 0;
+    let soccerScore = 0;
+    
+    // BASEBALL KEYWORDS WITH WEIGHTS
+    const baseballKeywords = [
+      // Strong indicators (3 points)
+      { term: /\bMLB\b|\bMAJOR LEAGUE BASEBALL\b/i, weight: 3 },
+      { term: /\bBASEBALL\b/i, weight: 3 },
+      { term: /\bWORLD SERIES\b/i, weight: 3 },
+      
+      // Team names (2 points)
+      { term: /\bYANKEES\b|\bRED SOX\b|\bDODGERS\b|\bCUBS\b|\bGIANTS\b|\bCARDINALS\b|\bBRAVES\b|\bASTROS\b|\bPHILLIES\b|\bNATIONALS\b|\bMETS\b|\bBLUE JAYS\b|\bANGELS\b|\bRANGERS\b|\bMARINERS\b|\bROYALS\b|\bMARLINS\b|\bOAKLAND A'S\b|\bATHLETICS\b|\bTWINS\b|\bBREWERS\b|\bGUARDIANS\b|\bINDIANS\b|\bPIRATES\b|\bPADRES\b|\bRAYS\b|\bORIOLES\b|\bROCKIES\b|\bDIAMONDBACKS\b|\bWHITE SOX\b|\bREDS\b|\bTIGERS\b/i, weight: 2 },
+      
+      // Positions (2 points)
+      { term: /\bPITCHER\b|\bCATCHER\b|\bFIRST BASE\b|\bSECOND BASE\b|\bTHIRD BASE\b|\bSHORTSTOP\b|\bOUTFIELDER\b|\bINFIELDER\b|\bDESIGNATED HITTER\b/i, weight: 2 },
+      { term: /\b1B\b|\b2B\b|\b3B\b|\bSS\b|\bOF\b|\bLF\b|\bCF\b|\bRF\b|\bDH\b/i, weight: 2 },
+      
+      // Baseball terms (1 point)
+      { term: /\bHOME RUN\b|\bHOMERUN\b|\bRBI\b|\bERN\b|\bBATTING\b|\bPITCHING\b|\bHITTER\b|\bMOUND\b|\bINNING\b|\bBULLPEN\b|\bBAT\b|\bGLOVE\b/i, weight: 1 },
+      { term: /\bMLB DEBUT\b|\bROOKIE CARD\b|\bALL[\s-]STAR\b/i, weight: 1 }
+    ];
+    
+    // FOOTBALL KEYWORDS WITH WEIGHTS
+    const footballKeywords = [
+      // Strong indicators (3 points)
+      { term: /\bNFL\b|\bNATIONAL FOOTBALL LEAGUE\b/i, weight: 3 },
+      { term: /\bFOOTBALL\b/i, weight: 3 },
+      { term: /\bSUPER BOWL\b/i, weight: 3 },
+      
+      // Team names (2 points)
+      { term: /\bCOWBOYS\b|\bPACKERS\b|\bPATRIOTS\b|\b49ERS\b|\bSTEELERS\b|\bCHIEFS\b|\bRAIDERS\b|\bEAGLES\b|\bBEARS\b|\bVIKINGS\b|\bRAMS\b|\bSEAHAWKS\b|\bBUCCANEERS\b|\bBRONCOS\b|\bSAINTS\b|\bPANTHERS\b|\bCHARGERS\b|\bBENGALS\b|\bBILLS\b|\bTITANS\b|\bLIONS\b|\bJETS\b|\bGIANTS\b|\bDOLPHINS\b|\bRAVENS\b|\bCOLTS\b|\bBROWNS\b|\bCARDINALS\b|\bCOMMANDERS\b|\bFALCONS\b|\bJAGUARS\b|\bTEXANS\b/i, weight: 2 },
+      
+      // Positions (2 points - make sure we have word boundaries to avoid false matches)
+      { term: /\bQUARTERBACK\b|\bQB\b|\bRUNNING BACK\b|\bRB\b|\bWIDE RECEIVER\b|\bWR\b|\bTIGHT END\b|\bTE\b|\bOFFENSIVE LINE\b|\bDEFENSIVE LINE\b|\bLINEBACKER\b|\bCORNERBACK\b|\bSAFETY\b|\bKICKER\b|\bPUNTER\b/i, weight: 2 },
+      
+      // Football terms (1 point)
+      { term: /\bTOUCHDOWN\b|\bTD\b|\bFIELD GOAL\b|\bTACKLE\b|\bSACK\b|\bBLITZ\b|\bINTERCEPTION\b|\bPASS\b|\bRUSH\b|\bYARDS\b|\bYARDAGE\b|\bDRAFT PICK\b/i, weight: 1 }
+    ];
+    
+    // BASKETBALL KEYWORDS WITH WEIGHTS
+    const basketballKeywords = [
+      // Strong indicators (3 points)
+      { term: /\bNBA\b|\bNATIONAL BASKETBALL ASSOCIATION\b/i, weight: 3 },
+      { term: /\bBASKETBALL\b/i, weight: 3 },
+      { term: /\bNBA FINALS\b/i, weight: 3 },
+      
+      // Team names (2 points)
+      { term: /\bLAKERS\b|\bCELTICS\b|\bBULLS\b|\bWARRIORS\b|\bSPURS\b|\bHEAT\b|\bMAVERICKS\b|\bBUCKS\b|\bKNICKS\b|\bNETS\b|\bROCKETS\b|\bCLIPPERS\b|\b76ERS\b|\bSIXERS\b|\bSUNS\b|\bTHUNDER\b|\bJAZZ\b|\bTRAIL BLAZERS\b|\bGRIZZLIES\b|\bHAWKS\b|\bTIMBERWOLVES\b|\bPELICANS\b|\bNUGGETS\b|\bHORNETS\b|\bKINGS\b|\bPACERS\b|\bPISTONS\b|\bMAGIC\b|\bWIZARDS\b|\bRAPTORS\b/i, weight: 2 },
+      
+      // Positions (2 points)
+      { term: /\bPOINT GUARD\b|\bPG\b|\bSHOOTING GUARD\b|\bSG\b|\bSMALL FORWARD\b|\bSF\b|\bPOWER FORWARD\b|\bPF\b|\bCENTER\b|\bWING\b/i, weight: 2 },
+      
+      // Basketball terms (1 point)
+      { term: /\bSLAM DUNK\b|\bTHREE[\s-]POINTER\b|\bREBOUND\b|\bASSIST\b|\bSTEAL\b|\bBLOCK\b|\bFREE THROW\b|\bJUMP SHOT\b|\bLAYUP\b|\bCOURT\b|\bHOOP\b|\bBACKBOARD\b/i, weight: 1 }
+    ];
+    
+    // HOCKEY KEYWORDS WITH WEIGHTS
+    const hockeyKeywords = [
+      // Strong indicators (3 points)
+      { term: /\bNHL\b|\bNATIONAL HOCKEY LEAGUE\b/i, weight: 3 },
+      { term: /\bHOCKEY\b/i, weight: 3 },
+      { term: /\bSTANLEY CUP\b/i, weight: 3 },
+      
+      // Team names (2 points)
+      { term: /\bBRUINS\b|\bBLACKHAWKS\b|\bRED WINGS\b|\bMAP(LE)? LEAFS\b|\bCANADIENS\b|\bPENGUINS\b|\bRANGERS\b|\bLIGHTNING\b|\bFLYERS\b|\bKINGS\b|\bOILERS\b|\bCANUCKS\b|\bDEVILS\b|\bISLANDERS\b|\bGOLDEN KNIGHTS\b|\bFLAMES\b|\bBLUES\b|\bCANES\b|\bHURRICANES\b|\bDALLAS STARS\b|\bSTARS\b|\bSENATORS\b|\bSABRES\b|\bWILD\b|\bDUCKS\b|\bPREDATORS\b|\bAVALANCHE\b|\bSHARKS\b|\bBLUE JACKETS\b|\bJETS\b|\bKRAKEN\b/i, weight: 2 },
+      
+      // Positions (2 points)
+      { term: /\bGOALIE\b|\bGOALTENDER\b|\bCENTER\b|\bWINGER\b|\bDEFENSEMAN\b|\bLEFT WING\b|\bRIGHT WING\b|\bLW\b|\bRW\b|\bD\b|\bG\b/i, weight: 2 },
+      
+      // Hockey terms (1 point)
+      { term: /\bPUCK\b|\bSTICK\b|\bICE\b|\bRINK\b|\bNET\b|\bGOAL\b|\bASSIST\b|\bSAVE\b|\bSAVE PERCENTAGE\b|\bPENALTY\b|\bPENALTY BOX\b|\bPOWER PLAY\b|\bSHORT HANDED\b|\bHAT TRICK\b/i, weight: 1 }
+    ];
+    
+    // SOCCER KEYWORDS WITH WEIGHTS
+    const soccerKeywords = [
+      // Strong indicators (3 points)
+      { term: /\bFIFA\b|\bMLS\b|\bMAJOR LEAGUE SOCCER\b|\bSOCCER\b/i, weight: 3 },
+      { term: /\bWORLD CUP\b|\bPREMIER LEAGUE\b|\bLA LIGA\b|\bBUNDESLIGA\b|\bSERIE A\b|\bLIGUE 1\b/i, weight: 3 },
+      
+      // Team names (2 points)
+      { term: /\bREAL MADRID\b|\bBARCELONA\b|\bMAN UNITED\b|\bMANCHESTER UNITED\b|\bMANCHESTER CITY\b|\bLIVERPOOL\b|\bCHELSEA\b|\bARSENAL\b|\bJUVENTUS\b|\bBAYERN\b|\bPSG\b|\bAC MILAN\b|\bINTER\b|\bATLETICO\b|\bBOCA JUNIORS\b|\bRIVER PLATE\b|\bGALAXY\b|\bSEATTLE SOUNDERS\b|\bINTER MIAMI\b|\bATLANTA UNITED\b/i, weight: 2 },
+      
+      // Positions (2 points)
+      { term: /\bGOALKEEPER\b|\bGK\b|\bDEFENDER\b|\bMIDFIELDER\b|\bFORWARD\b|\bSTRIKER\b|\bWINGER\b|\bSWEEPER\b/i, weight: 2 },
+      
+      // Soccer terms (1 point)
+      { term: /\bGOAL\b|\bCLEAN SHEET\b|\bYELLOW CARD\b|\bRED CARD\b|\bFREE KICK\b|\bPENALTY KICK\b|\bCORNER\b|\bOFFSIDE\b|\bPITCH\b|\bSTOPPAGE TIME\b|\bSTRIKE\b/i, weight: 1 }
+    ];
+    
+    // Calculate scores for each sport
+    for (const keyword of baseballKeywords) {
+      if (cleanText.match(keyword.term)) {
+        baseballScore += keyword.weight;
+      }
+    }
+    
+    for (const keyword of footballKeywords) {
+      if (cleanText.match(keyword.term)) {
+        footballScore += keyword.weight;
+      }
+    }
+    
+    for (const keyword of basketballKeywords) {
+      if (cleanText.match(keyword.term)) {
+        basketballScore += keyword.weight;
+      }
+    }
+    
+    for (const keyword of hockeyKeywords) {
+      if (cleanText.match(keyword.term)) {
+        hockeyScore += keyword.weight;
+      }
+    }
+    
+    for (const keyword of soccerKeywords) {
+      if (cleanText.match(keyword.term)) {
+        soccerScore += keyword.weight;
+      }
+    }
+    
+    // Determine the sport with the highest score
+    const sportScores = [
+      { sport: "Baseball", score: baseballScore },
+      { sport: "Football", score: footballScore },
+      { sport: "Basketball", score: basketballScore },
+      { sport: "Hockey", score: hockeyScore },
+      { sport: "Soccer", score: soccerScore }
+    ];
+    
+    // Sort by score (highest first)
+    sportScores.sort((a, b) => b.score - a.score);
+    
+    // Log scores for debugging
+    console.log("Sport detection scores:", sportScores.map(s => `${s.sport}: ${s.score}`).join(", "));
+    
+    // If highest score is zero, default to Baseball
+    if (sportScores[0].score === 0) {
+      cardDetails.sport = "Baseball"; // Default
+      console.log("No sport indicators found, defaulting to Baseball");
     } else {
-      console.log("Sport detected: Baseball (default)");
-      cardDetails.sport = "Baseball";
+      // Use sport with highest score
+      cardDetails.sport = sportScores[0].sport;
+      console.log(`Sport detected with highest score (${sportScores[0].score}): ${cardDetails.sport}`);
     }
     
     // No player-specific overrides - fully dynamic
