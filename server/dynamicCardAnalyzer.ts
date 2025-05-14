@@ -282,36 +282,125 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>): 
     return;
   }
   
-  // For non-Stars of MLB cards, use the general approach
-  // Common sports names that might be in the text (not player-specific)
-  const sportKeywords = ['BASEBALL', 'FOOTBALL', 'BASKETBALL', 'HOCKEY', 'SOCCER', 'MLB', 'NFL', 'NBA', 'NHL'];
+  // ENHANCED PLAYER NAME DETECTION
+  // For non-Stars of MLB cards, use a more sophisticated approach
   
-  // Exclude words that are commonly misidentified as player names
-  const excludedPlayerNames = ['MAJOR LEAGUE', 'BASEBALL', 'TRADING CARD', 'TOPPS', 'PANINI', 'UPPER DECK'];
+  // Common sports terms that might be in the text (not player-specific)
+  const sportKeywords = [
+    'BASEBALL', 'FOOTBALL', 'BASKETBALL', 'HOCKEY', 'SOCCER', 
+    'MLB', 'NFL', 'NBA', 'NHL', 'MLS', 'FIFA',
+    'PITCHER', 'CATCHER', 'OUTFIELDER', 'INFIELDER', 'SHORTSTOP', 'QUARTERBACK',
+    'WIDE RECEIVER', 'RUNNING BACK', 'GOALIE'
+  ];
   
-  // Try to extract player name using various patterns and positions
+  // Brand names and card terminology to exclude 
+  const excludedTerms = [
+    // Card companies
+    'TOPPS', 'PANINI', 'BOWMAN', 'UPPER DECK', 'FLEER', 'DONRUSS', 'LEAF', 
+    'SCORE', 'PLAYOFF', 'PACIFIC', 'SAGE', 'FINEST', 'SELECT', 
+    
+    // Standard card text
+    'TRADING CARD', 'BASEBALL CARD', 'FOOTBALL CARD', 'BASKETBALL CARD',
+    'ROOKIE CARD', 'FUTURE STAR', 'ALL STAR', 'MVP', 'CHAMPION',
+    
+    // Leagues and organizations
+    'MAJOR LEAGUE', 'BASEBALL', 'NATIONAL LEAGUE', 'AMERICAN LEAGUE',
+    'WORLD SERIES', 'HALL OF FAME', 'ALL-STAR',
+    
+    // Collection names
+    'CHROME', 'HERITAGE', 'STARS OF MLB', 'PRIZM', 'SERIES ONE', 'SERIES TWO'
+  ];
   
-  // Pattern 1: Look for potential name at the beginning of the text (most common position)
-  let nameParts = text.split(' ').slice(0, 3);
-  let potentialName = nameParts.join(' ');
+  // Special case: Identify a copyright line (to avoid extracting names from it)
+  const copyrightMatch = text.match(/©|Ⓒ|\([cC]\)/);
+  const copyrightLine = copyrightMatch && copyrightMatch.index !== undefined ? 
+    text.substring(copyrightMatch.index).split('\n')[0] : '';
   
-  // Check if the potential name contains excluded terms
-  const isExcluded = excludedPlayerNames.some(term => potentialName.includes(term));
+  // Clean the text for better name extraction
+  let cleanText = text
+    // Remove copyright line from consideration
+    .replace(copyrightLine, '')
+    // Remove card numbers to avoid confusion
+    .replace(/\b(CARD|NO\.)\s*\d+\b/ig, '')
+    // Remove common text prefixes often on cards
+    .replace(/^(TOPPS|BOWMAN|PANINI|DONRUSS|UPPER DECK)\s+/i, '')
+    // Remove obvious non-name parts
+    .replace(/\b(MLB|NFL|NBA|NHL|ROOKIE|RC)\b/g, '');
+    
+  // Split into lines for better analysis
+  const lines = cleanText.split('\n').filter(line => line.trim() !== '');
   
-  if (!isExcluded && nameParts.length >= 2) {
-    // Basic validation - names typically don't contain digits or special characters
-    if (!/[0-9*#@<>]/.test(potentialName) && !/MLB|NFL|NBA|NHL/.test(potentialName)) {
-      cardDetails.playerFirstName = nameParts[0].toLowerCase()
+  // Approach 1: Examine the first line, which often contains the player name
+  if (lines.length > 0) {
+    const firstLine = lines[0].trim();
+    const firstLineWords = firstLine.split(/\s+/);
+    
+    // If first line has 2-3 words (typical for "FirstName LastName")
+    if (firstLineWords.length >= 2 && firstLineWords.length <= 3) {
+      // Check if none of the words are excluded terms
+      const isValidName = !firstLineWords.some(word => 
+        excludedTerms.some(term => term.includes(word) || word.includes(term))
+      );
+      
+      // Check if words appear to be names (start with capital, no numbers, reasonable length)
+      const wordLooksLikeName = (word: string) => 
+        word.length > 1 && 
+        /^[A-Z]/.test(word) && 
+        !/\d/.test(word) && 
+        word.length < 15;
+        
+      if (isValidName && firstLineWords.every(wordLooksLikeName)) {
+        cardDetails.playerFirstName = firstLineWords[0].toLowerCase()
+          .split(' ')
+          .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+          .join(' ');
+          
+        cardDetails.playerLastName = firstLineWords.slice(1).join(' ').toLowerCase()
+          .split(' ')
+          .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+          .join(' ');
+        
+        console.log(`Detected player name from first line: ${cardDetails.playerFirstName} ${cardDetails.playerLastName}`);
+        return;
+      }
+    }
+  }
+  
+  // Approach 2: Look for name patterns in the entire text
+  // Define a regex pattern that looks for potential names - Two capitalized words in sequence
+  const nameRegex = /\b([A-Z][a-zA-Z']{1,20})\s+([A-Z][a-zA-Z'-]{1,20})\b/g;
+  
+  // Use Array.from instead of spread operator for better TypeScript compatibility
+  const nameMatches = Array.from(cleanText.matchAll(nameRegex));
+  
+  for (const match of nameMatches) {
+    const firstName = match[1];
+    const lastName = match[2];
+    
+    // Skip if either part matches excluded terms
+    const isExcluded = excludedTerms.some(term => 
+      firstName.includes(term) || lastName.includes(term) ||
+      term.includes(firstName) || term.includes(lastName)
+    );
+    
+    // Skip if either part matches sport keywords
+    const isSportTerm = sportKeywords.some(term => 
+      firstName.includes(term) || lastName.includes(term) ||
+      term.includes(firstName) || term.includes(lastName)
+    );
+    
+    if (!isExcluded && !isSportTerm && firstName !== lastName) {
+      cardDetails.playerFirstName = firstName.toLowerCase()
         .split(' ')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+        .map((word: string) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
         .join(' ');
         
-      cardDetails.playerLastName = nameParts.slice(1).join(' ').toLowerCase()
+      cardDetails.playerLastName = lastName.toLowerCase()
         .split(' ')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+        .map((word: string) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
         .join(' ');
       
-      console.log(`Detected player name (pattern 1): ${cardDetails.playerFirstName} ${cardDetails.playerLastName}`);
+      console.log(`Detected player name from name pattern: ${cardDetails.playerFirstName} ${cardDetails.playerLastName}`);
       return;
     }
   }
@@ -788,19 +877,69 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>)
     }
   }
   
-  // Year detection - copyright symbol is most reliable for card year
+  // ENHANCED YEAR DETECTION
+  // Year detection with more sophisticated patterns and priority order
   const yearPatterns = [
-    { regex: /[©Ⓒ®]\s*(?:&\s*[©Ⓒ®])?\s*(\d{4})/, description: "Copyright year" },
-    { regex: /\b(20\d{2})\b/, description: "Plain year" }
+    // Copyright year is the most reliable indicator of the actual card year
+    { regex: /[©Ⓒ®]\s*(?:&\s*[©Ⓒ®])?\s*(20\d{2})/, description: "Copyright year", priority: 1 },
+    { regex: /COPYRIGHT\s*(20\d{2})/, description: "Copyright text", priority: 2 },
+    { regex: /\bCOPR\.\s*(20\d{2})/, description: "Copr. abbreviation", priority: 3 },
+    
+    // Collection year often appears in the card title or collection name
+    { regex: /\b(20\d{2})\s+(?:TOPPS|BOWMAN|PANINI|DONRUSS|UPPER DECK|FLEER)\b/, description: "Year + brand", priority: 4 },
+    { regex: /\b(?:TOPPS|BOWMAN|PANINI|DONRUSS|UPPER DECK|FLEER)\s+(20\d{2})\b/, description: "Brand + year", priority: 5 },
+    
+    // Card set years in names
+    { regex: /\b(20\d{2})\s+(?:SERIES|UPDATE|CHROME|HERITAGE|PRIZM|OPTIC)\b/, description: "Year + collection", priority: 6 },
+    { regex: /\b(?:SERIES|UPDATE|CHROME|HERITAGE|PRIZM|OPTIC)\s+(20\d{2})\b/, description: "Collection + year", priority: 7 },
+    
+    // Years with a specific edition number
+    { regex: /\b(20\d{2})\s+(?:EDITION|COLLECTION)\b/, description: "Year edition", priority: 8 },
+    
+    // Season statistics years
+    { regex: /\b(20\d{2})\s+(?:SEASON|STATS|STATISTICS)\b/, description: "Year season", priority: 9 },
+    
+    // Standalone year as a last resort (most likely to be incorrect)
+    { regex: /\b(20\d{2})\b/, description: "Plain year", priority: 10 }
   ];
   
-  // Try to detect year
-  for (const pattern of yearPatterns) {
+  // Sort patterns by priority (lower = higher priority)
+  const sortedPatterns = [...yearPatterns].sort((a, b) => a.priority - b.priority);
+  
+  // Try to detect year with priority order
+  for (const pattern of sortedPatterns) {
     const match = text.match(pattern.regex);
     if (match) {
-      cardDetails.year = parseInt(match[1], 10);
-      console.log(`Detected year (${pattern.description}): ${cardDetails.year}`);
-      break;
+      const year = parseInt(match[1], 10);
+      
+      // Validate the detected year (must be between 1950 and current year + 1)
+      const currentYear = new Date().getFullYear();
+      if (year >= 1950 && year <= currentYear + 1) {
+        cardDetails.year = year;
+        console.log(`Detected year (${pattern.description}): ${cardDetails.year} (priority: ${pattern.priority})`);
+        break;
+      }
+    }
+  }
+  
+  // If no year detected, make an educated guess based on card appearance 
+  // and copyright year patterns
+  if (!cardDetails.year) {
+    // Check for modern-era copyright pattern which often has © YEAR MLB
+    const modernCopyrightMatch = text.match(/[©Ⓒ®]\s*(?:20\d{2})?\s*MLB/i);
+    if (modernCopyrightMatch) {
+      // Most likely a recent card, default to latest common year
+      cardDetails.year = 2024;
+      console.log('No specific year detected, but found modern MLB copyright format. Using default year 2024.');
+    }
+    // For heritage/throwback cards, detect years from common vintage year sets
+    else if (text.includes('HERITAGE') && text.match(/\b(19\d{2})\b/)) {
+      const vintageYearMatch = text.match(/\b(19\d{2})\b/);
+      if (vintageYearMatch) {
+        // For heritage cards, set the current production year (not the vintage year)
+        cardDetails.year = 2024;
+        console.log(`Heritage card referencing vintage year ${vintageYearMatch[1]}, using current production year 2024.`);
+      }
     }
   }
   
@@ -896,54 +1035,203 @@ function extractSerialNumber(text: string, cardDetails: Partial<CardFormValues>)
  * Detect special card features (rookie, autograph, etc.)
  */
 function detectCardFeatures(text: string, cardDetails: Partial<CardFormValues>): void {
-  // Enhanced Rookie card detection
-  // Look for any of these common rookie indicators on cards
+  // ENHANCED ROOKIE CARD DETECTION
+  // Look for any of these common rookie indicators on cards with expanded terminology
   const rookieIndicators = [
+    // Standard rookie indicators
     'ROOKIE', 'RC', 'R.C.', 'FIRST YEAR', 'DEBUT', 
-    'ROOKIE CARD', '1ST YEAR', 'FIRST MLB', '1ST MLB'
+    'ROOKIE CARD', '1ST YEAR', 'FIRST MLB', '1ST MLB',
+    
+    // Sport-specific rookie indicators
+    'NFL DEBUT', 'MLB DEBUT', 'NBA DEBUT', 'NHL DEBUT',
+    'FRESHMAN', 'FUTURE STARS', 'PROSPECT',
+    
+    // Card-specific rookie indicators
+    'RATED ROOKIE', 'TRUE ROOKIE', 'ROOKIE DEBUT',
+    
+    // Brand-specific rookie indicators
+    'BOWMAN 1ST', 'BOWMAN 1ST CARD', 'BOWMAN ROOKIE',
+    'TOPPS RC', 'TOPPS ROOKIE', 'PANINI RC', 
+    'DONRUSS RATED ROOKIE'
   ];
   
-  // Check if any rookie indicator is present in the text
-  const hasRookieIndicator = rookieIndicators.some(indicator => 
-    text.includes(indicator)
-  );
+  // More precise rookie detection - look for specific boundaries
+  // to ensure we don't match substrings inside other words
+  const hasStrongRookieIndicator = rookieIndicators.some(indicator => {
+    // Convert indicator to regex-safe string by escaping special characters
+    const escapedIndicator = indicator.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    
+    // Check for either:
+    // - Exact match with word boundaries
+    // - Match inside brackets/graphics like [RC] or {RC}
+    // - Match with a colon after it like "RC:"
+    const regexPattern = new RegExp(`(^|[\\s\\[\\{\\(])${escapedIndicator}($|[\\s\\]\\}\\)\\:])`, 'i');
+    return regexPattern.test(text);
+  });
   
-  if (hasRookieIndicator) {
+  // Also check for the RC logo that appears in recent cards
+  // This is usually printed as "RC" in a small logo/graphic form
+  const hasRCLogo = /\bRC\b|\[RC\]|\{RC\}|\(RC\)|RC logo/i.test(text);
+  
+  if (hasStrongRookieIndicator || hasRCLogo) {
     cardDetails.isRookieCard = true;
-    console.log('Detected rookie card indicator');
+    console.log('Detected rookie card indicator with high confidence');
   }
   
-  // Autograph detection
-  if (text.includes('AUTO') || text.includes('AUTOGRAPH') || text.includes('SIGNED') || 
-      text.includes('SIGNATURE') || text.includes('CERTIFIED AUTOGRAPH')) {
+  // ENHANCED AUTOGRAPH DETECTION
+  // Check for autograph indicators with more context and precision
+  const autographIndicators = [
+    // Standard indicators
+    'AUTOGRAPH', 'SIGNED', 'SIGNATURE', 'CERTIFIED AUTOGRAPH',
+    
+    // Brand-specific autograph indicators
+    'CERTIFIED AUTO', 'ON-CARD AUTO', 'STICKER AUTO',
+    'AUTHENTIC SIGNATURES', 'AUTOGRAPHED', 'HAND SIGNED',
+    
+    // Card type indicators
+    'AUTO JERSEY', 'AUTO PATCH', 'AUTO RELIC', 'AUTO RC'
+  ];
+  
+  // More precise autograph detection with word boundaries
+  const hasAutographIndicator = autographIndicators.some(indicator => {
+    // Convert indicator to regex-safe string by escaping special characters
+    const escapedIndicator = indicator.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    
+    // Similar pattern as rookie detection but customized for auto detection
+    const regexPattern = new RegExp(`(^|[\\s\\[\\{\\(])${escapedIndicator}($|[\\s\\]\\}\\)\\:])`, 'i');
+    return regexPattern.test(text);
+  });
+  
+  // Special case for "AUTO" which needs more context to avoid false positives
+  // as it's a common substring in many words
+  const hasAutoKeyword = /\bAUTO\b|\[AUTO\]|\{AUTO\}|\(AUTO\)|AUTO:/i.test(text);
+  
+  if (hasAutographIndicator || hasAutoKeyword) {
     cardDetails.isAutographed = true;
-    console.log('Detected autographed card');
+    console.log('Detected autographed card indicator with high confidence');
   }
   
-  // Numbered card detection (if we didn't already find a serial number)
-  if (!cardDetails.isNumbered && 
-      (text.includes('NUMBERED') || text.includes('LIMITED EDITION'))) {
+  // ENHANCED NUMBERED CARD DETECTION
+  // Check for indicators of numbered cards, with better context
+  const numberedCardIndicators = [
+    'NUMBERED', 'LIMITED EDITION', 'SERIAL', 'SERIALED', 
+    'PRINT RUN', 'PRINT RUN OF', 'EDITION OF', 'EDITION SIZE',
+    'RARE', 'SCARCE', 'LOW PRINT RUN', 'SHORT PRINT'
+  ];
+  
+  // More precise numbered card detection
+  const hasNumberedIndicator = numberedCardIndicators.some(indicator => {
+    // Convert indicator to regex-safe string by escaping special characters
+    const escapedIndicator = indicator.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    
+    // Check with word boundaries
+    const regexPattern = new RegExp(`(^|[\\s\\[\\{\\(])${escapedIndicator}($|[\\s\\]\\}\\)\\:])`, 'i');
+    return regexPattern.test(text);
+  });
+  
+  // Also check for common numbered card patterns
+  const hasNumberedPattern = /\/\d+|OF \d+|EDITION OF \d+|LIMITED TO \d+/i.test(text);
+  
+  if (!cardDetails.isNumbered && (hasNumberedIndicator || hasNumberedPattern)) {
     cardDetails.isNumbered = true;
-    console.log('Detected numbered card (from keywords)');
+    console.log('Detected numbered card with high confidence');
   }
   
-  // Variant detection
+  // ENHANCED VARIANT DETECTION
+  // More comprehensive list of card variants with organized categories
   const variants = [
+    // Finish/Treatment variants
     { keyword: 'REFRACTOR', name: 'Refractor' },
-    { keyword: 'PARALLEL', name: 'Parallel' },
-    { keyword: 'HOLOGRAM', name: 'Hologram' },
+    { keyword: 'CHROME', name: 'Chrome' },
     { keyword: 'PRIZM', name: 'Prizm' },
+    { keyword: 'OPTI-CHROME', name: 'Opti-Chrome' },
+    { keyword: 'HOLOGRAM', name: 'Hologram' },
+    { keyword: 'HOLO', name: 'Holo' },
     { keyword: 'FOIL', name: 'Foil' },
+    { keyword: 'RAINBOW FOIL', name: 'Rainbow Foil' },
+    { keyword: 'SHIMMER', name: 'Shimmer' },
+    { keyword: 'GLOSSY', name: 'Glossy' },
+    { keyword: 'LAVA', name: 'Lava' },
+    { keyword: 'CRACKED ICE', name: 'Cracked Ice' },
+    { keyword: 'CRUSADE', name: 'Crusade' },
+    { keyword: 'ETCHED', name: 'Etched' },
+    
+    // Color/Material variants
     { keyword: 'GOLD', name: 'Gold' },
     { keyword: 'SILVER', name: 'Silver' },
-    { keyword: 'CHROME', name: 'Chrome' }
+    { keyword: 'BLUE', name: 'Blue' },
+    { keyword: 'GREEN', name: 'Green' },
+    { keyword: 'RED', name: 'Red' },
+    { keyword: 'PURPLE', name: 'Purple' },
+    { keyword: 'ORANGE', name: 'Orange' },
+    { keyword: 'YELLOW', name: 'Yellow' },
+    { keyword: 'PINK', name: 'Pink' },
+    { keyword: 'BLACK', name: 'Black' },
+    { keyword: 'SAPPHIRE', name: 'Sapphire' },
+    { keyword: 'RUBY', name: 'Ruby' },
+    { keyword: 'EMERALD', name: 'Emerald' },
+    { keyword: 'DIAMOND', name: 'Diamond' },
+    { keyword: 'BRONZE', name: 'Bronze' },
+    { keyword: 'PLATINUM', name: 'Platinum' },
+    { keyword: 'TITANIUM', name: 'Titanium' },
+    
+    // Special editions
+    { keyword: 'PARALLEL', name: 'Parallel' },
+    { keyword: 'SP', name: 'Short Print' },
+    { keyword: 'SSP', name: 'Super Short Print' },
+    { keyword: 'KABOOM', name: 'Kaboom' },
+    { keyword: 'DOWNTOWN', name: 'Downtown' },
+    { keyword: 'CANVAS', name: 'Canvas' },
+    { keyword: 'SEPIA', name: 'Sepia' },
+    { keyword: 'VINTAGE STOCK', name: 'Vintage Stock' },
+    { keyword: 'INDEPENDENCE DAY', name: 'Independence Day' },
+    { keyword: 'FATHERS DAY', name: 'Father\'s Day' },
+    { keyword: 'MOTHERS DAY', name: 'Mother\'s Day' },
+    { keyword: 'MEMORIAL DAY', name: 'Memorial Day' },
+    { keyword: 'BLACK FRIDAY', name: 'Black Friday' },
+    { keyword: 'CYBER MONDAY', name: 'Cyber Monday' },
+    
+    // Brand-specific variants
+    { keyword: 'TOPPS CHROME', name: 'Chrome' },
+    { keyword: 'BOWMAN CHROME', name: 'Chrome' },
+    { keyword: 'FINEST', name: 'Finest' },
+    { keyword: 'OPTIC', name: 'Optic' },
+    { keyword: 'VELOCITY', name: 'Velocity' },
+    { keyword: 'SELECT', name: 'Select' },
+    { keyword: 'MOSAIC', name: 'Mosaic' },
+    { keyword: 'DONRUSS OPTIC', name: 'Optic' },
+    { keyword: 'DONRUSS ELITE', name: 'Elite' },
+    { keyword: 'HERITAGE HIGH NUMBER', name: 'High Number' },
+    { keyword: 'HIGH NUMBER', name: 'High Number' },
+    { keyword: 'HIGH TEK', name: 'High Tek' },
+    { keyword: 'FIVE STAR', name: 'Five Star' }
   ];
   
+  // For better variant detection, use a more precise approach with word boundaries
   for (const variant of variants) {
-    if (text.includes(variant.keyword)) {
-      cardDetails.variant = variant.name;
-      console.log(`Detected variant: ${variant.name}`);
-      break;
+    // Convert variant keyword to regex-safe string by escaping special characters
+    const escapedKeyword = variant.keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    
+    // Create a regex pattern that looks for the keyword with word boundaries or in specific contexts
+    const regexPattern = new RegExp(`(^|[\\s\\[\\{\\(])${escapedKeyword}($|[\\s\\]\\}\\)\\:])`, 'i');
+    
+    if (regexPattern.test(text)) {
+      // Only set the variant if it's not already set (prioritize specific variants over generic ones)
+      if (!cardDetails.variant) {
+        cardDetails.variant = variant.name;
+        console.log(`Detected variant: ${variant.name}`);
+      } 
+      // If the current variant is Chrome and we find a more specific one, use that instead
+      else if (cardDetails.variant === 'Chrome' && variant.name !== 'Chrome') {
+        cardDetails.variant = variant.name;
+        console.log(`Updated variant from Chrome to more specific: ${variant.name}`);
+      }
+      // If we find Gold/Silver/etc after Refractor, combine them
+      else if (cardDetails.variant === 'Refractor' && 
+              ['Gold', 'Silver', 'Blue', 'Green', 'Red', 'Purple', 'Orange'].includes(variant.name)) {
+        cardDetails.variant = `${variant.name} Refractor`;
+        console.log(`Enhanced variant to: ${cardDetails.variant}`);
+      }
     }
   }
 }
