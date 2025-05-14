@@ -72,18 +72,25 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       cardDetails.sport = "Baseball"; // Default to Baseball
     }
     
-    // Check sport overrides based on text content
-    if (cleanText.match(/FOOTBALL|NFL|QUARTERBACK|TOUCHDOWN|RECEIVER|FIELD GOAL|TACKLE/i)) {
+    // Enhanced sport detection with more comprehensive keyword lists
+    if (cleanText.match(/FOOTBALL|NFL|QUARTERBACK|QB|TOUCHDOWN|TD|RECEIVER|WR|RB|RUNNING BACK|FIELD GOAL|TACKLE|YARDS|OFFENSIVE|DEFENSIVE|COACH|PASS|PUNT|KICK|BOWL|LINEMAN|DRAFT|GUARD|COLTS|BENGALS|COWBOYS|GIANTS|PACKERS|SEAHAWKS|CHIEFS|BRONCOS|PATRIOTS|VIKINGS|FALCONS|SAINTS/i)) {
       cardDetails.sport = "Football";
       console.log("Sport detected: Football");
-    } else if (cleanText.match(/BASKETBALL|NBA|SLAM DUNK|POINT GUARD|FORWARD|CENTER|COURT|REBOUND/i)) {
+    } else if (cleanText.match(/BASKETBALL|NBA|SLAM DUNK|POINT GUARD|PG|SHOOTING GUARD|SG|SMALL FORWARD|SF|POWER FORWARD|PF|CENTER|C|COURT|REBOUND|PLAYOFFS|FINALS|DRAFT|LAKERS|CELTICS|BULLS|WARRIORS|KNICKS|NETS|HEAT|MAVERICKS|SPURS|ROCKETS|RAPTORS|BUCKS|CAVALIERS|SUNS|NUGGETS/i)) {
       cardDetails.sport = "Basketball";
       console.log("Sport detected: Basketball");
-    } else if (cleanText.match(/HOCKEY|NHL|GOALIE|ICE RINK|PUCK|PENALTY|STANLEY CUP/i)) {
+    } else if (cleanText.match(/HOCKEY|NHL|GOALIE|ICE RINK|PUCK|PENALTY|STANLEY CUP|PLAYOFFS|DEFENSEMAN|FORWARD|LEFT WING|RIGHT WING|LW|RW|CENTER|BLUE LINE|BRUINS|CANADIENS|RED WINGS|BLACKHAWKS|RANGERS|MAPLE LEAFS|FLYERS|PENGUINS|OILERS|FLAMES|AVALANCHE|GOLDEN KNIGHTS|LIGHTNING/i)) {
       cardDetails.sport = "Hockey";
       console.log("Sport detected: Hockey");
+    } else if (cleanText.match(/SOCCER|FOOTBALL CLUB|FC|FIFA|WORLD CUP|PREMIER LEAGUE|LA LIGA|BUNDESLIGA|SERIE A|LIGUE 1|MLS|FORWARD|STRIKER|MIDFIELDER|DEFENDER|GOALKEEPER|GK|GOAL|BARCELONA|REAL MADRID|MANCHESTER|LIVERPOOL|CHELSEA|ARSENAL|BAYERN|PSG|JUVENTUS|INTER|AC MILAN/i)) {
+      cardDetails.sport = "Soccer";
+      console.log("Sport detected: Soccer");
+    } else if (cleanText.match(/BASEBALL|MLB|PITCHER|P|CATCHER|C|INFIELDER|OUTFIELDER|SS|1B|2B|3B|OF|DH|DESIGNATED HITTER|SHORTSTOP|HOMERUN|HOME RUN|WORLD SERIES|ALL-STAR|MVP|ROOKIE|TOPPS|BOWMAN|HERITAGE|CHROME|PANINI|DONRUSS|STADIUM CLUB|YANKEES|RED SOX|DODGERS|CUBS|GIANTS|CARDINALS|BRAVES|ASTROS|PHILLIES|NATIONALS|METS|BLUE JAYS|ANGELS|RANGERS/i)) {
+      cardDetails.sport = "Baseball";
+      console.log("Sport detected: Baseball");
     } else {
       console.log("Sport detected: Baseball (default)");
+      cardDetails.sport = "Baseball";
     }
     
     // No player-specific overrides - fully dynamic
@@ -544,17 +551,48 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>): 
  * Extract card metadata (collection, brand, year) using context analysis
  */
 function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>): void {
-  // Brand detection
+  // Brand detection with expanded list of card manufacturers and brands
   const brandPatterns = [
+    // Major brands
     { regex: /\bTOPPS\b/, name: "Topps" },
     { regex: /\bUPPER\s*DECK\b/, name: "Upper Deck" },
     { regex: /\bPANINI\b/, name: "Panini" },
     { regex: /\bDONRUSS\b/, name: "Donruss" },
-    { regex: /\bFLEER\b/, name: "Fleer" },
     { regex: /\bBOWMAN\b/, name: "Bowman" },
+    { regex: /\bFLEER\b/, name: "Fleer" },
+    
+    // Additional brands
+    { regex: /\bPRISTINE\b/, name: "Pristine" },
+    { regex: /\bSCORE\b/, name: "Score" },
+    { regex: /\bSAGE\b/, name: "Sage" },
+    { regex: /\bLEAF\b/, name: "Leaf" },
+    { regex: /\bFINEST\b/, name: "Finest" },
+    { regex: /\bSELECT\b/, name: "Select" },
+    { regex: /\bCONTENDERS\b/, name: "Contenders" },
+    { regex: /\bPRISM\b/, name: "Prizm" },
+    { regex: /\bCHRONICLES\b/, name: "Chronicles" },
+    { regex: /\bOPTIC\b/, name: "Optic" },
+    { regex: /\bMOSAIC\b/, name: "Mosaic" },
+    { regex: /\bSTADIUM\s*CLUB\b/, name: "Stadium Club" },
+    { regex: /\bHERITAGE\b/, name: "Heritage" },
+    { regex: /\bTRIBUTE\b/, name: "Tribute" },
+    { regex: /\bDYNASTY\b/, name: "Dynasty" },
+    { regex: /\bABSOLUTE\b/, name: "Absolute" },
+    { regex: /\bCLEAR\b/, name: "Clear" },
+    { regex: /\bDIAMOND\s*KINGS\b/, name: "Diamond Kings" },
+    { regex: /\bGOLD\s*LABEL\b/, name: "Gold Label" },
+    { regex: /\bTRIPLE\s*THREADS\b/, name: "Triple Threads" },
+    { regex: /\bFIVE\s*STAR\b/, name: "Five Star" },
+    { regex: /\bSIGNATURE\s*SERIES\b/, name: "Signature Series" },
+    { regex: /\bCERTIFIED\b/, name: "Certified" },
+    { regex: /\bIMMACULATE\b/, name: "Immaculate" },
+    { regex: /\bNATIONAL\s*TREASURES\b/, name: "National Treasures" },
+    
     // Common OCR mistakes
     { regex: /\bTCPPS\b/, name: "Topps" },
-    { regex: /\bLAPPS\b/, name: "Topps" }
+    { regex: /\bLOPPS\b/, name: "Topps" },
+    { regex: /\bLAPPS\b/, name: "Topps" },
+    { regex: /\b(0|O)PTIC\b/i, name: "Optic" }
   ];
   
   // Try to detect brand
