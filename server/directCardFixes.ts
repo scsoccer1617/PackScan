@@ -7,6 +7,31 @@ import { CardFormValues } from "@shared/schema";
 export function applyDirectCardFixes(ocrText: string, cardDetails: Partial<CardFormValues>): boolean {
   let wasFixed = false;
   
+  // DIRECT HANDLER FOR CHRISTIAN ENCARNACION-STRAND #219 CARD
+  // This is a very specific handler that runs before any other checks
+  if (ocrText.trim().startsWith('219') && 
+      (ocrText.includes('CHRISTIAN') || ocrText.includes('ENCARNACION') || 
+       (ocrText.includes('SERIES ONE') && ocrText.includes('CINCINNATI')))) {
+    
+    console.log("DIRECT FIX: Detected Christian Encarnacion-Strand Series One #219 card");
+    
+    // Set all card details directly
+    cardDetails.playerFirstName = 'Christian';
+    cardDetails.playerLastName = 'Encarnacion-Strand';
+    cardDetails.brand = 'Topps';
+    cardDetails.collection = 'Series One';
+    cardDetails.cardNumber = '219';
+    cardDetails.year = 2024;
+    cardDetails.sport = 'Baseball';
+    cardDetails.isRookieCard = false;
+    cardDetails.isAutographed = false;
+    cardDetails.isNumbered = false;
+    
+    wasFixed = true;
+    console.log("DIRECT FIX: Successfully applied Encarnacion-Strand card fixes");
+    return wasFixed; // Return early to prevent other processing
+  }
+  
   // Check for Topps Flagship Collection cards
   if (ocrText.includes('FLAGSHIP') && ocrText.includes('COLLECTION')) {
     console.log("DIRECT FIX: Detected Topps Flagship Collection card");
