@@ -120,15 +120,25 @@ export async function handleCardImageAnalysis(req: MulterRequest, res: Response)
     }
     
     // CARD NUMBER DETECTION
-    const dashNumberMatch = cleanText.match(/\b([A-Z0-9]+)-([0-9]+)\b/);
-    if (dashNumberMatch && dashNumberMatch[0]) {
-      cardDetails.cardNumber = dashNumberMatch[0];
-      console.log(`Detected card number with dash: ${cardDetails.cardNumber}`);
-      
-      // Check for 35th Anniversary card format
-      if (dashNumberMatch[0].match(/^\d+[A-Z]-\d+$/)) {
-        cardDetails.collection = "35th Anniversary";
-        console.log(`Setting collection from card number pattern: 35th Anniversary`);
+    if (cardDetails.brand === 'Score') {
+      // Score cards typically have a number at the top or beginning
+      const scoreNumberMatch = cleanText.match(/^[\s\n]*(\d{1,3})\b/);
+      if (scoreNumberMatch && scoreNumberMatch[1]) {
+        cardDetails.cardNumber = scoreNumberMatch[1];
+        console.log(`Detected Score card number: ${cardDetails.cardNumber}`);
+      }
+    } else {
+      // Standard format for modern cards with dash
+      const dashNumberMatch = cleanText.match(/\b([A-Z0-9]+)-([0-9]+)\b/);
+      if (dashNumberMatch && dashNumberMatch[0]) {
+        cardDetails.cardNumber = dashNumberMatch[0];
+        console.log(`Detected card number with dash: ${cardDetails.cardNumber}`);
+        
+        // Check for 35th Anniversary card format
+        if (dashNumberMatch[0].match(/^\d+[A-Z]-\d+$/)) {
+          cardDetails.collection = "35th Anniversary";
+          console.log(`Setting collection from card number pattern: 35th Anniversary`);
+        }
       }
     }
     
@@ -136,10 +146,48 @@ export async function handleCardImageAnalysis(req: MulterRequest, res: Response)
     if (cleanText.includes('TOPPS')) {
       cardDetails.brand = 'Topps';
       console.log(`Detected brand: Topps`);
+    } else if (cleanText.includes('SCORE') && !cleanText.includes('SCORE CARD')) {
+      cardDetails.brand = 'Score';
+      console.log(`Detected brand: Score`);
+      
+      // For Score cards, we need to handle the player name differently
+      // Score cards often have "SCORE" at the top followed by player name
+      // Like: "603 SCORE JUAN BELL"
+      if (cardDetails.playerFirstName === 'Score') {
+        // If we incorrectly detected "Score" as first name, look for actual player name
+        const scoreNamePattern = /SCORE[\s\n]+([A-Z]+)[\s\n]+([A-Z]+)/;
+        const scoreNameMatch = cleanText.match(scoreNamePattern);
+        
+        if (scoreNameMatch && scoreNameMatch[1] && scoreNameMatch[2]) {
+          cardDetails.playerFirstName = formatName(scoreNameMatch[1]);
+          cardDetails.playerLastName = formatName(scoreNameMatch[2]);
+          console.log(`Corrected player name for Score card: ${cardDetails.playerFirstName} ${cardDetails.playerLastName}`);
+        }
+      }
     }
     
     // COLLECTION & VARIANT DETECTION
-    if (cleanText.includes('STARS OF MLB') || cleanText.includes('SMLB')) {
+    if (cardDetails.brand === 'Score') {
+      // For Score cards, use the year to determine the collection
+      if (cardDetails.year) {
+        cardDetails.collection = `${cardDetails.year} Score`;
+        console.log(`Set Score collection based on year: ${cardDetails.collection}`);
+      } else {
+        cardDetails.collection = 'Score Base';
+        console.log(`Set default Score collection`);
+      }
+      
+      // Check for special Score collections
+      if (cleanText.includes('SCORE TRADED') || cleanText.includes('TRADED SET')) {
+        cardDetails.collection = 'Score Traded';
+        console.log(`Detected Score Traded collection`);
+      } else if (cleanText.includes('SCORE ROOKIES')) {
+        cardDetails.collection = 'Score Rookies';
+        console.log(`Detected Score Rookies collection`);
+      }
+    }
+    // Modern Topps collections
+    else if (cleanText.includes('STARS OF MLB') || cleanText.includes('SMLB')) {
       cardDetails.collection = 'Stars of MLB';
       console.log(`Detected collection: Stars of MLB`);
     } 
