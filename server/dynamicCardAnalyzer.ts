@@ -1081,36 +1081,71 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>)
     }
   }
   
-  // ENHANCED YEAR DETECTION
-  // Year detection with more sophisticated patterns and priority order
+  // ENHANCED YEAR DETECTION WITH COPYRIGHT PRIORITIZATION
+  // Year detection with sophisticated patterns focusing on copyright year
   const yearPatterns = [
-    // Copyright year is the most reliable indicator of the actual card year
-    { regex: /[©Ⓒ®]\s*(?:&\s*[©Ⓒ®])?\s*(20\d{2})/, description: "Copyright year", priority: 1 },
-    { regex: /COPYRIGHT\s*(20\d{2})/, description: "Copyright text", priority: 2 },
-    { regex: /\bCOPR\.\s*(20\d{2})/, description: "Copr. abbreviation", priority: 3 },
+    // Copyright symbol patterns - highest priority as these are the most reliable
+    { regex: /[©Ⓒ]\s*(?:&\s*[©Ⓒ])?\s*((?:19|20)\d{2})/, description: "Copyright symbol year", priority: 1 },
+    { regex: /[©Ⓒ](?:&[©Ⓒ])?\s*(?:TOPPS|MLB|NFL|NBA|NHL).*?((?:19|20)\d{2})/, description: "Copyright with brand year", priority: 1 },
+    { regex: /&[©Ⓒ]\s*((?:19|20)\d{2})/, description: "Ampersand copyright year", priority: 1 },
     
-    // Collection year often appears in the card title or collection name
-    { regex: /\b(20\d{2})\s+(?:TOPPS|BOWMAN|PANINI|DONRUSS|UPPER DECK|FLEER)\b/, description: "Year + brand", priority: 4 },
-    { regex: /\b(?:TOPPS|BOWMAN|PANINI|DONRUSS|UPPER DECK|FLEER)\s+(20\d{2})\b/, description: "Brand + year", priority: 5 },
+    // Text-based copyright indicators
+    { regex: /COPYRIGHT\s*((?:19|20)\d{2})/, description: "Copyright text", priority: 2 },
+    { regex: /\bCOPR\.\s*((?:19|20)\d{2})/, description: "Copr. abbreviation", priority: 2 },
+    { regex: /\(C\)\s*((?:19|20)\d{2})/, description: "Parentheses C year", priority: 2 },
+    
+    // Company info with year
+    { regex: /(?:TOPPS|PANINI|DONRUSS|UPPER DECK|FLEER|BOWMAN).*?(?:COMPANY|INC).*?((?:19|20)\d{2})/, description: "Company copyright", priority: 3 },
+    { regex: /(?:THE TOPPS COMPANY).*?((?:19|20)\d{2})/, description: "Topps Company year", priority: 3 },
+    
+    // Collection year patterns
+    { regex: /\b((?:19|20)\d{2})\s+(?:TOPPS|BOWMAN|PANINI|DONRUSS|UPPER DECK|FLEER)\b/, description: "Year + brand", priority: 4 },
+    { regex: /\b(?:TOPPS|BOWMAN|PANINI|DONRUSS|UPPER DECK|FLEER)\s+((?:19|20)\d{2})\b/, description: "Brand + year", priority: 4 },
     
     // Card set years in names
-    { regex: /\b(20\d{2})\s+(?:SERIES|UPDATE|CHROME|HERITAGE|PRIZM|OPTIC)\b/, description: "Year + collection", priority: 6 },
-    { regex: /\b(?:SERIES|UPDATE|CHROME|HERITAGE|PRIZM|OPTIC)\s+(20\d{2})\b/, description: "Collection + year", priority: 7 },
+    { regex: /\b((?:19|20)\d{2})\s+(?:SERIES|UPDATE|CHROME|HERITAGE|PRIZM|OPTIC)\b/, description: "Year + collection", priority: 5 },
+    { regex: /\b(?:SERIES|UPDATE|CHROME|HERITAGE|PRIZM|OPTIC)\s+((?:19|20)\d{2})\b/, description: "Collection + year", priority: 5 },
     
-    // Years with a specific edition number
-    { regex: /\b(20\d{2})\s+(?:EDITION|COLLECTION)\b/, description: "Year edition", priority: 8 },
+    // Years with specific context
+    { regex: /\b((?:19|20)\d{2})\s+(?:EDITION|COLLECTION)\b/, description: "Year edition", priority: 6 },
+    { regex: /\b((?:19|20)\d{2})\s+(?:SEASON|STATS|STATISTICS)\b/, description: "Year season", priority: 7 },
+    { regex: /\bROOKIE.*?((?:19|20)\d{2})/, description: "Rookie year", priority: 7 },
     
-    // Season statistics years
-    { regex: /\b(20\d{2})\s+(?:SEASON|STATS|STATISTICS)\b/, description: "Year season", priority: 9 },
+    // Special location pattern - years at the end of text are often copyright years
+    { regex: /((?:19|20)\d{2})(?:.{0,20})$/, description: "Year near end of text", priority: 8 },
     
-    // Standalone year as a last resort (most likely to be incorrect)
-    { regex: /\b(20\d{2})\b/, description: "Plain year", priority: 10 }
+    // Standalone year as a last resort
+    { regex: /\b((?:19|20)\d{2})\b/, description: "Plain year", priority: 9 }
   ];
   
   // Sort patterns by priority (lower = higher priority)
   const sortedPatterns = [...yearPatterns].sort((a, b) => a.priority - b.priority);
   
-  // Try to detect year with priority order
+  // Try to detect year with priority order - with enhanced copyright detection
+  // First, specifically search for copyright year pattern with logging to help troubleshoot
+  let copyrightText = '';
+  const copyrightPattern = /(?:[©Ⓒ&]|COPYRIGHT|COPR\.|THE TOPPS COMPANY|PANINI).*?((?:19|20)\d{2})/i;
+  const copyrightMatch = text.match(copyrightPattern);
+  
+  if (copyrightMatch) {
+    const fullMatch = copyrightMatch[0];
+    const copyrightYear = parseInt(copyrightMatch[1], 10);
+    const currentYear = new Date().getFullYear();
+    
+    // Log the full copyright text for debugging
+    copyrightText = fullMatch.trim();
+    console.log(`Detected copyright text: "${copyrightText}"`);
+    
+    // If year is valid, use it directly
+    if (copyrightYear >= 1950 && copyrightYear <= currentYear + 1) {
+      cardDetails.year = copyrightYear;
+      console.log(`Using copyright year as card date: ${cardDetails.year}`);
+      // Skip the general pattern matching since we found a high-confidence copyright year
+      return;
+    }
+  }
+  
+  // Fall back to the regular priority-based pattern matching if no copyright year was found
   for (const pattern of sortedPatterns) {
     const match = text.match(pattern.regex);
     if (match) {

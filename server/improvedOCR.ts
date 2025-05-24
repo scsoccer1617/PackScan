@@ -90,6 +90,11 @@ export async function handleCardImageAnalysis(req: MulterRequest, res: Response)
       };
     }
     
+    // Add estimated value field if missing
+    if (cardInfo.estimatedValue === undefined) {
+      cardInfo.estimatedValue = 0;
+    }
+    
     // Log the OCR results
     console.log('OCR results:', JSON.stringify(cardInfo, null, 2));
     console.timeEnd('card-analysis-total');
