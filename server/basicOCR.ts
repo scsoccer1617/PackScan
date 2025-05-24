@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { extractTextFromImage } from './googleVisionFetch';
 import { CardFormValues } from '@shared/schema';
+import { applyScoreCardFixes } from './scoreCardSpecificFixes';
 
 // Define a standalone MulterFile interface that doesn't conflict with built-in types
 interface MulterFile {
@@ -292,6 +293,21 @@ export async function handleCardImageAnalysis(req: MulterRequest, res: Response)
     else if (cleanText.includes('NBA') || cleanText.includes('BASKETBALL')) {
       cardDetails.sport = 'Basketball'; 
       console.log(`Sport detected: Basketball`);
+    }
+    
+    // Apply specific fixes for Score cards and other known edge cases
+    if (cardDetails.brand === 'Score') {
+      // Apply specialized fixes for Score cards
+      const fixedCardDetails = applyScoreCardFixes(cardDetails, cleanText);
+      console.log('Applied Score card specific fixes, updated details:', fixedCardDetails);
+      
+      console.timeEnd('card-analysis-total');
+      
+      // Return the fixed card details
+      return res.json({
+        success: true,
+        data: fixedCardDetails
+      });
     }
     
     console.log('Extracted card details:', cardDetails);
