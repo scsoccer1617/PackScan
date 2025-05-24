@@ -85,12 +85,38 @@ export async function handleCardImageAnalysis(req: MulterRequest, res: Response)
       isNumbered: false
     };
     
-    // PLAYER NAME DETECTION
-    const nameMatch = cleanText.match(/^[\s\n]*([A-Z]+)[\s\n]+([A-Z]+)[\s\n]/);
-    if (nameMatch && nameMatch[1] && nameMatch[2]) {
-      cardDetails.playerFirstName = formatName(nameMatch[1]);
-      cardDetails.playerLastName = formatName(nameMatch[2]);
-      console.log(`Detected player name from name pattern: ${cardDetails.playerFirstName} ${cardDetails.playerLastName}`);
+    // PLAYER NAME DETECTION - Using multiple approaches
+    
+    // Try to match the card number and player name pattern (common for many cards)
+    // Example: "89B-2 MANNY MACHADO"
+    const cardNumberNamePattern = /\b([A-Z0-9]+)-([0-9]+)\s+([A-Z]+)\s+([A-Z]+)\b/i;
+    const cardNumberNameMatch = cleanText.match(cardNumberNamePattern);
+    
+    if (cardNumberNameMatch && cardNumberNameMatch[3] && cardNumberNameMatch[4]) {
+      cardDetails.playerFirstName = formatName(cardNumberNameMatch[3]);
+      cardDetails.playerLastName = formatName(cardNumberNameMatch[4]);
+      console.log(`Detected player name near card number: ${cardDetails.playerFirstName} ${cardDetails.playerLastName}`);
+    } 
+    // Fallback to looking for a name at the beginning of the text
+    else {
+      const nameMatch = cleanText.match(/^[\s\n]*([A-Z]+)[\s\n]+([A-Z]+)[\s\n]/);
+      if (nameMatch && nameMatch[1] && nameMatch[2]) {
+        cardDetails.playerFirstName = formatName(nameMatch[1]);
+        cardDetails.playerLastName = formatName(nameMatch[2]);
+        console.log(`Detected player name from beginning of text: ${cardDetails.playerFirstName} ${cardDetails.playerLastName}`);
+      }
+      
+      // Try a more general pattern for standalone names in the text
+      if (!cardDetails.playerFirstName && !cardDetails.playerLastName) {
+        const generalNamePattern = /\b([A-Z]{3,})\s+([A-Z]{3,})\b/;
+        const generalNameMatch = cleanText.match(generalNamePattern);
+        
+        if (generalNameMatch && generalNameMatch[1] && generalNameMatch[2]) {
+          cardDetails.playerFirstName = formatName(generalNameMatch[1]);
+          cardDetails.playerLastName = formatName(generalNameMatch[2]);
+          console.log(`Detected player name with general pattern: ${cardDetails.playerFirstName} ${cardDetails.playerLastName}`);
+        }
+      }
     }
     
     // CARD NUMBER DETECTION
