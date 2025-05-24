@@ -262,6 +262,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
           front: '/uploads/1745871754339_Lindor_front.jpg',
           back: '/uploads/1745871754347_Lindor_back.jpg'
         },
+        // New cards recently added by OCR detection
+        4: {
+          front: '/uploads/1748048494981_Rafaela_front.jpg',
+          back: '/uploads/1748048494981_Rafaela_back.jpg'
+        },
+        5: {
+          front: '/uploads/1748048678781_Frelick_front.jpg',
+          back: '/uploads/1748048678781_Frelick_back.jpg'
+        },
+        6: {
+          front: '/uploads/1748098999257_Machado_front.jpg',
+          back: '/uploads/1748098999257_Machado_back.jpg'
+        },
       };
       
       // Get the path for this card and side
