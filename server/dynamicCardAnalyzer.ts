@@ -3,6 +3,7 @@ import { extractTextFromImage } from "./googleVisionFetch";
 import { processFlagshipCollectionCard } from "./flagshipCardHandler";
 import { applyDirectCardFixes } from "./directCardFixes";
 import { processJordanWicksCard } from "./jordanWicksHandler";
+import { processUpperDeckCard } from "./upperDeckCardHandler";
 
 interface TextAnnotation {
   description: string;
@@ -85,9 +86,15 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     
     if (!handledByDirectFix) {
       // Check if this is a Topps Flagship Collection card
+      // Check for Topps Flagship Collection
       if (cleanText.includes('FLAGSHIP') && cleanText.includes('COLLECTION')) {
         handledBySpecialProcessor = processFlagshipCollectionCard(fullText, cardDetails);
         console.log(`Topps Flagship Collection card detected: ${handledBySpecialProcessor ? 'successfully processed' : 'failed to process'}`);
+      } 
+      // Check for Upper Deck cards
+      else if (cleanText.includes('UPPER DECK') || cleanText.includes('THE UPPER DECK COM')) {
+        handledBySpecialProcessor = processUpperDeckCard(fullText, cardDetails);
+        console.log(`Upper Deck card detected: ${handledBySpecialProcessor ? 'successfully processed' : 'failed to process'}`);
       }
     } else {
       console.log("Direct card fix was applied, skipping other processors");
