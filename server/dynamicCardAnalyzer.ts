@@ -42,32 +42,6 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     console.log('Full OCR text:', fullText);
     
     // Initialize card details object with default values
-
-function analyzeCondition(ocrResult: OCRResult): string {
-  const { positionedText } = ocrResult;
-  
-  // Look for condition indicators in specific positions
-  const conditionPatterns = [
-    { regex: /PSA\s*(\d{1,2})/i, format: 'PSA' },
-    { regex: /BGS\s*(\d{1,2}(?:\.\d)?)/i, format: 'BGS' },
-    { regex: /SGC\s*(\d{1,2}(?:\.\d)?)/i, format: 'SGC' }
-  ];
-
-  // Check each text element for condition information
-  for (const text of positionedText) {
-    for (const pattern of conditionPatterns) {
-      const match = text.text.match(pattern.regex);
-      if (match) {
-        const grade = match[1];
-        return `${pattern.format} ${grade}`;
-      }
-    }
-  }
-
-  // Default to PSA 8 if no condition found
-  return 'PSA 8';
-}
-
     const cardDetails: Partial<CardFormValues> = {
       condition: 'PSA 8', // Default condition per requirements
       estimatedValue: 0, // Default value
@@ -686,64 +660,27 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>)
  * - This function should NOT set serial numbers detected from other parts of the card
  *   (like paragraph text that might mention "10 of 25 players" or similar)
  */
-function extractSerialNumber(ocrResult: OCRResult, cardDetails: Partial<CardFormValues>): void {
-  const { positionedText } = ocrResult;
+function extractSerialNumber(text: string, cardDetails: Partial<CardFormValues>): void {
+  // REFINED APPROACH:
+  // Since we don't have position data in this function, we need to be extremely cautious
+  // about detecting serial numbers from card stats or other text that might match the pattern
   
-  // Look for serial numbers specifically in bottom right corner
-  const serialNumberCandidates = positionedText.filter(item => {
-    const text = item.text;
-    const pos = item.position;
-    
-    // Check if text matches serial number format (e.g., "123/499")
-    const isSerialFormat = /^\d{1,4}\/\d{1,4}$/.test(text);
-    
-    // Verify position is in bottom right corner
-    const isBottomRight = pos.y > (pos.height * 0.7) && pos.x > (pos.width * 0.7);
-    
-    return isSerialFormat && isBottomRight;
-  });
-
-  if (serialNumberCandidates.length > 0) {
-    cardDetails.serialNumber = serialNumberCandidates[0].text;
-    cardDetails.isNumbered = true;
-    console.log(`Detected serial number in bottom right: ${cardDetails.serialNumber}`);
-  }
+  // We'll be much more restrictive in the plain text analyzer:
+  // - Only process standalone serial numbers (i.e., not embedded in larger text)
+  // - Don't set a serial number from this function at all - leave it to the Vision API
+  //   which can properly detect the position
+  
+  // This function will do nothing - the proper serial number detection happens in 
+  // the Vision API with position detection. This avoids false positives.
+  
+  console.log('Skipping serial number detection in plain text analyzer - will be handled by Vision API with position data');
+  return;
 }
 
 /**
  * Detect special card features (rookie, autograph, etc.)
  */
-function detectCardFeatures(ocrResult: OCRResult, cardDetails: Partial<CardFormValues>): void {
-  const { fullText: text, positionedText } = ocrResult;
-  
-  // Variant detection with position awareness
-  const variantPatterns = [
-    { keyword: 'REFRACTOR', name: 'Refractor', position: 'center' },
-    { keyword: 'PARALLEL', name: 'Parallel', position: 'center' },
-    { keyword: 'PRIZM', name: 'Prizm', position: 'center' },
-    { keyword: 'CHROME', name: 'Chrome', position: 'top' },
-    { keyword: 'AQUA FOIL', name: 'Aqua Foil', position: 'center' },
-    { keyword: 'GOLD', name: 'Gold', position: 'any' },
-    { keyword: 'SILVER', name: 'Silver', position: 'any' }
-  ];
-
-  // Check for variants in specific positions
-  for (const variant of variantPatterns) {
-    const variantText = positionedText.find(item => {
-      const matchesKeyword = item.text.toUpperCase().includes(variant.keyword);
-      if (!matchesKeyword) return false;
-
-      if (variant.position === 'any') return true;
-      return isInRegion(item.position, variant.position as any);
-    });
-
-    if (variantText) {
-      cardDetails.variant = variant.name;
-      console.log(`Detected ${variant.name} variant in ${variant.position} position`);
-      break;
-    }
-  }
-
+function detectCardFeatures(text: string, cardDetails: Partial<CardFormValues>): void {
   // Enhanced Rookie card detection
   // Look for any of these common rookie indicators on cards
   const rookieIndicators = [
