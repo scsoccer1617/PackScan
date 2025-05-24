@@ -284,6 +284,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           front: '/uploads/1748119546246_Wicks_front.jpg',
           back: '/uploads/1748119546254_Wicks_back.jpg'
         },
+        9: {
+          front: '/uploads/1748119870910_Ramirez_front.jpg',
+          back: '/uploads/1748119870910_Ramirez_back.jpg'
+        },
       };
       
       // Get the path for this card and side
