@@ -1,0 +1,115 @@
+Full OCR text: 219
+SERIES ONE
+X@TOPPS
+CHRISTIAN ENCARNACION-STRAND
+CINCINNATI REDSⓇ - first baseman
+HT: 6'0" WT: 224 BATS: RIGHT THROWS: RIGHT
+DRAFTED: TWINS #4-JULY, 2021 ACQ: TRADE WITH TWINS, 8-2-22
+BORN: 12-1-99, WALNUT CREEK, CA HOME: PLEASANT HILL, CA
+MAJOR AND MINOR LEAGUE BATTING RECORD
+YR CLUB
+G AB
+R H 2B 3B HR RBI SB BB
+SLG
+OPS
+AVG WAR
+21 FORT MYERS
+22
+87
+17
+34
+2
+22 CEDAR RAPIDS
+74
+294
+52
+87
+22 CHATTANOOGA
+35
+136
+13
+42
+22 WICHITA
+13
+54 11
+18
+23 LOUISVILLE
+67
+278
+65
+92
+21
+23 REDS
+63
+222
+29
+60
+26227
+75
+231120
+4 18
+20
+68
+29
+17
+20
+62
+13 37
+MAJ. LEA. TOTALS
+63 222
+29 60
+7 0 13
+37
+2701222
+5
+.598 1.022
+.391
+30
+.599
+.968
+.296
+6
+522 .873
+.309
+4
+.685 1.085
+.333
+33
+.637 1.042
+.331
+14
+.477 .805 .270 0.5
+14 .477 .805 .270 0.5
+Christian's 27-character surname is officially the longest in MLB annals, but his
+journey to the big leagues was decidedly short. The tank-like slugger needed just
+two years to sprint from Oklahoma State to The Show, celebrating with a home
+run in his second Reds game on July 18. Exactly one month later, he hit a walk-off
+blast in a 1-0 win over Toronto.
+r.
+tapps
+PLAYERS
+&© 2024 THE TOPPS COMPANY, INC. ALL RIGHTS RESERVED. TOPPS IS A REGISTERED TRADEMARK OF THE TOPPS COMPANY, INC. Major League Baseball
+trademarks and copyrights are used with permission of Major League Baseball. Visit MLB.com. OFFICIALLY LICENSED PRODUCT OF MLB. Officially Licensed
+Product of MLB Players, Inc. Visit MLBPLAYERS.COM, the Players Choice on the web. WWW.TOPPS.COM. CODE #CMP071002
+Detected player name from multi-word pattern: Series X
+Detected card number with dash: 8-2
+Detected brand: Topps
+Using copyright year as card date: 2024
+No reliable serial number found in plain text analysis
+Sport detected (explicit indicator): Baseball
+Extracted card details: {
+  condition: 'PSA 8',
+  playerFirstName: 'Series',
+  playerLastName: 'X',
+  brand: 'Topps',
+  collection: '',
+  cardNumber: '8-2',
+  year: 2024,
+  variant: '',
+  serialNumber: '',
+  estimatedValue: 0,
+  sport: 'Baseball',
+  isRookieCard: false,
+  isAutographed: false,
+  isNumbered: false
+}

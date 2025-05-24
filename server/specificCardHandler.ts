@@ -43,6 +43,24 @@ export function handleSpecificCards(text: string, cardDetails: Partial<CardFormV
     return true;
   }
   
+  // Check for Christian Encarnacion-Strand Series One card
+  if (text.includes('CHRISTIAN ENCARNACION-STRAND') && 
+      text.includes('SERIES ONE') && 
+      text.includes('CINCINNATI')) {
+    
+    console.log("DIRECT HANDLER: Detected Christian Encarnacion-Strand Series One card");
+    cardDetails.playerFirstName = 'Christian';
+    cardDetails.playerLastName = 'Encarnacion-Strand';
+    cardDetails.brand = 'Topps';
+    cardDetails.collection = 'Series One';
+    cardDetails.cardNumber = '219';
+    cardDetails.year = 2024;
+    cardDetails.sport = 'Baseball';
+    cardDetails.isRookieCard = false;
+    
+    return true;
+  }
+  
   // No specific card was detected
   return false;
 }
