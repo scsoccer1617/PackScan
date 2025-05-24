@@ -62,48 +62,93 @@ export async function handleCardImageAnalysis(req: MulterRequest, res: Response)
     
     // Race the analysis against the timeout
     const cardInfoPromise = analyzeSportsCardImage(req.file.buffer.toString('base64'));
-    let cardInfo = await Promise.race([cardInfoPromise, timeout])
-      .catch(error => {
-        console.error('Analysis timeout or error:', error);
-        // Return default values if timeout occurs
-        return {
+    try {
+      let cardInfo: any = await Promise.race([cardInfoPromise, timeout]);
+      
+      // If we got a valid result, make sure required fields have values
+      if (cardInfo && typeof cardInfo === 'object') {
+        const defaultsIfMissing = {
+          condition: 'PSA 8',
+          sport: 'Baseball',
+          brand: cardInfo.brand || 'Topps',
+          year: cardInfo.year || new Date().getFullYear(),
+          playerFirstName: cardInfo.playerFirstName || 'Unknown',
+          playerLastName: cardInfo.playerLastName || 'Player',
+          collection: cardInfo.collection || '',
+          cardNumber: cardInfo.cardNumber || '',
+          variant: cardInfo.variant || '',
+          estimatedValue: cardInfo.estimatedValue || 0,
+          isRookieCard: !!cardInfo.isRookieCard,
+          isAutographed: !!cardInfo.isAutographed,
+          isNumbered: !!cardInfo.isNumbered
+        };
+        
+        // Make sure required fields exist
+        Object.entries(defaultsIfMissing).forEach(([key, value]) => {
+          if (cardInfo[key] === undefined || cardInfo[key] === null) {
+            cardInfo[key] = value;
+          }
+        });
+        
+        // Log the OCR results
+        console.log('OCR results:', JSON.stringify(cardInfo, null, 2));
+        console.timeEnd('card-analysis-total');
+        
+        // Send the response
+        return res.json({
+          success: true,
+          data: cardInfo
+        });
+      } else {
+        // Handle invalid result
+        console.error('Invalid card info returned from analysis:', cardInfo);
+        const fallbackData = {
           condition: 'PSA 8',
           sport: 'Baseball',
           brand: 'Topps',
           year: new Date().getFullYear(),
-          errorMessage: 'Analysis timed out, please try again with a clearer image'
+          playerFirstName: 'Unknown',
+          playerLastName: 'Player',
+          collection: '',
+          cardNumber: '',
+          variant: '',
+          estimatedValue: 0,
+          isRookieCard: false,
+          isAutographed: false,
+          isNumbered: false,
+          errorMessage: 'Analysis result was invalid, please try again with a clearer image'
         };
-      });
-    
-    // Ensure we always have valid data to return to the client
-    if (!cardInfo || typeof cardInfo !== 'object') {
-      console.error('Invalid card info returned from analysis:', cardInfo);
-      // Provide a default fallback if the result is invalid
-      cardInfo = {
+        
+        // Log the fallback
+        console.log('Using fallback data:', JSON.stringify(fallbackData, null, 2));
+        console.timeEnd('card-analysis-total');
+        
+        // Send the response with fallback data
+        return res.json({
+          success: true,
+          data: fallbackData
+        });
+      }
+    } catch (error) {
+      // Handle analysis error
+      console.error('Error during card analysis:', error);
+      const errorResponse = {
         condition: 'PSA 8',
         sport: 'Baseball',
         brand: 'Topps',
         year: new Date().getFullYear(),
         playerFirstName: 'Unknown',
         playerLastName: 'Player',
-        errorMessage: 'Analysis result was invalid, please try again with a clearer image'
+        errorMessage: 'Analysis error, please try again with a clearer image'
       };
+      
+      console.timeEnd('card-analysis-total');
+      return res.json({
+        success: true,
+        data: errorResponse
+      });
     }
-    
-    // Add estimated value field if missing
-    if (cardInfo.estimatedValue === undefined) {
-      cardInfo.estimatedValue = 0;
-    }
-    
-    // Log the OCR results
-    console.log('OCR results:', JSON.stringify(cardInfo, null, 2));
-    console.timeEnd('card-analysis-total');
-    
-    // Send the response
-    res.json({
-      success: true,
-      data: cardInfo
-    });
+    // This part should never be reached due to the returns in the try/catch block above
     
   } catch (error: any) {
     console.error('Error analyzing card image:', error);
