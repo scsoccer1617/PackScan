@@ -121,11 +121,25 @@ export async function handleCardImageAnalysis(req: MulterRequest, res: Response)
     
     // CARD NUMBER DETECTION
     if (cardDetails.brand === 'Score') {
-      // Score cards typically have a number at the top or beginning
-      const scoreNumberMatch = cleanText.match(/^[\s\n]*(\d{1,3})\b/);
+      // Score cards typically have a number at the top or beginning of the card
+      // First try to find a plain number at the beginning
+      const scoreNumberPattern = /^[\s\n]*(\d{1,3})\b/;
+      const scoreNumberMatch = cleanText.match(scoreNumberPattern);
+      
       if (scoreNumberMatch && scoreNumberMatch[1]) {
         cardDetails.cardNumber = scoreNumberMatch[1];
-        console.log(`Detected Score card number: ${cardDetails.cardNumber}`);
+        console.log(`Detected Score card number from beginning: ${cardDetails.cardNumber}`);
+      } 
+      // If not found at beginning, look anywhere in the first few words
+      else {
+        const scoreNumberAnywhere = /\b(\d{1,3})\b/;
+        const firstFewWords = cleanText.split(/\s+/).slice(0, 5).join(' ');
+        const scoreNumberAnywhereMatch = firstFewWords.match(scoreNumberAnywhere);
+        
+        if (scoreNumberAnywhereMatch && scoreNumberAnywhereMatch[1]) {
+          cardDetails.cardNumber = scoreNumberAnywhereMatch[1];
+          console.log(`Detected Score card number from first few words: ${cardDetails.cardNumber}`);
+        }
       }
     } else {
       // Standard format for modern cards with dash
@@ -168,13 +182,20 @@ export async function handleCardImageAnalysis(req: MulterRequest, res: Response)
     
     // COLLECTION & VARIANT DETECTION
     if (cardDetails.brand === 'Score') {
-      // For Score cards, use the year to determine the collection
-      if (cardDetails.year) {
+      // For old Score cards (pre-2000), the base set typically doesn't have a specific collection name
+      // Only special insert sets have collection names like "Rookies" or "Traded"
+      if (cardDetails.year && cardDetails.year < 2000) {
+        // For vintage Score, just leave collection blank for base sets
+        cardDetails.collection = '';
+        console.log(`Score base set from ${cardDetails.year}, no specific collection name needed`);
+      } else if (cardDetails.year) {
+        // For modern Score, use year in collection name
         cardDetails.collection = `${cardDetails.year} Score`;
-        console.log(`Set Score collection based on year: ${cardDetails.collection}`);
+        console.log(`Set modern Score collection: ${cardDetails.collection}`);
       } else {
-        cardDetails.collection = 'Score Base';
-        console.log(`Set default Score collection`);
+        // Fallback
+        cardDetails.collection = '';
+        console.log(`No specific collection for Score base set`);
       }
       
       // Check for special Score collections
