@@ -16,7 +16,7 @@ import {
 import { storage } from './storage';
 import { searchCardValues, getEbaySearchUrl } from './ebayService';
 import { z } from 'zod';
-import { handleCardImageAnalysis } from './basicOCR';
+import { handleCardImageAnalysis } from './directOCR';
 import { extractTextFromImage, analyzeSportsCardImage } from './googleVisionFetch';
 import { handleJordanWicksCard } from './jordanWicksRoute';
 import { join } from 'path';
