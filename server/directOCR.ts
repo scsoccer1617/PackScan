@@ -72,14 +72,20 @@ export async function handleCardImageAnalysis(req: MulterRequest, res: Response)
       // Extract full text from OCR result
       let fullText = '';
       if (typeof ocrResult === 'object') {
-        // Try to get the full text from the result object
+        console.log("OCR result object:", JSON.stringify(ocrResult, null, 2));
+        
+        // Check if we have a fullText property
         if (ocrResult.fullText) {
           fullText = ocrResult.fullText;
+          console.log("Found fullText property:", fullText);
         } else {
-          // Fallback to concatenating all string values in the object
-          fullText = Object.values(ocrResult)
-            .filter(value => typeof value === 'string')
-            .join(' ');
+          // Extract all string values from the object and use them as text
+          const stringValues = Object.entries(ocrResult)
+            .filter(([key, value]) => typeof value === 'string')
+            .map(([key, value]) => value);
+          
+          fullText = stringValues.join(' ');
+          console.log("Constructed fullText from values:", fullText);
         }
         
         // Check for specific cards first
