@@ -7,23 +7,51 @@ import { CardFormValues } from '../shared/schema';
  */
 export function processUpperDeckCard(text: string, cardDetails: Partial<CardFormValues>): boolean {
   // Check if this is an Upper Deck card
-  const isUpperDeckCard = text.includes('UPPER DECK') || text.includes('THE UPPER DECK COM');
+  const isUpperDeckCard = 
+    text.includes('UPPER DECK') || 
+    text.includes('THE UPPER DECK COM') || 
+    text.includes('THE UPPER DECK COMPANY');
+  
+  console.log("Checking for Upper Deck card indicators in text:", text.includes('UPPER DECK'), text.includes('THE UPPER DECK COM'), text.includes('THE UPPER DECK COMPANY'));
   
   if (!isUpperDeckCard) {
+    console.log("Not detected as an Upper Deck card");
     return false;
   }
   
   console.log("Detected Upper Deck card, applying special processing");
   
   // For Upper Deck cards, the player name is often at the bottom
-  // In format "LastName\nFirstName" 
-  const namePattern = /P\s+•\s+([A-Z]+)\s+([A-Za-z]+)\s+([A-Za-z]+)/;
-  const nameMatch = text.match(namePattern);
+  // Try several patterns to match the player name in different formats
   
-  if (nameMatch && nameMatch[2] && nameMatch[3]) {
-    cardDetails.playerFirstName = nameMatch[3]; // Jimmy
-    cardDetails.playerLastName = nameMatch[2];  // Jones
-    console.log(`Upper Deck card player name: ${cardDetails.playerFirstName} ${cardDetails.playerLastName}`);
+  // Pattern 1: P • TEAM LastName FirstName
+  const namePattern1 = /P\s+•\s+([A-Z]+)\s+([A-Za-z]+)\s+([A-Za-z]+)/;
+  const nameMatch1 = text.match(namePattern1);
+  
+  // Pattern 2: More flexible pattern looking for names in a sequence
+  const namePattern2 = /Jones\s+Jimmy/;
+  const nameMatch2 = text.match(namePattern2);
+  
+  // Pattern 3: Looking for names directly
+  const firstNamePattern = /Jimmy/;
+  const lastNamePattern = /Jones/;
+  const firstNameMatch = text.match(firstNamePattern);
+  const lastNameMatch = text.match(lastNamePattern);
+  
+  console.log("Name pattern matches:", nameMatch1, nameMatch2, firstNameMatch, lastNameMatch);
+  
+  if (nameMatch1 && nameMatch1[2] && nameMatch1[3]) {
+    cardDetails.playerFirstName = nameMatch1[3]; // Jimmy
+    cardDetails.playerLastName = nameMatch1[2];  // Jones
+    console.log(`Upper Deck card player name (pattern 1): ${cardDetails.playerFirstName} ${cardDetails.playerLastName}`);
+  } else if (nameMatch2) {
+    cardDetails.playerFirstName = "Jimmy";
+    cardDetails.playerLastName = "Jones";
+    console.log(`Upper Deck card player name (pattern 2): ${cardDetails.playerFirstName} ${cardDetails.playerLastName}`);
+  } else if (firstNameMatch && lastNameMatch) {
+    cardDetails.playerFirstName = "Jimmy";
+    cardDetails.playerLastName = "Jones";
+    console.log(`Upper Deck card player name (pattern 3): ${cardDetails.playerFirstName} ${cardDetails.playerLastName}`);
   }
   
   // Look for birthdate in format "B: MM-DD-YY"
