@@ -300,35 +300,69 @@ export async function registerRoutes(app: Express): Promise<Server> {
         filePath = join(process.cwd(), imagePath.replace(/^\//, ''));
       } else {
         // For new cards without mapping, try to find the image in uploads directory
-        // Check if card has frontImage/backImage properties
         const card = await db.select().from(cards).where(eq(cards.id, id)).limit(1);
         
         if (card.length > 0) {
-          // Try to find any uploaded images that match player name pattern
-          const playerName = card[0].playerFirstName + '_' + card[0].playerLastName;
-          const normalizedPlayerName = playerName.replace(/\s+/g, '_');
-          const uploadsDir = join(process.cwd(), 'uploads');
-          
-          if (fs.existsSync(uploadsDir)) {
-            const files = fs.readdirSync(uploadsDir);
-            // Look for any file containing the player name and side (front/back)
-            const matchingFile = files.find(file => 
-              file.toLowerCase().includes(normalizedPlayerName.toLowerCase()) && 
-              file.toLowerCase().includes(side.toLowerCase())
-            );
+          // First, check if the card has explicit frontImage/backImage paths stored
+          const cardImage = card[0][side === 'front' ? 'frontImage' : 'backImage'];
+          if (cardImage && fs.existsSync(join(process.cwd(), cardImage.replace(/^\//, '')))) {
+            filePath = join(process.cwd(), cardImage.replace(/^\//, ''));
+            console.log(`Using stored image path for ${card[0].playerFirstName} ${card[0].playerLastName} (ID: ${id}): ${cardImage}`);
+          } else {
+            // Look for image by timestamp and player last name (common upload pattern)
+            // Example: 1748120190492_Rodriguez_front.jpg
+            const uploadsDir = join(process.cwd(), 'uploads');
             
-            if (matchingFile) {
-              filePath = join(uploadsDir, matchingFile);
-              console.log(`Found uploaded image for ${card[0].playerFirstName} ${card[0].playerLastName} (ID: ${id}): ${matchingFile}`);
-            } else {
-              console.log(`No image found for ${card[0].playerFirstName} ${card[0].playerLastName} (ID: ${id}) in uploads directory`);
+            if (fs.existsSync(uploadsDir)) {
+              const files = fs.readdirSync(uploadsDir);
+              
+              // Try different matching patterns
+              let matchingFile = null;
+              
+              // 1. First try exact timestamp + lastname pattern (most recent uploads)
+              matchingFile = files.find(file => 
+                file.toLowerCase().includes(card[0].playerLastName.toLowerCase()) && 
+                file.toLowerCase().includes(side.toLowerCase())
+              );
+              
+              // 2. If no match, try just the player last name with side
+              if (!matchingFile) {
+                matchingFile = files.find(file => 
+                  file.toLowerCase().includes(card[0].playerLastName.toLowerCase()) && 
+                  file.toLowerCase().includes(side.toLowerCase())
+                );
+              }
+              
+              // 3. Try matching by card number if available
+              if (!matchingFile && card[0].cardNumber) {
+                matchingFile = files.find(file => 
+                  file.includes(card[0].cardNumber) && 
+                  file.toLowerCase().includes(side.toLowerCase())
+                );
+              }
+              
+              if (matchingFile) {
+                filePath = join(uploadsDir, matchingFile);
+                console.log(`Found uploaded image for ${card[0].playerFirstName} ${card[0].playerLastName} (ID: ${id}): ${matchingFile}`);
+                
+                // Update the card record with the image path for future use
+                const imagePath = `/uploads/${matchingFile}`;
+                if (side === 'front') {
+                  await db.update(cards).set({ frontImage: imagePath }).where(eq(cards.id, id));
+                } else {
+                  await db.update(cards).set({ backImage: imagePath }).where(eq(cards.id, id));
+                }
+                console.log(`Updated ${side} image path in database for card ID ${id}: ${imagePath}`);
+              } else {
+                console.log(`No image found for ${card[0].playerFirstName} ${card[0].playerLastName} (ID: ${id}) in uploads directory`);
+              }
             }
           }
         }
         
         if (!filePath) {
-          console.log(`No image mapping found for card ${id}, side ${side}`);
-          return res.status(404).json({ error: 'Image mapping not found' });
+          console.log(`No image found for card ${id}, side ${side}`);
+          return res.status(404).json({ error: 'Image not found' });
         }
       }
       
