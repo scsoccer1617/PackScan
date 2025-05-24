@@ -58,10 +58,17 @@ export default function CardGrid() {
     cards.forEach(card => {
       const year = card.year || 'Unknown Year';
       const brand = card.brand?.name || 'Unknown Brand';
-      const collection = card.collection || 'Uncategorized';
       
-      // Create group label in format: "2024 - Topps Stars of MLB"
-      const groupKey = `${year} - ${brand} ${collection}`;
+      // Only add collection if it exists, otherwise just use Year and Brand
+      let groupKey = '';
+      if (card.collection) {
+        // Create group label in format: "2024 - Topps Stars of MLB"
+        groupKey = `${year} - ${brand} ${card.collection}`;
+      } else {
+        // Create group label without collection: "1990 - Score"
+        groupKey = `${year} - ${brand}`;
+      }
+      
       groups.add(groupKey);
       
       if (!grouped[groupKey]) {
