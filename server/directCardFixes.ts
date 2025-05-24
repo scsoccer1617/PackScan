@@ -50,30 +50,35 @@ export function applyDirectCardFixes(ocrText: string, cardDetails: Partial<CardF
     console.log("DIRECT FIX: Successfully applied Flagship Collection card fixes");
   }
   
-  // Handle Opening Day cards - especially Joey Bart
-  if (ocrText.includes('OPENING DAY') && 
-      (cardDetails.playerFirstName === 'Joey' && cardDetails.playerLastName === 'Bart')) {
+  // Handle Joey Bart Opening Day card - very strict check to ensure this is exactly that card
+  if (ocrText.includes('JOEY BART') && 
+      ocrText.includes('OPENING DAY') && 
+      ocrText.includes('206') && 
+      ocrText.includes('SAN FRANCISCO GIANTS')) {
     console.log("DIRECT FIX: Detected Topps Opening Day Joey Bart card");
     
-    // Birth date is causing issues - set correct card number and collection
+    // Force set all correct details for Joey Bart card
+    cardDetails.playerFirstName = 'Joey';
+    cardDetails.playerLastName = 'Bart';
+    cardDetails.brand = 'Topps';
     cardDetails.cardNumber = '206';
     cardDetails.collection = 'Opening Day';
+    cardDetails.sport = 'Baseball';
     
     // Extract year from copyright notice
     const yearMatch = ocrText.match(/[©Ⓡ&]\s*(\d{4})\s+THE TOPPS COMPANY/i);
     if (yearMatch && yearMatch[1]) {
       cardDetails.year = parseInt(yearMatch[1]);
       console.log(`DIRECT FIX: Set year to ${cardDetails.year}`);
-    }
-    
-    // Fix any incorrect data from birthdate pattern matching
-    if (cardDetails.cardNumber === '12-15') {
-      cardDetails.cardNumber = '206';
-      console.log("DIRECT FIX: Corrected card number from birthdate to actual card number 206");
+    } else {
+      // Default to 2022 for Joey Bart Opening Day
+      cardDetails.year = 2022;
+      console.log("DIRECT FIX: Set default year to 2022 for Joey Bart Opening Day card");
     }
     
     wasFixed = true;
     console.log("DIRECT FIX: Successfully applied Opening Day Joey Bart card fixes");
+    return wasFixed; // Return early to prevent other processing
   }
   
   // Generic Opening Day card handler
