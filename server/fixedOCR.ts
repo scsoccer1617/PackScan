@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { analyzeSportsCardImage } from './dynamicCardAnalyzer';
+import { analyzeSportsCardImage } from './simpleCardAnalyzer';
 import { CardFormValues } from '@shared/schema';
 
 // Define a standalone MulterFile interface that doesn't conflict with built-in types
