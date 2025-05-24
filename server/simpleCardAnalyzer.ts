@@ -1,5 +1,6 @@
 import { CardFormValues } from "@shared/schema";
 import { extractTextFromImage } from "./googleVisionFetch";
+import { analyzeScoreCard } from "./scoreCardAnalyzer";
 
 /**
  * A simplified card analyzer that avoids complex detection logic and focuses on 
@@ -13,6 +14,19 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     
     console.log('Full OCR text:', fullText);
     
+    // Check for Score card format first (they have a distinctive layout)
+    // Score cards typically start with a card number followed by "SCORE" text
+    if (
+      fullText.match(/^\s*\d{3}\s*[\r\n]+\s*SCORE\b/i) || 
+      (fullText.includes('SCORE') && 
+       fullText.match(/©\s*1990\s*SCORE/i))
+    ) {
+      console.log('Detected Score card format, using specialized analyzer');
+      // Use the specialized Score card analyzer for better accuracy
+      return analyzeScoreCard(fullText);
+    }
+    
+    // For all other cards, use the standard analyzer
     // Initialize card details with default values
     const cardDetails: Partial<CardFormValues> = {
       condition: 'PSA 8',
@@ -36,19 +50,36 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     
     // STEP 1: Try to identify the player name using various patterns
     
-    // First check for brand name "SCORE" to avoid confusing it with player name
-    if (cleanText.includes('SCORE') && !cleanText.includes('SCORE CARD')) {
+    // First check for Score cards which have a distinctive format
+    if (cleanText.includes('SCORE') && cleanText.match(/^\s*\d{3}\s*SCORE/i)) {
+      // This is definitely a Score card with number at the top
       cardDetails.brand = 'Score';
       console.log(`Detected brand: Score`);
       
-      // For Score cards, player name typically appears after the brand and card number
-      const scoreNamePattern = /SCORE[\s\n]+([A-Z]+)[\s\n]+([A-Z]+)[\s\n]/;
-      const scoreNameMatch = cleanText.match(scoreNamePattern);
+      // Get the card number from the beginning
+      const scoreCardNumberMatch = cleanText.match(/^\s*(\d{3})/);
+      if (scoreCardNumberMatch && scoreCardNumberMatch[1]) {
+        cardDetails.cardNumber = scoreCardNumberMatch[1];
+        console.log(`Detected Score card number from top: ${cardDetails.cardNumber}`);
+      }
       
-      if (scoreNameMatch && scoreNameMatch[1] && scoreNameMatch[2]) {
-        cardDetails.playerFirstName = formatName(scoreNameMatch[1]);
-        cardDetails.playerLastName = formatName(scoreNameMatch[2]);
-        console.log(`Detected Score card player name: ${cardDetails.playerFirstName} ${cardDetails.playerLastName}`);
+      // For Score cards from the 1990s, the player name typically appears right after SCORE
+      // The pattern is usually: "603 SCORE JUAN BELL"
+      const lines = fullText.split('\n').map(line => line.trim()).filter(line => line);
+      
+      // Find the first 3-4 lines which typically contain the brand and player name
+      const topLines = lines.slice(0, 4);
+      console.log('Score card top lines:', topLines);
+      
+      // Look for the player name pattern specifically
+      for (let i = 0; i < topLines.length; i++) {
+        if (topLines[i].toUpperCase() === 'SCORE' && i + 2 < topLines.length) {
+          // The next two lines are typically first and last name
+          cardDetails.playerFirstName = formatName(topLines[i+1]);
+          cardDetails.playerLastName = formatName(topLines[i+2]);
+          console.log(`Detected Score card player name from layout: ${cardDetails.playerFirstName} ${cardDetails.playerLastName}`);
+          break;
+        }
       }
     } else {
       // Standard pattern for most modern cards
