@@ -304,6 +304,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       else {
         // If the file doesn't exist in uploads, try to serve an attached_assets fallback
         const fallbackImageMap = {
+          8: { front: 'IMG_3542.jpeg', back: 'IMG_3543.jpeg' }, // Jordan Wicks Flagship Collection
           20: { front: 'frelick_front_2024_topps_35year.jpg', back: 'frelick_back_2024_35year.jpg' },
           22: { front: 'manaea_front_2024_topps_series2.jpg', back: 'manaea_back_2024_topps_series2.jpg' },
           23: { front: 'bregman_front_2024_topps_35year.jpg', back: 'bregman_back_2024_topps_35year.jpg' },
