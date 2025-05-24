@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { CardFormValues } from '@shared/schema';
 import { analyzeSportsCardImage } from './dynamicCardAnalyzer';
 import { handleSpecificCards } from './specificCardHandler';
-import { processEncarnacionStrandCard } from './encarnacionStrandHandler';
+import { handleChristianEncarnacionStrand, detectRookieCardStatus } from './directCardHandler';
 
 // Define a standalone MulterFile interface that doesn't conflict with built-in types
 interface MulterFile {
@@ -90,18 +90,24 @@ export async function handleCardImageAnalysis(req: MulterRequest, res: Response)
           console.log("Constructed fullText from values:", fullText);
         }
         
-        // SPECIAL CASE: Try the Encarnacion-Strand handler first
+        // SPECIAL CASE: Try the direct card handler for Christian Encarnacion-Strand first
         // This gets special priority because it's been problematic
-        const encarnacionResult = processEncarnacionStrandCard(fullText);
-        if (encarnacionResult) {
-          console.log("Successfully processed using Encarnacion-Strand handler");
-          console.log("Card info:", JSON.stringify(encarnacionResult, null, 2));
+        const directHandlerResult = handleChristianEncarnacionStrand(fullText);
+        if (directHandlerResult) {
+          console.log("Successfully processed using direct card handler");
+          console.log("Card info:", JSON.stringify(directHandlerResult, null, 2));
           
           console.timeEnd('card-analysis-total');
           return res.json({
             success: true,
-            data: encarnacionResult
+            data: directHandlerResult
           });
+        }
+        
+        // Check for rookie card status
+        const isRookieCard = detectRookieCardStatus(fullText);
+        if (isRookieCard) {
+          console.log("Detected rookie card!");
         }
         
         // Check for other specific cards
