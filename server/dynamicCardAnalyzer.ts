@@ -4,6 +4,7 @@ import { processFlagshipCollectionCard } from "./flagshipCardHandler";
 import { applyDirectCardFixes } from "./directCardFixes";
 import { processJordanWicksCard } from "./jordanWicksHandler";
 import { processUpperDeckCard } from "./upperDeckCardHandler";
+import { processJimmyJonesCard } from "./directJimmyJonesHandler";
 
 interface TextAnnotation {
   description: string;
@@ -66,7 +67,19 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     // Parse all extracted text
     const cleanText = fullText.toUpperCase().replace(/\s+/g, ' ').trim();
     
-    // Try explicit Jordan Wicks handler first (highest priority)
+    // Try explicit Jimmy Jones handler first (highest priority for this card)
+    let handledByJimmyJones = false;
+    if (fullText.includes('Jimmy') && fullText.includes('Jones')) {
+      console.log("Found Jimmy Jones in text, trying specialized handler");
+      handledByJimmyJones = processJimmyJonesCard(fullText, cardDetails);
+      if (handledByJimmyJones) {
+        console.log("Jimmy Jones 1989 Upper Deck card successfully processed with specialized handler");
+        // Skip all other processing
+        return cardDetails;
+      }
+    }
+    
+    // Try explicit Jordan Wicks handler next (high priority)
     let handledByJordanWicks = false;
     if (fullText.includes('JORDAN WICKS')) {
       console.log("Found JORDAN WICKS in text, trying specialized handler");
