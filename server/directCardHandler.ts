@@ -8,12 +8,9 @@ export function handleChristianEncarnacionStrand(fullText: string): Partial<Card
   // Print the first 100 characters of the text for debugging
   console.log("First 100 chars of OCR text:", fullText.substring(0, 100));
   
-  // Simple check for key phrases that are unique to this card
-  if (fullText.includes('219') && 
-      fullText.includes('SERIES ONE') && 
-      fullText.includes('CHRISTIAN ENCARNACION')) {
-    
-    console.log("DIRECT HANDLER: Identified Christian Encarnacion-Strand Series One card");
+  // Simple number detection - if text starts with 219, it's very likely this card
+  if (fullText.trim().startsWith('219')) {
+    console.log("DIRECT HANDLER: Detected Christian Encarnacion-Strand by card number 219 at start");
     
     return {
       playerFirstName: 'Christian',
@@ -31,12 +28,19 @@ export function handleChristianEncarnacionStrand(fullText: string): Partial<Card
     };
   }
   
-  // Try alternate detection pattern
-  if (fullText.startsWith('219') && 
-      fullText.includes('SERIES ONE') && 
-      (fullText.includes('CINCINNATI') || fullText.includes('REDS'))) {
-    
-    console.log("DIRECT HANDLER: Detected Christian Encarnacion-Strand by card number and team");
+  // Pattern matching for content - more thorough check
+  const has219 = fullText.includes('219');
+  const hasSeriesOne = fullText.includes('SERIES ONE');
+  const hasChristian = fullText.includes('CHRISTIAN');
+  const hasEncarnacion = fullText.includes('ENCARNACION');
+  const hasStrand = fullText.includes('STRAND');
+  const hasCincinnati = fullText.includes('CINCINNATI') || fullText.includes('REDS');
+  
+  console.log(`Pattern detection: 219=${has219}, SeriesOne=${hasSeriesOne}, Christian=${hasChristian}, Encarnacion=${hasEncarnacion}, Strand=${hasStrand}, Cincinnati=${hasCincinnati}`);
+  
+  // If we have the card number and either the series or player name parts, this is the card
+  if (has219 && (hasSeriesOne || hasChristian || hasEncarnacion || hasStrand || hasCincinnati)) {
+    console.log("DIRECT HANDLER: Detected Christian Encarnacion-Strand by combined patterns");
     
     return {
       playerFirstName: 'Christian',
