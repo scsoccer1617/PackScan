@@ -159,17 +159,49 @@ export async function handleCardImageAnalysis(req: MulterRequest, res: Response)
       console.log(`Detected variant: Chrome`);
     }
     
-    // YEAR DETECTION
-    const copyrightMatch = cleanText.match(/(?:©|\(C\)|\&copy;|\&\s*©|\&\s*\(C\))(?:\s*)(\d{4})/i);
-    if (copyrightMatch && copyrightMatch[1]) {
+    // YEAR DETECTION - Try multiple patterns for copyright year
+    
+    // Check for exact match with ampersand format like "&2024"
+    const ampersandYearMatch = cleanText.match(/\&(\d{4})/i);
+    if (ampersandYearMatch && ampersandYearMatch[1]) {
       try {
-        const year = parseInt(copyrightMatch[1], 10);
+        const year = parseInt(ampersandYearMatch[1], 10);
         if (year >= 1900 && year <= new Date().getFullYear()) {
           cardDetails.year = year;
-          console.log(`Using copyright year as card date: ${cardDetails.year}`);
+          console.log(`Using ampersand year as card date: ${cardDetails.year}`);
         }
       } catch (e) {
-        console.error('Error parsing year:', e);
+        console.error('Error parsing ampersand year:', e);
+      }
+    } 
+    // Fallback to standard copyright format
+    else {
+      const copyrightMatch = cleanText.match(/(?:©|\(C\)|\&copy;|\&\s*©|\&\s*\(C\))(?:\s*)(\d{4})/i);
+      if (copyrightMatch && copyrightMatch[1]) {
+        try {
+          const year = parseInt(copyrightMatch[1], 10);
+          if (year >= 1900 && year <= new Date().getFullYear()) {
+            cardDetails.year = year;
+            console.log(`Using copyright year as card date: ${cardDetails.year}`);
+          }
+        } catch (e) {
+          console.error('Error parsing copyright year:', e);
+        }
+      }
+      // Last resort - look for any 4-digit year that appears after text like "TOPPS COMPANY"
+      else if (cleanText.includes('TOPPS COMPANY')) {
+        const companyYearMatch = cleanText.match(/TOPPS COMPANY[^\d]*(\d{4})/i);
+        if (companyYearMatch && companyYearMatch[1]) {
+          try {
+            const year = parseInt(companyYearMatch[1], 10);
+            if (year >= 1900 && year <= new Date().getFullYear()) {
+              cardDetails.year = year;
+              console.log(`Using Topps company year as card date: ${cardDetails.year}`);
+            }
+          } catch (e) {
+            console.error('Error parsing company year:', e);
+          }
+        }
       }
     }
     
