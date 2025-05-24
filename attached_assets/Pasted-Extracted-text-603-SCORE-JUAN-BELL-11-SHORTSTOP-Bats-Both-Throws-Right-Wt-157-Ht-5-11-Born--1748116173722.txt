@@ -1,0 +1,136 @@
+Extracted text: 603
+SCORE
+JUAN
+BELL
+11-SHORTSTOP
+Bats: Both Throws: Right
+Wt.: 157 Ht.: 5'11"
+Born: March 29, 1968
+San Pedro De Macoris, D.R.
+02816323 LIGE
+2
+MAJOR LEAGE BASEBALL
+©1990 SCORE, PRTD. IN U.S.A.
+PROFESSIONAL BATTING RECORD
+YEAR TEAM
+.262 116
+.000 8
+.000 8
+BA G
+.245 134 473 54 116 15
+.279 61 215 37 60 4
+257 42 77 9
+408 50 107 15
+AB R H 2B 3B
+HAIR
+RBI
+SB
+3
+4
+58 21
+4 2
+000
+2360
+5 21 11
+8
+45 7
+2 32 17.
+0
+0 1
+4 2 0 0 0 0
+0 1
+1987 BAKERSFIELD
+1988 SAN ANTONIO
+1988 ALBUQUERQUE .300 73
+1989 ROCHESTER
+1989 ORIOLES
+M.L. TOTALS
+Juan is a dazzling fielder and he'll be only 22 in 1990, with five
+minor league seasons behind him. He has outstanding range at
+shortstop, a quick release and a magnificent throwing arm.
+Now if only Juan can hit major league pitching, he could be one
+of 1990's more spectacular rookies. "He moves like a gazelle,
+very fluid with deceiving quickness," said Dave Machemar of
+Stockton. "He makes plays that are unmakable."
+Juan, who is the younger brother of the Blue Jays' George,
+had his finest year in '88 when he was voted the Texas
+League's best defensive shortstop and infielder with the best
+arm. Promoted to Triple-A Albuquerque, he batted .300.
+Full OCR text: 603
+SCORE
+JUAN
+BELL
+11-SHORTSTOP
+Bats: Both Throws: Right
+Wt.: 157 Ht.: 5'11"
+Born: March 29, 1968
+San Pedro De Macoris, D.R.
+02816323 LIGE
+2
+MAJOR LEAGE BASEBALL
+©1990 SCORE, PRTD. IN U.S.A.
+PROFESSIONAL BATTING RECORD
+YEAR TEAM
+.262 116
+.000 8
+.000 8
+BA G
+.245 134 473 54 116 15
+.279 61 215 37 60 4
+257 42 77 9
+408 50 107 15
+AB R H 2B 3B
+HAIR
+RBI
+SB
+3
+4
+58 21
+4 2
+000
+2360
+5 21 11
+8
+45 7
+2 32 17.
+0
+0 1
+4 2 0 0 0 0
+0 1
+1987 BAKERSFIELD
+1988 SAN ANTONIO
+1988 ALBUQUERQUE .300 73
+1989 ROCHESTER
+1989 ORIOLES
+M.L. TOTALS
+Juan is a dazzling fielder and he'll be only 22 in 1990, with five
+minor league seasons behind him. He has outstanding range at
+shortstop, a quick release and a magnificent throwing arm.
+Now if only Juan can hit major league pitching, he could be one
+of 1990's more spectacular rookies. "He moves like a gazelle,
+very fluid with deceiving quickness," said Dave Machemar of
+Stockton. "He makes plays that are unmakable."
+Juan, who is the younger brother of the Blue Jays' George,
+had his finest year in '88 when he was voted the Texas
+League's best defensive shortstop and infielder with the best
+arm. Promoted to Triple-A Albuquerque, he batted .300.
+Detected player name with general pattern: Score Juan
+Using copyright year as card date: 1990
+Detected rookie card status
+Sport detected: Baseball
+Extracted card details: {
+  condition: 'PSA 8',
+  playerFirstName: 'Score',
+  playerLastName: 'Juan',
+  brand: '',
+  collection: '',
+  cardNumber: '',
+  year: 1990,
+  variant: '',
+  serialNumber: '',
+  estimatedValue: 0,
+  sport: 'Baseball',
+  isRookieCard: true,
+  isAutographed: false,
+  isNumbered: false
+}
