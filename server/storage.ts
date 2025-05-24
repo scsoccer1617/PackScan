@@ -318,9 +318,8 @@ export const storage = {
       const csvFilePath = path.join(exportDir, 'cards_export.csv');
       const fileExists = fs.existsSync(csvFilePath);
       
-      // Prepare CSV row
+      // Prepare CSV row - removed ID column
       const csvRow = [
-        card.id.toString(),
         sportName,
         card.playerFirstName,
         card.playerLastName,
@@ -344,7 +343,7 @@ export const storage = {
       // Write header if file doesn't exist
       if (!fileExists) {
         const headers = [
-          'ID', 'Sport', 'Player First Name', 'Player Last Name', 
+          'Sport', 'Player First Name', 'Player Last Name', 
           'Brand', 'Collection', 'Card Number', 'Year', 
           'Variant', 'Serial Number', 'Condition', 'Estimated Value',
           'Rookie Card', 'Autographed', 'Numbered', 'Notes',
@@ -413,14 +412,14 @@ export const storage = {
                 },
               });
               
-              // Add headers to the new sheet
+              // Add headers to the new sheet - removed ID column
               await googleSheetsInstance.spreadsheets.values.update({
                 spreadsheetId,
-                range: 'Cards!A1:S1',
+                range: 'Cards!A1:R1',
                 valueInputOption: 'RAW',
                 resource: {
                   values: [[
-                    'ID', 'Sport', 'Player First Name', 'Player Last Name', 
+                    'Sport', 'Player First Name', 'Player Last Name', 
                     'Brand', 'Collection', 'Card Number', 'Year', 
                     'Variant', 'Serial Number', 'Condition', 'Estimated Value',
                     'Rookie Card', 'Autographed', 'Numbered', 'Notes',
@@ -450,14 +449,13 @@ export const storage = {
             };
           }
           
-          // Insert card data
+          // Insert card data - removed ID column
           await googleSheetsInstance.spreadsheets.values.update({
             spreadsheetId,
-            range: `Cards!A${nextRow}:S${nextRow}`,
+            range: `Cards!A${nextRow}:R${nextRow}`,
             valueInputOption: 'RAW',
             resource: {
               values: [[
-                card.id.toString(),
                 sportName,
                 card.playerFirstName,
                 card.playerLastName,
