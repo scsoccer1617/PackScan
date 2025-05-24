@@ -293,13 +293,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Get the path for this card and side
       const imagePath = imageMap[id]?.[side];
       
-      if (!imagePath) {
-        console.log(`No image mapping found for card ${id}, side ${side}`);
-        return res.status(404).json({ error: 'Image mapping not found' });
-      }
+      let filePath;
       
-      // Build the path to the file
-      const filePath = join(process.cwd(), imagePath.replace(/^\//, ''));
+      if (imagePath) {
+        // Build the path to the file from the mapping
+        filePath = join(process.cwd(), imagePath.replace(/^\//, ''));
+      } else {
+        // For new cards without mapping, try to find the image in uploads directory
+        // Check if card has frontImage/backImage properties
+        const card = await db.select().from(cards).where(eq(cards.id, id)).limit(1);
+        
+        if (card.length > 0) {
+          // Try to find any uploaded images that match player name pattern
+          const playerName = card[0].playerFirstName + '_' + card[0].playerLastName;
+          const normalizedPlayerName = playerName.replace(/\s+/g, '_');
+          const uploadsDir = join(process.cwd(), 'uploads');
+          
+          if (fs.existsSync(uploadsDir)) {
+            const files = fs.readdirSync(uploadsDir);
+            // Look for any file containing the player name and side (front/back)
+            const matchingFile = files.find(file => 
+              file.toLowerCase().includes(normalizedPlayerName.toLowerCase()) && 
+              file.toLowerCase().includes(side.toLowerCase())
+            );
+            
+            if (matchingFile) {
+              filePath = join(uploadsDir, matchingFile);
+              console.log(`Found uploaded image for ${card[0].playerFirstName} ${card[0].playerLastName} (ID: ${id}): ${matchingFile}`);
+            } else {
+              console.log(`No image found for ${card[0].playerFirstName} ${card[0].playerLastName} (ID: ${id}) in uploads directory`);
+            }
+          }
+        }
+        
+        if (!filePath) {
+          console.log(`No image mapping found for card ${id}, side ${side}`);
+          return res.status(404).json({ error: 'Image mapping not found' });
+        }
+      }
       
       // Check if file exists
       if (fs.existsSync(filePath)) {
