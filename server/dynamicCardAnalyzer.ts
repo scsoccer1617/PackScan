@@ -3,6 +3,7 @@ import { extractTextFromImage } from "./googleVisionFetch";
 import { processFlagshipCollectionCard } from "./flagshipCardHandler";
 import { applyDirectCardFixes } from "./directCardFixes";
 import { processJordanWicksCard } from "./jordanWicksHandler";
+import { processSeriesTwoCard } from "./seriesTwoHandler";
 
 interface TextAnnotation {
   description: string;
@@ -112,6 +113,15 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       console.log("Directly set Joey Bart Opening Day card values");
       handledBySpecialProcessor = true;
       handledByJoeyBart = true;
+    }
+    
+    // Try Series Two special handler
+    if (!handledBySpecialProcessor && fullText.includes('SERIES TWO')) {
+      console.log("Found SERIES TWO in text, trying specialized handler");
+      handledBySpecialProcessor = processSeriesTwoCard(fullText, cardDetails);
+      if (handledBySpecialProcessor) {
+        console.log("Series Two card successfully processed with specialized handler");
+      }
     }
     
     // Only run general processors if specialized ones didn't handle it

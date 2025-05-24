@@ -1,0 +1,164 @@
+Full OCR text: SERIES TWO
+ZAC GALLEN
+ARIZONA
+NDBACKS
+440
+Y
+@TOPPS
+HT: 6'2" WT: 198 THROWS: RIGHT BATS: RIGHT DRAFTED: CARDINALS #3-JUNE, 2016
+ACQ: TRADE WITH MARLINS, 7-31-19 BORN: 8-3-95, GIBBSBORO, NJ HOME: GIBBSBORO, NJ
+Just 152 innings into his career, Zac lays claim to a significant MLB record. He allowed three
+or fewer earned runs in each of his first 23 starts, eclipsing the previous mark of 21 by Aaron
+Sele (1993-94).
+MAJOR AND MINOR LEAGUE PITCHING RECORD
+YR CLUB
+G
+W L
+IP
+H
+16 GCL CARDINALS
+6
+0
+17 PALM BEACH
+9
+17 SPRINGFIELD
+13
+17 MEMPHIS
+4 1
+18 NEW ORLEANS
+25
+8
+19 NEW ORLEANS
+14
+19 MARLINS
+7
+19 DIAMONDBACKS
+8
+20 DIAMONDBACKS
+MLB TOTALS
+12
+27
+891236
+1025 19
+1332
+54
+9.2
+7
+55.2 44
+14
+71.1 76
+33
+R213
+ER
+BB
+SO
+SHO
+SV WHIP ERA WAR
+2
+0
+15
+0
+1 0.72 1.86
+10
+10
+56
+0
+0
+0.97 1.62
+30
+19
+42
+0
+0
+1.33 3.79
+20.2 18
+9
+8
+6
+23
+133.1 148 60 54
+48
+136
+91.1 48 21
+18
+17
+112
+36.1
+25
+12
+11
+18
+43
+43.2 37
+14 14
+18
+53
+72
+8
+152
+117
+55 24
+50
+22 25
+82
+47
+61
+178
+0000000
+0
+1.16 3.48
+0
+1.47 3.65
+0 0.71 1.77
+0 1.18 2.72
+1.3
+0 1.26 2.89
+1.3
+0 1.11 2.75
+2.8
+0
+1.17 2.78 5.4
+LOPPS
+&©2021 THE TOPPS COMPANY, INC. ALL RIGHTS RESERVED. TOPPS IS A REGISTERED TRADEMARK OF THE TOPPS COMPANY, INC. Major
+League Baseball trademarks and copyrights are used with permission of Major League Baseball. Visit MLB.com. OFFICIALLY LICENSED PRODUCT OF
+MLB. Officially Licensed Product of MLB Players, Inc. Visit MLBPLAYERS.COM, the Players Choice on the web. WWW.TOPPS.COM. CODE/CMP045423
+口
+PLAYERS
+Detected player name from name pattern: Series Two
+Detected card number with dash: 7-31
+Detected brand: Topps
+Using copyright year as card date: 2021
+No reliable serial number found in plain text analysis
+Sport detected (explicit indicator): Baseball
+Extracted card details: {
+  condition: 'PSA 8',
+  playerFirstName: 'Series',
+  playerLastName: 'Two',
+  brand: 'Topps',
+  collection: '',
+  cardNumber: '7-31',
+  year: 2021,
+  variant: '',
+  serialNumber: '',
+  estimatedValue: 0,
+  sport: 'Baseball',
+  isRookieCard: false,
+  isAutographed: false,
+  isNumbered: false
+}
+OCR results: {
+  "condition": "PSA 8",
+  "playerFirstName": "Series",
+  "playerLastName": "Two",
+  "brand": "Topps",
+  "collection": "",
+  "cardNumber": "7-31",
+  "year": 2021,
+  "variant": "",
+  "serialNumber": "",
+  "estimatedValue": 0,
+  "sport": "Baseball",
+  "isRookieCard": false,
+  "isAutographed": false,
+  "isNumbered": false
+}
