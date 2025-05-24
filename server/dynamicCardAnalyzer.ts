@@ -1,5 +1,6 @@
 import { CardFormValues } from "@shared/schema";
 import { extractTextFromImage } from "./googleVisionFetch";
+import { processFlagshipCollectionCard } from "./flagshipCardHandler";
 
 interface TextAnnotation {
   description: string;
@@ -62,14 +63,26 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     // Parse all extracted text
     const cleanText = fullText.toUpperCase().replace(/\s+/g, ' ').trim();
     
-    // PLAYER NAME DETECTION - Extract player name using positional and context analysis
-    extractPlayerName(cleanText, cardDetails);
+    // Try specialized card handlers first
+    let handledBySpecialProcessor = false;
     
-    // CARD NUMBER DETECTION - Extract card number using regex patterns
-    extractCardNumber(cleanText, cardDetails);
+    // Check if this is a Topps Flagship Collection card
+    if (cleanText.includes('FLAGSHIP') && cleanText.includes('COLLECTION')) {
+      handledBySpecialProcessor = processFlagshipCollectionCard(fullText, cardDetails);
+      console.log(`Topps Flagship Collection card detected: ${handledBySpecialProcessor ? 'successfully processed' : 'failed to process'}`);
+    }
     
-    // COLLECTION, BRAND & YEAR DETECTION - Extract using pattern recognition
-    extractCardMetadata(cleanText, cardDetails);
+    // Only run general processors if specialized ones didn't handle it
+    if (!handledBySpecialProcessor) {
+      // PLAYER NAME DETECTION - Extract player name using positional and context analysis
+      extractPlayerName(cleanText, cardDetails);
+      
+      // CARD NUMBER DETECTION - Extract card number using regex patterns
+      extractCardNumber(cleanText, cardDetails);
+      
+      // COLLECTION, BRAND & YEAR DETECTION - Extract using pattern recognition
+      extractCardMetadata(cleanText, cardDetails);
+    }
     
     // SERIAL NUMBER DETECTION - Look for serial numbering
     extractSerialNumber(cleanText, cardDetails);
