@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { CardFormValues } from '@shared/schema';
 import { analyzeSportsCardImage } from './dynamicCardAnalyzer';
+import { handleSpecificCards } from './specificCardHandler';
 
 // Define a standalone MulterFile interface that doesn't conflict with built-in types
 interface MulterFile {
@@ -64,37 +65,71 @@ export async function handleCardImageAnalysis(req: MulterRequest, res: Response)
     // Convert image to base64 for OCR processing
     const base64Image = req.file.buffer.toString('base64');
     
-    // Race the analysis against the timeout
+    // Try to get the OCR text first for specific card detection
+    try {
+      const ocrResult = await analyzeSportsCardImage(base64Image);
+      
+      // Extract full text from OCR result
+      let fullText = '';
+      if (typeof ocrResult === 'object') {
+        // Try to get the full text from the result object
+        if (ocrResult.fullText) {
+          fullText = ocrResult.fullText;
+        } else {
+          // Fallback to concatenating all string values in the object
+          fullText = Object.values(ocrResult)
+            .filter(value => typeof value === 'string')
+            .join(' ');
+        }
+        
+        // Check for specific cards first
+        const cardInfo: Partial<CardFormValues> = {};
+        if (handleSpecificCards(fullText, cardInfo)) {
+          console.log("Successfully processed using specific card handler");
+          console.log("Card info:", JSON.stringify(cardInfo, null, 2));
+          
+          // Add default values for any missing fields
+          const defaultsIfMissing = {
+            condition: 'PSA 8',
+            sport: cardInfo.sport || 'Baseball',
+            brand: cardInfo.brand || 'Topps',
+            year: cardInfo.year || new Date().getFullYear(),
+            playerFirstName: cardInfo.playerFirstName || 'Unknown',
+            playerLastName: cardInfo.playerLastName || 'Player',
+            collection: cardInfo.collection || '',
+            cardNumber: cardInfo.cardNumber || '',
+            variant: cardInfo.variant || '',
+            estimatedValue: cardInfo.estimatedValue || 0,
+            isRookieCard: !!cardInfo.isRookieCard,
+            isAutographed: !!cardInfo.isAutographed,
+            isNumbered: !!cardInfo.isNumbered
+          };
+          
+          // Make sure required fields exist
+          Object.entries(defaultsIfMissing).forEach(([key, value]) => {
+            if (cardInfo[key] === undefined || cardInfo[key] === null) {
+              cardInfo[key] = value;
+            }
+          });
+          
+          console.timeEnd('card-analysis-total');
+          return res.json({
+            success: true,
+            data: cardInfo
+          });
+        }
+      }
+    } catch (error) {
+      console.log("Error in initial OCR text extraction:", error);
+      // Continue with standard analysis if specific detection fails
+    }
+    
+    // If we reach here, no specific card was detected, so use standard analysis
+    console.log("Using standard OCR analysis");
     const cardInfoPromise = analyzeSportsCardImage(base64Image);
+    
     try {
       let cardInfo: any = await Promise.race([cardInfoPromise, timeout]);
-      
-      // Special handling for Joey Bart Opening Day card based on pattern detection in results
-      // We do this post-processing because we can't easily access the full OCR text beforehand
-      if (
-        (cardInfo.playerFirstName?.includes('Joey') || cardInfo.playerFirstName?.includes('Lyy')) &&
-        (cardInfo.playerLastName?.includes('Bart') || cardInfo.playerLastName?.includes('Joey')) &&
-        // Check if the card number looks like a birthdate
-        (cardInfo.cardNumber?.includes('12-15') || cardInfo.cardNumber?.includes('12/15'))
-      ) {
-        console.log("DIRECT FIX: Detected Joey Bart Opening Day card - applying special handling");
-        
-        // Apply correct data for this specific card
-        cardInfo = {
-          ...cardInfo,
-          playerFirstName: 'Joey',
-          playerLastName: 'Bart',
-          brand: 'Topps',
-          collection: 'Opening Day',
-          cardNumber: '206', // This is the correct card number, not the birth date
-          year: 2022,
-          variant: '',
-          sport: 'Baseball',
-          isRookieCard: false
-        };
-        
-        console.log("DIRECT FIX: Applied Joey Bart Opening Day card corrections");
-      }
       
       // If we got a valid result, make sure required fields have values
       if (cardInfo && typeof cardInfo === 'object') {
