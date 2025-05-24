@@ -1,6 +1,7 @@
 import { CardFormValues } from "@shared/schema";
 import { extractTextFromImage } from "./googleVisionFetch";
 import { processFlagshipCollectionCard } from "./flagshipCardHandler";
+import { applyDirectCardFixes } from "./directCardFixes";
 
 interface TextAnnotation {
   description: string;
@@ -63,13 +64,21 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     // Parse all extracted text
     const cleanText = fullText.toUpperCase().replace(/\s+/g, ' ').trim();
     
-    // Try specialized card handlers first
+    // Try direct card fixes for known problematic card types (most reliable)
+    let handledByDirectFix = applyDirectCardFixes(fullText, cardDetails);
+    
+    // Try specialized card handlers as a fallback
     let handledBySpecialProcessor = false;
     
-    // Check if this is a Topps Flagship Collection card
-    if (cleanText.includes('FLAGSHIP') && cleanText.includes('COLLECTION')) {
-      handledBySpecialProcessor = processFlagshipCollectionCard(fullText, cardDetails);
-      console.log(`Topps Flagship Collection card detected: ${handledBySpecialProcessor ? 'successfully processed' : 'failed to process'}`);
+    if (!handledByDirectFix) {
+      // Check if this is a Topps Flagship Collection card
+      if (cleanText.includes('FLAGSHIP') && cleanText.includes('COLLECTION')) {
+        handledBySpecialProcessor = processFlagshipCollectionCard(fullText, cardDetails);
+        console.log(`Topps Flagship Collection card detected: ${handledBySpecialProcessor ? 'successfully processed' : 'failed to process'}`);
+      }
+    } else {
+      console.log("Direct card fix was applied, skipping other processors");
+      handledBySpecialProcessor = true; // Mark as handled by specialized processor
     }
     
     // Only run general processors if specialized ones didn't handle it
