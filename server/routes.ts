@@ -264,12 +264,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         },
         // New cards recently added by OCR detection
         4: {
-          front: '/uploads/1748048494981_Rafaela_front.jpg',
-          back: '/uploads/1748048494981_Rafaela_back.jpg'
+          front: '/uploads/1746536468855_Rafaela_front.jpg',
+          back: '/uploads/1746536468863_Rafaela_back.jpg'
         },
         5: {
-          front: '/uploads/1748048678781_Frelick_front.jpg',
-          back: '/uploads/1748048678781_Frelick_back.jpg'
+          front: '/uploads/1745841448384_Frelick_front.jpg',
+          back: '/uploads/1745841448392_Frelick_back.jpg'
         },
         6: {
           front: '/uploads/1748098999257_Machado_front.jpg',
