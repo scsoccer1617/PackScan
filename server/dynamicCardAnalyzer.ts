@@ -212,6 +212,21 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>): 
       return;
     }
     
+    // Look for standalone numbers that might be card numbers
+    // This catches single numbers like "206" on their own line (common in Opening Day cards)
+    const standaloneNumberPattern = /(?:^|\n)\s*(\d{1,3})\s*(?:\n|$)/;
+    const standaloneNumberMatch = text.match(standaloneNumberPattern);
+    
+    if (standaloneNumberMatch && standaloneNumberMatch[1]) {
+      // Make sure it's a reasonable card number (not too large)
+      const number = standaloneNumberMatch[1];
+      if (parseInt(number) < 1000) {
+        cardDetails.cardNumber = number;
+        console.log(`Detected standalone card number: ${cardDetails.cardNumber}`);
+        return;
+      }
+    }
+    
     // Alphanumeric patterns like: T27, TC12, etc.
     const alphaNumPattern = /\b([A-Z]{1,3})(\d+)\b/;
     const alphaNumMatch = text.match(alphaNumPattern);
