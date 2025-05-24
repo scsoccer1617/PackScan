@@ -2,6 +2,7 @@ import { CardFormValues } from "@shared/schema";
 import { extractTextFromImage } from "./googleVisionFetch";
 import { processFlagshipCollectionCard } from "./flagshipCardHandler";
 import { applyDirectCardFixes } from "./directCardFixes";
+import { processJordanWicksCard } from "./jordanWicksHandler";
 
 interface TextAnnotation {
   description: string;
@@ -64,7 +65,19 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     // Parse all extracted text
     const cleanText = fullText.toUpperCase().replace(/\s+/g, ' ').trim();
     
-    // Try direct card fixes for known problematic card types (most reliable)
+    // Try explicit Jordan Wicks handler first (highest priority)
+    let handledByJordanWicks = false;
+    if (fullText.includes('JORDAN WICKS')) {
+      console.log("Found JORDAN WICKS in text, trying specialized handler");
+      handledByJordanWicks = processJordanWicksCard(fullText, cardDetails);
+      if (handledByJordanWicks) {
+        console.log("Jordan Wicks card successfully processed with specialized handler");
+        // Skip all other processing
+        return cardDetails;
+      }
+    }
+    
+    // Try direct card fixes for other known problematic card types
     let handledByDirectFix = applyDirectCardFixes(fullText, cardDetails);
     
     // Try specialized card handlers as a fallback
