@@ -357,6 +357,19 @@ function extractSerialNumber(text: string, cardDetails: Partial<CardFormValues>)
  */
 function detectCardFeatures(text: string, cardDetails: Partial<CardFormValues>): void {
   try {
+    // Check for special card types that are NOT rookie cards
+    const isHomeRunChallengeCard = 
+      text.includes('HOME RUN CHALLENGE') || 
+      text.includes('HR CHALLENGE') || 
+      (cardDetails.cardNumber && cardDetails.cardNumber.startsWith('HRC-'));
+    
+    // If it's a Home Run Challenge card, explicitly mark as NOT a rookie card
+    if (isHomeRunChallengeCard) {
+      cardDetails.isRookieCard = false;
+      console.log("Identified as Home Run Challenge card - not a rookie card");
+      return;
+    }
+    
     // ROOKIE CARD DETECTION
     // Check for explicit rookie indicators
     const rookiePatterns = [
