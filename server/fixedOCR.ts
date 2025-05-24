@@ -59,25 +59,46 @@ export async function handleCardImageAnalysis(req: MulterRequest, res: Response)
     console.log('Processing image with dynamic OCR analyzer...');
 
     // Analyze the image and get card details
-    const cardDetails = await analyzeSportsCardImage(req.file.buffer.toString('base64'));
+    const cardDetailsResult = await analyzeSportsCardImage(req.file.buffer.toString('base64'));
+    
+    // Make sure we have a valid object to work with
+    const cardDetails = cardDetailsResult || {};
 
     // Ensure we have default values for required fields
     const processedCardDetails: Partial<CardFormValues> = {
-      condition: cardDetails.condition || 'PSA 8',
-      sport: cardDetails.sport || 'Baseball',
-      playerFirstName: cardDetails.playerFirstName || 'Unknown',
-      playerLastName: cardDetails.playerLastName || 'Player',
-      brand: cardDetails.brand || 'Topps',
-      collection: cardDetails.collection || '',
-      cardNumber: cardDetails.cardNumber || '',
-      year: cardDetails.year || new Date().getFullYear(),
-      variant: cardDetails.variant || '',
-      serialNumber: cardDetails.serialNumber || '',
-      estimatedValue: cardDetails.estimatedValue || 0,
-      isRookieCard: !!cardDetails.isRookieCard,
-      isAutographed: !!cardDetails.isAutographed,
-      isNumbered: !!cardDetails.isNumbered
+      condition: 'PSA 8',
+      sport: 'Baseball',
+      playerFirstName: 'Unknown',
+      playerLastName: 'Player',
+      brand: 'Topps',
+      collection: '',
+      cardNumber: '',
+      year: new Date().getFullYear(),
+      variant: '',
+      serialNumber: '',
+      estimatedValue: 0,
+      isRookieCard: false,
+      isAutographed: false,
+      isNumbered: false
     };
+    
+    // Now safely copy over any detected values
+    if (cardDetails && typeof cardDetails === 'object') {
+      if (cardDetails.condition) processedCardDetails.condition = cardDetails.condition;
+      if (cardDetails.sport) processedCardDetails.sport = cardDetails.sport;
+      if (cardDetails.playerFirstName) processedCardDetails.playerFirstName = cardDetails.playerFirstName;
+      if (cardDetails.playerLastName) processedCardDetails.playerLastName = cardDetails.playerLastName;
+      if (cardDetails.brand) processedCardDetails.brand = cardDetails.brand;
+      if (cardDetails.collection) processedCardDetails.collection = cardDetails.collection;
+      if (cardDetails.cardNumber) processedCardDetails.cardNumber = cardDetails.cardNumber;
+      if (cardDetails.year) processedCardDetails.year = cardDetails.year;
+      if (cardDetails.variant) processedCardDetails.variant = cardDetails.variant;
+      if (cardDetails.serialNumber) processedCardDetails.serialNumber = cardDetails.serialNumber;
+      if (cardDetails.estimatedValue) processedCardDetails.estimatedValue = cardDetails.estimatedValue;
+      if (cardDetails.isRookieCard) processedCardDetails.isRookieCard = !!cardDetails.isRookieCard;
+      if (cardDetails.isAutographed) processedCardDetails.isAutographed = !!cardDetails.isAutographed;
+      if (cardDetails.isNumbered) processedCardDetails.isNumbered = !!cardDetails.isNumbered;
+    }
 
     // Log the results
     console.log('OCR results:', JSON.stringify(processedCardDetails, null, 2));
