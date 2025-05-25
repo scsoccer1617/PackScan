@@ -6,7 +6,6 @@ import AddCard from "@/pages/AddCard";
 import Collection from "@/pages/Collection";
 import Stats from "@/pages/Stats";
 import Header from "@/components/Header";
-import BottomNavigation from "@/components/BottomNavigation";
 import { useState } from "react";
 
 function App() {
@@ -25,11 +24,9 @@ function App() {
             <Route component={NotFound} />
           </Switch>
           
-          {/* Global bottom spacer for all pages */}
-          <div className="w-full h-24"></div>
+          {/* Small bottom spacer for all pages */}
+          <div className="w-full h-8"></div>
         </main>
-        
-        <BottomNavigation activeTab={activeTab} setActiveTab={setActiveTab} />
       </div>
     </QueryClientProvider>
   );
