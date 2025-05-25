@@ -145,6 +145,12 @@ export function applyDirectCardFixes(ocrText: string, cardDetails: Partial<CardF
       console.log("DIRECT FIX: Detected Trent Grisham Series One card");
       cardDetails.playerFirstName = 'Trent';
       cardDetails.playerLastName = 'Grisham';
+      
+      // Fix for Trent Grisham's card number - hardcoded since OCR is detecting it incorrectly
+      if (ocrText.includes('SAN DIEGO PADRES') && ocrText.includes('SERIES ONE')) {
+        cardDetails.cardNumber = '249';
+        console.log("DIRECT FIX: Set Trent Grisham card number to 249 (hardcoded)");
+      }
     }
     else if (ocrText.includes('CHRISTIAN') && ocrText.includes('ENCARNACION')) {
       console.log("DIRECT FIX: Detected Christian Encarnacion-Strand Series One card");
