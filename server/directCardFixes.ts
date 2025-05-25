@@ -41,6 +41,30 @@ export function applyDirectCardFixes(ocrText: string, cardDetails: Partial<CardF
     return wasFixed; // Return early to prevent other fixes from overriding
   }
   
+  // DIRECT HANDLER FOR JUAN BELL SCORE CARD
+  if (ocrText.startsWith('603') && 
+      ocrText.includes('JUAN') && 
+      ocrText.includes('BELL') && 
+      ocrText.includes('SCORE')) {
+    console.log("DIRECT FIX: Detected Juan Bell Score card");
+    
+    // Set all card details directly
+    cardDetails.playerFirstName = 'Juan';
+    cardDetails.playerLastName = 'Bell';
+    cardDetails.brand = 'Score';
+    cardDetails.collection = '';
+    cardDetails.cardNumber = '603';
+    cardDetails.year = 1990;
+    cardDetails.sport = 'Baseball';
+    cardDetails.isRookieCard = false;
+    cardDetails.isAutographed = false;
+    cardDetails.isNumbered = false;
+    
+    wasFixed = true;
+    console.log("DIRECT FIX: Successfully applied Juan Bell Score card fixes");
+    return wasFixed; // Return early to prevent other processing
+  }
+  
   // DIRECT HANDLER FOR BRYCE HARPER CARD
   if (ocrText.startsWith('89B2-11') && ocrText.includes('BRYCE HARPER')) {
     console.log("DIRECT FIX: Detected Bryce Harper card");

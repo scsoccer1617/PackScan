@@ -203,6 +203,31 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>): 
       }
     }
     
+    // Check for multi-line player names (common in some cards like Score)
+    // This handles cases like "JUAN\nBELL" where the name is split across lines
+    for (let i = 0; i < Math.min(5, lines.length - 1); i++) {
+      // Check for two consecutive short lines that might be first name + last name
+      const line1 = lines[i].trim();
+      const line2 = lines[i+1].trim();
+      
+      // Each line should be a single word, all caps, and a reasonable length for a name
+      if (line1 && line2 && 
+          /^[A-Z]{2,15}$/.test(line1) && 
+          /^[A-Z]{2,15}$/.test(line2) &&
+          !['TOPPS', 'SCORE', 'BOWMAN', 'FLEER', 'LEAF', 'DONRUSS', 'UPPER', 'DECK', 'SERIES', 'ONE', 'TWO'].includes(line1) &&
+          !['TOPPS', 'SCORE', 'BOWMAN', 'FLEER', 'LEAF', 'DONRUSS', 'UPPER', 'DECK', 'SERIES', 'ONE', 'TWO'].includes(line2)) {
+        
+        console.log(`Found potential multi-line player name: ${line1} ${line2}`);
+        
+        // Format the name properly
+        cardDetails.playerFirstName = line1.charAt(0).toUpperCase() + line1.slice(1).toLowerCase();
+        cardDetails.playerLastName = line2.charAt(0).toUpperCase() + line2.slice(1).toLowerCase();
+        
+        console.log(`Detected player name from consecutive lines: ${cardDetails.playerFirstName} ${cardDetails.playerLastName}`);
+        return;
+      }
+    }
+      
     // Next, look for specific pattern like "NORMAN (NORM) WOOD CHARLTON"
     for (let i = 0; i < Math.min(5, lines.length); i++) {
       const line = lines[i].trim();
