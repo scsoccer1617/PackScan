@@ -200,8 +200,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           back: '/uploads/1748179343894_Bergman_back.jpg'
         },
         30: {
-          front: '/uploads/1745791833108_Schanuel_front.jpg',
-          back: '/uploads/1745791833113_Schanuel_back.jpg'
+          front: '/uploads/1748180820141_LEAGUE BASEBALL®_front.jpg',
+          back: '/uploads/1748180820143_LEAGUE BASEBALL®_back.jpg'
         },
         31: {
           front: '/uploads/1745792025505_Lewis_front.jpg',
