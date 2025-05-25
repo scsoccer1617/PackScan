@@ -380,7 +380,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           8: { front: 'IMG_3542.jpeg', back: 'IMG_3543.jpeg' }, // Jordan Wicks Flagship Collection
           20: { front: 'frelick_front_2024_topps_35year.jpg', back: 'frelick_back_2024_35year.jpg' },
           22: { front: 'manaea_front_2024_topps_series2.jpg', back: 'manaea_back_2024_topps_series2.jpg' },
-          23: { front: 'bregman_front_2024_topps_35year.jpg', back: 'bregman_back_2024_topps_35year.jpg' },
+          // Use the uploaded Frazier card images directly
+          23: { front: '/uploads/1748135529468_Frazier_front.jpg', back: '/uploads/1748135529471_Frazier_back.jpg' },
           24: { front: 'cole_front_2021_topps_heritage.jpg', back: 'cole_back_2021_topps_heritage.jpg' },
           25: { front: 'freedman_front_2023_topps_smlb.jpg', back: 'freedman_back_2023_topps_smlb.jpg' },
           26: { front: 'correa_front_2024_topps_smlb.jpg', back: 'correa_back_2024_topps_smlb.jpg' },
