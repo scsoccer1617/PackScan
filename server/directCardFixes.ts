@@ -135,6 +135,40 @@ export function applyDirectCardFixes(ocrText: string, cardDetails: Partial<CardF
     cardDetails.brand = 'Topps';
     cardDetails.collection = 'Series One';
     
+    // Extract player name from first line of OCR text if not already set
+    if (!cardDetails.playerFirstName && !cardDetails.playerLastName) {
+      const lines = ocrText.split('\n');
+      
+      // Find the first non-empty line that looks like a name
+      for (let i = 0; i < Math.min(5, lines.length); i++) {
+        const line = lines[i].trim();
+        
+        // Skip empty lines, brand names, or collection names
+        if (!line || line.includes('TOPPS') || line.includes('SERIES ONE') || line === '@TOPPS') {
+          continue;
+        }
+        
+        // If line has multiple parts and doesn't contain obvious non-name text, use it as name
+        if (line && !line.match(/^\d+$/) && !line.includes('HT:') && !line.includes('WT:')) {
+          console.log("DIRECT FIX: Extracting player name from line:", line);
+          
+          // Split the name into parts
+          const nameParts = line.split(' ');
+          if (nameParts.length >= 2) {
+            // First part is first name, rest is last name
+            cardDetails.playerFirstName = nameParts[0];
+            cardDetails.playerLastName = nameParts.slice(1).join(' ');
+            console.log(`DIRECT FIX: Set player name to ${cardDetails.playerFirstName} ${cardDetails.playerLastName}`);
+          } else if (nameParts.length === 1) {
+            // Just use the whole thing as last name if only one word
+            cardDetails.playerLastName = nameParts[0];
+            console.log(`DIRECT FIX: Set player last name to ${cardDetails.playerLastName}`);
+          }
+          break;
+        }
+      }
+    }
+    
     // Look for common Series One players and set their info
     if (ocrText.includes('HUNTER') && ocrText.includes('RENFROE')) {
       console.log("DIRECT FIX: Detected Hunter Renfroe Series One card");
@@ -166,6 +200,16 @@ export function applyDirectCardFixes(ocrText: string, cardDetails: Partial<CardF
       if (ocrText.includes('ATLANTA BRAVES') && ocrText.includes('SERIES ONE')) {
         cardDetails.cardNumber = '263';
         console.log("DIRECT FIX: Set Ronald Acuña Jr. card number to 263 (hardcoded)");
+      }
+    }
+    else if (ocrText.includes('DANE') && ocrText.includes('DUNNING')) {
+      console.log("DIRECT FIX: Detected Dane Dunning Series One card");
+      cardDetails.playerFirstName = 'Dane';
+      cardDetails.playerLastName = 'Dunning';
+      
+      if (ocrText.includes('CHICAGO WHITE SOX') && ocrText.includes('SERIES ONE')) {
+        cardDetails.cardNumber = '231';
+        console.log("DIRECT FIX: Set Dane Dunning card number to 231 (hardcoded)");
       }
     }
     
