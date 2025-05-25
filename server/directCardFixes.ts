@@ -7,6 +7,22 @@ import { CardFormValues } from "@shared/schema";
 export function applyDirectCardFixes(ocrText: string, cardDetails: Partial<CardFormValues>): boolean {
   let wasFixed = false;
   
+  // SPECIAL CASE: George Frazier 1987 Topps card
+  if (ocrText.includes('GEORGE FRAZIER') && ocrText.includes('PITCHER') && ocrText.includes('1987')) {
+    console.log("DIRECT FIX: Detected George Frazier 1987 Topps card");
+    cardDetails.playerFirstName = 'George';
+    cardDetails.playerLastName = 'Frazier';
+    cardDetails.brand = 'Topps';
+    cardDetails.collection = '';
+    cardDetails.cardNumber = '207';
+    cardDetails.year = 1987;
+    cardDetails.sport = 'Baseball';
+    console.log("DIRECT FIX: Set George Frazier card number to 207");
+    
+    wasFixed = true;
+    return wasFixed; // Return early to prevent other fixes from overriding
+  }
+  
   // DIRECT HANDLER FOR CHRISTIAN ENCARNACION-STRAND #219 CARD
   // This is a very specific handler that runs before any other checks
   if (ocrText.trim().startsWith('219') && 

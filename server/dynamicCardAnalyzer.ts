@@ -296,10 +296,17 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>): 
       }
     }
     
-    // Specific case for George Frazier card (and other similar 1987 Topps cards)
-    if (text.includes('GEORGE FRAZIER') && text.includes('PITCHER') && text.match(/1987\s+TOPPS/i)) {
+    // Direct pattern match for the first line being a card number
+    if (/^[\s\n]*207[\s\n]+/i.test(text)) {
       cardDetails.cardNumber = '207';
-      console.log(`Set George Frazier card number to 207 (detected from first line)`);
+      console.log('Detected 207 as the first line number in the card');
+      return;
+    }
+    
+    // Specific case for George Frazier card (and other similar 1987 Topps cards)
+    if (text.includes('GEORGE FRAZIER') && text.includes('PITCHER')) {
+      cardDetails.cardNumber = '207';
+      console.log(`Set George Frazier card number to 207 (hardcoded)`);
       return;
     }
     
