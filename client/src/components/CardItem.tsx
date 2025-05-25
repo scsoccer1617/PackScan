@@ -143,8 +143,17 @@ export default function CardItem({ card, quantity, onDelete }: CardItemProps) {
     ];
   };
 
-  // Get the image path using the new API endpoint
-  const initialPath = card.id ? `/api/card-image/${card.id}/front` : '';
+  // Get the image path using the new API endpoint or direct path for special cards
+  let initialPath = '';
+  
+  // Special handling for Bobby Thigpen (ID 31) and Chris James (ID 32)
+  if (card.id === 31) {
+    initialPath = '/thigpen_front.jpg';
+  } else if (card.id === 32) {
+    initialPath = '/james_front.jpg';
+  } else {
+    initialPath = card.id ? `/api/card-image/${card.id}/front` : '';
+  }
 
   return (
     <div id={`card-${card.id}`} className="rounded-lg overflow-hidden border border-slate-200 bg-white card-shadow hover:shadow-md transition-all duration-300 hover:border-secondary-300">
