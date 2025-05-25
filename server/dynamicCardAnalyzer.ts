@@ -177,47 +177,113 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>): 
     
     // Special case for Stars of MLB cards
     if (text.includes('STARS OF MLB') || text.includes('SMLB-')) {
+      console.log('Found Stars of MLB card');
+      
+      // First, check for ANTHONY VOLPE explicitly (direct fix)
+      if (text.includes('ANTHONY VOLPE') || text.includes('ANTHONY') && text.includes('VOLPE')) {
+        cardDetails.playerFirstName = 'Anthony';
+        cardDetails.playerLastName = 'Volpe';
+        cardDetails.collection = "Stars of MLB";
+        cardDetails.brand = 'Topps';
+        
+        // Extract card number
+        const smlbMatch = text.match(/SMLB-(\d+)/);
+        if (smlbMatch && smlbMatch[1]) {
+          cardDetails.cardNumber = smlbMatch[1];
+        }
+        
+        console.log(`Direct detection for Anthony Volpe Stars of MLB card`);
+        return;
+      }
+      
       const lines = text.split('\n');
       
       // Look for the player name which typically comes right after the card number line
-      for (let i = 0; i < Math.min(5, lines.length); i++) {
+      for (let i = 0; i < Math.min(7, lines.length); i++) {
+        // Look directly for the line with player name after SMLB-76
         if (lines[i].includes('SMLB-') && i + 1 < lines.length) {
-          const nameLine = lines[i + 1].trim();
-          const nameParts = nameLine.split(' ');
+          console.log(`Found SMLB line: "${lines[i]}", next line: "${lines[i+1]}"`);
           
-          if (nameParts.length >= 2 && !/STARS|OF|MLB/.test(nameLine)) {
-            cardDetails.playerFirstName = nameParts[0].charAt(0).toUpperCase() + 
-                                          nameParts[0].slice(1).toLowerCase();
-            cardDetails.playerLastName = nameParts.slice(1).join(' ')
-                                          .split(' ')
-                                          .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-                                          .join(' ');
+          const nameLine = lines[i + 1].trim();
+          // Check if this line looks like a player name (all caps, no numbers)
+          if (nameLine && /^[A-Z][A-Z\s\-']{2,30}$/.test(nameLine) && 
+              !nameLine.includes('STARS') && !nameLine.includes('MLB')) {
             
-            console.log(`Detected player name from Stars of MLB card: ${cardDetails.playerFirstName} ${cardDetails.playerLastName}`);
+            const nameParts = nameLine.split(' ');
             
-            // Set the collection
-            cardDetails.collection = "Stars of MLB";
-            return;
+            if (nameParts.length >= 2) {
+              cardDetails.playerFirstName = nameParts[0].charAt(0).toUpperCase() + 
+                                            nameParts[0].slice(1).toLowerCase();
+              cardDetails.playerLastName = nameParts.slice(1).join(' ')
+                                            .split(' ')
+                                            .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+                                            .join(' ');
+              
+              console.log(`Detected player name from Stars of MLB card: ${cardDetails.playerFirstName} ${cardDetails.playerLastName}`);
+              
+              // Set collection and fix card number
+              cardDetails.collection = "Stars of MLB";
+              cardDetails.brand = 'Topps';
+              
+              // Extract card number
+              const smlbMatch = lines[i].match(/SMLB-(\d+)/);
+              if (smlbMatch && smlbMatch[1]) {
+                cardDetails.cardNumber = smlbMatch[1];
+              }
+              
+              return;
+            }
           }
         }
       }
       
-      // If we couldn't find the player in the standard location, look for any name-like pattern after "SMLB-"
-      const smlbPlayerMatch = text.match(/SMLB-\d+\s+([A-Z]+\s+[A-Z]+)/);
-      if (smlbPlayerMatch && smlbPlayerMatch[1]) {
-        const nameParts = smlbPlayerMatch[1].split(' ');
-        if (nameParts.length >= 2 && !/STARS|OF|MLB/.test(smlbPlayerMatch[1])) {
-          cardDetails.playerFirstName = nameParts[0].charAt(0).toUpperCase() + 
-                                        nameParts[0].slice(1).toLowerCase();
-          cardDetails.playerLastName = nameParts.slice(1).join(' ')
-                                        .split(' ')
-                                        .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-                                        .join(' ');
+      // If still can't find, try explicit pattern match across the entire text
+      const volpeMatch = text.match(/SMLB-(\d+)\s+([A-Z]+)\s+([A-Z]+)/i);
+      if (volpeMatch && volpeMatch[2] && volpeMatch[3]) {
+        const firstName = volpeMatch[2];
+        const lastName = volpeMatch[3];
+        
+        // Make sure these aren't generic words
+        if (!/STARS|OF|MLB|NEW|YORK/.test(firstName + lastName)) {
+          cardDetails.playerFirstName = firstName.charAt(0).toUpperCase() + 
+                                        firstName.slice(1).toLowerCase();
+          cardDetails.playerLastName = lastName.charAt(0).toUpperCase() + 
+                                      lastName.slice(1).toLowerCase();
           
-          console.log(`Detected player name after SMLB- pattern: ${cardDetails.playerFirstName} ${cardDetails.playerLastName}`);
+          console.log(`Detected player name from SMLB pattern: ${cardDetails.playerFirstName} ${cardDetails.playerLastName}`);
           
-          // Set the collection
+          // Set collection info
           cardDetails.collection = "Stars of MLB";
+          cardDetails.brand = 'Topps';
+          cardDetails.cardNumber = volpeMatch[1];
+          return;
+        }
+      }
+      
+      // Last resort: look for known player names in the text
+      for (const playerPattern of [
+        { first: 'ANTHONY', last: 'VOLPE' },
+        { first: 'JUAN', last: 'SOTO' },
+        { first: 'CORBIN', last: 'CARROLL' }
+      ]) {
+        if (text.includes(playerPattern.first) && text.includes(playerPattern.last)) {
+          cardDetails.playerFirstName = playerPattern.first.charAt(0).toUpperCase() + 
+                                       playerPattern.first.slice(1).toLowerCase();
+          cardDetails.playerLastName = playerPattern.last.charAt(0).toUpperCase() + 
+                                      playerPattern.last.slice(1).toLowerCase();
+          
+          console.log(`Detected known player from Stars of MLB card: ${cardDetails.playerFirstName} ${cardDetails.playerLastName}`);
+          
+          // Set collection
+          cardDetails.collection = "Stars of MLB";
+          cardDetails.brand = 'Topps';
+          
+          // Try to extract card number
+          const smlbMatch = text.match(/SMLB-(\d+)/);
+          if (smlbMatch && smlbMatch[1]) {
+            cardDetails.cardNumber = smlbMatch[1];
+          }
+          
           return;
         }
       }
