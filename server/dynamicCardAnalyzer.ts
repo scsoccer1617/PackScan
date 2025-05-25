@@ -161,6 +161,28 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>): 
     // First, look for name patterns in the first few lines of the card
     const lines = text.split('\n');
     
+    // Look for specific pattern like "NORMAN (NORM) WOOD CHARLTON"
+    for (let i = 0; i < Math.min(5, lines.length); i++) {
+      const line = lines[i].trim();
+      const parenthesesNameMatch = line.match(/([A-Z][A-Za-z]+)\s+\(([A-Za-z]+)\)\s+([A-Za-z]+)\s+([A-Za-z]+)/);
+      
+      if (parenthesesNameMatch) {
+        const [_, firstName, nickname, middleName, lastName] = parenthesesNameMatch;
+        // Use the nickname if available, otherwise use the first name
+        cardDetails.playerFirstName = nickname || firstName;
+        cardDetails.playerLastName = lastName;
+        
+        // Format the names properly
+        cardDetails.playerFirstName = cardDetails.playerFirstName.charAt(0).toUpperCase() + 
+                                     cardDetails.playerFirstName.slice(1).toLowerCase();
+        cardDetails.playerLastName = cardDetails.playerLastName.charAt(0).toUpperCase() + 
+                                    cardDetails.playerLastName.slice(1).toLowerCase();
+        
+        console.log(`Detected player name with parenthetical nickname: ${cardDetails.playerFirstName} ${cardDetails.playerLastName}`);
+        return;
+      }
+    }
+    
     // Focus on the first 5 lines, which typically contain the player name
     for (let i = 0; i < Math.min(5, lines.length); i++) {
       const line = lines[i].trim();
