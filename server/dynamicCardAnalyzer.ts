@@ -340,21 +340,55 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>): 
  */
 function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>): void {
   try {
-    // Look for specific card number formats
+    // Look for known card number formats
+    
+    // Filter out birthday/date formats first
+    // Common date formats to avoid: MM-DD-YY, M-D-YY, MM-DD, M-D
+    const isDOBFormat = (text: string): boolean => {
+      // Check for birthdate patterns like "Born 7-17-63" or similar
+      return /BORN|BIRTH|DOB|B-DAY|DATE OF BIRTH|HT|WT|HEIGHT|WEIGHT/i.test(text) ||
+             // Date format with year: MM-DD-YY or M-D-YY
+             /\b\d{1,2}-\d{1,2}-\d{2,4}\b/.test(text) ||
+             // Trade or draft dates
+             /TRADE|DRAFT|ACQUIRED|SIGNED|GRADUATED/i.test(text) ||
+             // Player stats with dates
+             /SEASON|RECORD|\b(?:ERA|HR|RBI|AVG|OBP|SLG)\b/i.test(text) ||
+             // Date format without year near words indicating dates
+             /(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC|JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER)[.\s,-]+\d{1,2}/.test(text);
+    };
+    
+    // Split text into lines for analysis
+    const lines = text.split('\n');
+    
+    // Check for birthdate-related lines
+    const birthdateLines = lines.filter(line => isDOBFormat(line));
+    if (birthdateLines.length > 0) {
+      console.log(`Skipping potential birthdate/stat lines for card number detection:`, birthdateLines);
+    }
+    
     // Format: 89B-2 (alphanumeric with dash)
+    // Make sure we don't match date formats like 7-17 or 7-17-63
     const dashNumberPattern = /\b([A-Z0-9]+)-([0-9]+)\b/;
     const dashNumberMatch = text.match(dashNumberPattern);
     
     if (dashNumberMatch && dashNumberMatch[0]) {
-      cardDetails.cardNumber = dashNumberMatch[0];
-      console.log(`Detected card number with dash: ${cardDetails.cardNumber}`);
+      // Skip this match if it appears to be a date format
+      const matchedText = dashNumberMatch[0];
+      const lineWithMatch = lines.find(line => line.includes(matchedText));
       
-      // 35th Anniversary cards have format like 89B-2
-      if (dashNumberMatch[0].match(/^\d+[A-Z]-\d+$/)) {
-        cardDetails.collection = "35th Anniversary";
-        console.log(`Setting collection from card number pattern: 35th Anniversary`);
+      if (lineWithMatch && isDOBFormat(lineWithMatch)) {
+        console.log(`Skipping date-like pattern "${matchedText}" that appears to be a birthdate/date`);
+      } else {
+        cardDetails.cardNumber = matchedText;
+        console.log(`Detected card number with dash: ${cardDetails.cardNumber}`);
+        
+        // 35th Anniversary cards have format like 89B-2
+        if (matchedText.match(/^\d+[A-Z]-\d+$/)) {
+          cardDetails.collection = "35th Anniversary";
+          console.log(`Setting collection from card number pattern: 35th Anniversary`);
+        }
+        return;
       }
-      return;
     }
     
     // Format: 89-B (number-letter)
@@ -362,9 +396,16 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>): 
     const numberLetterMatch = text.match(numberLetterPattern);
     
     if (numberLetterMatch && numberLetterMatch[0]) {
-      cardDetails.cardNumber = numberLetterMatch[0];
-      console.log(`Detected number-letter card number: ${cardDetails.cardNumber}`);
-      return;
+      const matchedText = numberLetterMatch[0];
+      const lineWithMatch = lines.find(line => line.includes(matchedText));
+      
+      if (lineWithMatch && isDOBFormat(lineWithMatch)) {
+        console.log(`Skipping date-like pattern "${matchedText}" that appears to be a birthdate/date`);
+      } else {
+        cardDetails.cardNumber = matchedText;
+        console.log(`Detected number-letter card number: ${cardDetails.cardNumber}`);
+        return;
+      }
     }
     
     // Plain number format: #123 or No. 123
@@ -379,10 +420,47 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>): 
     
     // Look for standalone numbers at the very beginning of the card text
     // This prioritizes the number that appears at the top of the card
-    const lines = text.split('\n');
     
-    // HIGHEST PRIORITY: Check if the very first line is ONLY a number
-    // This is the most reliable way to detect card numbers at the top of a card
+    // HIGHEST PRIORITY: Look for a number near the brand name - most card numbers are physically near the brand
+    for (let i = 0; i < Math.min(10, lines.length); i++) {
+      const line = lines[i].trim();
+      
+      // If line contains a card brand, check for nearby card numbers
+      if (/TOPPS|BOWMAN|FLEER|DONRUSS|SCORE|LEAF|UPPER DECK/i.test(line)) {
+        console.log(`Found brand mention in line ${i+1}: "${line}"`);
+        
+        // First check if the brand line itself contains a standalone number
+        const brandLineNumberMatch = line.match(/\b(\d{1,3})\b/);
+        if (brandLineNumberMatch && brandLineNumberMatch[1]) {
+          const number = brandLineNumberMatch[1];
+          if (parseInt(number) > 0 && parseInt(number) < 1000) {
+            cardDetails.cardNumber = number;
+            console.log(`Detected card number ${number} in same line as brand - highest confidence`);
+            return;
+          }
+        }
+        
+        // Check the lines immediately before and after the brand line
+        const surroundingLines = [];
+        if (i > 0) surroundingLines.push(lines[i-1].trim());
+        if (i < lines.length - 1) surroundingLines.push(lines[i+1].trim());
+        
+        for (const nearbyLine of surroundingLines) {
+          const nearbyNumberMatch = nearbyLine.match(/\b(\d{1,3})\b/);
+          if (nearbyNumberMatch && nearbyNumberMatch[1]) {
+            const number = nearbyNumberMatch[1];
+            if (parseInt(number) > 0 && parseInt(number) < 1000 && !isDOBFormat(nearbyLine)) {
+              cardDetails.cardNumber = number;
+              console.log(`Detected card number ${number} in line adjacent to brand - high confidence`);
+              return;
+            }
+          }
+        }
+      }
+    }
+    
+    // Second priority: Check if the very first line is ONLY a number
+    // This is also a reliable way to detect card numbers at the top of a card
     const firstLine = lines[0].trim();
     if (/^\d+$/.test(firstLine) && parseInt(firstLine) > 0 && parseInt(firstLine) < 10000) {
       cardDetails.cardNumber = firstLine;
