@@ -307,7 +307,22 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>): 
     // Look for standalone numbers at the very beginning of the card text
     // This prioritizes the number that appears at the top of the card
     const lines = text.split('\n');
-    // Check the first 3 lines for a standalone number
+    
+    // Check the very first line/token for a standalone number - highest priority!
+    const firstLine = lines[0].trim();
+    // Try to extract a number from the beginning of the first line
+    const firstLineMatch = firstLine.match(/^(\d{1,4})/);
+    if (firstLineMatch && firstLineMatch[1]) {
+      const number = firstLineMatch[1];
+      // Make sure it's a reasonable card number (1-9999)
+      if (parseInt(number) > 0 && parseInt(number) < 10000) {
+        cardDetails.cardNumber = number;
+        console.log(`Detected card number at very beginning of OCR text: ${cardDetails.cardNumber}`);
+        return;
+      }
+    }
+    
+    // Check the first 3 lines for a standalone number as fallback
     for (let i = 0; i < Math.min(3, lines.length); i++) {
       const trimmedLine = lines[i].trim();
       // If the line is just a number and it's a reasonable card number (1-999)
@@ -417,6 +432,21 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>)
     
     // YEAR DETECTION - Look for copyright years and isolated 4-digit years
     // Important: Look for copyright symbols as they usually indicate production year
+    
+    // First check for brand name followed by year - highest confidence source
+    const brandYearPattern = /(\d{4})\s+(TOPPS|LEAF|BOWMAN|FLEER|DONRUSS|UPPER DECK)(?:\s+INC\.?|,\s+INC\.?)?/i;
+    const brandYearMatch = text.match(brandYearPattern);
+    
+    if (brandYearMatch && brandYearMatch[1]) {
+      const year = parseInt(brandYearMatch[1], 10);
+      if (year >= 1900 && year <= new Date().getFullYear()) {
+        cardDetails.year = year;
+        console.log(`Using brand year as card date: ${cardDetails.year}`);
+        return;
+      }
+    }
+    
+    // Check for copyright year pattern next
     const copyrightYearPattern = /(?:©|\(C\)|\&copy;|\&\s*©|\&\s*\(C\))(?:\s*)(\d{4})/i;
     const copyrightMatch = text.match(copyrightYearPattern);
     
@@ -425,17 +455,44 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>)
       if (year >= 1900 && year <= new Date().getFullYear()) {
         cardDetails.year = year;
         console.log(`Using copyright year as card date: ${cardDetails.year}`);
+        return;
       }
-    } else {
-      // Fall back to looking for 4-digit years (but this is less reliable)
-      const yearPattern = /\b(19\d{2}|20\d{2})\b/;
-      const yearMatch = text.match(yearPattern);
+    }
+    
+    // Check for "YEAR Team" pattern often used in older cards
+    const yearTeamPattern = /\b(19\d{2}|20\d{2})\s+(REDS|YANKEES|CUBS|DODGERS|GIANTS|BRAVES|ATHLETICS|ANGELS|CARDINALS|BLUE JAYS|WHITE SOX|RED SOX|PIRATES|MARLINS|RANGERS|NATIONALS|MARINERS|TIGERS|TWINS|ROYALS|INDIANS|GUARDIANS|DIAMONDBACKS|ROCKIES|PADRES|RAYS|PHILLIES|METS|ASTROS|BREWERS|ORIOLES)\b/i;
+    const yearTeamMatch = text.match(yearTeamPattern);
+    
+    if (yearTeamMatch && yearTeamMatch[1]) {
+      const year = parseInt(yearTeamMatch[1], 10);
+      if (year >= 1900 && year <= new Date().getFullYear()) {
+        cardDetails.year = year;
+        console.log(`Using team-year pattern as card date: ${cardDetails.year}`);
+        return;
+      }
+    }
+    
+    // Fall back to looking for 4-digit years (but this is less reliable)
+    // This is more risky as it can pick up birth years
+    const yearPattern = /\b(19\d{2}|20\d{2})\b/;
+    const yearMatches = text.match(new RegExp(yearPattern, 'g')) || [];
+    
+    if (yearMatches.length > 0) {
+      // Get all matches and find the most likely card year
+      const years = yearMatches
+        .map(match => parseInt(match.replace(/[^\d]/g, ''), 10))
+        .filter(year => year >= 1900 && year <= new Date().getFullYear());
       
-      if (yearMatch && yearMatch[1]) {
-        const year = parseInt(yearMatch[1], 10);
-        if (year >= 1900 && year <= new Date().getFullYear()) {
-          cardDetails.year = year;
-          console.log(`Detected isolated year: ${cardDetails.year}`);
+      if (years.length > 0) {
+        // When multiple years are found, prefer years from 1980-2025 as card years
+        // since these are most likely to be production years not birth years
+        const modernYears = years.filter(year => year >= 1980 && year <= 2025);
+        if (modernYears.length > 0) {
+          cardDetails.year = modernYears[0];
+          console.log(`Selected modern year as most likely card date: ${cardDetails.year}`);
+        } else {
+          cardDetails.year = years[0];
+          console.log(`Using first detected year as card date: ${cardDetails.year}`);
         }
       }
     }
