@@ -442,22 +442,48 @@ export const storage = {
               // Try to find existing card to update
               let rowFound = false;
               
+              // First, look for the card by ID in Google Sheets
+              // Print debug info about the card we're trying to save
+              console.log(`Searching for card in Google Sheets: ID=${card.id}, Name=${card.playerFirstName} ${card.playerLastName}, Number=${card.cardNumber}, Year=${card.year}`);
+              
+              // Since cards in Google Sheets may not have exact name matches due to editing
+              // First strategy: Find by matching card number and year combination (more stable identifiers)
+              // Second strategy: If that fails, try matching by player name and year
+              
               // Skip header row and look for matching cards
               for (let i = 1; i < rows.length; i++) {
                 const row = rows[i];
                 if (row && row.length >= 7) { // Make sure we have enough columns
-                  // Check if this is the same card by matching player name, card number, and year
-                  // Index: 1=FirstName, 2=LastName, 5=CardNumber, 6=Year
-                  if (row[1] === card.playerFirstName && 
-                      row[2] === card.playerLastName && 
-                      row[5] === card.cardNumber && 
-                      row[6] === card.year.toString()) {
-                    
-                    // Found the card - update this row
+                  // For debug, print row data
+                  if (i < 5 || row[5] === card.cardNumber) {
+                    console.log(`Row ${i+1}: FirstName=${row[1]}, LastName=${row[2]}, CardNumber=${row[5]}, Year=${row[6]}`);
+                  }
+                  
+                  // Strategy 1: Match by card number and year (more reliable for same card)
+                  if (row[5] === card.cardNumber && row[6] === card.year.toString()) {
+                    // Found the card by number and year - update this row
                     nextRow = i + 1; // +1 because sheets are 1-indexed
                     rowFound = true;
-                    console.log(`Found existing card in Google Sheets at row ${nextRow}, will update instead of adding new`);
+                    console.log(`Found existing card in Google Sheets at row ${nextRow} by card number and year, will update`);
                     break;
+                  }
+                }
+              }
+              
+              // If still not found, try matching by player first and last name
+              if (!rowFound) {
+                for (let i = 1; i < rows.length; i++) {
+                  const row = rows[i];
+                  if (row && row.length >= 7) { // Make sure we have enough columns
+                    // Strategy 2: If card number didn't match, try matching by player name
+                    if (row[1] === card.playerFirstName && 
+                        row[2] === card.playerLastName) {
+                      // Found the card by player name - update this row
+                      nextRow = i + 1; // +1 because sheets are 1-indexed
+                      rowFound = true;
+                      console.log(`Found existing card in Google Sheets at row ${nextRow} by player name, will update`);
+                      break;
+                    }
                   }
                 }
               }
@@ -465,6 +491,7 @@ export const storage = {
               // If card not found, add to end
               if (!rowFound) {
                 nextRow = rows.length + 1;
+                console.log(`No matching card found in Google Sheets, adding new row at ${nextRow}`);
               }
             }
           } catch (sheetCheckError: any) {
