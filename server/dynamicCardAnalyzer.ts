@@ -239,6 +239,13 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>): 
       const line1 = lines[i].trim();
       const line2 = lines[i+1].trim();
       
+      // Check for Collector's Choice collection in the first few lines
+      if (line1.includes("COLLECTOR") && (line1.includes("CHOICE") || line2.includes("CHOICE"))) {
+        cardDetails.collection = "Collector's Choice";
+        cardDetails.brand = "Upper Deck";
+        console.log(`Detected Collector's Choice collection and Upper Deck brand from text`);
+      }
+      
       // Each line should be a single word, all caps, and a reasonable length for a name
       // Special handling for Score cards where player names are on consecutive lines
       const isNonName = (text: string) => {
@@ -637,7 +644,7 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>)
       { pattern: /STADIUM CLUB/i, name: "Stadium Club" },
       { pattern: /BOWMAN CHROME/i, name: "Bowman Chrome" },
       { pattern: /35TH ANNIVERSARY/i, name: "35th Anniversary" },
-      { pattern: /COLLECTOR'?S? CHOICE/i, name: "Collector's Choice" },
+      { pattern: /COLLECTOR'?S?[\s-]*CHOICE/i, name: "Collector's Choice", brandOverride: "Upper Deck" },
       { pattern: /SERIES ONE|SERIES 1/i, name: "Series One" },
       { pattern: /SERIES TWO|SERIES 2/i, name: "Series Two" }
     ];
@@ -652,6 +659,12 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>)
         if (collectionData.variant) {
           cardDetails.variant = collectionData.variant;
           console.log(`Detected variant: ${cardDetails.variant}`);
+        }
+        
+        // If this collection has a specific brand association, override the brand
+        if (collectionData.brandOverride) {
+          cardDetails.brand = collectionData.brandOverride;
+          console.log(`Brand override applied for collection ${cardDetails.collection}: ${cardDetails.brand}`);
         }
         
         break;
