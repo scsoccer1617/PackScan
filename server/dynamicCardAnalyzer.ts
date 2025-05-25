@@ -227,10 +227,10 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>): 
         cardDetails.collection = "Stars of MLB";
         cardDetails.brand = 'Topps';
         
-        // Extract card number
-        const smlbMatch = text.match(/SMLB-(\d+)/);
-        if (smlbMatch && smlbMatch[1]) {
-          cardDetails.cardNumber = smlbMatch[1];
+        // Extract card number - keep the full SMLB-XX format
+        const smlbMatch = text.match(/SMLB-\d+/);
+        if (smlbMatch) {
+          cardDetails.cardNumber = smlbMatch[0];
         }
         
         console.log(`Direct detection for Anthony Volpe Stars of MLB card`);
@@ -266,10 +266,10 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>): 
               cardDetails.collection = "Stars of MLB";
               cardDetails.brand = 'Topps';
               
-              // Extract card number
-              const smlbMatch = lines[i].match(/SMLB-(\d+)/);
-              if (smlbMatch && smlbMatch[1]) {
-                cardDetails.cardNumber = smlbMatch[1];
+              // Extract card number - keep the full SMLB-XX format
+              const smlbMatch = lines[i].match(/SMLB-\d+/);
+              if (smlbMatch) {
+                cardDetails.cardNumber = smlbMatch[0];
               }
               
               return;
