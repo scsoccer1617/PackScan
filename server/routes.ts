@@ -188,16 +188,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
           back: '/uploads/back_e52dbdbf-d207-4da8-8e13-0321da15c516.jpg'
         },
         27: {
-          front: '/uploads/1745782254517_Trout_front.jpg',
-          back: '/uploads/1745782254523_Trout_back.jpg'
+          front: '/uploads/1748135529468_Frazier_front.jpg',
+          back: '/uploads/1748135529471_Frazier_back.jpg'
         },
         28: {
-          front: '/uploads/1745785721118_Machado_front.jpg',
-          back: '/uploads/1745785721128_Machado_back.jpg'
+          front: '/uploads/1748136695127_Charlton_front.jpg',
+          back: '/uploads/1748136695130_Charlton_back.jpg'
         },
         29: {
-          front: '/uploads/1745790593490_Volpe_front.jpg',
-          back: '/uploads/1745790593497_Volpe_back.jpg'
+          front: '/uploads/1748179343891_Bergman_front.jpg',
+          back: '/uploads/1748179343894_Bergman_back.jpg'
         },
         30: {
           front: '/uploads/1745791833108_Schanuel_front.jpg',
