@@ -168,8 +168,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           back: '/uploads/back_e28fcc8f-d43d-447d-94f5-0b90f27b6c0e.jpg'
         },
         22: {
-          front: '/uploads/front_8f406497-ba8d-4277-94a2-c2f0d6a07d03.jpg',
-          back: '/uploads/back_ccf6c8b3-7ab8-4fa5-b545-06e08876abf9.jpg'
+          front: '/uploads/1748134305932_Harper_front.jpg',
+          back: '/uploads/1748134305937_Harper_back.jpg'
         },
         23: {
           front: '/uploads/front_13f82788-ebc8-427f-8a07-2c9b300c775d.jpg',
