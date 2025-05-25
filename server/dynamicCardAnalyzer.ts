@@ -183,6 +183,37 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>): 
     const multiWordMatch = text.match(multiWordNamePattern);
     
     if (multiWordMatch && multiWordMatch[1] && multiWordMatch[2]) {
+      // Check if the second part is a position, not a last name
+      const positionWords = ['PITCHER', 'CATCHER', 'INFIELDER', 'OUTFIELDER', 'SHORTSTOP', 'FIRST BASEMAN', 'SECOND BASEMAN', 'THIRD BASEMAN'];
+      const detectedLastName = multiWordMatch[2].trim();
+      
+      if (positionWords.includes(detectedLastName)) {
+        // It's likely a position, not a last name - look for a better name match
+        const lines = text.split('\n');
+        for (let i = 0; i < Math.min(3, lines.length); i++) {
+          const line = lines[i].trim();
+          // Look for a line with multiple capital words that might be a full name
+          if (line.match(/^[A-Z]+ [A-Z]+$/) && !positionWords.includes(line)) {
+            const nameParts = line.split(' ');
+            if (nameParts.length >= 2) {
+              cardDetails.playerFirstName = nameParts[0].toLowerCase()
+                .split(' ')
+                .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+                .join(' ');
+                
+              cardDetails.playerLastName = nameParts.slice(1).join(' ').toLowerCase()
+                .split(' ')
+                .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+                .join(' ');
+              
+              console.log(`Detected proper player name from line: ${line}`);
+              return;
+            }
+          }
+        }
+      }
+      
+      // If we didn't find a better match or the detected name isn't a position, use the original match
       cardDetails.playerFirstName = multiWordMatch[1].toLowerCase()
         .split(' ')
         .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
