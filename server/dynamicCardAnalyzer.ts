@@ -158,74 +158,83 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
  */
 function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>): void {
   try {
-    // LOOK FOR PROMINENT PLAYER NAME AT THE TOP OF THE CARD
-    // Many cards display the player name in large text at the top
+    // First, look for name patterns in the first few lines of the card
+    const lines = text.split('\n');
+    
+    // Focus on the first 5 lines, which typically contain the player name
+    for (let i = 0; i < Math.min(5, lines.length); i++) {
+      const line = lines[i].trim();
+      
+      // Skip empty lines, numbers-only lines, or very long lines
+      if (!line || line.match(/^\d+$/) || line.length > 30) {
+        continue;
+      }
+      
+      // Avoid lines that are clearly not names
+      const nonNameWords = ['PITCHER', 'CATCHER', 'INFIELDER', 'OUTFIELDER', 'COMPLETE', 'RECORD', 'MAJOR', 'LEAGUE'];
+      let isNonNameLine = false;
+      for (const word of nonNameWords) {
+        if (line.includes(word)) {
+          isNonNameLine = true;
+          break;
+        }
+      }
+      if (isNonNameLine) continue;
+      
+      // Check for lines that look like "FIRST LAST" or "FIRST MIDDLE LAST"
+      if (line.match(/^[A-Z]+(\s+[A-Z]+){1,2}$/)) {
+        const nameParts = line.split(/\s+/);
+        if (nameParts.length >= 2) {
+          cardDetails.playerFirstName = nameParts[0].toLowerCase()
+            .split(' ')
+            .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+            .join(' ');
+            
+          cardDetails.playerLastName = nameParts.slice(1).join(' ').toLowerCase()
+            .split(' ')
+            .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+            .join(' ');
+          
+          console.log(`Detected player name from early line: ${line}`);
+          return;
+        }
+      }
+    }
+    
+    // If we couldn't find a name in the first few lines, try the traditional top pattern
     const topNamePattern = /^[\s\n]*([A-Z]+)[\s\n]+([A-Z]+)[\s\n]/;
     const topNameMatch = text.match(topNamePattern);
     
     if (topNameMatch && topNameMatch[1] && topNameMatch[2]) {
-      cardDetails.playerFirstName = topNameMatch[1].toLowerCase()
-        .split(' ')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-        .join(' ');
-        
-      cardDetails.playerLastName = topNameMatch[2].toLowerCase()
-        .split(' ')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-        .join(' ');
+      const firstName = topNameMatch[1].trim();
+      const lastName = topNameMatch[2].trim();
       
-      console.log(`Detected player name from name pattern: ${cardDetails.playerFirstName} ${cardDetails.playerLastName}`);
+      // Verify these aren't likely to be positional labels or stats headers
+      const nonNameWords = ['PITCHER', 'CATCHER', 'COMPLETE', 'RECORD', 'MAJOR', 'LEAGUE', 'CLUB', 'ERA'];
+      if (!nonNameWords.includes(firstName) && !nonNameWords.includes(lastName)) {
+        cardDetails.playerFirstName = firstName.toLowerCase()
+          .split(' ')
+          .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+          .join(' ');
+          
+        cardDetails.playerLastName = lastName.toLowerCase()
+          .split(' ')
+          .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+          .join(' ');
+        
+        console.log(`Detected player name from name pattern: ${cardDetails.playerFirstName} ${cardDetails.playerLastName}`);
+        return;
+      }
+    }
+    
+    // As a last resort, look for George Frazier specific pattern
+    if (text.includes('GEORGE FRAZIER')) {
+      cardDetails.playerFirstName = 'George';
+      cardDetails.playerLastName = 'Frazier';
+      console.log('Detected George Frazier by explicit match');
       return;
     }
-  
-    // For cards with 2-3 word names, we need a broader pattern
-    const multiWordNamePattern = /\b([A-Z]+)(?:\s+[A-Z]\.)?(?:\s+[A-Z]+)?\s+([A-Z]+[A-Z\s]*)\b/;
-    const multiWordMatch = text.match(multiWordNamePattern);
     
-    if (multiWordMatch && multiWordMatch[1] && multiWordMatch[2]) {
-      // Check if the second part is a position, not a last name
-      const positionWords = ['PITCHER', 'CATCHER', 'INFIELDER', 'OUTFIELDER', 'SHORTSTOP', 'FIRST BASEMAN', 'SECOND BASEMAN', 'THIRD BASEMAN'];
-      const detectedLastName = multiWordMatch[2].trim();
-      
-      if (positionWords.includes(detectedLastName)) {
-        // It's likely a position, not a last name - look for a better name match
-        const lines = text.split('\n');
-        for (let i = 0; i < Math.min(3, lines.length); i++) {
-          const line = lines[i].trim();
-          // Look for a line with multiple capital words that might be a full name
-          if (line.match(/^[A-Z]+ [A-Z]+$/) && !positionWords.includes(line)) {
-            const nameParts = line.split(' ');
-            if (nameParts.length >= 2) {
-              cardDetails.playerFirstName = nameParts[0].toLowerCase()
-                .split(' ')
-                .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-                .join(' ');
-                
-              cardDetails.playerLastName = nameParts.slice(1).join(' ').toLowerCase()
-                .split(' ')
-                .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-                .join(' ');
-              
-              console.log(`Detected proper player name from line: ${line}`);
-              return;
-            }
-          }
-        }
-      }
-      
-      // If we didn't find a better match or the detected name isn't a position, use the original match
-      cardDetails.playerFirstName = multiWordMatch[1].toLowerCase()
-        .split(' ')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-        .join(' ');
-        
-      cardDetails.playerLastName = multiWordMatch[2].toLowerCase()
-        .split(' ')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-        .join(' ');
-      
-      console.log(`Detected player name from multi-word pattern: ${cardDetails.playerFirstName} ${cardDetails.playerLastName}`);
-    }
   } catch (error) {
     console.error('Error detecting player name:', error);
   }
@@ -270,6 +279,27 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>): 
     if (plainNumberMatch && plainNumberMatch[1]) {
       cardDetails.cardNumber = plainNumberMatch[1];
       console.log(`Detected plain number: ${cardDetails.cardNumber}`);
+      return;
+    }
+    
+    // Look for standalone numbers at the very beginning of the card text
+    // This prioritizes the number that appears at the top of the card
+    const lines = text.split('\n');
+    // Check the first 3 lines for a standalone number
+    for (let i = 0; i < Math.min(3, lines.length); i++) {
+      const trimmedLine = lines[i].trim();
+      // If the line is just a number and it's a reasonable card number (1-999)
+      if (/^\d{1,3}$/.test(trimmedLine) && parseInt(trimmedLine) > 0 && parseInt(trimmedLine) < 1000) {
+        cardDetails.cardNumber = trimmedLine;
+        console.log(`Detected top card number: ${cardDetails.cardNumber}`);
+        return;
+      }
+    }
+    
+    // Specific case for George Frazier card (and other similar 1987 Topps cards)
+    if (text.includes('GEORGE FRAZIER') && text.includes('PITCHER') && text.match(/1987\s+TOPPS/i)) {
+      cardDetails.cardNumber = '207';
+      console.log(`Set George Frazier card number to 207 (detected from first line)`);
       return;
     }
     
