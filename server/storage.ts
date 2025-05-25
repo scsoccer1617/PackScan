@@ -431,14 +431,41 @@ export const storage = {
               console.log('Created "Cards" sheet with headers');
               nextRow = 2; // Start at row 2 after headers
             } else {
-              // If Cards sheet exists, get the next row number
+              // If Cards sheet exists, check if we're updating an existing card
               const response = await googleSheetsInstance.spreadsheets.values.get({
                 spreadsheetId,
-                range: 'Cards!A:A',
+                range: 'Cards!A:R', // Get all columns to search for existing card
               });
               
               const rows = response.data.values || [];
-              nextRow = rows.length + 1;
+              
+              // Try to find existing card to update
+              let rowFound = false;
+              
+              // Skip header row and look for matching cards
+              for (let i = 1; i < rows.length; i++) {
+                const row = rows[i];
+                if (row && row.length >= 7) { // Make sure we have enough columns
+                  // Check if this is the same card by matching player name, card number, and year
+                  // Index: 1=FirstName, 2=LastName, 5=CardNumber, 6=Year
+                  if (row[1] === card.playerFirstName && 
+                      row[2] === card.playerLastName && 
+                      row[5] === card.cardNumber && 
+                      row[6] === card.year.toString()) {
+                    
+                    // Found the card - update this row
+                    nextRow = i + 1; // +1 because sheets are 1-indexed
+                    rowFound = true;
+                    console.log(`Found existing card in Google Sheets at row ${nextRow}, will update instead of adding new`);
+                    break;
+                  }
+                }
+              }
+              
+              // If card not found, add to end
+              if (!rowFound) {
+                nextRow = rows.length + 1;
+              }
             }
           } catch (sheetCheckError: any) {
             console.error('Error checking/creating Cards sheet:', sheetCheckError);
