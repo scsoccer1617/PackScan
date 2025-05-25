@@ -32,23 +32,44 @@ export function applyDirectCardFixes(ocrText: string, cardDetails: Partial<CardF
     return wasFixed; // Return early to prevent other processing
   }
   
-  // Check for Topps Flagship Collection cards
-  if (ocrText.includes('FLAGSHIP') && ocrText.includes('COLLECTION')) {
-    console.log("DIRECT FIX: Detected Topps Flagship Collection card");
+  // Handle both Flagship Collection and the newer Flagship X cards
+  if (ocrText.includes('FLAGSHIP')) {
+    console.log("DIRECT FIX: Detected Topps Flagship card");
     
-    // Force set brand, collection and card type
+    // Force set brand
     cardDetails.brand = 'Topps';
-    cardDetails.collection = 'Flagship Collection';
     
-    // Parse the first numeric line for card number
-    const lines = ocrText.split('\n');
-    if (lines.length > 0 && /^\d+$/.test(lines[0].trim())) {
-      cardDetails.cardNumber = lines[0].trim();
-      console.log(`DIRECT FIX: Set card number to ${cardDetails.cardNumber}`);
+    // Different collection names based on exact format
+    if (ocrText.includes('COLLECTION')) {
+      cardDetails.collection = 'Flagship Collection';
+      console.log("DIRECT FIX: Set collection to Flagship Collection");
+    } else {
+      cardDetails.collection = 'Flagship';
+      console.log("DIRECT FIX: Set collection to Flagship");
     }
     
-    // Find Jordan Wicks in the text
-    if (ocrText.includes('JORDAN') && ocrText.includes('WICKS')) {
+    // Check for card number patterns
+    const cardNumberPatterns = [
+      /CTC-(\d+)/,  // CTC-10 format
+      /^(\d+)$/m    // Line starting with just numbers
+    ];
+    
+    for (const pattern of cardNumberPatterns) {
+      const match = ocrText.match(pattern);
+      if (match && match[0]) {
+        cardDetails.cardNumber = match[0];
+        console.log(`DIRECT FIX: Set card number to ${cardDetails.cardNumber}`);
+        break;
+      }
+    }
+    
+    // Check for specific players
+    if (ocrText.includes('FERNANDO') && (ocrText.includes('TATIS') || ocrText.includes('JR'))) {
+      cardDetails.playerFirstName = 'Fernando';
+      cardDetails.playerLastName = 'Tatis Jr.';
+      console.log("DIRECT FIX: Set player to Fernando Tatis Jr.");
+    } 
+    else if (ocrText.includes('JORDAN') && ocrText.includes('WICKS')) {
       cardDetails.playerFirstName = 'Jordan';
       cardDetails.playerLastName = 'Wicks';
       console.log("DIRECT FIX: Set player to Jordan Wicks");
@@ -62,6 +83,7 @@ export function applyDirectCardFixes(ocrText: string, cardDetails: Partial<CardF
     } else {
       // Default to 2024 if not found
       cardDetails.year = 2024;
+      console.log("DIRECT FIX: Set default year to 2024");
     }
     
     // Check for draft info to determine rookie status
@@ -72,7 +94,7 @@ export function applyDirectCardFixes(ocrText: string, cardDetails: Partial<CardF
     
     // Don't let other card handlers override these values
     wasFixed = true;
-    console.log("DIRECT FIX: Successfully applied Flagship Collection card fixes");
+    console.log("DIRECT FIX: Successfully applied Flagship card fixes");
   }
   
   // Handle Joey Bart Opening Day card - very strict check to ensure this is exactly that card
