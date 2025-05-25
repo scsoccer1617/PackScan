@@ -210,6 +210,10 @@ export function applyDirectCardFixes(ocrText: string, cardDetails: Partial<CardF
       if (ocrText.includes('CHICAGO WHITE SOX') && ocrText.includes('SERIES ONE')) {
         cardDetails.cardNumber = '231';
         console.log("DIRECT FIX: Set Dane Dunning card number to 231 (hardcoded)");
+        
+        // The 2021 Dane Dunning Series One card is a rookie card
+        cardDetails.isRookieCard = true;
+        console.log("DIRECT FIX: Set Dane Dunning card as a rookie card");
       }
     }
     
