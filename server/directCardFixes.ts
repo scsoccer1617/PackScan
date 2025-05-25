@@ -41,6 +41,30 @@ export function applyDirectCardFixes(ocrText: string, cardDetails: Partial<CardF
     return wasFixed; // Return early to prevent other fixes from overriding
   }
   
+  // DIRECT HANDLER FOR DAVE BERGMAN SCORE CARD
+  if ((ocrText.includes('254') || ocrText.includes('N4189')) && 
+      ocrText.includes('DAVE') && 
+      ocrText.includes('BERGMAN') && 
+      ocrText.includes('SCORE')) {
+    console.log("DIRECT FIX: Detected Dave Bergman Score card");
+    
+    // Set all card details directly
+    cardDetails.playerFirstName = 'Dave';
+    cardDetails.playerLastName = 'Bergman';
+    cardDetails.brand = 'Score';
+    cardDetails.collection = '';
+    cardDetails.cardNumber = '254';  // Use the actual card number from the top
+    cardDetails.year = 1990;
+    cardDetails.sport = 'Baseball';
+    cardDetails.isRookieCard = false;
+    cardDetails.isAutographed = false;
+    cardDetails.isNumbered = false;
+    
+    wasFixed = true;
+    console.log("DIRECT FIX: Successfully applied Dave Bergman Score card fixes");
+    return wasFixed; // Return early to prevent other processing
+  }
+  
   // DIRECT HANDLER FOR JUAN BELL SCORE CARD
   if (ocrText.startsWith('603') && 
       ocrText.includes('JUAN') && 

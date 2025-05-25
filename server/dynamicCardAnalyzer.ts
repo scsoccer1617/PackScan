@@ -211,11 +211,17 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>): 
       const line2 = lines[i+1].trim();
       
       // Each line should be a single word, all caps, and a reasonable length for a name
+      // Special handling for Score cards where player names are on consecutive lines
+      const isNonName = (text: string) => {
+        const nonNames = ['TOPPS', 'SCORE', 'BOWMAN', 'FLEER', 'LEAF', 'DONRUSS', 'UPPER', 'DECK', 
+                          'SERIES', 'ONE', 'TWO', 'BASE', 'CARD', 'MLB', 'FRONT', 'BACK'];
+        return nonNames.includes(text) || text.length < 2 || /^\d+$/.test(text);
+      };
+      
       if (line1 && line2 && 
-          /^[A-Z]{2,15}$/.test(line1) && 
-          /^[A-Z]{2,15}$/.test(line2) &&
-          !['TOPPS', 'SCORE', 'BOWMAN', 'FLEER', 'LEAF', 'DONRUSS', 'UPPER', 'DECK', 'SERIES', 'ONE', 'TWO'].includes(line1) &&
-          !['TOPPS', 'SCORE', 'BOWMAN', 'FLEER', 'LEAF', 'DONRUSS', 'UPPER', 'DECK', 'SERIES', 'ONE', 'TWO'].includes(line2)) {
+          /^[A-Z]{2,15}$/.test(line1) && // First name is all caps, single word, 2-15 letters
+          /^[A-Z]{2,15}$/.test(line2) && // Last name is all caps, single word, 2-15 letters
+          !isNonName(line1) && !isNonName(line2)) {
         
         console.log(`Found potential multi-line player name: ${line1} ${line2}`);
         
