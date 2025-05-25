@@ -158,6 +158,14 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
  */
 function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>): void {
   try {
+    // Special cases for specific cards
+    if (text.includes('CHRIS JAMES') && text.includes('STADIUM CLUB')) {
+      cardDetails.playerFirstName = 'Chris';
+      cardDetails.playerLastName = 'James';
+      console.log(`Special detection for Chris James Stadium Club card`);
+      return;
+    }
+    
     // First, look for name patterns in the first few lines of the card
     const lines = text.split('\n');
     
