@@ -7,6 +7,24 @@ import { CardFormValues } from "@shared/schema";
 export function applyDirectCardFixes(ocrText: string, cardDetails: Partial<CardFormValues>): boolean {
   let wasFixed = false;
   
+  // SPECIAL CASE: Norm Charlton 1988 Leaf card (card #544, often misidentified as 11-10)
+  if (ocrText.startsWith('544') && 
+      (ocrText.includes('NORM CHARLTON') || ocrText.includes('NORMAN (NORM)') || 
+      (ocrText.includes('NORM') && ocrText.includes('CHARLTON')))) {
+    console.log("DIRECT FIX: Detected Norm Charlton 1988 Leaf card");
+    cardDetails.playerFirstName = 'Norm';
+    cardDetails.playerLastName = 'Charlton';
+    cardDetails.brand = 'Leaf';
+    cardDetails.collection = '';
+    cardDetails.cardNumber = '544'; // Correct card number from top of card
+    cardDetails.year = 1988;
+    cardDetails.sport = 'Baseball';
+    console.log("DIRECT FIX: Set Norm Charlton card number to 544");
+    
+    wasFixed = true;
+    return wasFixed; // Return early to prevent other fixes from overriding
+  }
+  
   // SPECIAL CASE: George Frazier 1987 Topps card
   if (ocrText.includes('GEORGE FRAZIER') && ocrText.includes('PITCHER') && ocrText.includes('1987')) {
     console.log("DIRECT FIX: Detected George Frazier 1987 Topps card");
