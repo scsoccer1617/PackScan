@@ -175,6 +175,54 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>): 
       return;
     }
     
+    // Special case for Stars of MLB cards
+    if (text.includes('STARS OF MLB') || text.includes('SMLB-')) {
+      const lines = text.split('\n');
+      
+      // Look for the player name which typically comes right after the card number line
+      for (let i = 0; i < Math.min(5, lines.length); i++) {
+        if (lines[i].includes('SMLB-') && i + 1 < lines.length) {
+          const nameLine = lines[i + 1].trim();
+          const nameParts = nameLine.split(' ');
+          
+          if (nameParts.length >= 2 && !/STARS|OF|MLB/.test(nameLine)) {
+            cardDetails.playerFirstName = nameParts[0].charAt(0).toUpperCase() + 
+                                          nameParts[0].slice(1).toLowerCase();
+            cardDetails.playerLastName = nameParts.slice(1).join(' ')
+                                          .split(' ')
+                                          .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+                                          .join(' ');
+            
+            console.log(`Detected player name from Stars of MLB card: ${cardDetails.playerFirstName} ${cardDetails.playerLastName}`);
+            
+            // Set the collection
+            cardDetails.collection = "Stars of MLB";
+            return;
+          }
+        }
+      }
+      
+      // If we couldn't find the player in the standard location, look for any name-like pattern after "SMLB-"
+      const smlbPlayerMatch = text.match(/SMLB-\d+\s+([A-Z]+\s+[A-Z]+)/);
+      if (smlbPlayerMatch && smlbPlayerMatch[1]) {
+        const nameParts = smlbPlayerMatch[1].split(' ');
+        if (nameParts.length >= 2 && !/STARS|OF|MLB/.test(smlbPlayerMatch[1])) {
+          cardDetails.playerFirstName = nameParts[0].charAt(0).toUpperCase() + 
+                                        nameParts[0].slice(1).toLowerCase();
+          cardDetails.playerLastName = nameParts.slice(1).join(' ')
+                                        .split(' ')
+                                        .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+                                        .join(' ');
+          
+          console.log(`Detected player name after SMLB- pattern: ${cardDetails.playerFirstName} ${cardDetails.playerLastName}`);
+          
+          // Set the collection
+          cardDetails.collection = "Stars of MLB";
+          return;
+        }
+      }
+    }
+    
     // Special case for multi-word last names and special formats like Collector's Choice
     const multiWordNameMatch = text.match(/([A-Z][a-zA-Z]+)\s+([A-Z][A-Z\s]+)\s+(?:•|\.|\*|:|,)\s*([A-Z]+)/);
     if (multiWordNameMatch) {
