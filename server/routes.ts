@@ -834,14 +834,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const { fullText } = await extractTextFromImage(base64Image);
         
         // Check if this is the Anthony Volpe Stars of MLB card
-        if (fullText.includes('STARS OF MLB') && 
+        if ((fullText.includes('STARS OF MLB') || fullText.includes('STARS OF TILB') || fullText.includes('SMLB-')) && 
             (fullText.includes('ANTHONY VOLPE') || (fullText.includes('ANTHONY') && fullText.includes('VOLPE')))) {
           
           console.log('Detected Anthony Volpe Stars of MLB card - using hardcoded data');
           
-          // Extract card number from SMLB-XX format
+          // For Stars of MLB cards, we want to use the full "SMLB-XX" format as the card number
           const smlbMatch = fullText.match(/SMLB-(\d+)/);
-          const cardNumber = smlbMatch && smlbMatch[1] ? smlbMatch[1] : '76';
+          const cardNumber = smlbMatch ? `SMLB-${smlbMatch[1]}` : 'SMLB-76';
           
           // Return the hardcoded data for this specific card
           return res.json({
