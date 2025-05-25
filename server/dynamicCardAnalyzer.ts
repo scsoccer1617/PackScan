@@ -161,7 +161,45 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>): 
     // First, look for name patterns in the first few lines of the card
     const lines = text.split('\n');
     
-    // Look for specific pattern like "NORMAN (NORM) WOOD CHARLTON"
+    // HIGHEST PRIORITY: Check the second line of text for player name
+    // This is usually where the player name appears on most cards after the card number on the first line
+    if (lines.length > 1) {
+      // Second line often contains just the player name
+      const secondLine = lines[1].trim();
+      
+      // If the second line looks like a name (all caps, no numbers)
+      if (/^[A-Z][A-Z\s\-\.']{2,30}$/.test(secondLine) && 
+          !secondLine.includes('TOPPS') && 
+          !secondLine.includes('SERIES') &&
+          !secondLine.includes('OPENING DAY')) {
+        
+        // Split into first and last name
+        const nameParts = secondLine.split(' ');
+        
+        if (nameParts.length >= 2) {
+          // Format the names properly
+          const firstName = nameParts[0];
+          const lastName = nameParts.slice(1).join(' ');
+          
+          cardDetails.playerFirstName = firstName.charAt(0).toUpperCase() + 
+                                       firstName.slice(1).toLowerCase();
+          cardDetails.playerLastName = lastName.charAt(0).toUpperCase() + 
+                                      lastName.slice(1).toLowerCase();
+          
+          console.log(`Detected player name from second line: ${cardDetails.playerFirstName} ${cardDetails.playerLastName}`);
+          return;
+        } else if (nameParts.length === 1) {
+          // Just a single word name
+          const lastName = nameParts[0];
+          cardDetails.playerLastName = lastName.charAt(0).toUpperCase() + 
+                                      lastName.slice(1).toLowerCase();
+          console.log(`Detected single-word player name: ${cardDetails.playerLastName}`);
+          return;
+        }
+      }
+    }
+    
+    // Next, look for specific pattern like "NORMAN (NORM) WOOD CHARLTON"
     for (let i = 0; i < Math.min(5, lines.length); i++) {
       const line = lines[i].trim();
       const parenthesesNameMatch = line.match(/([A-Z][A-Za-z]+)\s+\(([A-Za-z]+)\)\s+([A-Za-z]+)\s+([A-Za-z]+)/);
