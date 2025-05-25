@@ -429,13 +429,31 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>): 
       if (/TOPPS|BOWMAN|FLEER|DONRUSS|SCORE|LEAF|UPPER DECK/i.test(line)) {
         console.log(`Found brand mention in line ${i+1}: "${line}"`);
         
-        // First check if the brand line itself contains a standalone number
+        // First check if the brand line itself contains a number pattern like "FLEER 549"
+        // Look specifically for the pattern BRAND followed by a number
+        const brandWithNumberPattern = new RegExp(`\\b(TOPPS|BOWMAN|FLEER|DONRUSS|SCORE|LEAF|UPPER DECK)\\s+(\\d{1,3})\\b`, 'i');
+        const brandWithNumberMatch = line.match(brandWithNumberPattern);
+        
+        if (brandWithNumberMatch && brandWithNumberMatch[2]) {
+          const number = brandWithNumberMatch[2];
+          if (parseInt(number) > 0 && parseInt(number) < 1000) {
+            cardDetails.cardNumber = number;
+            console.log(`Detected card number ${number} immediately after brand "${brandWithNumberMatch[1]}" - highest confidence`);
+            return;
+          }
+        }
+        
+        // If no direct brand+number pattern, check for any standalone number in the line
         const brandLineNumberMatch = line.match(/\b(\d{1,3})\b/);
         if (brandLineNumberMatch && brandLineNumberMatch[1]) {
           const number = brandLineNumberMatch[1];
-          if (parseInt(number) > 0 && parseInt(number) < 1000) {
+          // Avoid common incorrect matches like jersey numbers, heights, weights
+          const commonIncorrectNumbers = ['00', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12'];
+          if (parseInt(number) > 0 && 
+              parseInt(number) < 1000 && 
+              !commonIncorrectNumbers.includes(number)) {
             cardDetails.cardNumber = number;
-            console.log(`Detected card number ${number} in same line as brand - highest confidence`);
+            console.log(`Detected card number ${number} in same line as brand - high confidence`);
             return;
           }
         }

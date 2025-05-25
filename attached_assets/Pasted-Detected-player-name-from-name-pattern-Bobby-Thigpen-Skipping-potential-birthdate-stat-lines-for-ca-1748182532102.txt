@@ -1,0 +1,27 @@
+Detected player name from name pattern: Bobby Thigpen
+Skipping potential birthdate/stat lines for card number detection: [
+  `BOBBY THIGPEN HEIGHT 6'3", WEIGHT 195, BATS RIGHT, THROWS RIGHT BORN 7-17-63, TALLAHASSEE, FL HOME ST. PETERSBURG, FL FLEER 549 YR. CLUB ERA W L 85 NIAGFALS 1.72 86 BIRMNGHM 4.69 86 WHITESX 1.77 87 HAWAII 6.15 87 WHITESX 2.73 88 WHITESX 3.30 89 WHITESX 3.76 ML TOTALS W28227526 IP G CG SV H R ER BB SO 3 52% 28 0 9 30 12 10 19 74 11 159 25 5 0 182 97 83 54 90 0 35% 20 0 7 26 7 7 12 20 3 5423 9 2 0 72 38 36 14 17 5 89 51 0 16 86 30 27 24 52 8 90 68 0 34 96 38 33 33 62 6 79 61 0 34 62 34 33 40 47 3.06 16 19 293 200 0 91 270 109 100 109 181 VITAL SIGNS BASED ON WALKS/SO PER 9 INNINGS PITCHED MLB WALK RATIO 4.6 STRIKEOUT RATIO 5.4 OPPOSING BATTERS AVERAGE 218 1990 FLEER CORP., PHILA., 19141 PRINTED IN U.S.A.`
+]
+Skipping date-like pattern "7-17" that appears to be a birthdate/date
+Found brand mention in line 1: "BOBBY THIGPEN HEIGHT 6'3", WEIGHT 195, BATS RIGHT, THROWS RIGHT BORN 7-17-63, TALLAHASSEE, FL HOME ST. PETERSBURG, FL FLEER 549 YR. CLUB ERA W L 85 NIAGFALS 1.72 86 BIRMNGHM 4.69 86 WHITESX 1.77 87 HAWAII 6.15 87 WHITESX 2.73 88 WHITESX 3.30 89 WHITESX 3.76 ML TOTALS W28227526 IP G CG SV H R ER BB SO 3 52% 28 0 9 30 12 10 19 74 11 159 25 5 0 182 97 83 54 90 0 35% 20 0 7 26 7 7 12 20 3 5423 9 2 0 72 38 36 14 17 5 89 51 0 16 86 30 27 24 52 8 90 68 0 34 96 38 33 33 62 6 79 61 0 34 62 34 33 40 47 3.06 16 19 293 200 0 91 270 109 100 109 181 VITAL SIGNS BASED ON WALKS/SO PER 9 INNINGS PITCHED MLB WALK RATIO 4.6 STRIKEOUT RATIO 5.4 OPPOSING BATTERS AVERAGE 218 1990 FLEER CORP., PHILA., 19141 PRINTED IN U.S.A."
+Detected card number 6 in same line as brand - highest confidence
+Detected brand: Fleer
+Using brand year as card date: 1990
+No reliable serial number found in plain text analysis
+Sport detected (explicit indicator): Baseball
+Extracted card details: {
+  condition: 'PSA 8',
+  playerFirstName: 'Bobby',
+  playerLastName: 'Thigpen',
+  brand: 'Fleer',
+  collection: '',
+  cardNumber: '6',
+  year: 1990,
+  variant: '',
+  serialNumber: '',
+  estimatedValue: 0,
+  sport: 'Baseball',
+  isRookieCard: false,
+  isAutographed: false,
+  isNumbered: false
+}
