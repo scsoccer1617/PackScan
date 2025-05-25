@@ -128,6 +128,56 @@ export function applyDirectCardFixes(ocrText: string, cardDetails: Partial<CardF
     return wasFixed; // Return early to prevent other processing
   }
   
+  // Handle Topps Series One cards
+  else if (ocrText.includes('SERIES ONE') && !wasFixed) {
+    console.log("DIRECT FIX: Detected Topps Series One card");
+    
+    cardDetails.brand = 'Topps';
+    cardDetails.collection = 'Series One';
+    
+    // Look for Hunter Renfroe
+    if (ocrText.includes('HUNTER') && ocrText.includes('RENFROE')) {
+      console.log("DIRECT FIX: Detected Hunter Renfroe Series One card");
+      cardDetails.playerFirstName = 'Hunter';
+      cardDetails.playerLastName = 'Renfroe';
+      
+      // Find the specific card number
+      // Topps cards typically have standalone card numbers in their own line
+      const lines = ocrText.split('\n');
+      for (const line of lines) {
+        // Look for a line that has just a number
+        const trimmedLine = line.trim();
+        if (/^\d+$/.test(trimmedLine) && parseInt(trimmedLine) < 1000) {
+          cardDetails.cardNumber = trimmedLine;
+          console.log(`DIRECT FIX: Set card number to ${cardDetails.cardNumber}`);
+          break;
+        }
+      }
+    }
+    
+    // Look for standalone numbers in the text that might be card numbers
+    if (!cardDetails.cardNumber) {
+      const standaloneNumberMatch = ocrText.match(/(?:^|\n)\s*(\d{1,3})\s*(?:\n|$)/);
+      if (standaloneNumberMatch && standaloneNumberMatch[1]) {
+        const number = standaloneNumberMatch[1];
+        if (parseInt(number) < 1000) {
+          cardDetails.cardNumber = number;
+          console.log(`DIRECT FIX: Set card number to standalone number ${cardDetails.cardNumber}`);
+        }
+      }
+    }
+    
+    // Extract year from copyright notice
+    const yearMatch = ocrText.match(/[©Ⓡ&]\s*(\d{4})\s+THE TOPPS COMPANY/i);
+    if (yearMatch && yearMatch[1]) {
+      cardDetails.year = parseInt(yearMatch[1]);
+      console.log(`DIRECT FIX: Set year to ${cardDetails.year}`);
+    }
+    
+    wasFixed = true;
+    console.log("DIRECT FIX: Successfully applied Series One card fixes");
+  }
+  
   // Generic Opening Day card handler
   else if (ocrText.includes('OPENING DAY') && !wasFixed) {
     console.log("DIRECT FIX: Detected Topps Opening Day card");

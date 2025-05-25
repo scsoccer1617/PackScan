@@ -1,0 +1,120 @@
+Full OCR text: PAYS
+HUNTER RENFROE
+TAMPA BAY RAYS
+பயம்
+@TOPPS
+HT: 6'1" WT: 230 BATS: RIGHT THROWS: RIGHT DRAFTED: PADRES #1-JUNE, 2013
+SERIES ONE
+295
+ACQ: TRADE WITH PADRES, 12-6-19 BORN: 1-28-92, CRYSTAL SPRINGS, MS HOME: CRYSTAL SPRINGS, MS
+The Rays traded for Hunter not only because of his power, but also for his defense. No NL
+outfielder had more assists from 2017-19 than his 28. "He's a confident guy," skipper Kevin
+Cash says. "He's got that ability to really be a game-changer for us." Just four contests into '20,
+Renfroe proved it by delivering the 11th multi-homer effort of his career.
+MAJOR LEAGUE BATTING RECORD
+YR CLUB
+G AB
+R H
+2B
+3B
+HR
+RBI SB BB
+16 PADRES
+11
+35
+8
+13
+3
+0
+4
+14
+0
+17 PADRES
+122
+445
+51
+103
+25 1
+26
+58
+18 PADRES
+117
+403
+53
+100
+23
+1
+26
+68
+32
+27 .467
+OPS AVG WAR
+SLG
+0.4
+1 .800 1.189 .371
+.751 .231
+0.7
+30 .504
+.805 .248 2.3
+19 PADRES
+140
+440 64
+95
+19
+1
+33
+64
+5
+46 .489
+.778 .216
+2.7
+20 RAYS
+42
+122 18
+19
+5
+0
+8
+22
+2
+14 .393
+.645 .156 -0.1
+MLB TOTALS
+432 1445 194
+330
+75
+3
+97
+226
+12
+118 .486
+.776 .228
+6.0
+LOPPS
+&© 2021 THE TOPPS COMPANY, INC. ALL RIGHTS RESERVED. TOPPS IS A REGISTERED TRADEMARK OF THE TOPPS COMPANY, INC.
+Major League Baseball trademarks and copyrights are used with permission of Major League Baseball. Visit MLB.com. OFFICIALLY LICENSED
+PRODUCT OF MLB. Officially Licensed Product of MLB Players, Inc. Visit MLBPLAYERS.COM, the Players Choice on the web.
+WWW.TOPPS.COM. CODE#CMP043213
+F.
+Detected player name from name pattern: Pays Hunter
+Detected card number with dash: 12-6
+Detected brand: Topps
+Using copyright year as card date: 2021
+No reliable serial number found in plain text analysis
+Sport detected (explicit indicator): Baseball
+Extracted card details: {
+  condition: 'PSA 8',
+  playerFirstName: 'Pays',
+  playerLastName: 'Hunter',
+  brand: 'Topps',
+  collection: '',
+  cardNumber: '12-6',
+  year: 2021,
+  variant: '',
+  serialNumber: '',
+  estimatedValue: 0,
+  sport: 'Baseball',
+  isRookieCard: false,
+  isAutographed: false,
+  isNumbered: false
+}
