@@ -122,24 +122,16 @@ export default function SimpleCardForm() {
       if (data && data.card && data.card.id) {
         setSavedCardId(data.card.id);
         console.log("Card saved successfully with ID:", data.card.id);
-        
-        // If we're in the middle of OCR workflow, don't reset the form
-        if (!showOCRResults) {
-          // Reset the form only if not in OCR workflow
-          form.reset();
-          setFrontImage("");
-          setBackImage("");
-          setShowFormFields(false);
-        }
-      } else {
-        // Reset the form if normal workflow (not OCR)
-        if (!showOCRResults) {
-          form.reset();
-          setFrontImage("");
-          setBackImage("");
-          setShowFormFields(false);
-        }
       }
+      
+      // Always reset the form after successfully saving a card
+      form.reset();
+      setFrontImage("");
+      setBackImage("");
+      setShowFormFields(false);
+      setShowOCRResults(false); // Hide OCR results
+      
+      // Force return to Add Card state
       
       // Invalidate cards query to refresh the collection
       queryClient.invalidateQueries({ queryKey: ['/api/cards'] });
