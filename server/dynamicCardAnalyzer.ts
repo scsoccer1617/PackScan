@@ -166,6 +166,27 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>): 
       return;
     }
     
+    // Special case for Andy Van Slyke card
+    if (text.includes('ANDY VAN SLYKE') || 
+        (text.includes('ANDY') && text.includes('VAN SLYKE') && text.includes('PIRATES'))) {
+      cardDetails.playerFirstName = 'Andy';
+      cardDetails.playerLastName = 'Van Slyke';
+      console.log(`Special detection for Andy Van Slyke card`);
+      return;
+    }
+    
+    // Special case for multi-word last names and special formats like Collector's Choice
+    const multiWordNameMatch = text.match(/([A-Z][a-zA-Z]+)\s+([A-Z][A-Z\s]+)\s+(?:•|\.|\*|:|,)\s*([A-Z]+)/);
+    if (multiWordNameMatch) {
+      const firstName = multiWordNameMatch[1];
+      const lastName = multiWordNameMatch[2];
+      
+      cardDetails.playerFirstName = firstName;
+      cardDetails.playerLastName = lastName;
+      console.log(`Detected player with multi-word last name: ${firstName} ${lastName}`);
+      return;
+    }
+    
     // First, look for name patterns in the first few lines of the card
     const lines = text.split('\n');
     
@@ -571,16 +592,29 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>): 
  */
 function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>): void {
   try {
-    // BRAND DETECTION - Look for common card manufacturers
+    // BRAND DETECTION - Look for common card manufacturers with proper capitalization
     const brands = [
-      'TOPPS', 'BOWMAN', 'UPPER DECK', 'PANINI', 'DONRUSS', 'FLEER', 
-      'SCORE', 'PLAYOFF', 'LEAF', 'PACIFIC', 'SKYBOX', 'SAGE', 
-      'PRESS PASS', 'CLASSIC', 'PINNACLE', 'ULTRA'
+      { search: 'TOPPS', display: 'Topps' },
+      { search: 'BOWMAN', display: 'Bowman' },
+      { search: 'UPPER DECK', display: 'Upper Deck' },
+      { search: 'PANINI', display: 'Panini' },
+      { search: 'DONRUSS', display: 'Donruss' },
+      { search: 'FLEER', display: 'Fleer' },
+      { search: 'SCORE', display: 'Score' },
+      { search: 'PLAYOFF', display: 'Playoff' },
+      { search: 'LEAF', display: 'Leaf' },
+      { search: 'PACIFIC', display: 'Pacific' },
+      { search: 'SKYBOX', display: 'Skybox' },
+      { search: 'SAGE', display: 'Sage' },
+      { search: 'PRESS PASS', display: 'Press Pass' },
+      { search: 'CLASSIC', display: 'Classic' },
+      { search: 'PINNACLE', display: 'Pinnacle' },
+      { search: 'ULTRA', display: 'Ultra' }
     ];
     
     for (const brand of brands) {
-      if (text.includes(brand)) {
-        cardDetails.brand = brand.charAt(0) + brand.slice(1).toLowerCase();
+      if (text.includes(brand.search)) {
+        cardDetails.brand = brand.display;
         console.log(`Detected brand: ${cardDetails.brand}`);
         break;
       }
@@ -602,7 +636,10 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>)
       { pattern: /GOLD LABEL/i, name: "Gold Label" },
       { pattern: /STADIUM CLUB/i, name: "Stadium Club" },
       { pattern: /BOWMAN CHROME/i, name: "Bowman Chrome" },
-      { pattern: /35TH ANNIVERSARY/i, name: "35th Anniversary" }
+      { pattern: /35TH ANNIVERSARY/i, name: "35th Anniversary" },
+      { pattern: /COLLECTOR'?S? CHOICE/i, name: "Collector's Choice" },
+      { pattern: /SERIES ONE|SERIES 1/i, name: "Series One" },
+      { pattern: /SERIES TWO|SERIES 2/i, name: "Series Two" }
     ];
     
     for (const collectionData of collectionPatterns) {
