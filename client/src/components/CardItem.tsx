@@ -146,11 +146,13 @@ export default function CardItem({ card, quantity, onDelete }: CardItemProps) {
   // Get the image path using the new API endpoint or direct path for special cards
   let initialPath = '';
   
-  // Special handling for Bobby Thigpen (ID 31) and Chris James (ID 32)
+  // Special handling for problematic cards with direct image paths
   if (card.id === 31) {
     initialPath = '/uploads/1748182904641_Thigpen_front.jpg';
   } else if (card.id === 32) {
     initialPath = '/uploads/1748183726973_James_front.jpg';
+  } else if (card.id === 33) {
+    initialPath = '/uploads/1748186054812_Van Slyke_front.jpg';
   } else {
     initialPath = card.id ? `/api/card-image/${card.id}/front` : '';
   }

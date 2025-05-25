@@ -391,7 +391,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           30: { front: 'cole_front_2021_topps_heritage.jpg', back: 'cole_back_2021_topps_heritage.jpg' },
           31: { front: '/uploads/fixed_Thigpen_front.jpg', back: '/uploads/1748182904644_Thigpen_back.jpg' },
           32: { front: '/uploads/fixed_James_front.jpg', back: '/uploads/1748183726976_James_back.jpg' },
-          33: { front: 'bregman_front_2024_topps_35year.jpg', back: 'bregman_back_2024_topps_35year.jpg' },
+          33: { front: '/uploads/1748186054812_Van Slyke_front.jpg', back: '/uploads/1748186054814_Van Slyke_back.jpg' },
           34: { front: 'manaea_front_2024_topps_series2.jpg', back: 'manaea_back_2024_topps_series2.jpg' },
           35: { front: 'frelick_front_2024_topps_35year.jpg', back: 'frelick_back_2024_35year.jpg' },
           36: { front: 'trout_front_2024_topps_chrome.jpg', back: 'trout_back_2024_topps_chrome.jpg' },
