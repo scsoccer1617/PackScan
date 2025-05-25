@@ -10,10 +10,41 @@ export default function Collection() {
   const [manualTotalValue, setManualTotalValue] = useState(0);
   const [allCards, setAllCards] = useState([]);
   
+  // Force refresh of collection data when component mounts or when returning to this page
+  const [refreshKey, setRefreshKey] = useState(0);
+  
+  // Listen for storage events to detect when a card has been edited
+  useEffect(() => {
+    const handleCardEdited = () => {
+      console.log("Collection page detected card edit, refreshing data...");
+      setRefreshKey(prevKey => prevKey + 1);
+    };
+    
+    // Listen for storage event from other components signaling a card update
+    window.addEventListener('storage', (event) => {
+      if (event.key === 'card_edited') {
+        handleCardEdited();
+      }
+    });
+    
+    // Check for URL parameters indicating we've returned from an edit
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('refresh') === 'true') {
+      handleCardEdited();
+      // Clean up the URL
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+    
+    return () => {
+      window.removeEventListener('storage', handleCardEdited);
+    };
+  }, []);
+  
   // Direct API call for the cards
   useEffect(() => {
     async function fetchCards() {
       try {
+        console.log("Fetching cards data (refresh key:", refreshKey, ")");
         const response = await fetch('/api/cards');
         if (response.ok) {
           const cardsData = await response.json();
@@ -37,7 +68,7 @@ export default function Collection() {
     }
     
     fetchCards();
-  }, []);
+  }, [refreshKey]);
   
   // Fetch using React Query (for comparison)
   const { data: collectionSummary, isLoading: summaryLoading } = useQuery<{ cardCount: number, totalValue: number }>({

@@ -135,20 +135,19 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
           description: "The card has been successfully updated with your changes.",
         });
         
-        // Close the modal
+        // Use a more React-friendly approach to refresh data
+        console.log("Triggering collection page refresh after card update...");
+        
+        // Close modal first to prevent any state conflicts
         onClose();
         
-        // Navigate to collection page with a more robust approach
-        console.log("Navigating back to collection page after update...");
+        // Trigger refresh using localStorage event for components listening for changes
+        localStorage.setItem('card_edited', Date.now().toString());
+        
+        // Navigate to collection page with a refresh parameter
         setTimeout(() => {
-          // First, make sure we're on the collection page
-          if (!window.location.pathname.includes('/collection')) {
-            window.location.href = '/collection';
-          } else {
-            // If already on collection page, trigger a hard reload to refresh data
-            window.location.reload();
-          }
-        }, 500); // Slightly longer delay to ensure toast is visible and data is refreshed
+          window.location.href = '/collection?refresh=true';
+        }, 300);
       } catch (error) {
         console.error("Error during card update cleanup:", error);
       }
