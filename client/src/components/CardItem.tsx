@@ -153,6 +153,8 @@ export default function CardItem({ card, quantity, onDelete }: CardItemProps) {
     initialPath = '/uploads/1748183726973_James_front.jpg';
   } else if (card.id === 33) {
     initialPath = '/uploads/1748186054812_Van Slyke_front.jpg';
+  } else if (card.id === 34) {
+    initialPath = '/uploads/1748186788500_Jones_front.jpg';
   } else {
     initialPath = card.id ? `/api/card-image/${card.id}/front` : '';
   }
