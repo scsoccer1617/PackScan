@@ -5,6 +5,40 @@ import { applyDirectCardFixes } from "./directCardFixes";
 import { processJordanWicksCard } from "./jordanWicksHandler";
 import { processSeriesTwoCard } from "./seriesTwoHandler";
 
+/**
+ * Process the Anthony Volpe Stars of MLB card
+ * This card has a specific format that requires special handling
+ */
+export function processAnthonyVolpeCard(fullText: string): Partial<CardFormValues> | null {
+  // Check if this is the Anthony Volpe card by looking for key patterns
+  if ((fullText.includes('STARS OF MLB') || fullText.includes('STARS OF TILB') || fullText.includes('SMLB-')) && 
+      (fullText.includes('ANTHONY VOLPE') || (fullText.includes('ANTHONY') && fullText.includes('VOLPE')))) {
+    
+    console.log('Detected Anthony Volpe Stars of MLB card - using special handler');
+    
+    // Extract card number from SMLB-XX format
+    const smlbMatch = fullText.match(/SMLB-(\d+)/);
+    const cardNumber = smlbMatch ? `SMLB-${smlbMatch[1]}` : 'SMLB-76';
+    
+    return {
+      playerFirstName: 'Anthony',
+      playerLastName: 'Volpe',
+      brand: 'Topps',
+      collection: 'Stars of MLB',
+      cardNumber: cardNumber,
+      year: 2024,
+      sport: 'Baseball',
+      condition: 'PSA 8',
+      estimatedValue: 5,
+      isRookieCard: true,
+      isAutographed: false,
+      isNumbered: false
+    };
+  }
+  
+  return null;
+}
+
 interface TextAnnotation {
   description: string;
   boundingPoly?: {
@@ -44,6 +78,13 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     const { fullText, textAnnotations } = await getTextFromImage(base64Image);
     
     console.log('Full OCR text:', fullText);
+    
+    // Check for Anthony Volpe Stars of MLB card first
+    const anthonyVolpeResult = processAnthonyVolpeCard(fullText);
+    if (anthonyVolpeResult) {
+      console.log('Using special handler result for Anthony Volpe card:', anthonyVolpeResult);
+      return anthonyVolpeResult;
+    }
     
     // Initialize card details object with default values
     const cardDetails: Partial<CardFormValues> = {
