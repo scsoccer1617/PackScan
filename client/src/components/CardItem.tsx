@@ -148,9 +148,9 @@ export default function CardItem({ card, quantity, onDelete }: CardItemProps) {
   
   // Special handling for Bobby Thigpen (ID 31) and Chris James (ID 32)
   if (card.id === 31) {
-    initialPath = '/thigpen_front.jpg';
+    initialPath = '/thigpen.jpg';
   } else if (card.id === 32) {
-    initialPath = '/james_front.jpg';
+    initialPath = '/james.jpg';
   } else {
     initialPath = card.id ? `/api/card-image/${card.id}/front` : '';
   }
