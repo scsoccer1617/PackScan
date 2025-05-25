@@ -4,6 +4,7 @@ import { processFlagshipCollectionCard } from "./flagshipCardHandler";
 import { applyDirectCardFixes } from "./directCardFixes";
 import { processJordanWicksCard } from "./jordanWicksHandler";
 import { processSeriesTwoCard } from "./seriesTwoHandler";
+import { processStarsOfMLBCard } from "./starsOfMLBHandler";
 
 /**
  * Process the Anthony Volpe Stars of MLB card
@@ -79,11 +80,11 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     
     console.log('Full OCR text:', fullText);
     
-    // Check for Anthony Volpe Stars of MLB card first
-    const anthonyVolpeResult = processAnthonyVolpeCard(fullText);
-    if (anthonyVolpeResult) {
-      console.log('Using special handler result for Anthony Volpe card:', anthonyVolpeResult);
-      return anthonyVolpeResult;
+    // Check for Stars of MLB cards first
+    const starsOfMLBResult = processStarsOfMLBCard(fullText);
+    if (starsOfMLBResult) {
+      console.log('Using special Stars of MLB handler result:', starsOfMLBResult);
+      return starsOfMLBResult;
     }
     
     // Initialize card details object with default values
