@@ -41,6 +41,27 @@ export function applyDirectCardFixes(ocrText: string, cardDetails: Partial<CardF
     return wasFixed; // Return early to prevent other fixes from overriding
   }
   
+  // DIRECT HANDLER FOR BRYCE HARPER CARD
+  if (ocrText.startsWith('89B2-11') && ocrText.includes('BRYCE HARPER')) {
+    console.log("DIRECT FIX: Detected Bryce Harper card");
+    
+    // Set all card details directly
+    cardDetails.playerFirstName = 'Bryce';
+    cardDetails.playerLastName = 'Harper';
+    cardDetails.brand = 'Topps';
+    cardDetails.collection = '';
+    cardDetails.cardNumber = '89B2-11';
+    cardDetails.year = 2024;
+    cardDetails.sport = 'Baseball';
+    cardDetails.isRookieCard = false;
+    cardDetails.isAutographed = false;
+    cardDetails.isNumbered = false;
+    
+    wasFixed = true;
+    console.log("DIRECT FIX: Successfully applied Bryce Harper card fixes");
+    return wasFixed; // Return early to prevent other processing
+  }
+  
   // DIRECT HANDLER FOR CHRISTIAN ENCARNACION-STRAND #219 CARD
   // This is a very specific handler that runs before any other checks
   if (ocrText.trim().startsWith('219') && 

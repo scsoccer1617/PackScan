@@ -167,8 +167,12 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>): 
       // Second line often contains just the player name
       const secondLine = lines[1].trim();
       
-      // If the second line looks like a name (all caps, no numbers)
-      if (/^[A-Z][A-Z\s\-\.']{2,30}$/.test(secondLine) && 
+      console.log(`Checking second line for player name: "${secondLine}"`);
+      
+      // If the second line looks like a name (all caps, no numbers, reasonable length)
+      if (secondLine && 
+          secondLine.length > 0 &&
+          /^[A-Z][A-Z\s\-\.']{2,30}$/.test(secondLine) && 
           !secondLine.includes('TOPPS') && 
           !secondLine.includes('SERIES') &&
           !secondLine.includes('OPENING DAY')) {

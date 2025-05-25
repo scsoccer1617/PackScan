@@ -69,39 +69,48 @@ export async function handleCardImageAnalysis(req: MulterRequest, res: Response)
     // Try to get the OCR text first for specific card detection
     try {
       // First get the raw OCR text for all our special handlers
-      const ocrText = await analyzeSportsCardImage(base64Image);
+      const ocrResult = await analyzeSportsCardImage(base64Image);
       
       // Extract full text from OCR result
       let fullText = '';
-      if (typeof ocrText === 'object') {
-        console.log("OCR result object:", JSON.stringify(ocrText, null, 2));
+      if (typeof ocrResult === 'object') {
+        console.log("OCR result object:", JSON.stringify(ocrResult, null, 2));
         
-        // Check if we have a fullText property
-        if (ocrText.fullText) {
-          fullText = ocrText.fullText;
+        // Get the full OCR text from Google Vision response
+        // This will be available from googleVisionFetch.ts which sets fullText
+        if ('fullText' in ocrResult && typeof ocrResult.fullText === 'string') {
+          fullText = ocrResult.fullText;
           console.log("Found fullText property:", fullText);
         } else {
           // Extract all string values from the object and use them as text
-          const stringValues = Object.entries(ocrText)
+          const stringValues = Object.entries(ocrResult)
             .filter(([key, value]) => typeof value === 'string')
-            .map(([key, value]) => value);
+            .map(([_, value]) => value);
           
           fullText = stringValues.join(' ');
           console.log("Constructed fullText from values:", fullText);
         }
         
-        // SPECIAL CASE: Try the improved direct handler for Christian Encarnacion-Strand first
-        // This gets special priority because it's been problematic
-        const encarnacionResult = detectEncarnacionStrandCard(fullText);
-        if (encarnacionResult) {
-          console.log("Successfully identified Christian Encarnacion-Strand card!");
-          console.log("Card details:", JSON.stringify(encarnacionResult, null, 2));
+        // SPECIAL CASE: Only check for Christian Encarnacion-Strand card if text contains relevant keywords
+        // This avoids unnecessary checks on every card
+        if (fullText.includes('219') && 
+            (fullText.includes('CHRISTIAN') || 
+             fullText.includes('ENCARNACION') || 
+             fullText.includes('STRAND') || 
+             (fullText.includes('CINCINNATI') && fullText.includes('REDS')))) {
           
-          console.timeEnd('card-analysis-total');
-          return res.json({
-            success: true,
-            data: encarnacionResult
-          });
+          console.log("Found potential Encarnacion-Strand card keywords, running special detection");
+          const encarnacionResult = detectEncarnacionStrandCard(fullText);
+          if (encarnacionResult) {
+            console.log("Successfully identified Christian Encarnacion-Strand card!");
+            console.log("Card details:", JSON.stringify(encarnacionResult, null, 2));
+            
+            console.timeEnd('card-analysis-total');
+            return res.json({
+              success: true,
+              data: encarnacionResult
+            });
+          }
         }
         
         // Check for rookie card status
