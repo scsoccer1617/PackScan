@@ -308,10 +308,17 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>): 
     // This prioritizes the number that appears at the top of the card
     const lines = text.split('\n');
     
-    // Check the very first line/token for a standalone number - highest priority!
+    // HIGHEST PRIORITY: Check if the very first line is ONLY a number
+    // This is the most reliable way to detect card numbers at the top of a card
     const firstLine = lines[0].trim();
-    // Try to extract a number from the beginning of the first line
-    const firstLineMatch = firstLine.match(/^(\d{1,4})/);
+    if (/^\d+$/.test(firstLine) && parseInt(firstLine) > 0 && parseInt(firstLine) < 10000) {
+      cardDetails.cardNumber = firstLine;
+      console.log(`Detected standalone card number at top of card: ${cardDetails.cardNumber}`);
+      return;
+    }
+    
+    // Second attempt: Try to extract a number from the beginning of the first line
+    const firstLineMatch = firstLine.match(/^(\d{1,4})\s/);
     if (firstLineMatch && firstLineMatch[1]) {
       const number = firstLineMatch[1];
       // Make sure it's a reasonable card number (1-9999)
@@ -512,28 +519,67 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>)
  */
 function extractSerialNumber(text: string, cardDetails: Partial<CardFormValues>): void {
   try {
-    // Look for serial numbering in common formats
-    const serialPatterns = [
-      /\b(\d+)\/(\d+)\b/,  // Format: 123/1000
-      /\b(\d+)\s+OF\s+(\d+)\b/i,  // Format: 123 OF 1000
-      /\b(\d+)\s+OUT OF\s+(\d+)\b/i  // Format: 123 OUT OF 1000
+    // CRITICAL: Filter out text sections that should not contain serial numbers
+    // Avoid common false positives like dates (3/31/86), contract dates, trade dates, etc.
+    
+    // Common sections to ignore when looking for serial numbers
+    const ignorePatterns = [
+      /TRADED/i,
+      /ACQUIRED/i,
+      /CONTRACT/i,
+      /BORN/i,
+      /STATS/i,
+      /RECORD/i,
+      /CAREER/i,
+      /HIGHLIGHTS/i,
+      /PERFORMANCE/i,
     ];
     
-    for (const pattern of serialPatterns) {
-      const match = text.match(pattern);
-      if (match && match[1] && match[2]) {
-        const serialNumber = parseInt(match[1], 10);
-        const totalNumber = parseInt(match[2], 10);
-        
-        // Validate that this looks like a real serial number
-        // Exclude common statistical lines that match the pattern
-        if (serialNumber < totalNumber && // Serial number should be less than total
-            totalNumber <= 10000 && // Most serial numbers don't exceed 10000
-            serialNumber > 0) {
-          cardDetails.serialNumber = `${serialNumber}/${totalNumber}`;
-          cardDetails.isNumbered = true;
-          console.log(`Detected serial number: ${cardDetails.serialNumber}`);
-          return;
+    // Look for serial numbering in common formats, but only when they appear
+    // outside of long text paragraphs or stats sections
+    const serialPatterns = [
+      // Most card serial numbers are format: XXX/YYY where YYY is limited run size
+      /\b(\d{1,3})\/(\d{3,4})\b/,  // Format: 123/1000 (limited to reasonable ranges)
+      /\b(\d{1,3})\s+OF\s+(\d{3,4})\b/i,  // Format: 123 OF 1000
+      /\b(\d{1,3})\s+OUT OF\s+(\d{3,4})\b/i  // Format: 123 OUT OF 1000
+    ];
+    
+    // Break the text into smaller segments to avoid matching serial numbers in paragraphs
+    const lines = text.split('\n');
+    
+    // Look for serial number patterns only in short isolated lines
+    // Serial numbers usually appear on their own or in very simple contexts
+    for (const line of lines) {
+      // Skip lines that are likely to contain biographical info, dates, stats, etc.
+      if (line.length > 40) continue; // Real serial numbers are rarely in long lines
+      
+      // Skip lines containing ignore patterns
+      let shouldSkip = false;
+      for (const pattern of ignorePatterns) {
+        if (pattern.test(line)) {
+          shouldSkip = true;
+          break;
+        }
+      }
+      if (shouldSkip) continue;
+      
+      // Check for serial number pattern in this line
+      for (const pattern of serialPatterns) {
+        const match = line.match(pattern);
+        if (match && match[1] && match[2]) {
+          const serialNumber = parseInt(match[1], 10);
+          const totalNumber = parseInt(match[2], 10);
+          
+          // Validate that this looks like a real serial number
+          if (serialNumber < totalNumber && // Serial number should be less than total
+              totalNumber >= 10 && // Most serial numbers are at least /10
+              totalNumber <= 10000 && // Most don't exceed 10000
+              serialNumber > 0) {
+            cardDetails.serialNumber = `${serialNumber}/${totalNumber}`;
+            cardDetails.isNumbered = true;
+            console.log(`Detected serial number: ${cardDetails.serialNumber}`);
+            return;
+          }
         }
       }
     }
