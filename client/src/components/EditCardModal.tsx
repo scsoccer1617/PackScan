@@ -138,11 +138,17 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
         // Close the modal
         onClose();
         
-        // Reload the page to ensure all data is fresh
-        console.log("Reloading page to refresh all data...");
+        // Navigate to collection page with a more robust approach
+        console.log("Navigating back to collection page after update...");
         setTimeout(() => {
-          window.location.reload();
-        }, 300); // Small delay to allow the toast to show
+          // First, make sure we're on the collection page
+          if (!window.location.pathname.includes('/collection')) {
+            window.location.href = '/collection';
+          } else {
+            // If already on collection page, trigger a hard reload to refresh data
+            window.location.reload();
+          }
+        }, 500); // Slightly longer delay to ensure toast is visible and data is refreshed
       } catch (error) {
         console.error("Error during card update cleanup:", error);
       }
