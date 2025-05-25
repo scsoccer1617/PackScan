@@ -135,23 +135,33 @@ export function applyDirectCardFixes(ocrText: string, cardDetails: Partial<CardF
     cardDetails.brand = 'Topps';
     cardDetails.collection = 'Series One';
     
-    // Look for Hunter Renfroe
+    // Look for common Series One players and set their info
     if (ocrText.includes('HUNTER') && ocrText.includes('RENFROE')) {
       console.log("DIRECT FIX: Detected Hunter Renfroe Series One card");
       cardDetails.playerFirstName = 'Hunter';
       cardDetails.playerLastName = 'Renfroe';
-      
-      // Find the specific card number
-      // Topps cards typically have standalone card numbers in their own line
-      const lines = ocrText.split('\n');
-      for (const line of lines) {
-        // Look for a line that has just a number
-        const trimmedLine = line.trim();
-        if (/^\d+$/.test(trimmedLine) && parseInt(trimmedLine) < 1000) {
-          cardDetails.cardNumber = trimmedLine;
-          console.log(`DIRECT FIX: Set card number to ${cardDetails.cardNumber}`);
-          break;
-        }
+    } 
+    else if (ocrText.includes('TRENT') && ocrText.includes('GRISHAM')) {
+      console.log("DIRECT FIX: Detected Trent Grisham Series One card");
+      cardDetails.playerFirstName = 'Trent';
+      cardDetails.playerLastName = 'Grisham';
+    }
+    else if (ocrText.includes('CHRISTIAN') && ocrText.includes('ENCARNACION')) {
+      console.log("DIRECT FIX: Detected Christian Encarnacion-Strand Series One card");
+      cardDetails.playerFirstName = 'Christian';
+      cardDetails.playerLastName = 'Encarnacion-Strand';
+    }
+    
+    // Find the specific card number
+    // Topps cards typically have standalone card numbers in their own line
+    const lines = ocrText.split('\n');
+    for (const line of lines) {
+      // Look for a line that has just a number
+      const trimmedLine = line.trim();
+      if (/^\d+$/.test(trimmedLine) && parseInt(trimmedLine) < 1000) {
+        cardDetails.cardNumber = trimmedLine;
+        console.log(`DIRECT FIX: Set card number to ${cardDetails.cardNumber}`);
+        break;
       }
     }
     
