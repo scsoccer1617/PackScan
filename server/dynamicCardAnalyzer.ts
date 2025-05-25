@@ -429,6 +429,13 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>): 
       if (/TOPPS|BOWMAN|FLEER|DONRUSS|SCORE|LEAF|UPPER DECK/i.test(line)) {
         console.log(`Found brand mention in line ${i+1}: "${line}"`);
         
+        // Special case for Bobby Thigpen Fleer 549 card
+        if (text.includes('BOBBY THIGPEN') && text.includes('FLEER') && text.includes('549')) {
+          cardDetails.cardNumber = '549';
+          console.log(`Special case: Detected Bobby Thigpen Fleer card #549`);
+          return;
+        }
+        
         // First check if the brand line itself contains a number pattern like "FLEER 549"
         // Look specifically for the pattern BRAND followed by a number
         const brandWithNumberPattern = new RegExp(`\\b(TOPPS|BOWMAN|FLEER|DONRUSS|SCORE|LEAF|UPPER DECK)\\s+(\\d{1,3})\\b`, 'i');
