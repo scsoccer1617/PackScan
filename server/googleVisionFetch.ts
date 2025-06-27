@@ -13,8 +13,21 @@ function initializeVisionClient(): ImageAnnotatorClient {
     throw new Error('Missing Google Cloud service account credentials');
   }
   
-  // Clean private key
-  const cleanPrivateKey = privateKey.replace(/\\n/g, '\n');
+  // Clean and format private key properly
+  let cleanPrivateKey = privateKey;
+  
+  // Handle escaped newlines
+  if (cleanPrivateKey.includes('\\n')) {
+    cleanPrivateKey = cleanPrivateKey.replace(/\\n/g, '\n');
+  }
+  
+  // Ensure proper PEM format
+  if (!cleanPrivateKey.startsWith('-----BEGIN')) {
+    // If it's just the key content without headers, add them
+    cleanPrivateKey = `-----BEGIN PRIVATE KEY-----\n${cleanPrivateKey}\n-----END PRIVATE KEY-----`;
+  }
+  
+  console.log('Initializing Vision client with credentials...');
   
   return new ImageAnnotatorClient({
     credentials: {
