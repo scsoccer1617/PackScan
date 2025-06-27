@@ -933,6 +933,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     }
   });
+
+  // Simple eBay search endpoint for price lookup (no card saving)
+  app.get(`${apiPrefix}/ebay-search`, async (req, res) => {
+    try {
+      const { playerName, cardNumber, brand, year, collection, condition } = req.query;
+      
+      if (!playerName || !brand || !year) {
+        return res.status(400).json({ error: 'Missing required parameters' });
+      }
+      
+      const results = await searchCardValues(
+        playerName as string,
+        cardNumber as string || '',
+        brand as string,
+        parseInt(year as string, 10),
+        collection as string || '',
+        condition as string || ''
+      );
+      
+      return res.json(results);
+    } catch (error) {
+      console.error('Error searching eBay:', error);
+      return res.status(500).json({ 
+        error: 'Failed to search eBay prices',
+        results: [],
+        averageValue: 0
+      });
+    }
+  });
   
   // Generate eBay search URL for a specific card
   app.get(`${apiPrefix}/cards/:id/ebay-url`, async (req, res) => {
