@@ -67,35 +67,26 @@ export async function searchCardValues(
     
     console.log('Searching eBay with keywords:', keywords);
 
-    // API request parameters
+    // API request parameters - simplified to avoid errors
     const params = {
       'OPERATION-NAME': 'findItemsByKeywords',
       'SERVICE-VERSION': '1.0.0',
       'SECURITY-APPNAME': EBAY_APP_ID,
       'GLOBAL-ID': 'EBAY-US',
       'RESPONSE-DATA-FORMAT': 'JSON',
-      'REST-PAYLOAD': true,
+      'REST-PAYLOAD': 'true',
       'keywords': keywords,
       'categoryId': '212', // Sports Mem, Cards & Fan Shop
-      'itemFilter(0).name': 'Condition',
-      'itemFilter(0).value': 'Used',
-      'itemFilter(1).name': 'ListingType',
-      'itemFilter(1).value(0)': 'FixedPrice',
-      'itemFilter(1).value(1)': 'Auction',
-      'sortOrder': 'BestMatch',
-      'paginationInput.entriesPerPage': 20 // Increased from 10 to get more results
+      'paginationInput.entriesPerPage': '5'
     };
 
     // Make the API request
     const response = await axios.get(EBAY_FINDING_API_URL, { params });
     const data = response.data;
     
-    // Log the full response for debugging
-    console.log('eBay API Response:', JSON.stringify(data, null, 2));
-    
-    // Check for eBay API errors
+    // Check for eBay API errors first
     if (data && data.errorMessage) {
-      console.log('eBay API Error:', JSON.stringify(data.errorMessage, null, 2));
+      console.log('eBay API Error:', data.errorMessage);
       return { averageValue: 0, results: [] };
     }
 
