@@ -15,12 +15,13 @@ export default function PriceLookup() {
   const [showOCRResults, setShowOCRResults] = useState<boolean>(false);
   const [cardData, setCardData] = useState<Partial<CardFormValues> | null>(null);
   const [showPriceResults, setShowPriceResults] = useState<boolean>(false);
+  const [analyzing, setAnalyzing] = useState<boolean>(false);
   const { toast } = useToast();
   
   // OCR hook for analyzing card images
   const { loading: ocrLoading, error: ocrError, data: ocrData, analyzeImage } = useOCR();
   
-  // Handle OCR analysis request
+  // Handle combined OCR + eBay price analysis
   const handleAnalyzeRequest = async () => {
     if (!backImage) {
       toast({
@@ -31,17 +32,55 @@ export default function PriceLookup() {
       return;
     }
     
+    setAnalyzing(true);
     try {
-      // Use the back image for OCR since it contains the card number and details
-      await analyzeImage(backImage);
-      setShowOCRResults(true);
-      setShowPriceResults(false);
+      // Use the new combined endpoint for OCR + price lookup
+      const response = await fetch('/api/analyze-card-with-prices', {
+        method: 'POST',
+        body: (() => {
+          const formData = new FormData();
+          
+          // Convert base64 image to file for upload
+          const byteCharacters = atob(backImage.split(',')[1]);
+          const byteNumbers = new Array(byteCharacters.length);
+          for (let i = 0; i < byteCharacters.length; i++) {
+            byteNumbers[i] = byteCharacters.charCodeAt(i);
+          }
+          const byteArray = new Uint8Array(byteNumbers);
+          const blob = new Blob([byteArray], { type: 'image/jpeg' });
+          
+          formData.append('image', blob, 'card.jpg');
+          return formData;
+        })()
+      });
+      
+      if (!response.ok) {
+        throw new Error('Analysis failed');
+      }
+      
+      const result = await response.json();
+      
+      if (result.success && result.data) {
+        setCardData(result.data);
+        setShowOCRResults(true);
+        setShowPriceResults(true); // Show both OCR and price results
+        
+        toast({
+          title: "Analysis Complete",
+          description: `Found ${result.data.ebayResults?.length || 0} recent sales with average value of $${result.data.averageValue || 0}`,
+        });
+      } else {
+        throw new Error(result.message || 'Analysis failed');
+      }
     } catch (error) {
+      console.error('Analysis error:', error);
       toast({
         title: "Analysis Failed",
         description: "Could not analyze the card image. Please try again.",
         variant: "destructive",
       });
+    } finally {
+      setAnalyzing(false);
     }
   };
   

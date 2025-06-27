@@ -784,6 +784,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Test Google Vision API authentication
+  app.get(`${apiPrefix}/test-vision`, async (req, res) => {
+    try {
+      // Create a simple test image (1x1 pixel white PNG in base64)
+      const testImage = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==';
+      
+      console.log('Testing Google Vision API authentication...');
+      const result = await extractTextFromImage(testImage);
+      console.log('Google Vision API test successful:', result);
+      
+      return res.json({
+        success: true,
+        message: 'Google Vision API is working correctly',
+        textLength: result.fullText.length
+      });
+    } catch (error: any) {
+      console.error('Google Vision API test failed:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Google Vision API authentication failed',
+        error: error.message
+      });
+    }
+  });
+
   // OCR endpoint to analyze card images
   app.post(`${apiPrefix}/analyze-card-image`, upload.single('image'), async (req, res) => {
     // Check for special cards first by looking at the request
@@ -905,6 +930,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: 'Missing required parameters' });
       }
       
+      console.log('eBay search request:', { playerName, cardNumber, brand, year, collection });
+      
       const results = await searchCardValues(
         playerName as string,
         cardNumber as string || '',
@@ -914,6 +941,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         condition as string || ''
       );
       
+      console.log('eBay search results:', results);
+      
       return res.json(results);
     } catch (error) {
       console.error('Error searching eBay:', error);
@@ -921,6 +950,93 @@ export async function registerRoutes(app: Express): Promise<Server> {
         error: 'Failed to search eBay prices',
         results: [],
         averageValue: 0
+      });
+    }
+  });
+
+  // Combined OCR + eBay price lookup endpoint
+  app.post(`${apiPrefix}/analyze-card-with-prices`, upload.single('image'), async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ 
+          success: false,
+          message: 'No image provided',
+          error: 'missing_file'
+        });
+      }
+
+      console.log('Starting combined OCR + eBay price analysis...');
+      
+      // First, perform OCR analysis
+      const ocrResponse = await new Promise<any>((resolve, reject) => {
+        const mockRes = {
+          json: (data: any) => resolve(data),
+          status: (code: number) => ({
+            json: (data: any) => reject(new Error(`OCR failed with status ${code}: ${JSON.stringify(data)}`))
+          })
+        };
+        
+        handleCardImageAnalysis(req, mockRes as any);
+      });
+
+      if (!ocrResponse.success || !ocrResponse.data) {
+        return res.json({
+          success: true,
+          data: {
+            ...ocrResponse.data,
+            ebayResults: [],
+            averageValue: 0,
+            error: 'OCR analysis failed'
+          }
+        });
+      }
+
+      const cardData = ocrResponse.data;
+      console.log('OCR completed, starting eBay search for:', cardData);
+
+      // Then perform eBay price lookup with the OCR results
+      let ebayResults = [];
+      let averageValue = 0;
+
+      if (cardData.playerFirstName && cardData.playerLastName && cardData.brand && cardData.year) {
+        try {
+          const playerName = `${cardData.playerFirstName} ${cardData.playerLastName}`;
+          const ebayData = await searchCardValues(
+            playerName,
+            cardData.cardNumber || '',
+            cardData.brand,
+            cardData.year,
+            cardData.collection || '',
+            cardData.condition || ''
+          );
+          
+          ebayResults = ebayData.results || [];
+          averageValue = ebayData.averageValue || 0;
+          
+          console.log(`eBay search completed: ${ebayResults.length} results, average value: $${averageValue}`);
+        } catch (ebayError) {
+          console.error('eBay search failed:', ebayError);
+        }
+      } else {
+        console.log('Insufficient card data for eBay search');
+      }
+
+      return res.json({
+        success: true,
+        data: {
+          ...cardData,
+          ebayResults,
+          averageValue,
+          estimatedValue: averageValue // Update the estimated value with eBay data
+        }
+      });
+
+    } catch (error: any) {
+      console.error('Error in combined analysis:', error);
+      return res.status(500).json({
+        success: false,
+        message: error.message || 'Combined analysis failed',
+        error: 'analysis_failed'
       });
     }
   });
