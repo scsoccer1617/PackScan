@@ -183,23 +183,32 @@ export function getEbaySearchUrl(
   const nameComponents = playerName.split(' ');
   const lastName = nameComponents.length > 1 ? nameComponents[nameComponents.length - 1] : playerName;
   
-  // Determine if this is a Heritage card
-  const isHeritage = collection && collection.toLowerCase().includes('heritage');
-  
-  // Build search terms using same logic as API search
+  // Build search terms using same logic as API search - use full details for better results
   let keywords = '';
   
-  if (isHeritage) {
+  // Check for Stars of MLB cards
+  if (collection && collection.toLowerCase().includes('stars of mlb')) {
+    // For Stars of MLB cards, use the exact format that works on eBay
+    keywords = `${playerName} ${brand} ${collection} ${cardNumber}`;
+  }
+  // Check for Heritage cards
+  else if (collection && collection.toLowerCase().includes('heritage')) {
     keywords = `${lastName} ${brand} Heritage ${year}`;
     if (/^\d+$/.test(cardNumber)) {
       keywords += ` ${cardNumber}`;
     }
-  } else {
+  } 
+  // Standard cards
+  else {
     keywords = `${lastName} ${brand} ${year}`;
     if (/^\d+$/.test(cardNumber)) {
       keywords += ` ${cardNumber}`;
     }
   }
+  
+  // Debug logging
+  console.log('getEbaySearchUrl - Building search URL with keywords:', keywords);
+  console.log('getEbaySearchUrl - Collection:', collection);
   
   // Encode for URL
   return `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(keywords)}&_sacat=0&LH_Complete=1&LH_Sold=1`;
