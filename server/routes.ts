@@ -823,7 +823,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // OCR endpoint to analyze card images
-  app.post(`${apiPrefix}/analyze-card-image`, upload.single('cardImage'), async (req, res) => {
+  app.post(`${apiPrefix}/analyze-card-image`, upload.single('image'), async (req, res) => {
     // Check for special cards first by looking at the request
     const file = req.file;
     
