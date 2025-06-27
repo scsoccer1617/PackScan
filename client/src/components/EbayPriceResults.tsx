@@ -14,6 +14,13 @@ interface EbaySearchResult {
   endTime: string;
 }
 
+interface EbayResponse {
+  averageValue: number;
+  results: EbaySearchResult[];
+  searchUrl?: string;
+  errorMessage?: string;
+}
+
 interface EbayPriceResultsProps {
   cardData: Partial<CardFormValues>;
 }
@@ -23,6 +30,7 @@ export default function EbayPriceResults({ cardData }: EbayPriceResultsProps) {
   const [results, setResults] = useState<EbaySearchResult[]>([]);
   const [averageValue, setAverageValue] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [searchUrl, setSearchUrl] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchEbayData = async () => {
@@ -48,9 +56,13 @@ export default function EbayPriceResults({ cardData }: EbayPriceResultsProps) {
           throw new Error("Failed to fetch eBay data");
         }
 
-        const data = await response.json();
+        const data: EbayResponse = await response.json();
         setResults(data.results.slice(0, 5)); // Get only the 5 most recent
         setAverageValue(data.averageValue);
+        setSearchUrl(data.searchUrl || null);
+        if (data.errorMessage) {
+          setError(data.errorMessage);
+        }
         setLoading(false);
       } catch (err) {
         setError("Failed to fetch eBay prices. Please try again.");
@@ -118,7 +130,16 @@ export default function EbayPriceResults({ cardData }: EbayPriceResultsProps) {
           <CardTitle className="text-red-600">Error Loading Prices</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-gray-600">{error}</p>
+          <p className="text-gray-600 mb-4">{error}</p>
+          {searchUrl && (
+            <Button 
+              onClick={() => window.open(searchUrl, '_blank')}
+              className="flex items-center gap-2"
+            >
+              <ExternalLink className="h-4 w-4" />
+              Search eBay Manually
+            </Button>
+          )}
         </CardContent>
       </Card>
     );

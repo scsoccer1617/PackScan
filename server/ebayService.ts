@@ -157,7 +157,14 @@ export async function searchCardValues(
     };
   } catch (error) {
     console.error('Error searching eBay for card values:', error);
-    return { averageValue: 0, results: [] };
+    // Return search URL as fallback when API fails
+    const searchUrl = getEbaySearchUrl(playerName, cardNumber, brand, year, collection);
+    return { 
+      averageValue: 0, 
+      results: [],
+      searchUrl,
+      errorMessage: 'eBay API authentication error - check credentials'
+    };
   }
 }
 
