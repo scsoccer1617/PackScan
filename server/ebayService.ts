@@ -40,27 +40,29 @@ export async function searchCardValues(
     const nameComponents = playerName.split(' ');
     const lastName = nameComponents.length > 1 ? nameComponents[nameComponents.length - 1] : playerName;
     
-    // For special cards like Heritage, we need to be more specific
-    let isHeritage = false;
-    if (typeof collection === 'string' && collection.toLowerCase().includes('heritage')) {
-      isHeritage = true;
-    }
-    
-    // Construct a more flexible search query
+    // Special handling for different card types
     let keywords = '';
     
-    if (isHeritage) {
+    // Check for Stars of MLB cards
+    if (typeof collection === 'string' && collection.toLowerCase().includes('stars of mlb')) {
+      // For Stars of MLB cards, use full player name and "Stars MLB" for better results
+      keywords = `${playerName} ${brand} ${year} Stars MLB`;
+      console.log('Using Stars of MLB search strategy');
+    }
+    // Check for Heritage cards
+    else if (typeof collection === 'string' && collection.toLowerCase().includes('heritage')) {
       // For Heritage cards, we use a more specific format that works better
       keywords = `${lastName} ${brand} Heritage ${year}`;
-    } else {
+      if (/^\d+$/.test(cardNumber)) {
+        keywords += ` ${cardNumber}`;
+      }
+      console.log('Using Heritage search strategy');
+    } 
+    // Standard cards
+    else {
       // For regular cards, we use a broader search
       keywords = `${lastName} ${brand} ${year}`;
-    }
-    
-    // Try to add card number if appropriate
-    // For Heritage cards, if the card number is numeric, include it
-    if (isHeritage && /^\d+$/.test(cardNumber)) {
-      keywords += ` ${cardNumber}`;
+      console.log('Using standard search strategy');
     }
     
     console.log('Searching eBay with keywords:', keywords);
@@ -87,6 +89,15 @@ export async function searchCardValues(
     // Make the API request
     const response = await axios.get(EBAY_FINDING_API_URL, { params });
     const data = response.data;
+    
+    // Log the full response for debugging
+    console.log('eBay API Response:', JSON.stringify(data, null, 2));
+    
+    // Check for eBay API errors
+    if (data && data.errorMessage) {
+      console.log('eBay API Error:', JSON.stringify(data.errorMessage, null, 2));
+      return { averageValue: 0, results: [] };
+    }
 
     // Extract search results
     let results: EbaySearchResult[] = [];
