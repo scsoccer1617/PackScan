@@ -2,126 +2,9 @@ import { db } from '@db';
 import * as schema from '@shared/schema';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { calculateEstimatedValue } from '../client/src/lib/utils';
-import { google } from 'googleapis';
-import { OAuth2Client } from 'google-auth-library';
 import fs from 'fs';
 import path from 'path';
-
-// Google Sheets API setup
-let googleAuth: OAuth2Client | null = null;
-export let googleSheetsInstance: any = null;
-export let spreadsheetId = process.env.GOOGLE_SHEET_ID || '';
-
-// Initialize Google Sheets API
-export async function initGoogleSheetsApi() {
-  try {
-    // Check if we have the required environment variables
-    if (!process.env.GOOGLE_CLIENT_EMAIL || !process.env.GOOGLE_PRIVATE_KEY) {
-      console.warn('Google Sheets API credentials not found. Using database storage only.');
-      return false;
-    }
-
-    // Create a properly formatted private key
-    let privateKey = process.env.GOOGLE_PRIVATE_KEY || '';
-    
-    try {
-      // Try to parse the key in case it was literally copied from the JSON file
-      if (privateKey.startsWith('"') && privateKey.endsWith('"')) {
-        // Remove the outer quotes
-        privateKey = privateKey.slice(1, -1);
-      }
-      
-      // Handle various formats of private key
-      if (privateKey.includes('\\n')) {
-        privateKey = privateKey.replace(/\\n/g, '\n');
-      }
-      
-      // Make sure it begins and ends with the right markers
-      if (!privateKey.includes('-----BEGIN PRIVATE KEY-----')) {
-        privateKey = '-----BEGIN PRIVATE KEY-----\n' + privateKey;
-      }
-      if (!privateKey.includes('-----END PRIVATE KEY-----')) {
-        privateKey = privateKey + '\n-----END PRIVATE KEY-----';
-      }
-    } catch (error) {
-      console.error('Error processing private key:', error);
-    }
-    
-    // Check key format and log diagnostic info (without exposing sensitive data)
-    console.log('Initializing Google Sheets with client email:', process.env.GOOGLE_CLIENT_EMAIL);
-    console.log('Private key starts with correct header:', privateKey.startsWith('-----BEGIN PRIVATE KEY-----'));
-    console.log('Private key ends with correct footer:', privateKey.endsWith('-----END PRIVATE KEY-----'));
-    console.log('Private key length:', privateKey.length);
-    console.log('Private key contains newlines:', privateKey.includes('\n'));
-    
-    // Try with direct JWT approach
-    googleAuth = new google.auth.JWT(
-      process.env.GOOGLE_CLIENT_EMAIL,
-      undefined,
-      privateKey,
-      ['https://www.googleapis.com/auth/spreadsheets']
-    );
-    
-    googleSheetsInstance = google.sheets({
-      version: 'v4',
-      auth: googleAuth
-    });
-
-    // Create or validate spreadsheet
-    if (!spreadsheetId) {
-      console.log('Creating new Google Sheet for card collection...');
-      try {
-        const response = await googleSheetsInstance.spreadsheets.create({
-          resource: {
-            properties: {
-              title: 'Sports Card Collection',
-            },
-            sheets: [
-              {
-                properties: {
-                  title: 'Cards',
-                  gridProperties: {
-                    frozenRowCount: 1,
-                  },
-                },
-              },
-            ],
-          },
-        });
-        
-        spreadsheetId = response.data.spreadsheetId;
-        console.log(`Created new spreadsheet with ID: ${spreadsheetId}`);
-        
-        // Add headers
-        await googleSheetsInstance.spreadsheets.values.update({
-          spreadsheetId,
-          range: 'Cards!A1:R1',
-          valueInputOption: 'RAW',
-          resource: {
-            values: [[
-              'ID', 'Sport', 'Player First Name', 'Player Last Name', 
-              'Brand', 'Collection', 'Card Number', 'Year', 
-              'Variant', 'Serial Number', 'Condition', 'Estimated Value',
-              'Rookie Card', 'Autographed', 'Numbered',
-              'Front Image URL', 'Back Image URL', 'Last Updated'
-            ]],
-          },
-        });
-      } catch (err) {
-        console.error('Error creating Google Sheet:', err);
-        return false;
-      }
-    }
-    
-    console.log('Google Sheets API initialized successfully');
-    return true;
-  } catch (error) {
-    console.error('Error initializing Google Sheets API:', error);
-    googleAuth = null;
-    googleSheetsInstance = null;
-    return false;
-  }
-}
+// Storage functions for card management - database only
 
 // Database storage
 export const storage = {
@@ -205,52 +88,10 @@ export const storage = {
   },
 
   async deleteCard(id: number) {
-    // First retrieve the card to be deleted so we can get its data
-    const cardToDelete = await this.getCardById(id);
-    
     // Delete the card from the database
     const [deletedCard] = await db.delete(schema.cards)
       .where(eq(schema.cards.id, id))
       .returning();
-    
-    // Remove from Google Sheets if possible
-    if (googleSheetsInstance && spreadsheetId && cardToDelete) {
-      try {
-        // Find the row with this card ID in the spreadsheet
-        const response = await googleSheetsInstance.spreadsheets.values.get({
-          spreadsheetId,
-          range: 'Cards!A:A', // Get all values in column A (ID column)
-        });
-        
-        const rows = response.data.values || [];
-        let rowIndex = -1;
-        
-        // Find the row with matching card ID
-        for (let i = 0; i < rows.length; i++) {
-          if (rows[i][0] === id.toString()) {
-            rowIndex = i + 1; // +1 because spreadsheet rows are 1-indexed
-            break;
-          }
-        }
-        
-        if (rowIndex > 1) { // Skip header row (row 1)
-          console.log(`Deleting card ${id} from Google Sheets row ${rowIndex}`);
-          
-          // Clear the row in the spreadsheet
-          await googleSheetsInstance.spreadsheets.values.clear({
-            spreadsheetId,
-            range: `Cards!A${rowIndex}:S${rowIndex}`,
-          });
-          
-          console.log(`Successfully deleted card ${id} from Google Sheets`);
-        } else {
-          console.log(`Card ${id} not found in Google Sheets, no deletion needed`);
-        }
-      } catch (error) {
-        console.error(`Error deleting card ${id} from Google Sheets:`, error);
-        // Continue even if Google Sheets deletion fails
-      }
-    }
     
     return deletedCard;
   },
@@ -610,5 +451,3 @@ export const storage = {
   },
 };
 
-// Initialize Google Sheets API when this module is imported
-initGoogleSheetsApi().catch(console.error);
