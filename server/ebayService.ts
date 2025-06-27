@@ -18,6 +18,10 @@ interface EbaySearchResult {
 /**
  * Search eBay for completed/sold items matching card criteria
  */
+// Simple cache to reduce API calls
+const searchCache = new Map<string, { data: any; timestamp: number }>();
+const CACHE_DURATION = 60000; // 1 minute cache
+
 export async function searchCardValues(
   playerName: string,
   cardNumber: string,
@@ -30,6 +34,16 @@ export async function searchCardValues(
     if (!EBAY_APP_ID) {
       console.warn('eBay API credentials not set. Cannot fetch card values.');
       return { averageValue: 0, results: [] };
+    }
+
+    // Create cache key from search parameters
+    const cacheKey = `${playerName}-${cardNumber}-${brand}-${year}-${collection || ''}`;
+    const cached = searchCache.get(cacheKey);
+    
+    // Return cached result if still valid
+    if (cached && (Date.now() - cached.timestamp) < CACHE_DURATION) {
+      console.log('Returning cached eBay results for:', cacheKey);
+      return cached.data;
     }
 
     // Build search query based on card details
@@ -151,10 +165,15 @@ export async function searchCardValues(
     // Calculate average value
     const averageValue = itemCount > 0 ? Math.round(totalValue / itemCount) : 0;
 
-    return {
+    const result = {
       averageValue,
       results
     };
+
+    // Cache the successful result
+    searchCache.set(cacheKey, { data: result, timestamp: Date.now() });
+
+    return result;
   } catch (error: any) {
     console.error('Error searching eBay for card values:', error);
     
