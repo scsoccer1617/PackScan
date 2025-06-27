@@ -206,10 +206,6 @@ export function getEbaySearchUrl(
     }
   }
   
-  // Debug logging
-  console.log('getEbaySearchUrl - Building search URL with keywords:', keywords);
-  console.log('getEbaySearchUrl - Collection:', collection);
-  
   // Encode for URL
   return `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(keywords)}&_sacat=0&LH_Complete=1&LH_Sold=1`;
 }
