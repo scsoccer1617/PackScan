@@ -1,5 +1,55 @@
 import { CardFormValues } from '../shared/schema';
 import fetch from 'node-fetch';
+import { createHash, createSign } from 'crypto';
+
+/**
+ * Generate JWT token for Google Service Account authentication
+ */
+async function generateAccessToken(clientEmail: string, privateKey: string): Promise<string> {
+  const now = Math.floor(Date.now() / 1000);
+  const header = {
+    alg: 'RS256',
+    typ: 'JWT'
+  };
+  
+  const payload = {
+    iss: clientEmail,
+    scope: 'https://www.googleapis.com/auth/cloud-platform',
+    aud: 'https://oauth2.googleapis.com/token',
+    exp: now + 3600, // 1 hour
+    iat: now
+  };
+  
+  const encodedHeader = Buffer.from(JSON.stringify(header)).toString('base64url');
+  const encodedPayload = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const signingInput = `${encodedHeader}.${encodedPayload}`;
+  
+  // Clean private key
+  const cleanPrivateKey = privateKey.replace(/\\n/g, '\n');
+  
+  const signature = createSign('RSA-SHA256')
+    .update(signingInput)
+    .sign(cleanPrivateKey, 'base64url');
+  
+  const jwt = `${signingInput}.${signature}`;
+  
+  // Exchange JWT for access token
+  const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded'
+    },
+    body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${jwt}`
+  });
+  
+  const tokenData = await tokenResponse.json() as any;
+  
+  if (!tokenData.access_token) {
+    throw new Error('Failed to obtain access token');
+  }
+  
+  return tokenData.access_token;
+}
 
 /**
  * Improve detection of RC (Rookie Card) logo in images
@@ -178,15 +228,21 @@ function isRCLogoPresent(textAnnotations: any[]): boolean {
  */
 export async function extractTextFromImage(base64Image: string): Promise<{ fullText: string, textAnnotations: any[] }> {
   try {
-    console.log('Using direct fetch method to access Google Cloud Vision API');
-    const apiKey = process.env.GOOGLE_CLOUD_VISION_API_KEY;
+    console.log('Using service account authentication for Google Cloud Vision API');
     
-    if (!apiKey) {
-      throw new Error('Missing Google Cloud Vision API key');
+    // Check for required service account credentials
+    const clientEmail = process.env.GOOGLE_CLIENT_EMAIL;
+    const privateKey = process.env.GOOGLE_PRIVATE_KEY;
+    
+    if (!clientEmail || !privateKey) {
+      throw new Error('Missing Google Cloud service account credentials');
     }
     
+    // Generate access token
+    const accessToken = await generateAccessToken(clientEmail, privateKey);
+    
     // Prepare the request
-    const visionEndpoint = `https://vision.googleapis.com/v1/images:annotate?key=${apiKey}`;
+    const visionEndpoint = 'https://vision.googleapis.com/v1/images:annotate';
     
     // Create request body
     const requestBody = {
@@ -217,7 +273,8 @@ export async function extractTextFromImage(base64Image: string): Promise<{ fullT
       fetch(visionEndpoint, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
         },
         body: JSON.stringify(requestBody)
       }),
