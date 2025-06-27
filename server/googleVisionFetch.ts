@@ -1,6 +1,5 @@
 import { CardFormValues } from '../shared/schema';
 import { ImageAnnotatorClient } from '@google-cloud/vision';
-import { extractTextWithTesseract } from './tesseractOCR';
 
 /**
  * Initialize Google Cloud Vision client with service account credentials
@@ -13,28 +12,43 @@ function initializeVisionClient(): ImageAnnotatorClient {
     throw new Error('Missing Google Cloud service account credentials');
   }
   
+  console.log('Initializing Google Vision client...');
+  console.log('Client email:', clientEmail);
+  console.log('Private key length:', privateKey.length);
+  console.log('Private key starts with:', privateKey.substring(0, 50));
+  
   // Clean and format private key properly
   let cleanPrivateKey = privateKey;
   
-  // Handle escaped newlines
-  if (cleanPrivateKey.includes('\\n')) {
-    cleanPrivateKey = cleanPrivateKey.replace(/\\n/g, '\n');
-  }
+  // Handle escaped newlines - multiple passes to ensure proper formatting
+  cleanPrivateKey = cleanPrivateKey.replace(/\\n/g, '\n');
   
-  // Ensure proper PEM format
+  // Remove any extra quotes that might be surrounding the key
+  cleanPrivateKey = cleanPrivateKey.replace(/^["']|["']$/g, '');
+  
+  // Ensure proper PEM format with correct headers
   if (!cleanPrivateKey.startsWith('-----BEGIN')) {
-    // If it's just the key content without headers, add them
     cleanPrivateKey = `-----BEGIN PRIVATE KEY-----\n${cleanPrivateKey}\n-----END PRIVATE KEY-----`;
   }
   
-  console.log('Initializing Vision client with credentials...');
+  // Split into lines and rejoin to ensure proper formatting
+  const lines = cleanPrivateKey.split('\n');
+  const formattedKey = lines.map(line => line.trim()).filter(line => line.length > 0).join('\n');
   
-  return new ImageAnnotatorClient({
-    credentials: {
-      client_email: clientEmail,
-      private_key: cleanPrivateKey,
-    },
-  });
+  console.log('Formatted private key first line:', formattedKey.split('\n')[0]);
+  console.log('Formatted private key last line:', formattedKey.split('\n')[formattedKey.split('\n').length - 1]);
+  
+  try {
+    return new ImageAnnotatorClient({
+      credentials: {
+        client_email: clientEmail,
+        private_key: formattedKey,
+      },
+    });
+  } catch (error: any) {
+    console.error('Failed to initialize Vision client:', error.message);
+    throw new Error(`Google Vision client initialization failed: ${error.message}`);
+  }
 }
 
 /**
@@ -221,9 +235,7 @@ export async function extractTextFromImage(base64Image: string): Promise<{ fullT
     const privateKey = process.env.GOOGLE_PRIVATE_KEY;
     
     if (!clientEmail || !privateKey) {
-      console.log('Missing Google Cloud credentials, using Tesseract fallback');
-      const imageBuffer = Buffer.from(base64Image, 'base64');
-      return await extractTextWithTesseract(imageBuffer);
+      throw new Error('Missing Google Cloud service account credentials');
     }
     
     try {
@@ -257,15 +269,12 @@ export async function extractTextFromImage(base64Image: string): Promise<{ fullT
     
       return { fullText, textAnnotations };
     } catch (visionError: any) {
-      console.error('Google Vision API failed, trying Tesseract fallback:', visionError.message);
-      // Fall back to Tesseract
-      const imageBuffer = Buffer.from(base64Image, 'base64');
-      return await extractTextWithTesseract(imageBuffer);
+      console.error('Google Vision API failed:', visionError.message);
+      throw visionError;
     }
   } catch (error: any) {
     console.error('Error in OCR processing:', error);
-    // Return empty result as last resort
-    return { fullText: '', textAnnotations: [] };
+    throw new Error(`Failed to analyze image with Google Vision: ${error.message || 'Unknown error'}`);
   }
 }
 
