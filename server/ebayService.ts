@@ -29,7 +29,7 @@ export async function searchCardValues(
   year: number,
   collection?: string,
   condition?: string
-): Promise<{ averageValue: number; results: EbaySearchResult[] }> {
+): Promise<{ averageValue: number; results: EbaySearchResult[]; searchUrl?: string; errorMessage?: string }> {
   try {
     if (!EBAY_APP_ID) {
       console.warn('eBay API credentials not set. Cannot fetch card values.');
