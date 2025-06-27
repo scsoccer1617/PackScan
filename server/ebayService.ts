@@ -45,9 +45,9 @@ export async function searchCardValues(
     
     // Check for Stars of MLB cards
     if (typeof collection === 'string' && collection.toLowerCase().includes('stars of mlb')) {
-      // For Stars of MLB cards, use full player name and "Stars MLB" for better results
-      keywords = `${playerName} ${brand} ${year} Stars MLB`;
-      console.log('Using Stars of MLB search strategy');
+      // For Stars of MLB cards, use the exact format that works on eBay
+      keywords = `${playerName} ${brand} ${collection} ${cardNumber}`;
+      console.log('Using Stars of MLB search strategy with card number');
     }
     // Check for Heritage cards
     else if (typeof collection === 'string' && collection.toLowerCase().includes('heritage')) {
@@ -67,16 +67,14 @@ export async function searchCardValues(
     
     console.log('Searching eBay with keywords:', keywords);
 
-    // API request parameters - simplified to avoid errors
+    // API request parameters - try even simpler format
     const params = {
       'OPERATION-NAME': 'findItemsByKeywords',
       'SERVICE-VERSION': '1.0.0',
       'SECURITY-APPNAME': EBAY_APP_ID,
       'GLOBAL-ID': 'EBAY-US',
       'RESPONSE-DATA-FORMAT': 'JSON',
-      'REST-PAYLOAD': 'true',
       'keywords': keywords,
-      'categoryId': '212', // Sports Mem, Cards & Fan Shop
       'paginationInput.entriesPerPage': '5'
     };
 
@@ -86,7 +84,7 @@ export async function searchCardValues(
     
     // Check for eBay API errors first
     if (data && data.errorMessage) {
-      console.log('eBay API Error:', data.errorMessage);
+      console.log('eBay API Error details:', JSON.stringify(data.errorMessage, null, 2));
       return { averageValue: 0, results: [] };
     }
 
