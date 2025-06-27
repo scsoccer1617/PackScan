@@ -103,7 +103,10 @@ This is a streamlined web application focused on sports card price lookup using 
 - `EBAY_APP_ID`: Optional eBay API integration
 
 ## Changelog
-- June 27, 2025. Initial setup
+- June 27, 2025: Initial setup
+- June 27, 2025: Removed Tesseract OCR fallback, focused exclusively on Google Vision API
+- June 27, 2025: Added combined OCR + eBay price lookup endpoint for streamlined user experience
+- June 27, 2025: Updated frontend to show both card detection and price analysis in single workflow
 
 ## User Preferences
 

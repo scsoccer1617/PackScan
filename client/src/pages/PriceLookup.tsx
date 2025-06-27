@@ -139,14 +139,14 @@ export default function PriceLookup() {
               
               <Button 
                 onClick={handleAnalyzeRequest}
-                disabled={ocrLoading || !backImage}
+                disabled={analyzing || !backImage}
                 className="w-full"
                 size="lg"
               >
-                {ocrLoading ? (
+                {analyzing ? (
                   <>
                     <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                    Analyzing Card...
+                    Analyzing Card & Getting Prices...
                   </>
                 ) : (
                   <>
