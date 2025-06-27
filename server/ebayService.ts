@@ -155,15 +155,27 @@ export async function searchCardValues(
       averageValue,
       results
     };
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error searching eBay for card values:', error);
+    
+    // Check for specific eBay error messages
+    let errorMessage = 'eBay API error - check credentials';
+    if (error.response?.data?.errorMessage) {
+      const ebayError = error.response.data.errorMessage[0]?.error?.[0];
+      if (ebayError?.errorId?.[0] === '10001') {
+        errorMessage = 'eBay API rate limit exceeded - please try again later';
+      } else if (ebayError?.message?.[0]) {
+        errorMessage = `eBay API error: ${ebayError.message[0]}`;
+      }
+    }
+    
     // Return search URL as fallback when API fails
     const searchUrl = getEbaySearchUrl(playerName, cardNumber, brand, year, collection);
     return { 
       averageValue: 0, 
       results: [],
       searchUrl,
-      errorMessage: 'eBay API authentication error - check credentials'
+      errorMessage
     };
   }
 }
