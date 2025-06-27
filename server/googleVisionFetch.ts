@@ -231,28 +231,12 @@ export async function extractTextFromImage(base64Image: string): Promise<{ fullT
     // Call the Vision API
     const [result] = await client.annotateImage(request);
     
-    // Process the response
-    const responseData = await response.json() as any;
+    console.log('Vision API Response received');
     
-    if (!response.ok) {
-      console.error('Vision API error:', responseData);
-      throw new Error(`Vision API error: ${responseData.error?.message || 'Unknown error'}`);
-    }
+    const fullText = result.fullTextAnnotation?.text || '';
+    const textAnnotations = result.textAnnotations || [];
     
-    console.log('Received Vision API response');
-    
-    // Extract the text
-    const responses = responseData.responses;
-    if (!responses || responses.length === 0 || !responses[0].textAnnotations) {
-      console.log('No text detected in the image');
-      return { fullText: '', textAnnotations: [] };
-    }
-    
-    const fullText = responses[0].textAnnotations[0].description || '';
-    console.log('Extracted text:', fullText);
-    
-    // Get all text annotations (including position information)
-    const textAnnotations = responses[0].textAnnotations.slice(1) || [];
+    console.log(`Extracted ${textAnnotations.length} text annotations`);
     
     return { fullText, textAnnotations };
   } catch (error: any) {
