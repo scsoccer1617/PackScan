@@ -68,12 +68,6 @@ export default function PriceLookup() {
 
   return (
     <div className="p-4 space-y-6">
-      {/* Header */}
-      <div className="text-center">
-        <h1 className="text-2xl font-bold text-gray-900 mb-2">Sports Card Price Lookup</h1>
-        <p className="text-gray-600">Upload your card images to find recent eBay sold prices</p>
-      </div>
-
       {!showOCRResults && !showPriceResults && (
         <>
           {/* Image Upload Section */}
@@ -95,7 +89,7 @@ export default function PriceLookup() {
                   />
                 </div>
                 <div>
-                  <h3 className="font-medium mb-2">Back of Card (Required)</h3>
+                  <h3 className="font-medium mb-2">Back of Card</h3>
                   <SimpleImageUploader
                     onImageCaptured={setBackImage}
                     label="Upload back image"
@@ -126,7 +120,6 @@ export default function PriceLookup() {
           </Card>
         </>
       )}
-
       {/* OCR Results */}
       {showOCRResults && ocrData && (
         <OCRResults 
@@ -137,7 +130,6 @@ export default function PriceLookup() {
           onCancel={() => setShowOCRResults(false)}
         />
       )}
-
       {/* Price Results */}
       {showPriceResults && cardData && (
         <div className="space-y-4">
