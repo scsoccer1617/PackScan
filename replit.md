@@ -2,7 +2,7 @@
 
 ## Overview
 
-This is a full-stack web application designed for sports card collectors to catalog, manage, and track their card collections. The system features automated card detection using Google Cloud Vision API with OCR capabilities, image upload functionality, and detailed card information management. Built with React frontend and Express.js backend using PostgreSQL for data persistence.
+This is a streamlined web application focused on sports card price lookup using eBay data. The system features automated card detection using Google Cloud Vision API with OCR capabilities and real-time eBay price analysis to help users find current market values for their cards. Built with React frontend and Express.js backend.
 
 ## System Architecture
 
@@ -51,10 +51,10 @@ This is a full-stack web application designed for sports card collectors to cata
 - **Value Estimation**: Integration with eBay API for market value approximation
 - **Data Validation**: Zod schemas for type safety and input validation
 
-### Google Sheets Integration
-- **Sync Capability**: Optional synchronization with Google Sheets for backup/sharing
-- **OAuth2 Authentication**: Service account authentication for sheets access
-- **Batch Operations**: Efficient bulk data operations
+### Price Lookup Integration
+- **eBay API**: Real-time lookup of recent sold listings for card valuation
+- **Market Analysis**: Display of 5 most recent sold prices for accurate market assessment
+- **Search Optimization**: Smart query building for better eBay search results
 
 ## Data Flow
 

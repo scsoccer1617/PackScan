@@ -13,6 +13,7 @@ import {
   type Card,
   type CardWithRelations
 } from '../shared/schema';
+import * as schema from '../shared/schema';
 import { storage } from './storage';
 import { searchCardValues, getEbaySearchUrl } from './ebayService';
 import { z } from 'zod';
@@ -506,26 +507,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Insert card to database
       const newCard = await storage.createCard(cardInsertData);
       
-      // Store to Google Sheets and handle case where DB succeeds but Sheets fails
-      let sheetsSaved = false;
-      try {
-        if (newCard) {
-          await storage.saveCardToGoogleSheets(
-            newCard, 
-            cardData.sport || '', 
-            cardData.brand || '',
-            cardInsertData.frontImage || undefined,
-            cardInsertData.backImage || undefined
-          );
-          sheetsSaved = true;
-        }
-      } catch (sheetError) {
-        console.error('Failed to save to Google Sheets:', sheetError);
-      }
-      
       return res.status(201).json({ 
-        card: newCard,
-        sheetsSaved 
+        card: newCard
       });
     } catch (error) {
       console.error('Error creating card:', error);
@@ -631,29 +614,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Update the card in the database
       const updatedCard = await storage.updateCard(cardId, updateFields);
       
-      // Also update in Google Sheets if available
-      let sheetsSaved = false;
-      try {
-        const sportName = updateData.sport || (existingCard.sportId ? await getSportNameById(existingCard.sportId) : '');
-        const brandName = updateData.brand || (existingCard.brandId ? await getBrandNameById(existingCard.brandId) : '');
-        
-        if (updatedCard) {
-          await storage.saveCardToGoogleSheets(
-            updatedCard,
-            sportName,
-            brandName,
-            updateFields.frontImage || existingCard.frontImage || undefined,
-            updateFields.backImage || existingCard.backImage || undefined
-          );
-          sheetsSaved = true;
-        }
-      } catch (sheetError) {
-        console.error('Failed to update Google Sheets:', sheetError);
-      }
-      
       return res.json({
-        card: updatedCard,
-        sheetsSaved
+        card: updatedCard
       });
     } catch (error) {
       console.error(`Error updating card ${req.params.id}:`, error);
