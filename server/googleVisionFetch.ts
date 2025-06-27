@@ -1,5 +1,6 @@
 import { CardFormValues } from '../shared/schema';
 import { ImageAnnotatorClient } from '@google-cloud/vision';
+import { extractTextWithTesseract } from './tesseractOCR';
 
 /**
  * Initialize Google Cloud Vision client with service account credentials
@@ -200,18 +201,21 @@ function isRCLogoPresent(textAnnotations: any[]): boolean {
  */
 export async function extractTextFromImage(base64Image: string): Promise<{ fullText: string, textAnnotations: any[] }> {
   try {
-    console.log('Using service account authentication for Google Cloud Vision API');
+    console.log('Attempting Google Cloud Vision API...');
     
     // Check for required service account credentials
     const clientEmail = process.env.GOOGLE_CLIENT_EMAIL;
     const privateKey = process.env.GOOGLE_PRIVATE_KEY;
     
     if (!clientEmail || !privateKey) {
-      throw new Error('Missing Google Cloud service account credentials');
+      console.log('Missing Google Cloud credentials, using Tesseract fallback');
+      const imageBuffer = Buffer.from(base64Image, 'base64');
+      return await extractTextWithTesseract(imageBuffer);
     }
     
-    // Initialize the Vision client
-    const client = initializeVisionClient();
+    try {
+      // Initialize the Vision client
+      const client = initializeVisionClient();
     
     // Prepare the image for analysis
     const request = {
@@ -238,10 +242,17 @@ export async function extractTextFromImage(base64Image: string): Promise<{ fullT
     
     console.log(`Extracted ${textAnnotations.length} text annotations`);
     
-    return { fullText, textAnnotations };
+      return { fullText, textAnnotations };
+    } catch (visionError: any) {
+      console.error('Google Vision API failed, trying Tesseract fallback:', visionError.message);
+      // Fall back to Tesseract
+      const imageBuffer = Buffer.from(base64Image, 'base64');
+      return await extractTextWithTesseract(imageBuffer);
+    }
   } catch (error: any) {
-    console.error('Error in Google Vision API:', error);
-    throw new Error(`Failed to analyze image with Google Vision: ${error.message || 'Unknown error'}`);
+    console.error('Error in OCR processing:', error);
+    // Return empty result as last resort
+    return { fullText: '', textAnnotations: [] };
   }
 }
 

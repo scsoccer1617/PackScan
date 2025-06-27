@@ -15,7 +15,7 @@ export async function extractTextWithTesseract(imageBuffer: Buffer): Promise<{ f
     const fullText = data.text || '';
     
     // Convert Tesseract words to Google Vision-like format
-    const textAnnotations = data.words?.map(word => ({
+    const textAnnotations = (data as any).words?.map((word: any) => ({
       description: word.text,
       boundingPoly: {
         vertices: [
@@ -60,7 +60,9 @@ export async function analyzeSportsCardWithTesseract(imageBuffer: Buffer): Promi
       // Player name detection (capitalized words)
       if (line.match(/^[A-Z][A-Z\s]+[A-Z]$/) && line.length > 3 && line.length < 30) {
         if (!line.includes('TOPPS') && !line.includes('SERIES') && !line.includes('MLB')) {
-          cardDetails.playerName = formatName(line);
+          const names = formatName(line).split(' ');
+          cardDetails.playerFirstName = names[0] || '';
+          cardDetails.playerLastName = names.slice(1).join(' ') || '';
           break;
         }
       }
