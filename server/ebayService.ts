@@ -2,7 +2,7 @@ import axios from 'axios';
 
 // eBay Browse API configuration (modern replacement for Finding API)
 const EBAY_APP_ID = process.env.EBAY_APP_ID || '';
-const EBAY_OAUTH_TOKEN = process.env.EBAY_OAUTH_TOKEN || '';
+const EBAY_BROWSE_TOKEN = process.env.EBAY_BROWSE_TOKEN || '';
 const EBAY_BROWSE_API_URL = 'https://api.ebay.com/buy/browse/v1';
 
 // Interface for eBay search results
@@ -32,8 +32,8 @@ export async function searchCardValues(
   condition?: string
 ): Promise<{ averageValue: number; results: EbaySearchResult[]; searchUrl?: string; errorMessage?: string }> {
   try {
-    if (!EBAY_APP_ID || !EBAY_OAUTH_TOKEN) {
-      console.warn('eBay API credentials not set. Cannot fetch card values.');
+    if (!EBAY_APP_ID || !EBAY_BROWSE_TOKEN) {
+      console.warn('eBay Browse API credentials not set. Cannot fetch card values.');
       return { averageValue: 0, results: [] };
     }
 
@@ -92,11 +92,11 @@ export async function searchCardValues(
       fieldgroups: 'EXTENDED'
     };
 
-    // Make the API request with OAuth token
+    // Make the API request with Browse API token
     const response = await axios.get(searchUrl, { 
       params: searchParams,
       headers: {
-        'Authorization': `Bearer ${EBAY_OAUTH_TOKEN}`,
+        'Authorization': `Bearer ${EBAY_BROWSE_TOKEN}`,
         'Accept': 'application/json',
         'Content-Type': 'application/json'
       },
@@ -209,9 +209,9 @@ export async function searchCardValues(
         errorMessage = `eBay API error: ${ebayError.message}`;
       }
     } else if (error.response?.status === 401) {
-      errorMessage = 'eBay OAuth token expired or invalid - please refresh authentication';
+      errorMessage = 'eBay OAuth token invalid - Browse API requires different scopes than Finding API';
     } else if (error.response?.status === 403) {
-      errorMessage = 'eBay API access forbidden - check OAuth token permissions';
+      errorMessage = 'eBay API access forbidden - OAuth token may lack Browse API permissions';
     } else if (error.response?.status === 429) {
       errorMessage = 'eBay API rate limit exceeded - please try again later';
     }
