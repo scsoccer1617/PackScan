@@ -345,93 +345,96 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
             </div>
           </div>
         ) : (
-          <div className="space-y-4">
-            {/* Summary box at the top */}
-            <div className="bg-green-50 border border-green-100 rounded-lg p-3">
-              <h3 className="font-semibold text-green-800 mb-1 text-sm">Card Analysis Results</h3>
-              
-              <p className="text-sm text-green-700">
-                {data.sport ? `${data.sport} ` : ''}
-                {data.sport && (data.playerFirstName || data.playerLastName) ? '• ' : ''}
-                {data.playerFirstName || data.playerLastName ? 
-                  `${data.playerFirstName || ''} ${data.playerLastName || ''} • ` : ''}
-                {data.year ? `${data.year} ` : ''}
-                {data.brand ? `${data.brand} ` : ''}
-                {data.collection ? `${data.collection} ` : ''}
-                {data.cardNumber ? `#${data.cardNumber}` : ''}
-              </p>
-            </div>
-            
-            {/* Detailed results grid */}
-            <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-              {data.sport && (
-                <div className="col-span-2 py-1 border-b border-gray-100">
-                  <span className="font-medium text-slate-700">Sport: </span>
-                  <span className="text-slate-900">{data.sport}</span>
+          <div className="space-y-6">
+            {/* Clean formatted display matching the user's preferred layout */}
+            <div className="space-y-4">
+              {/* Sport */}
+              <div className="text-lg">
+                <span className="font-semibold text-slate-800">Sport: </span>
+                <span className="text-slate-700">{data.sport || 'Not detected'}</span>
+              </div>
+
+              {/* Player */}
+              <div className="text-lg">
+                <span className="font-semibold text-slate-800">Player: </span>
+                <span className="text-slate-700">{data.playerFirstName || ''} {data.playerLastName || 'Not detected'}</span>
+              </div>
+
+              {/* Two-column layout for card details */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
+                <div className="space-y-4">
+                  {/* Brand */}
+                  <div className="text-lg">
+                    <span className="font-semibold text-slate-800">Brand: </span>
+                    <span className="text-slate-700">{data.brand || 'Not detected'}</span>
+                  </div>
+
+                  {/* Card Number */}
+                  <div className="text-lg">
+                    <span className="font-semibold text-slate-800">Card #: </span>
+                    <span className="text-slate-700">{data.cardNumber || 'Not detected'}</span>
+                  </div>
+
+                  {/* Variant */}
+                  <div className="text-lg">
+                    <span className="font-semibold text-slate-800">Variant: </span>
+                    <span className="text-slate-700">{data.variant || 'Not detected'}</span>
+                  </div>
                 </div>
-              )}
-              
-              <div className="col-span-2 py-1 border-b border-gray-100">
-                <span className="font-medium text-slate-700">Player: </span>
-                <span className="text-slate-900">{data.playerFirstName || ''} {data.playerLastName || ''}</span>
+
+                <div className="space-y-4">
+                  {/* Collection */}
+                  <div className="text-lg">
+                    <span className="font-semibold text-slate-800">Collection: </span>
+                    <span className="text-slate-700">{data.collection || 'Not detected'}</span>
+                  </div>
+
+                  {/* Year */}
+                  <div className="text-lg">
+                    <span className="font-semibold text-slate-800">Year: </span>
+                    <span className="text-slate-700">{data.year && data.year > 0 ? data.year : 'Not detected'}</span>
+                  </div>
+
+                  {/* Serial Number */}
+                  <div className="text-lg">
+                    <span className="font-semibold text-slate-800">Serial #: </span>
+                    <span className="text-slate-700">{data.serialNumber || 'None'}</span>
+                  </div>
+                </div>
               </div>
-              
-              <div className="py-1 border-b border-gray-100">
-                <span className="font-medium text-slate-700">Brand: </span>
-                <span className="text-slate-900">{data.brand || 'Not detected'}</span>
+
+              {/* Condition */}
+              <div className="text-lg">
+                <span className="font-semibold text-slate-800">Condition: </span>
+                <span className="text-slate-700">{data.condition || 'Not detected'}</span>
               </div>
-              
-              <div className="py-1 border-b border-gray-100">
-                <span className="font-medium text-slate-700">Collection: </span>
-                <span className="text-slate-900">{data.collection || 'Not detected'}</span>
-              </div>
-              
-              <div className="py-1 border-b border-gray-100">
-                <span className="font-medium text-slate-700">Card #: </span>
-                <span className="text-slate-900">{data.cardNumber || 'Not detected'}</span>
-              </div>
-              
-              <div className="py-1 border-b border-gray-100">
-                <span className="font-medium text-slate-700">Year: </span>
-                <span className="text-slate-900">{data.year && data.year > 0 ? data.year : 'Not detected'}</span>
-              </div>
-              
-              <div className="py-1 border-b border-gray-100">
-                <span className="font-medium text-slate-700">Variant: </span>
-                <span className="text-slate-900">{data.variant || 'Not detected'}</span>
-              </div>
-              
-              <div className="py-1 border-b border-gray-100">
-                <span className="font-medium text-slate-700">Serial #: </span>
-                <span className="text-slate-900">{data.serialNumber || 'None'}</span>
-              </div>
-              
-              <div className="col-span-2 py-1 border-b border-gray-100">
-                <span className="font-medium text-slate-700">Condition: </span>
-                <span className="text-slate-900">{data.condition || 'Not detected'}</span>
-              </div>
-              
+
               {/* Card Features */}
-              <div className="col-span-2 py-2">
-                <span className="font-medium text-slate-700 block mb-1">Card Features: </span>
-                <div className="flex flex-wrap gap-3">
-                  {data.isRookieCard === true && (
-                    <span className="inline-flex items-center rounded-full bg-green-100 px-2 py-1 text-xs font-medium text-green-800">
-                      Rookie Card
-                    </span>
-                  )}
-                  {data.isAutographed === true && (
-                    <span className="inline-flex items-center rounded-full bg-blue-100 px-2 py-1 text-xs font-medium text-blue-800">
-                      Autographed
-                    </span>
-                  )}
-                  {data.isNumbered === true && (
-                    <span className="inline-flex items-center rounded-full bg-purple-100 px-2 py-1 text-xs font-medium text-purple-800">
-                      Numbered
-                    </span>
-                  )}
-                  {data.isRookieCard !== true && data.isAutographed !== true && data.isNumbered !== true && (
-                    <span className="text-gray-500 text-xs">None detected</span>
+              <div className="mt-6">
+                <div className="text-lg mb-3">
+                  <span className="font-semibold text-slate-800">Card Features:</span>
+                </div>
+                <div className="ml-0">
+                  {data.isRookieCard === true || data.isAutographed === true || data.isNumbered === true ? (
+                    <div className="flex flex-wrap gap-3">
+                      {data.isRookieCard === true && (
+                        <span className="inline-flex items-center rounded-full bg-green-100 px-3 py-1 text-sm font-medium text-green-800">
+                          Rookie Card
+                        </span>
+                      )}
+                      {data.isAutographed === true && (
+                        <span className="inline-flex items-center rounded-full bg-blue-100 px-3 py-1 text-sm font-medium text-blue-800">
+                          Autographed
+                        </span>
+                      )}
+                      {data.isNumbered === true && (
+                        <span className="inline-flex items-center rounded-full bg-purple-100 px-3 py-1 text-sm font-medium text-purple-800">
+                          Numbered
+                        </span>
+                      )}
+                    </div>
+                  ) : (
+                    <span className="text-slate-500 text-lg">None detected</span>
                   )}
                 </div>
               </div>
