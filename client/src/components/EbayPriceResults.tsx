@@ -230,12 +230,16 @@ export default function EbayPriceResults({ cardData, frontImage, backImage }: Eb
                 )}
 
                 {/* Foil Type */}
-                {cardData.foilType && (
-                  <div className="text-lg">
-                    <span className="font-semibold text-slate-800">Foil Type: </span>
-                    <span className="text-slate-700">{cardData.foilType}</span>
-                  </div>
-                )}
+                <div className="text-lg">
+                  <span className="font-semibold text-slate-800">Foil Type: </span>
+                  <span className="text-slate-700">{cardData.foilType || 'None detected'}</span>
+                </div>
+
+                {/* Foil Status */}
+                <div className="text-lg">
+                  <span className="font-semibold text-slate-800">Is Foil: </span>
+                  <span className="text-slate-700">{cardData.isFoil ? 'Yes' : 'No'}</span>
+                </div>
 
                 {/* Numbered */}
                 {cardData.isNumbered && (

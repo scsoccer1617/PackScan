@@ -1012,7 +1012,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             cardData.year,
             cardData.collection || '',
             cardData.condition || '',
-            cardData.isNumbered || false
+            cardData.isNumbered || false,
+            cardData.foilType || undefined
           );
           
           ebayResults = ebayData.results || [];
