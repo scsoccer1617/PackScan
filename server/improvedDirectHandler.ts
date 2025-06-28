@@ -109,8 +109,20 @@ export function detectRookieCard(text: string): boolean {
       upperText.includes('(RC)') || 
       upperText.includes('[RC]') ||
       upperText.startsWith('RC ') ||
-      upperText.endsWith(' RC')) {
+      upperText.endsWith(' RC') ||
+      upperText.includes('RC\n') ||
+      upperText.includes('\nRC') ||
+      upperText.includes('RC ') ||
+      /RC[\s\n]/.test(upperText) ||
+      /[\s\n]RC/.test(upperText)) {
     console.log("✅ ROOKIE CARD: Detected RC logo text variation");
+    return true;
+  }
+
+  // Additional check for rookie card context clues in card descriptions
+  if ((upperText.includes('2022') || upperText.includes('2023') || upperText.includes('2024')) &&
+      (upperText.includes('FIRST') || upperText.includes('DEBUT') || upperText.includes('BREAKOUT'))) {
+    console.log("✅ ROOKIE CARD: Detected recent year with rookie context");
     return true;
   }
   

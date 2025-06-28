@@ -23,10 +23,10 @@ export default function PriceLookup() {
   
   // Handle combined OCR + eBay price analysis
   const handleAnalyzeRequest = async () => {
-    if (!frontImage) {
+    if (!backImage) {
       toast({
-        title: "Front Image Required",
-        description: "Please upload the FRONT of the card for analysis. Rookie cards (RC) and other features are typically found on the front.",
+        title: "Back Image Required",
+        description: "Please upload the BACK of the card for analysis. Card numbers and details are typically found on the back.",
         variant: "destructive",
       });
       return;
@@ -41,7 +41,7 @@ export default function PriceLookup() {
           const formData = new FormData();
           
           // Convert base64 image to file for upload
-          const byteCharacters = atob(frontImage.split(',')[1]);
+          const byteCharacters = atob(backImage.split(',')[1]);
           const byteNumbers = new Array(byteCharacters.length);
           for (let i = 0; i < byteCharacters.length; i++) {
             byteNumbers[i] = byteCharacters.charCodeAt(i);
@@ -139,7 +139,7 @@ export default function PriceLookup() {
               
               <Button 
                 onClick={handleAnalyzeRequest}
-                disabled={analyzing || !frontImage}
+                disabled={analyzing || !backImage}
                 className="w-full"
                 size="lg"
               >
