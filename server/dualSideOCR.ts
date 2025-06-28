@@ -77,7 +77,7 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
     );
 
     // Create a timeout promise that rejects after 30 seconds
-    const timeout = new Promise((_, reject) => {
+    const createTimeout = () => new Promise<never>((_, reject) => {
       setTimeout(() => reject(new Error('Image analysis timed out after 30 seconds')), 30000);
     });
 
@@ -94,10 +94,10 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
         const frontText = await extractTextForBrandDetection(frontBase64);
         if (frontText.toUpperCase().includes('SCORE')) {
           console.log('Detected Score card brand from front image, using specialized analyzer');
-          frontResult = await Promise.race([analyzeScoreCard(frontBase64), timeout]);
+          frontResult = await Promise.race([analyzeScoreCard(frontBase64), timeout]) as Partial<CardFormValues>;
         } else {
           // Use standard analyzer for other card brands
-          frontResult = await Promise.race([analyzeSportsCardImage(frontBase64), timeout]);
+          frontResult = await Promise.race([analyzeSportsCardImage(frontBase64), timeout]) as Partial<CardFormValues>;
         }
         console.log('Front image analysis complete');
       } catch (error) {
@@ -216,6 +216,12 @@ function combineCardResults(
   // Special case for rookie card - if either side detected it, mark it as true
   if (frontResult.isRookieCard === true || backResult.isRookieCard === true) {
     combined.isRookieCard = true;
+  }
+  
+  // Special case for serial numbers - if either side detected it, use it
+  if (frontResult.serialNumber || backResult.serialNumber) {
+    combined.serialNumber = frontResult.serialNumber || backResult.serialNumber;
+    combined.isNumbered = true;
   }
   
   // Special case for Score cards: if brand is detected as Score, double-check the player name

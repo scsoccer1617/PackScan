@@ -1553,77 +1553,17 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       console.log('Overriding year to 2024 for recent Series One/Two collection');
     }
     
-    // Extract serial number (like "123/499" or "010/399") - we need to do this FIRST
-    // Serial numbers are typically imprinted in foil or different color ink and 
-    // located in the bottom right corner of the card
-    let serialNumberAnnotation = null;
+    // Enhanced serial number detection using dedicated detector
+    const { detectSerialNumber } = await import('./serialNumberDetector');
+    const serialResult = detectSerialNumber(fullText, textAnnotations);
     
-    // IMPROVED SERIAL NUMBER DETECTION
-    // This specifically looks for the imprinted serial numbers that appear 
-    // in silver/foil at the bottom right corner of limited edition cards
-    // First pass: Look for serial numbers in the exact format and location
-    serialNumberAnnotation = textAnnotations.find(annotation => {
-      const text = annotation.description;
-      
-      // Skip if this doesn't look like a potential serial number format (e.g., "123/499")
-      if (!/^\d{1,3}\/\d{1,4}$/.test(text)) return false;
-      
-      const boundingPoly = annotation.boundingPoly;
-      if (!boundingPoly || !boundingPoly.vertices) return false;
-      
-      // VERY STRICT: Serial numbers are ONLY in the bottom right corner of the card
-      // This specifically targets the foil-stamped serial numbers that appear in a specific location
-      const isBottomRightCorner = boundingPoly.vertices.every((v: any) => 
-        v.y > 1700 && v.x > 950);
-      
-      // Verify this is an isolated number (not part of stats, career info, etc.)
-      // Real serial numbers are ALWAYS isolated from other text
-      const isIsolated = textAnnotations.filter(other => {
-        if (other === annotation) return false;
-        
-        // Check if any other text is very close to this annotation
-        const otherPoly = other.boundingPoly;
-        if (!otherPoly || !otherPoly.vertices) return false;
-        
-        // Calculate the distance between annotations
-        const thisCenter = {
-          x: boundingPoly.vertices.reduce((sum: number, v: any) => sum + v.x, 0) / 4,
-          y: boundingPoly.vertices.reduce((sum: number, v: any) => sum + v.y, 0) / 4
-        };
-        
-        const otherCenter = {
-          x: otherPoly.vertices.reduce((sum: number, v: any) => sum + v.x, 0) / 4,
-          y: otherPoly.vertices.reduce((sum: number, v: any) => sum + v.y, 0) / 4
-        };
-        
-        const distance = Math.sqrt(
-          Math.pow(thisCenter.x - otherCenter.x, 2) + 
-          Math.pow(thisCenter.y - otherCenter.y, 2)
-        );
-        
-        // Real serial numbers should have NO other text within 70 pixels
-        // This helps avoid mistaking numbers in tables/stats for serial numbers
-        return distance < 70;
-      }).length < 2; // Only the annotation itself should be detected in this area
-      
-      if (isBottomRightCorner && isIsolated) {
-        console.log('Found imprinted serial number:', text, 'at position:', JSON.stringify(boundingPoly));
-        return true;
-      }
-      
-      return false;
-    });
+    result.serialNumber = serialResult.serialNumber;
+    result.isNumbered = serialResult.isNumbered;
     
-    if (serialNumberAnnotation) {
-      result.serialNumber = serialNumberAnnotation.description;
-      // This is likely a numbered card (limited edition)
-      result.isNumbered = true;
-      console.log('Identified imprinted serial number from positioned text:', result.serialNumber);
+    if (serialResult.isNumbered) {
+      console.log(`Serial number detected via ${serialResult.detectionMethod}: ${serialResult.serialNumber}`);
     } else {
-      // Clear any serial number that might have been detected incorrectly
-      result.serialNumber = "";
-      result.isNumbered = false;
-      console.log('No imprinted serial number detected in expected location (bottom right corner)');
+      console.log('No serial number detected in this image');
     }
     
     // Check for Rookie Card indicators - Enhanced dynamic detection algorithm
