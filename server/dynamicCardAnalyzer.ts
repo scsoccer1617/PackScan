@@ -5,6 +5,7 @@ import { applyDirectCardFixes } from "./directCardFixes";
 import { processJordanWicksCard } from "./jordanWicksHandler";
 import { processSeriesTwoCard } from "./seriesTwoHandler";
 import { processStarsOfMLBCard } from "./starsOfMLBHandler";
+import { detectFoilVariant } from "./foilVariantDetector";
 
 /**
  * Process the Anthony Volpe Stars of MLB card
@@ -102,7 +103,9 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       sport: 'Baseball', // Default sport
       isRookieCard: false,
       isAutographed: false,
-      isNumbered: false
+      isNumbered: false,
+      isFoil: false,
+      foilType: null
     };
     
     // Parse all extracted text
@@ -186,6 +189,15 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     
     // SPORT DETECTION - Try to detect the sport if not already set
     detectSport(cleanText, cardDetails);
+    
+    // FOIL VARIANT DETECTION - Check for foil, chrome, refractor, and other special finishes
+    const foilResult = detectFoilVariant(fullText);
+    if (foilResult.isFoil) {
+      cardDetails.isFoil = true;
+      cardDetails.foilType = foilResult.foilType;
+      console.log(`Detected foil variant: ${foilResult.foilType} (confidence: ${foilResult.confidence})`);
+      console.log(`Foil indicators: ${foilResult.indicators.join(', ')}`);
+    }
     
     console.log('Extracted card details:', cardDetails);
     return cardDetails;

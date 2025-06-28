@@ -44,6 +44,8 @@ export const cards = pgTable("cards", {
   isRookieCard: boolean("is_rookie_card").default(false),
   isAutographed: boolean("is_autographed").default(false),
   isNumbered: boolean("is_numbered").default(false),
+  isFoil: boolean("is_foil").default(false),
+  foilType: text("foil_type"),
   notes: text("notes"),
   frontImage: text("front_image"),
   backImage: text("back_image"),
