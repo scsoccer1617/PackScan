@@ -58,20 +58,32 @@ export function processSeriesTwoCard(text: string, cardDetails: Partial<CardForm
       }
     }
     
-    // Search in a more intelligent pattern to find player name and card number
+    // Search for card number and player name around the SERIES TWO marker
     if (seriesTwoIndex >= 0) {
-      // Get the next few non-empty lines after SERIES TWO
-      const relevantLines = lines.slice(seriesTwoIndex + 1, seriesTwoIndex + 10).filter(line => line.trim());
-      
-      // Look for standalone numbers which might be card numbers
-      for (const line of relevantLines) {
+      // Look for card number BEFORE "SERIES TWO" (first few lines)
+      const beforeLines = lines.slice(0, seriesTwoIndex).filter(line => line.trim());
+      for (const line of beforeLines) {
         if (/^\d+$/.test(line)) {
           cardNumberLine = line;
+          console.log(`Found card number before SERIES TWO: ${line}`);
           break;
         }
       }
       
-      // Look for player names (all caps, not numbers, not collection names)
+      // If no card number found before, look after SERIES TWO
+      if (!cardNumberLine) {
+        const afterLines = lines.slice(seriesTwoIndex + 1, seriesTwoIndex + 10).filter(line => line.trim());
+        for (const line of afterLines) {
+          if (/^\d+$/.test(line)) {
+            cardNumberLine = line;
+            console.log(`Found card number after SERIES TWO: ${line}`);
+            break;
+          }
+        }
+      }
+      
+      // Look for player names AFTER SERIES TWO (all caps, not numbers, not collection names)
+      const relevantLines = lines.slice(seriesTwoIndex + 1, seriesTwoIndex + 10).filter(line => line.trim());
       for (const line of relevantLines) {
         // Skip if it's just a number
         if (/^\d+$/.test(line)) continue;
@@ -81,8 +93,11 @@ export function processSeriesTwoCard(text: string, cardDetails: Partial<CardForm
             line.split(/\s+/).length <= 3 && 
             line.length > 3 && 
             !line.includes('SERIES') &&
-            !line.includes('TWO')) {
+            !line.includes('TWO') &&
+            !line.includes('TOPPS') &&
+            !line.includes('METS')) {
           playerNameLine = line;
+          console.log(`Found player name after SERIES TWO: ${line}`);
           break;
         }
       }

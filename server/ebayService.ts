@@ -81,7 +81,16 @@ export async function searchCardValues(
         keywords += ` ${cardNumber}`;
       }
       console.log('Using Heritage search strategy');
-    } 
+    }
+    // Check for Series Two cards
+    else if (typeof collection === 'string' && collection.toLowerCase().includes('series two')) {
+      // For Series Two cards, include the full collection name for better results
+      keywords = `${playerName} ${brand} Series Two ${year}`;
+      if (cardNumber && /^\d+$/.test(cardNumber)) {
+        keywords += ` ${cardNumber}`;
+      }
+      console.log('Using Series Two search strategy with full player name and collection');
+    }
     // Standard cards
     else {
       // For regular cards, we use a broader search
@@ -356,7 +365,14 @@ export function getEbaySearchUrl(
     if (/^\d+$/.test(cardNumber)) {
       keywords += ` ${cardNumber}`;
     }
-  } 
+  }
+  // Check for Series Two cards
+  else if (collection && collection.toLowerCase().includes('series two')) {
+    keywords = `${playerName} ${brand} Series Two ${year}`;
+    if (cardNumber && /^\d+$/.test(cardNumber)) {
+      keywords += ` ${cardNumber}`;
+    }
+  }
   // Standard cards
   else {
     keywords = `${lastName} ${brand} ${year}`;
