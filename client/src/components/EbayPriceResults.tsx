@@ -221,6 +221,12 @@ export default function EbayPriceResults({ cardData, frontImage, backImage }: Eb
                   <span className="text-slate-700">{cardData.collection || 'Not detected'}</span>
                 </div>
 
+                {/* Variant */}
+                <div className="text-lg">
+                  <span className="font-semibold text-slate-800">Variant: </span>
+                  <span className="text-slate-700">{cardData.variant || 'Base/Standard'}</span>
+                </div>
+
                 {/* Serial Number */}
                 {cardData.serialNumber && (
                   <div className="text-lg">
