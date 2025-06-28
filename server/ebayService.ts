@@ -16,6 +16,15 @@ interface EbaySearchResult {
   endTime: string;
 }
 
+// Interface for the complete response
+interface EbayResponse {
+  averageValue: number;
+  results: EbaySearchResult[];
+  searchUrl?: string;
+  errorMessage?: string;
+  dataType?: 'sold' | 'current';
+}
+
 /**
  * Search eBay for completed/sold items matching card criteria
  */
@@ -30,7 +39,7 @@ export async function searchCardValues(
   year: number,
   collection?: string,
   condition?: string
-): Promise<{ averageValue: number; results: EbaySearchResult[]; searchUrl?: string; errorMessage?: string }> {
+): Promise<EbayResponse> {
   try {
     if (!EBAY_APP_ID || !EBAY_BROWSE_TOKEN) {
       console.warn('eBay Browse API credentials not set. Cannot fetch card values.');
@@ -80,107 +89,194 @@ export async function searchCardValues(
       console.log('Using standard search strategy');
     }
     
-    console.log('Searching eBay Browse API with keywords:', keywords);
+    console.log('Searching eBay for SOLD listings with keywords:', keywords);
 
-    // Use Browse API with proper OAuth authentication as recommended by eBay
-    const searchUrl = `${EBAY_BROWSE_API_URL}/item_summary/search`;
-    const searchParams = {
-      q: keywords,
-      limit: 10,
-      filter: 'buyingOptions:{AUCTION|FIXED_PRICE},deliveryCountry:US,conditionIds:{1000|1500|2000|2500|3000|4000|5000|6000}',
-      sort: 'price',
-      fieldgroups: 'EXTENDED',
-      category_ids: '213' // Sports trading cards category
-    };
-
-    // Make the API request with Browse API OAuth token
-    const response = await axios.get(searchUrl, { 
-      params: searchParams,
-      headers: {
-        'Authorization': `Bearer ${EBAY_BROWSE_TOKEN}`,
-        'Accept': 'application/json',
-        'Content-Type': 'application/json'
-      },
-      timeout: 15000
-    });
-    const data = response.data;
+    // Try Finding API first for sold listings (most valuable data)
+    let response;
+    let usingFindingAPI = true;
     
-    console.log('eBay Browse API Response received');
-    
-    // Check for eBay API errors
-    if (data.errors && data.errors.length > 0) {
-      console.log('eBay Browse API Error details:', JSON.stringify(data.errors, null, 2));
-      const error = data.errors[0];
-      const errorMessage = `eBay API error: ${error.message || 'Unknown error'}`;
-      
-      // Return search URL as fallback when API fails
-      const searchUrl = getEbaySearchUrl(playerName, cardNumber, brand, year, collection);
-      return { 
-        averageValue: 0, 
-        results: [],
-        searchUrl,
-        errorMessage
+    try {
+      const findingUrl = 'https://svcs.ebay.com/services/search/FindingService/v1';
+      const findingParams = {
+        'OPERATION-NAME': 'findCompletedItems',
+        'SERVICE-VERSION': '1.0.0',
+        'SECURITY-APPNAME': EBAY_APP_ID,
+        'GLOBAL-ID': 'EBAY-US',
+        'RESPONSE-DATA-FORMAT': 'JSON',
+        'keywords': keywords,
+        'paginationInput.entriesPerPage': '5',
+        'itemFilter(0).name': 'SoldItemsOnly',
+        'itemFilter(0).value': 'true',
+        'sortOrder': 'EndTimeSoonest'
       };
-    }
 
-    // Extract search results from Browse API response
+      response = await axios.get(findingUrl, { 
+        params: findingParams,
+        timeout: 10000
+      });
+      
+      console.log('Successfully using Finding API for sold listings');
+      
+    } catch (findingError: any) {
+      console.log('Finding API failed, falling back to Browse API for current listings');
+      usingFindingAPI = false;
+      
+      // Fallback to Browse API for current marketplace data
+      const browseUrl = `${EBAY_BROWSE_API_URL}/item_summary/search`;
+      const browseParams = {
+        q: keywords,
+        limit: 10,
+        filter: 'buyingOptions:{AUCTION|FIXED_PRICE},deliveryCountry:US,conditionIds:{1000|1500|2000|2500|3000|4000|5000|6000}',
+        sort: 'price',
+        fieldgroups: 'EXTENDED',
+        category_ids: '213'
+      };
+
+      response = await axios.get(browseUrl, { 
+        params: browseParams,
+        headers: {
+          'Authorization': `Bearer ${EBAY_BROWSE_TOKEN}`,
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        },
+        timeout: 15000
+      });
+    }
+    const data = response.data;
     let results: EbaySearchResult[] = [];
     let totalValue = 0;
     let itemCount = 0;
+    let dataType = usingFindingAPI ? 'sold' : 'current';
 
-    // Check if we have search results in Browse API format
-    if (data && data.itemSummaries && Array.isArray(data.itemSummaries)) {
-      const items = data.itemSummaries;
+    if (usingFindingAPI) {
+      console.log('Processing Finding API sold listings data');
       
-      // Process each item
-      results = items.map((item: any) => {
-        // Get price from Browse API format
-        let price = 0;
-        if (item.price && item.price.value) {
-          price = parseFloat(item.price.value);
-          totalValue += price;
-          itemCount++;
-        }
+      // Check for Finding API errors
+      if (data && data.errorMessage) {
+        console.log('Finding API Error details:', JSON.stringify(data.errorMessage, null, 2));
+        const error = data.errorMessage[0]?.error?.[0];
+        const errorMessage = `eBay API error: ${error?.message?.[0] || 'Unknown error'}`;
         
-        // Get image from Browse API format
-        let imageUrl = '';
-        if (item.image && item.image.imageUrl) {
-          imageUrl = item.image.imageUrl;
-        } else if (item.thumbnailImages && item.thumbnailImages.length > 0) {
-          imageUrl = item.thumbnailImages[0].imageUrl;
-        }
-        
-        // Get condition from Browse API format
-        let condition = '';
-        if (item.condition) {
-          condition = item.condition;
-        } else if (item.conditionId) {
-          // Map condition IDs to readable text
-          const conditionMap: { [key: string]: string } = {
-            '1000': 'New',
-            '1500': 'New other',
-            '1750': 'New with defects',
-            '2000': 'Manufacturer refurbished',
-            '2500': 'Seller refurbished',
-            '3000': 'Used',
-            '4000': 'Very good',
-            '5000': 'Good',
-            '6000': 'Acceptable',
-            '7000': 'For parts or not working'
-          };
-          condition = conditionMap[item.conditionId] || 'Unknown';
-        }
-        
-        return {
-          title: item.title || '',
-          price: price,
-          currency: item.price?.currency || 'USD',
-          url: item.itemWebUrl || '',
-          imageUrl: imageUrl,
-          condition: condition,
-          endTime: item.itemEndDate || ''
+        const searchUrl = getEbaySearchUrl(playerName, cardNumber, brand, year, collection);
+        return { 
+          averageValue: 0, 
+          results: [],
+          searchUrl,
+          errorMessage,
+          dataType: 'sold' as const
         };
-      });
+      }
+
+      // Process Finding API sold listings
+      if (
+        data && 
+        data.findCompletedItemsResponse && 
+        data.findCompletedItemsResponse[0] && 
+        data.findCompletedItemsResponse[0].searchResult && 
+        data.findCompletedItemsResponse[0].searchResult[0] && 
+        data.findCompletedItemsResponse[0].searchResult[0].item
+      ) {
+        const items = data.findCompletedItemsResponse[0].searchResult[0].item;
+        
+        results = items.map((item: any) => {
+          let price = 0;
+          if (item.sellingStatus && item.sellingStatus[0] && item.sellingStatus[0].currentPrice && item.sellingStatus[0].currentPrice[0]) {
+            price = parseFloat(item.sellingStatus[0].currentPrice[0].__value__);
+            totalValue += price;
+            itemCount++;
+          }
+          
+          let imageUrl = '';
+          if (item.galleryURL && item.galleryURL[0]) {
+            imageUrl = item.galleryURL[0];
+          }
+          
+          let condition = '';
+          if (item.condition && item.condition[0] && item.condition[0].conditionDisplayName) {
+            condition = item.condition[0].conditionDisplayName[0];
+          }
+          
+          return {
+            title: item.title ? item.title[0] : '',
+            price: price,
+            currency: item.sellingStatus && item.sellingStatus[0] && item.sellingStatus[0].currentPrice && item.sellingStatus[0].currentPrice[0]['@currencyId'] ? 
+              item.sellingStatus[0].currentPrice[0]['@currencyId'] : 'USD',
+            url: item.viewItemURL ? item.viewItemURL[0] : '',
+            imageUrl: imageUrl,
+            condition: condition,
+            endTime: item.listingInfo && item.listingInfo[0] && item.listingInfo[0].endTime ? 
+              item.listingInfo[0].endTime[0] : ''
+          };
+        });
+      }
+    } else {
+      console.log('Processing Browse API current listings data');
+      
+      // Check for Browse API errors
+      if (data.errors && data.errors.length > 0) {
+        console.log('Browse API Error details:', JSON.stringify(data.errors, null, 2));
+        const error = data.errors[0];
+        const errorMessage = `eBay API error: ${error.message || 'Unknown error'}`;
+        
+        const searchUrl = getEbaySearchUrl(playerName, cardNumber, brand, year, collection);
+        return { 
+          averageValue: 0, 
+          results: [],
+          searchUrl,
+          errorMessage,
+          dataType: 'current' as const
+        };
+      }
+
+      // Process Browse API current listings
+      if (data && data.itemSummaries && Array.isArray(data.itemSummaries)) {
+        const items = data.itemSummaries;
+        
+        results = items.map((item: any) => {
+          let price = 0;
+          if (item.price && item.price.value) {
+            price = parseFloat(item.price.value);
+            totalValue += price;
+            itemCount++;
+          }
+          
+          let imageUrl = '';
+          if (item.image && item.image.imageUrl) {
+            imageUrl = item.image.imageUrl;
+          } else if (item.thumbnailImages && item.thumbnailImages.length > 0) {
+            imageUrl = item.thumbnailImages[0].imageUrl;
+          }
+          
+          let condition = '';
+          if (item.condition) {
+            condition = item.condition;
+          } else if (item.conditionId) {
+            const conditionMap: { [key: string]: string } = {
+              '1000': 'New',
+              '1500': 'New other',
+              '1750': 'New with defects',
+              '2000': 'Manufacturer refurbished',
+              '2500': 'Seller refurbished',
+              '3000': 'Used',
+              '4000': 'Very good',
+              '5000': 'Good',
+              '6000': 'Acceptable',
+              '7000': 'For parts or not working'
+            };
+            condition = conditionMap[item.conditionId] || 'Unknown';
+          }
+          
+          return {
+            title: item.title || '',
+            price: price,
+            currency: item.price?.currency || 'USD',
+            url: item.itemWebUrl || '',
+            imageUrl: imageUrl,
+            condition: condition,
+            endTime: item.itemEndDate || ''
+          };
+        });
+      }
     }
 
     // Calculate average value
@@ -188,7 +284,9 @@ export async function searchCardValues(
 
     const result = {
       averageValue,
-      results
+      results: results.slice(0, 5), // Return only top 5 results
+      searchUrl: getEbaySearchUrl(playerName, cardNumber, brand, year, collection),
+      dataType: dataType as 'sold' | 'current'
     };
 
     // Cache the successful result
