@@ -80,37 +80,38 @@ export async function searchCardValues(
       console.log('Using standard search strategy');
     }
     
-    console.log('Searching eBay Browse API with keywords:', keywords);
+    console.log('Searching eBay for SOLD card values with keywords:', keywords);
 
-    // Use Browse API search endpoint with proper OAuth authentication
-    const searchUrl = `${EBAY_BROWSE_API_URL}/item_summary/search`;
+    // Use Finding API specifically for sold listings (still supported for this use case)
+    // Browse API is for active listings, Finding API's findCompletedItems is for sold data
+    const searchUrl = 'https://svcs.ebay.com/services/search/FindingService/v1';
     const searchParams = {
-      q: keywords,
-      limit: 5,
-      filter: 'conditionIds:{3000}', // Used condition filter
-      sort: 'endTimeSoonest', // Recent sold items
-      fieldgroups: 'EXTENDED'
+      'OPERATION-NAME': 'findCompletedItems',
+      'SERVICE-VERSION': '1.0.0',
+      'SECURITY-APPNAME': EBAY_APP_ID,
+      'GLOBAL-ID': 'EBAY-US',
+      'RESPONSE-DATA-FORMAT': 'JSON',
+      'keywords': keywords,
+      'paginationInput.entriesPerPage': '5',
+      'itemFilter(0).name': 'SoldItemsOnly',
+      'itemFilter(0).value': 'true',
+      'sortOrder': 'EndTimeSoonest'
     };
 
-    // Make the API request with Browse API token
+    // Make the API request (Finding API uses App ID, not OAuth for completed items)
     const response = await axios.get(searchUrl, { 
       params: searchParams,
-      headers: {
-        'Authorization': `Bearer ${EBAY_BROWSE_TOKEN}`,
-        'Accept': 'application/json',
-        'Content-Type': 'application/json'
-      },
       timeout: 15000
     });
     const data = response.data;
     
-    console.log('eBay Browse API Response:', data);
+    console.log('eBay Finding API (Completed Items) Response received');
     
-    // Check for eBay API errors
-    if (data.errors && data.errors.length > 0) {
-      console.log('eBay Browse API Error details:', JSON.stringify(data.errors, null, 2));
-      const error = data.errors[0];
-      const errorMessage = `eBay API error: ${error.message || 'Unknown error'}`;
+    // Check for eBay API errors first
+    if (data && data.errorMessage) {
+      console.log('eBay Finding API Error details:', JSON.stringify(data.errorMessage, null, 2));
+      const error = data.errorMessage[0]?.error?.[0];
+      const errorMessage = `eBay API error: ${error?.message?.[0] || 'Unknown error'}`;
       
       // Return search URL as fallback when API fails
       const searchUrl = getEbaySearchUrl(playerName, cardNumber, brand, year, collection);
@@ -122,62 +123,60 @@ export async function searchCardValues(
       };
     }
 
-    // Extract search results from Browse API response
+    // Extract search results from Finding API response
     let results: EbaySearchResult[] = [];
     let totalValue = 0;
     let itemCount = 0;
 
-    // Check if we have search results in Browse API format
-    if (data && data.itemSummaries && Array.isArray(data.itemSummaries)) {
-      const items = data.itemSummaries;
+    // Check if we have search results in Finding API format for completed items
+    if (
+      data && 
+      data.findCompletedItemsResponse && 
+      data.findCompletedItemsResponse[0] && 
+      data.findCompletedItemsResponse[0].searchResult && 
+      data.findCompletedItemsResponse[0].searchResult[0] && 
+      data.findCompletedItemsResponse[0].searchResult[0].item
+    ) {
+      const items = data.findCompletedItemsResponse[0].searchResult[0].item;
       
-      // Process each item
+      // Process each sold item
       results = items.map((item: any) => {
-        // Get price from Browse API format
+        // Get sold price from Finding API format
         let price = 0;
-        if (item.price && item.price.value) {
-          price = parseFloat(item.price.value);
+        if (item.sellingStatus && item.sellingStatus[0] && item.sellingStatus[0].currentPrice && item.sellingStatus[0].currentPrice[0]) {
+          price = parseFloat(item.sellingStatus[0].currentPrice[0].__value__);
+          
+          // Convert if not USD
+          if (item.sellingStatus[0].currentPrice[0]['@currencyId'] !== 'USD') {
+            price = price * 1.0; // Placeholder for currency conversion
+          }
+          
           totalValue += price;
           itemCount++;
         }
         
-        // Get image from Browse API format
+        // Get image from Finding API format
         let imageUrl = '';
-        if (item.image && item.image.imageUrl) {
-          imageUrl = item.image.imageUrl;
-        } else if (item.thumbnailImages && item.thumbnailImages.length > 0) {
-          imageUrl = item.thumbnailImages[0].imageUrl;
+        if (item.galleryURL && item.galleryURL[0]) {
+          imageUrl = item.galleryURL[0];
         }
         
-        // Get condition from Browse API format
+        // Get condition from Finding API format
         let condition = '';
-        if (item.condition) {
-          condition = item.condition;
-        } else if (item.conditionId) {
-          // Map condition IDs to readable text
-          const conditionMap: { [key: string]: string } = {
-            '1000': 'New',
-            '1500': 'New other',
-            '1750': 'New with defects',
-            '2000': 'Manufacturer refurbished',
-            '2500': 'Seller refurbished',
-            '3000': 'Used',
-            '4000': 'Very good',
-            '5000': 'Good',
-            '6000': 'Acceptable',
-            '7000': 'For parts or not working'
-          };
-          condition = conditionMap[item.conditionId] || 'Unknown';
+        if (item.condition && item.condition[0] && item.condition[0].conditionDisplayName) {
+          condition = item.condition[0].conditionDisplayName[0];
         }
         
         return {
-          title: item.title || '',
+          title: item.title ? item.title[0] : '',
           price: price,
-          currency: item.price?.currency || 'USD',
-          url: item.itemWebUrl || '',
+          currency: item.sellingStatus && item.sellingStatus[0] && item.sellingStatus[0].currentPrice && item.sellingStatus[0].currentPrice[0]['@currencyId'] ? 
+            item.sellingStatus[0].currentPrice[0]['@currencyId'] : 'USD',
+          url: item.viewItemURL ? item.viewItemURL[0] : '',
           imageUrl: imageUrl,
           condition: condition,
-          endTime: item.itemEndDate || ''
+          endTime: item.listingInfo && item.listingInfo[0] && item.listingInfo[0].endTime ? 
+            item.listingInfo[0].endTime[0] : ''
         };
       });
     }
@@ -195,23 +194,19 @@ export async function searchCardValues(
 
     return result;
   } catch (error: any) {
-    console.error('Error searching eBay Browse API for card values:', error);
+    console.error('Error searching eBay Finding API for sold card values:', error);
     console.error('Error response data:', error.response?.data);
     
-    // Check for specific eBay Browse API error messages
-    let errorMessage = 'eBay Browse API error - check credentials';
+    // Check for specific eBay Finding API error messages
+    let errorMessage = 'eBay Finding API error - check credentials';
     
-    if (error.response?.data?.errors && Array.isArray(error.response.data.errors)) {
-      const ebayError = error.response.data.errors[0];
-      if (ebayError?.errorId === 1001 || ebayError?.errorId === '1001') {
+    if (error.response?.data?.errorMessage) {
+      const ebayError = error.response.data.errorMessage[0]?.error?.[0];
+      if (ebayError?.errorId?.[0] === '10001') {
         errorMessage = 'eBay API rate limit exceeded - please try again later';
-      } else if (ebayError?.message) {
-        errorMessage = `eBay API error: ${ebayError.message}`;
+      } else if (ebayError?.message?.[0]) {
+        errorMessage = `eBay API error: ${ebayError.message[0]}`;
       }
-    } else if (error.response?.status === 401) {
-      errorMessage = 'eBay OAuth token invalid - Browse API requires different scopes than Finding API';
-    } else if (error.response?.status === 403) {
-      errorMessage = 'eBay API access forbidden - OAuth token may lack Browse API permissions';
     } else if (error.response?.status === 429) {
       errorMessage = 'eBay API rate limit exceeded - please try again later';
     }
