@@ -133,51 +133,8 @@ export default function EbayPriceResults({ cardData, frontImage, backImage }: Eb
     );
   }
 
-  if (error) {
-    const isRateLimit = error.includes('rate limit');
-    
-    return (
-      <Card className={isRateLimit ? "border-yellow-200 bg-yellow-50" : ""}>
-        <CardHeader>
-          <CardTitle className={isRateLimit ? "text-yellow-700" : "text-red-600"}>
-            {isRateLimit ? "eBay Rate Limit Reached" : "Error Loading Prices"}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {isRateLimit ? (
-            <div className="space-y-3">
-              <p className="text-yellow-700">
-                The eBay API has daily usage limits. This will reset within 24 hours.
-              </p>
-              <p className="text-sm text-yellow-600">
-                When available, this shows the 5 most recent <strong>sold prices</strong> (not asking prices) for accurate market values.
-              </p>
-            </div>
-          ) : (
-            <p className="text-gray-600 mb-4">{error}</p>
-          )}
-          
-          {searchUrl && (
-            <div className="mt-4">
-              <Button 
-                onClick={() => window.open(searchUrl, '_blank')}
-                className="flex items-center gap-2"
-                variant={isRateLimit ? "default" : "secondary"}
-              >
-                <ExternalLink className="h-4 w-4" />
-                Search eBay Sold Listings Manually
-              </Button>
-              <p className="text-xs text-gray-500 mt-2">
-                Opens eBay with your card details and sold listings filter
-              </p>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-    );
-  }
-
-  return (
+  // Helper function to render card information section
+  const renderCardInfoSection = () => (
     <div className="space-y-4">
       {/* Uploaded Card Images */}
       {(frontImage || backImage) && (
@@ -250,10 +207,10 @@ export default function EbayPriceResults({ cardData, frontImage, backImage }: Eb
                   <span className="text-slate-700">{cardData.cardNumber || 'Not detected'}</span>
                 </div>
 
-                {/* Variant */}
+                {/* Year */}
                 <div className="text-lg">
-                  <span className="font-semibold text-slate-800">Variant: </span>
-                  <span className="text-slate-700">{cardData.variant || 'Not detected'}</span>
+                  <span className="font-semibold text-slate-800">Year: </span>
+                  <span className="text-slate-700">{cardData.year || 'Not detected'}</span>
                 </div>
               </div>
 
@@ -264,58 +221,91 @@ export default function EbayPriceResults({ cardData, frontImage, backImage }: Eb
                   <span className="text-slate-700">{cardData.collection || 'Not detected'}</span>
                 </div>
 
-                {/* Year */}
-                <div className="text-lg">
-                  <span className="font-semibold text-slate-800">Year: </span>
-                  <span className="text-slate-700">{cardData.year && cardData.year > 0 ? cardData.year : 'Not detected'}</span>
-                </div>
-
                 {/* Serial Number */}
-                <div className="text-lg">
-                  <span className="font-semibold text-slate-800">Serial #: </span>
-                  <span className="text-slate-700">{cardData.serialNumber || 'None'}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Condition */}
-            <div className="text-lg">
-              <span className="font-semibold text-slate-800">Condition: </span>
-              <span className="text-slate-700">{cardData.condition || 'Not detected'}</span>
-            </div>
-
-            {/* Card Features */}
-            <div className="mt-6">
-              <div className="text-lg mb-3">
-                <span className="font-semibold text-slate-800">Card Features:</span>
-              </div>
-              <div className="ml-0">
-                {cardData.isRookieCard === true || cardData.isAutographed === true || cardData.isNumbered === true ? (
-                  <div className="flex flex-wrap gap-3">
-                    {cardData.isRookieCard === true && (
-                      <span className="inline-flex items-center rounded-full bg-green-100 px-3 py-1 text-sm font-medium text-green-800">
-                        Rookie Card
-                      </span>
-                    )}
-                    {cardData.isAutographed === true && (
-                      <span className="inline-flex items-center rounded-full bg-blue-100 px-3 py-1 text-sm font-medium text-blue-800">
-                        Autographed
-                      </span>
-                    )}
-                    {cardData.isNumbered === true && (
-                      <span className="inline-flex items-center rounded-full bg-purple-100 px-3 py-1 text-sm font-medium text-purple-800">
-                        Numbered
-                      </span>
-                    )}
+                {cardData.serialNumber && (
+                  <div className="text-lg">
+                    <span className="font-semibold text-slate-800">Serial #: </span>
+                    <span className="text-slate-700">{cardData.serialNumber}</span>
                   </div>
-                ) : (
-                  <span className="text-slate-500 text-lg">None detected</span>
+                )}
+
+                {/* Foil Type */}
+                {cardData.foilType && (
+                  <div className="text-lg">
+                    <span className="font-semibold text-slate-800">Foil Type: </span>
+                    <span className="text-slate-700">{cardData.foilType}</span>
+                  </div>
+                )}
+
+                {/* Numbered */}
+                {cardData.isNumbered && (
+                  <div className="text-lg">
+                    <span className="font-semibold text-slate-800">Type: </span>
+                    <span className="text-slate-700">Numbered Card</span>
+                  </div>
                 )}
               </div>
             </div>
           </div>
         </CardContent>
       </Card>
+    </div>
+  );
+
+  if (error) {
+    const isRateLimit = error.includes('rate limit');
+    
+    return (
+      <div className="space-y-4">
+        {/* Always show card information first */}
+        {renderCardInfoSection()}
+        
+        {/* Then show pricing error */}
+        <Card className={isRateLimit ? "border-yellow-200 bg-yellow-50" : ""}>
+          <CardHeader>
+            <CardTitle className={isRateLimit ? "text-yellow-700" : "text-red-600"}>
+              {isRateLimit ? "eBay Rate Limit Reached" : "Error Loading Prices"}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {isRateLimit ? (
+              <div className="space-y-3">
+                <p className="text-yellow-700">
+                  The eBay API has daily usage limits. This will reset within 24 hours.
+                </p>
+                <p className="text-sm text-yellow-600">
+                  When available, this shows the 5 most recent <strong>sold prices</strong> (not asking prices) for accurate market values.
+                </p>
+              </div>
+            ) : (
+              <p className="text-gray-600 mb-4">{error}</p>
+            )}
+            
+            {searchUrl && (
+              <div className="mt-4">
+                <Button 
+                  onClick={() => window.open(searchUrl, '_blank')}
+                  className="flex items-center gap-2"
+                  variant={isRateLimit ? "default" : "secondary"}
+                >
+                  <ExternalLink className="h-4 w-4" />
+                  Search eBay Sold Listings Manually
+                </Button>
+                <p className="text-xs text-gray-500 mt-2">
+                  Opens eBay with your card details and sold listings filter
+                </p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Always show card information first */}
+      {renderCardInfoSection()}
 
       {/* Average Price */}
       {averageValue > 0 && (
