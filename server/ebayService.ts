@@ -39,7 +39,8 @@ export async function searchCardValues(
   year: number,
   collection?: string,
   condition?: string,
-  isNumbered?: boolean
+  isNumbered?: boolean,
+  foilType?: string
 ): Promise<EbayResponse> {
   try {
     if (!EBAY_APP_ID || !EBAY_BROWSE_TOKEN) {
@@ -103,6 +104,17 @@ export async function searchCardValues(
     if (isNumbered) {
       keywords += ' numbered';
       console.log('Added "numbered" to search for serialized card');
+    }
+    
+    // Add foil variant for special finishes to get accurate pricing for foil variants
+    if (foilType) {
+      // Import the helper function to get the eBay-friendly search term
+      const { getFoilSearchTerm } = require('./foilVariantDetector');
+      const foilSearchTerm = getFoilSearchTerm(foilType);
+      if (foilSearchTerm) {
+        keywords += ` ${foilSearchTerm}`;
+        console.log(`Added "${foilSearchTerm}" to search for ${foilType} foil variant`);
+      }
     }
     
     console.log('Searching eBay for SOLD listings with keywords:', keywords);
@@ -353,7 +365,8 @@ export function getEbaySearchUrl(
   year: number,
   collection?: string,
   condition?: string,
-  isNumbered?: boolean
+  isNumbered?: boolean,
+  foilType?: string
 ): string {
   // Split player name into first and last name for more flexible search
   const nameComponents = playerName.split(' ');
@@ -392,6 +405,15 @@ export function getEbaySearchUrl(
   // Add "numbered" for serialized cards to get accurate pricing
   if (isNumbered) {
     keywords += ' numbered';
+  }
+  
+  // Add foil variant for special finishes to get accurate pricing
+  if (foilType) {
+    const { getFoilSearchTerm } = require('./foilVariantDetector');
+    const foilSearchTerm = getFoilSearchTerm(foilType);
+    if (foilSearchTerm) {
+      keywords += ` ${foilSearchTerm}`;
+    }
   }
   
   // Encode for URL

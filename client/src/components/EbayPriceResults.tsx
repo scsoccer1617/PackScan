@@ -53,7 +53,8 @@ export default function EbayPriceResults({ cardData, frontImage, backImage }: Eb
           year: cardData.year.toString(),
           collection: cardData.collection || "",
           condition: cardData.condition || "",
-          isNumbered: cardData.isNumbered ? "true" : "false"
+          isNumbered: cardData.isNumbered ? "true" : "false",
+          foilType: cardData.foilType || ""
         });
 
         const response = await fetch(`/api/ebay-search?${searchParams}`);

@@ -102,6 +102,8 @@ export const cardSchema = z.object({
   isRookieCard: z.boolean().optional().default(false),
   isAutographed: z.boolean().optional().default(false),
   isNumbered: z.boolean().optional().default(false),
+  isFoil: z.boolean().optional().default(false),
+  foilType: z.string().optional().nullable(),
   notes: z.string().optional(),
   frontImage: z.string().optional(),
   backImage: z.string().optional(),
