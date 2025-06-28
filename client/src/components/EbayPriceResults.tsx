@@ -52,7 +52,8 @@ export default function EbayPriceResults({ cardData, frontImage, backImage }: Eb
           brand: cardData.brand,
           year: cardData.year.toString(),
           collection: cardData.collection || "",
-          condition: cardData.condition || ""
+          condition: cardData.condition || "",
+          isNumbered: cardData.isNumbered ? "true" : "false"
         });
 
         const response = await fetch(`/api/ebay-search?${searchParams}`);
