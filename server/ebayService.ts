@@ -321,7 +321,8 @@ export async function searchCardValues(
       averageValue: 0, 
       results: [],
       searchUrl,
-      errorMessage
+      errorMessage,
+      dataType: 'sold' as const
     };
   }
 }

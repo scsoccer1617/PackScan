@@ -19,6 +19,7 @@ interface EbayResponse {
   results: EbaySearchResult[];
   searchUrl?: string;
   errorMessage?: string;
+  dataType?: 'sold' | 'current';
 }
 
 interface EbayPriceResultsProps {
@@ -31,6 +32,7 @@ export default function EbayPriceResults({ cardData }: EbayPriceResultsProps) {
   const [averageValue, setAverageValue] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [searchUrl, setSearchUrl] = useState<string | null>(null);
+  const [dataType, setDataType] = useState<'sold' | 'current'>('sold');
 
   useEffect(() => {
     const fetchEbayData = async () => {
@@ -60,6 +62,7 @@ export default function EbayPriceResults({ cardData }: EbayPriceResultsProps) {
         setResults(data.results.slice(0, 5)); // Get only the 5 most recent
         setAverageValue(data.averageValue);
         setSearchUrl(data.searchUrl || null);
+        setDataType(data.dataType || 'sold');
         if (data.errorMessage) {
           setError(data.errorMessage);
         }
@@ -102,7 +105,7 @@ export default function EbayPriceResults({ cardData }: EbayPriceResultsProps) {
             Finding Recent Sold Prices...
           </CardTitle>
           <p className="text-sm text-gray-600">
-            Searching for actual sold prices (not asking prices) to get real market values
+            Searching for authentic sold prices to get real market values
           </p>
         </CardHeader>
         <CardContent>
@@ -189,25 +192,37 @@ export default function EbayPriceResults({ cardData }: EbayPriceResultsProps) {
 
       {/* Average Price */}
       {averageValue > 0 && (
-        <Card className="bg-green-50 border-green-200">
+        <Card className={dataType === 'sold' ? "bg-green-50 border-green-200" : "bg-blue-50 border-blue-200"}>
           <CardContent className="pt-6">
             <div className="text-center">
-              <div className="text-2xl font-bold text-green-800">
+              <div className={`text-2xl font-bold ${dataType === 'sold' ? 'text-green-800' : 'text-blue-800'}`}>
                 {formatPrice(averageValue)}
               </div>
-              <p className="text-green-600">Average Recent Sold Price</p>
+              <p className={dataType === 'sold' ? 'text-green-600' : 'text-blue-600'}>
+                {dataType === 'sold' ? 'Average Recent Sold Price' : 'Average Current Asking Price'}
+              </p>
+              {dataType === 'current' && (
+                <p className="text-xs text-blue-500 mt-1">
+                  Note: These are asking prices, not actual sale prices
+                </p>
+              )}
             </div>
           </CardContent>
         </Card>
       )}
 
-      {/* Recent Sold Listings */}
+      {/* Recent Listings */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <TrendingUp className="h-5 w-5" />
-            Recent Sold Listings ({results.length})
+            {dataType === 'sold' ? 'Recent Sold Listings' : 'Current Market Listings'} ({results.length})
           </CardTitle>
+          {dataType === 'current' && (
+            <p className="text-sm text-blue-600">
+              Showing current asking prices - sold prices temporarily unavailable due to API limits
+            </p>
+          )}
         </CardHeader>
         <CardContent>
           {results.length === 0 ? (
