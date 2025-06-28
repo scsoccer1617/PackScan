@@ -64,6 +64,9 @@ function createEncarnacionStrandCard(): Partial<CardFormValues> {
  * Improved rookie card detection that works with modern cards
  */
 export function detectRookieCard(text: string): boolean {
+  console.log("🔍 ROOKIE DETECTION: Starting analysis...");
+  console.log("🔍 Original text:", text.substring(0, 200) + "...");
+  
   // Enhanced rookie identifiers with more variations
   const rookiePatterns = [
     /\bRC\b/,
@@ -80,8 +83,12 @@ export function detectRookieCard(text: string): boolean {
   
   // Check for standard patterns (case insensitive)
   const upperText = text.toUpperCase();
+  console.log("🔍 Checking patterns against:", upperText.substring(0, 200) + "...");
+  
   for (const pattern of rookiePatterns) {
-    if (pattern.test(upperText)) {
+    const matches = pattern.test(upperText);
+    console.log(`🔍 Pattern ${pattern} -> ${matches ? 'MATCH' : 'no match'}`);
+    if (matches) {
       console.log(`✅ ROOKIE CARD: Matched pattern ${pattern}`);
       return true;
     }

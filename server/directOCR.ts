@@ -113,10 +113,20 @@ export async function handleCardImageAnalysis(req: MulterRequest, res: Response)
           }
         }
         
-        // Check for rookie card status
+        // Check for rookie card status with detailed debugging
+        console.log("=== ROOKIE CARD DETECTION DEBUG ===");
+        console.log("Full OCR text for rookie detection:", fullText);
+        console.log("Text length:", fullText.length);
+        console.log("Contains 'RC':", fullText.includes('RC'));
+        console.log("Contains 'ROOKIE':", fullText.includes('ROOKIE'));
+        
         const isRookieCard = detectRookieCard(fullText);
+        console.log("Final rookie card detection result:", isRookieCard);
+        
         if (isRookieCard) {
-          console.log("Detected rookie card!");
+          console.log("✅ DETECTED ROOKIE CARD!");
+        } else {
+          console.log("❌ NO ROOKIE CARD DETECTED");
         }
         
         // Check for other specific cards
