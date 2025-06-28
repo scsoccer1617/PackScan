@@ -94,10 +94,10 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
         const frontText = await extractTextForBrandDetection(frontBase64);
         if (frontText.toUpperCase().includes('SCORE')) {
           console.log('Detected Score card brand from front image, using specialized analyzer');
-          frontResult = await Promise.race([analyzeScoreCard(frontBase64), timeout]) as Partial<CardFormValues>;
+          frontResult = await Promise.race([analyzeScoreCard(frontBase64), createTimeout()]);
         } else {
           // Use standard analyzer for other card brands
-          frontResult = await Promise.race([analyzeSportsCardImage(frontBase64), timeout]) as Partial<CardFormValues>;
+          frontResult = await Promise.race([analyzeSportsCardImage(frontBase64), createTimeout()]);
         }
         console.log('Front image analysis complete');
       } catch (error) {
@@ -114,10 +114,10 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
         const backText = await extractTextForBrandDetection(backBase64);
         if (backText.toUpperCase().includes('SCORE')) {
           console.log('Detected Score card brand from back image, using specialized analyzer');
-          backResult = await Promise.race([analyzeScoreCard(backBase64), timeout]);
+          backResult = await Promise.race([analyzeScoreCard(backBase64), createTimeout()]);
         } else {
           // Use standard analyzer for other card brands
-          backResult = await Promise.race([analyzeSportsCardImage(backBase64), timeout]);
+          backResult = await Promise.race([analyzeSportsCardImage(backBase64), createTimeout()]);
         }
         console.log('Back image analysis complete');
       } catch (error) {
