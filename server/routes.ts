@@ -888,7 +888,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // eBay search endpoint
   app.get(`${apiPrefix}/search-ebay-values`, async (req, res) => {
     try {
-      const { playerName, cardNumber, brand, year, collection, condition } = req.query;
+      const { playerName, cardNumber, brand, year, collection, condition, isNumbered } = req.query;
       
       if (!playerName || !brand || !year) {
         return res.status(400).json({ error: 'Missing required parameters' });
@@ -900,7 +900,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         brand as string,
         parseInt(year as string, 10),
         collection as string || '',
-        condition as string || ''
+        condition as string || '',
+        isNumbered === 'true'
       );
       
       return res.json(results);
@@ -915,7 +916,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           req.query.brand as string,
           parseInt(req.query.year as string, 10),
           req.query.collection as string || '',
-          ''
+          '',
+          req.query.isNumbered === 'true'
         ) 
       });
     }
@@ -924,13 +926,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Simple eBay search endpoint for price lookup (no card saving)
   app.get(`${apiPrefix}/ebay-search`, async (req, res) => {
     try {
-      const { playerName, cardNumber, brand, year, collection, condition } = req.query;
+      const { playerName, cardNumber, brand, year, collection, condition, isNumbered } = req.query;
       
       if (!playerName || !brand || !year) {
         return res.status(400).json({ error: 'Missing required parameters' });
       }
       
-      console.log('eBay search request:', { playerName, cardNumber, brand, year, collection });
+      console.log('eBay search request:', { playerName, cardNumber, brand, year, collection, isNumbered });
       
       const results = await searchCardValues(
         playerName as string,
@@ -938,7 +940,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         brand as string,
         parseInt(year as string, 10),
         collection as string || '',
-        condition as string || ''
+        condition as string || '',
+        isNumbered === 'true'
       );
       
       console.log('eBay search results:', results);
@@ -1007,7 +1010,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             cardData.brand,
             cardData.year,
             cardData.collection || '',
-            cardData.condition || ''
+            cardData.condition || '',
+            cardData.isNumbered || false
           );
           
           ebayResults = ebayData.results || [];

@@ -332,7 +332,7 @@ export async function searchCardValues(
     }
     
     // Return search URL as fallback when API fails
-    const searchUrl = getEbaySearchUrl(playerName, cardNumber, brand, year, collection);
+    const searchUrl = getEbaySearchUrl(playerName, cardNumber, brand, year, collection, '', isNumbered);
     return { 
       averageValue: 0, 
       results: [],
