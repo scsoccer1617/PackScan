@@ -247,6 +247,12 @@ export default function EbayPriceResults({ cardData, frontImage, backImage }: Eb
                   <span className="text-slate-700">{cardData.isFoil ? 'Yes' : 'No'}</span>
                 </div>
 
+                {/* Rookie Card Status */}
+                <div className="text-lg">
+                  <span className="font-semibold text-slate-800">Rookie Card: </span>
+                  <span className="text-slate-700">{cardData.isRookieCard ? 'Yes' : 'No'}</span>
+                </div>
+
                 {/* Numbered */}
                 {cardData.isNumbered && (
                   <div className="text-lg">

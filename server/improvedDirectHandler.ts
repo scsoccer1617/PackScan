@@ -64,28 +64,46 @@ function createEncarnacionStrandCard(): Partial<CardFormValues> {
  * Improved rookie card detection that works with modern cards
  */
 export function detectRookieCard(text: string): boolean {
-  // Standard rookie identifiers
+  // Enhanced rookie identifiers with more variations
   const rookiePatterns = [
     /\bRC\b/,
+    /\bR\.C\b/,
+    /\bR\.C\.\b/,
     /\bROOKIE\b/,
     /\bROOKIE CARD\b/,
     /\bDEBUT\b/,
-    /\bFIRST CARD\b/
+    /\bFIRST CARD\b/,
+    /\b1ST CARD\b/,
+    /\bFIRST YEAR\b/,
+    /\b1ST YEAR\b/
   ];
   
-  // Check for standard patterns
+  // Check for standard patterns (case insensitive)
+  const upperText = text.toUpperCase();
   for (const pattern of rookiePatterns) {
-    if (pattern.test(text)) {
+    if (pattern.test(upperText)) {
       console.log(`✅ ROOKIE CARD: Matched pattern ${pattern}`);
       return true;
     }
   }
   
-  // Check for descriptive rookie text
-  if (text.includes('first MLB') || 
-      text.includes('first season') || 
-      text.includes('made his debut')) {
+  // Check for specific rookie text patterns
+  if (upperText.includes('FIRST MLB') || 
+      upperText.includes('FIRST SEASON') || 
+      upperText.includes('MADE HIS DEBUT') ||
+      upperText.includes('ROOKIE YEAR') ||
+      upperText.includes('FIRST APPEARANCE')) {
     console.log("✅ ROOKIE CARD: Detected from player description");
+    return true;
+  }
+  
+  // Check for common RC logo variations that might be detected as text
+  if (upperText.includes(' RC ') || 
+      upperText.includes('(RC)') || 
+      upperText.includes('[RC]') ||
+      upperText.startsWith('RC ') ||
+      upperText.endsWith(' RC')) {
+    console.log("✅ ROOKIE CARD: Detected RC logo text variation");
     return true;
   }
   

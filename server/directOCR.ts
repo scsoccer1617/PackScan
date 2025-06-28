@@ -120,7 +120,9 @@ export async function handleCardImageAnalysis(req: MulterRequest, res: Response)
         }
         
         // Check for other specific cards
-        const cardInfo: Partial<CardFormValues> = {};
+        const cardInfo: Partial<CardFormValues> = {
+          isRookieCard: isRookieCard  // Apply the rookie card detection result
+        };
         if (handleSpecificCards(fullText, cardInfo)) {
           console.log("Successfully processed using specific card handler");
           console.log("Card info:", JSON.stringify(cardInfo, null, 2));
