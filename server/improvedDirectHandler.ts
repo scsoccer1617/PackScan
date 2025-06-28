@@ -65,7 +65,8 @@ function createEncarnacionStrandCard(): Partial<CardFormValues> {
  */
 export function detectRookieCard(text: string): boolean {
   console.log("🔍 ROOKIE DETECTION: Starting analysis...");
-  console.log("🔍 Original text:", text.substring(0, 200) + "...");
+  console.log("🔍 FULL OCR TEXT:", text);
+  console.log("🔍 Text length:", text.length);
   
   // Enhanced rookie identifiers with more variations
   const rookiePatterns = [
@@ -83,7 +84,7 @@ export function detectRookieCard(text: string): boolean {
   
   // Check for standard patterns (case insensitive)
   const upperText = text.toUpperCase();
-  console.log("🔍 Checking patterns against:", upperText.substring(0, 200) + "...");
+  console.log("🔍 UPPERCASE TEXT:", upperText);
   
   for (const pattern of rookiePatterns) {
     const matches = pattern.test(upperText);
@@ -125,6 +126,14 @@ export function detectRookieCard(text: string): boolean {
     console.log("✅ ROOKIE CARD: Detected recent year with rookie context");
     return true;
   }
-  
+
+  // Simple fallback check for any "RC" occurrence
+  if (upperText.includes('RC')) {
+    console.log("✅ ROOKIE CARD: Found 'RC' in text (simple search)");
+    return true;
+  }
+
+  console.log("❌ ROOKIE CARD: No rookie indicators found");
+  console.log("🔍 Final analysis: Checked patterns, context clues, and simple RC search");
   return false;
 }
