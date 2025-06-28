@@ -172,7 +172,11 @@ export default function PriceLookup() {
       {/* Price Results */}
       {showPriceResults && cardData && (
         <div className="space-y-4">
-          <EbayPriceResults cardData={cardData} />
+          <EbayPriceResults 
+            cardData={cardData} 
+            frontImage={frontImage}
+            backImage={backImage}
+          />
           <Button 
             onClick={handleReset}
             variant="outline"

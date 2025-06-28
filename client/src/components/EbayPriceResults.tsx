@@ -24,9 +24,11 @@ interface EbayResponse {
 
 interface EbayPriceResultsProps {
   cardData: Partial<CardFormValues>;
+  frontImage?: string;
+  backImage?: string;
 }
 
-export default function EbayPriceResults({ cardData }: EbayPriceResultsProps) {
+export default function EbayPriceResults({ cardData, frontImage, backImage }: EbayPriceResultsProps) {
   const [loading, setLoading] = useState(true);
   const [results, setResults] = useState<EbaySearchResult[]>([]);
   const [averageValue, setAverageValue] = useState(0);
@@ -275,6 +277,43 @@ export default function EbayPriceResults({ cardData }: EbayPriceResultsProps) {
           </div>
         </CardContent>
       </Card>
+
+      {/* Uploaded Card Images */}
+      {(frontImage || backImage) && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">Uploaded Card Images</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {frontImage && (
+                <div className="space-y-2">
+                  <h3 className="font-medium text-slate-700">Front of Card</h3>
+                  <div className="border border-gray-200 rounded-lg overflow-hidden">
+                    <img 
+                      src={frontImage} 
+                      alt="Front of card" 
+                      className="w-full h-auto max-h-96 object-contain bg-gray-50"
+                    />
+                  </div>
+                </div>
+              )}
+              {backImage && (
+                <div className="space-y-2">
+                  <h3 className="font-medium text-slate-700">Back of Card</h3>
+                  <div className="border border-gray-200 rounded-lg overflow-hidden">
+                    <img 
+                      src={backImage} 
+                      alt="Back of card" 
+                      className="w-full h-auto max-h-96 object-contain bg-gray-50"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Average Price */}
       {averageValue > 0 && (
