@@ -66,13 +66,13 @@ export async function handleCardImageAnalysis(req: MulterRequest, res: Response)
     // Convert image to base64 for OCR processing
     const base64Image = req.file.buffer.toString('base64');
     
+    // Declare fullText variable in the proper scope
+    let fullText = '';
+    
     // Try to get the OCR text first for specific card detection
     try {
       // First get the raw OCR text for all our special handlers
       const ocrResult = await analyzeSportsCardImage(base64Image);
-      
-      // Extract full text from OCR result
-      let fullText = '';
       if (typeof ocrResult === 'object') {
         console.log("OCR result object:", JSON.stringify(ocrResult, null, 2));
         
@@ -155,11 +155,7 @@ export async function handleCardImageAnalysis(req: MulterRequest, res: Response)
           };
           
           // Make sure required fields exist
-          Object.entries(defaultsIfMissing).forEach(([key, value]) => {
-            if (cardInfo[key] === undefined || cardInfo[key] === null) {
-              cardInfo[key] = value;
-            }
-          });
+          Object.assign(cardInfo, defaultsIfMissing);
           
           console.timeEnd('card-analysis-total');
           return res.json({
@@ -180,6 +176,13 @@ export async function handleCardImageAnalysis(req: MulterRequest, res: Response)
     try {
       let cardInfo: any = await Promise.race([cardInfoPromise, timeout]);
       
+      // Get rookie card detection from earlier analysis
+      let finalIsRookieCard = false;
+      if (fullText) {
+        finalIsRookieCard = detectRookieCard(fullText);
+        console.log("Applying rookie card detection from earlier analysis:", finalIsRookieCard);
+      }
+      
       // If we got a valid result, make sure required fields have values
       if (cardInfo && typeof cardInfo === 'object') {
         const defaultsIfMissing = {
@@ -193,17 +196,13 @@ export async function handleCardImageAnalysis(req: MulterRequest, res: Response)
           cardNumber: cardInfo.cardNumber || '',
           variant: cardInfo.variant || '',
           estimatedValue: cardInfo.estimatedValue || 0,
-          isRookieCard: !!cardInfo.isRookieCard,
+          isRookieCard: finalIsRookieCard, // Use the rookie card detection from earlier
           isAutographed: !!cardInfo.isAutographed,
           isNumbered: !!cardInfo.isNumbered
         };
         
         // Make sure required fields exist
-        Object.entries(defaultsIfMissing).forEach(([key, value]) => {
-          if (cardInfo[key] === undefined || cardInfo[key] === null) {
-            cardInfo[key] = value;
-          }
-        });
+        Object.assign(cardInfo, defaultsIfMissing);
         
         // Log the OCR results
         console.log('OCR results:', JSON.stringify(cardInfo, null, 2));
