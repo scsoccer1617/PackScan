@@ -107,6 +107,10 @@ This is a streamlined web application focused on sports card price lookup using 
 - June 27, 2025: Removed Tesseract OCR fallback, focused exclusively on Google Vision API
 - June 27, 2025: Added combined OCR + eBay price lookup endpoint for streamlined user experience
 - June 27, 2025: Updated frontend to show both card detection and price analysis in single workflow
+- June 28, 2025: Enhanced Series Two card detection - improved card number detection before/after "SERIES TWO" text
+- June 28, 2025: Enhanced eBay search strategy for Series Two cards with complete player name and collection details
+- June 28, 2025: Implemented enhanced serial number detection system for numbered cards (e.g., "010/399", "16/99")
+- June 28, 2025: Added dual-side OCR integration for serial number detection on both front and back images
 
 ## User Preferences
 

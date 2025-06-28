@@ -38,7 +38,8 @@ export async function searchCardValues(
   brand: string,
   year: number,
   collection?: string,
-  condition?: string
+  condition?: string,
+  isNumbered?: boolean
 ): Promise<EbayResponse> {
   try {
     if (!EBAY_APP_ID || !EBAY_BROWSE_TOKEN) {
@@ -96,6 +97,12 @@ export async function searchCardValues(
       // For regular cards, we use a broader search
       keywords = `${lastName} ${brand} ${year}`;
       console.log('Using standard search strategy');
+    }
+    
+    // Add "numbered" for serialized cards to get accurate pricing for limited editions
+    if (isNumbered) {
+      keywords += ' numbered';
+      console.log('Added "numbered" to search for serialized card');
     }
     
     console.log('Searching eBay for SOLD listings with keywords:', keywords);
@@ -345,7 +352,8 @@ export function getEbaySearchUrl(
   brand: string,
   year: number,
   collection?: string,
-  condition?: string
+  condition?: string,
+  isNumbered?: boolean
 ): string {
   // Split player name into first and last name for more flexible search
   const nameComponents = playerName.split(' ');
@@ -379,6 +387,11 @@ export function getEbaySearchUrl(
     if (/^\d+$/.test(cardNumber)) {
       keywords += ` ${cardNumber}`;
     }
+  }
+  
+  // Add "numbered" for serialized cards to get accurate pricing
+  if (isNumbered) {
+    keywords += ' numbered';
   }
   
   // Encode for URL
