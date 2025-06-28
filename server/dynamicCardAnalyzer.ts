@@ -178,8 +178,8 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       extractCardMetadata(cleanText, cardDetails);
     }
     
-    // SERIAL NUMBER DETECTION - Look for serial numbering
-    extractSerialNumber(cleanText, cardDetails);
+    // SERIAL NUMBER DETECTION - Look for serial numbering with enhanced detection
+    await extractSerialNumber(cleanText, cardDetails, textAnnotations);
     
     // CARD FEATURES DETECTION - Rookie cards, autographs, etc.
     detectCardFeatures(cleanText, cardDetails);
@@ -899,84 +899,32 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>)
 }
 
 /**
- * Extract serial number if present
- * 
- * IMPORTANT: Serial numbers should only be detected from specific locations on the card
- * - Serial numbers are typically imprinted in silver/foil in the bottom right corner of the card
- * - They have a format like "123/1000" or "123 OF 1000"
- * - This function should NOT set serial numbers detected from other parts of the card
- *   (like paragraph text that might mention "10 of 25 players" or similar)
+ * Extract serial number if present using enhanced detection
  */
-function extractSerialNumber(text: string, cardDetails: Partial<CardFormValues>): void {
+async function extractSerialNumber(text: string, cardDetails: Partial<CardFormValues>, textAnnotations?: any[]): Promise<void> {
   try {
-    // CRITICAL: Filter out text sections that should not contain serial numbers
-    // Avoid common false positives like dates (3/31/86), contract dates, trade dates, etc.
+    // Use the enhanced serial number detector
+    const { detectSerialNumber } = await import('./serialNumberDetector');
+    const result = detectSerialNumber(text, textAnnotations || []);
     
-    // Common sections to ignore when looking for serial numbers
-    const ignorePatterns = [
-      /TRADED/i,
-      /ACQUIRED/i,
-      /CONTRACT/i,
-      /BORN/i,
-      /STATS/i,
-      /RECORD/i,
-      /CAREER/i,
-      /HIGHLIGHTS/i,
-      /PERFORMANCE/i,
-    ];
-    
-    // Look for serial numbering in common formats, but only when they appear
-    // outside of long text paragraphs or stats sections
-    const serialPatterns = [
-      // Most card serial numbers are format: XXX/YYY where YYY is limited run size
-      /\b(\d{1,3})\/(\d{3,4})\b/,  // Format: 123/1000 (limited to reasonable ranges)
-      /\b(\d{1,3})\s+OF\s+(\d{3,4})\b/i,  // Format: 123 OF 1000
-      /\b(\d{1,3})\s+OUT OF\s+(\d{3,4})\b/i  // Format: 123 OUT OF 1000
-    ];
-    
-    // Break the text into smaller segments to avoid matching serial numbers in paragraphs
-    const lines = text.split('\n');
-    
-    // Look for serial number patterns only in short isolated lines
-    // Serial numbers usually appear on their own or in very simple contexts
-    for (const line of lines) {
-      // Skip lines that are likely to contain biographical info, dates, stats, etc.
-      if (line.length > 40) continue; // Real serial numbers are rarely in long lines
-      
-      // Skip lines containing ignore patterns
-      let shouldSkip = false;
-      for (const pattern of ignorePatterns) {
-        if (pattern.test(line)) {
-          shouldSkip = true;
-          break;
-        }
-      }
-      if (shouldSkip) continue;
-      
-      // Check for serial number pattern in this line
-      for (const pattern of serialPatterns) {
-        const match = line.match(pattern);
-        if (match && match[1] && match[2]) {
-          const serialNumber = parseInt(match[1], 10);
-          const totalNumber = parseInt(match[2], 10);
-          
-          // Validate that this looks like a real serial number
-          if (serialNumber < totalNumber && // Serial number should be less than total
-              totalNumber >= 10 && // Most serial numbers are at least /10
-              totalNumber <= 10000 && // Most don't exceed 10000
-              serialNumber > 0) {
-            cardDetails.serialNumber = `${serialNumber}/${totalNumber}`;
-            cardDetails.isNumbered = true;
-            console.log(`Detected serial number: ${cardDetails.serialNumber}`);
-            return;
-          }
-        }
-      }
+    if (result.isNumbered) {
+      cardDetails.serialNumber = result.serialNumber;
+      cardDetails.isNumbered = true;
+      console.log(`Enhanced detection found serial number via ${result.detectionMethod}: ${result.serialNumber}`);
+    } else {
+      console.log("No serial number found via enhanced detection");
     }
-    
-    console.log("No reliable serial number found in plain text analysis");
   } catch (error) {
-    console.error('Error detecting serial number:', error);
+    console.error('Error in enhanced serial number detection:', error);
+    
+    // Fallback to simple pattern matching if enhanced detection fails
+    const simplePattern = /\b(\d{1,3}\/\d{2,4})\b/;
+    const match = text.match(simplePattern);
+    if (match && match[1]) {
+      cardDetails.serialNumber = match[1];
+      cardDetails.isNumbered = true;
+      console.log(`Fallback detection found serial number: ${match[1]}`);
+    }
   }
 }
 
