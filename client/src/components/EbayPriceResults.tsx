@@ -101,6 +101,9 @@ export default function EbayPriceResults({ cardData }: EbayPriceResultsProps) {
             <TrendingUp className="h-5 w-5" />
             Finding Recent Sold Prices...
           </CardTitle>
+          <p className="text-sm text-gray-600">
+            Searching for actual sold prices (not asking prices) to get real market values
+          </p>
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
@@ -124,21 +127,43 @@ export default function EbayPriceResults({ cardData }: EbayPriceResultsProps) {
   }
 
   if (error) {
+    const isRateLimit = error.includes('rate limit');
+    
     return (
-      <Card>
+      <Card className={isRateLimit ? "border-yellow-200 bg-yellow-50" : ""}>
         <CardHeader>
-          <CardTitle className="text-red-600">Error Loading Prices</CardTitle>
+          <CardTitle className={isRateLimit ? "text-yellow-700" : "text-red-600"}>
+            {isRateLimit ? "eBay Rate Limit Reached" : "Error Loading Prices"}
+          </CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-gray-600 mb-4">{error}</p>
+          {isRateLimit ? (
+            <div className="space-y-3">
+              <p className="text-yellow-700">
+                The eBay API has daily usage limits. This will reset within 24 hours.
+              </p>
+              <p className="text-sm text-yellow-600">
+                When available, this shows the 5 most recent <strong>sold prices</strong> (not asking prices) for accurate market values.
+              </p>
+            </div>
+          ) : (
+            <p className="text-gray-600 mb-4">{error}</p>
+          )}
+          
           {searchUrl && (
-            <Button 
-              onClick={() => window.open(searchUrl, '_blank')}
-              className="flex items-center gap-2"
-            >
-              <ExternalLink className="h-4 w-4" />
-              Search eBay Manually
-            </Button>
+            <div className="mt-4">
+              <Button 
+                onClick={() => window.open(searchUrl, '_blank')}
+                className="flex items-center gap-2"
+                variant={isRateLimit ? "default" : "secondary"}
+              >
+                <ExternalLink className="h-4 w-4" />
+                Search eBay Sold Listings Manually
+              </Button>
+              <p className="text-xs text-gray-500 mt-2">
+                Opens eBay with your card details and sold listings filter
+              </p>
+            </div>
           )}
         </CardContent>
       </Card>
