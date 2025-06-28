@@ -111,6 +111,8 @@ This is a streamlined web application focused on sports card price lookup using 
 - June 28, 2025: Enhanced eBay search strategy for Series Two cards with complete player name and collection details
 - June 28, 2025: Implemented enhanced serial number detection system for numbered cards (e.g., "010/399", "16/99")
 - June 28, 2025: Added dual-side OCR integration for serial number detection on both front and back images
+- June 28, 2025: Implemented comprehensive foil variant detection system for chrome, refractor, autograph, and special finish cards
+- June 28, 2025: Added foil-specific eBay search keywords to improve pricing accuracy for premium card variants
 
 ## User Preferences
 

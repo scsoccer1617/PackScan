@@ -926,13 +926,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Simple eBay search endpoint for price lookup (no card saving)
   app.get(`${apiPrefix}/ebay-search`, async (req, res) => {
     try {
-      const { playerName, cardNumber, brand, year, collection, condition, isNumbered } = req.query;
+      const { playerName, cardNumber, brand, year, collection, condition, isNumbered, foilType } = req.query;
       
       if (!playerName || !brand || !year) {
         return res.status(400).json({ error: 'Missing required parameters' });
       }
       
-      console.log('eBay search request:', { playerName, cardNumber, brand, year, collection, isNumbered });
+      console.log('eBay search request:', { playerName, cardNumber, brand, year, collection, isNumbered, foilType });
       
       const results = await searchCardValues(
         playerName as string,
@@ -941,7 +941,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         parseInt(year as string, 10),
         collection as string || '',
         condition as string || '',
-        isNumbered === 'true'
+        isNumbered === 'true',
+        foilType as string || undefined
       );
       
       console.log('eBay search results:', results);
