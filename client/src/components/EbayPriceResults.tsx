@@ -175,19 +175,105 @@ export default function EbayPriceResults({ cardData }: EbayPriceResultsProps) {
 
   return (
     <div className="space-y-4">
-      {/* Card Summary */}
+      {/* Card Summary - Clean Format */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">
-            {cardData.playerFirstName} {cardData.playerLastName} - {cardData.year} {cardData.brand}
-          </CardTitle>
-          {cardData.collection && (
-            <p className="text-gray-600">{cardData.collection}</p>
-          )}
-          {cardData.cardNumber && (
-            <p className="text-sm text-gray-500">Card #{cardData.cardNumber}</p>
-          )}
+          <CardTitle className="text-lg mb-4">Card Information</CardTitle>
         </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            {/* Sport */}
+            <div className="text-lg">
+              <span className="font-semibold text-slate-800">Sport: </span>
+              <span className="text-slate-700">{cardData.sport || 'Baseball'}</span>
+            </div>
+
+            {/* Player */}
+            <div className="text-lg">
+              <span className="font-semibold text-slate-800">Player: </span>
+              <span className="text-slate-700">{cardData.playerFirstName || ''} {cardData.playerLastName || 'Not detected'}</span>
+            </div>
+
+            {/* Two-column layout for card details */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
+              <div className="space-y-4">
+                {/* Brand */}
+                <div className="text-lg">
+                  <span className="font-semibold text-slate-800">Brand: </span>
+                  <span className="text-slate-700">{cardData.brand || 'Not detected'}</span>
+                </div>
+
+                {/* Card Number */}
+                <div className="text-lg">
+                  <span className="font-semibold text-slate-800">Card #: </span>
+                  <span className="text-slate-700">{cardData.cardNumber || 'Not detected'}</span>
+                </div>
+
+                {/* Variant */}
+                <div className="text-lg">
+                  <span className="font-semibold text-slate-800">Variant: </span>
+                  <span className="text-slate-700">{cardData.variant || 'Not detected'}</span>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                {/* Collection */}
+                <div className="text-lg">
+                  <span className="font-semibold text-slate-800">Collection: </span>
+                  <span className="text-slate-700">{cardData.collection || 'Not detected'}</span>
+                </div>
+
+                {/* Year */}
+                <div className="text-lg">
+                  <span className="font-semibold text-slate-800">Year: </span>
+                  <span className="text-slate-700">{cardData.year && cardData.year > 0 ? cardData.year : 'Not detected'}</span>
+                </div>
+
+                {/* Serial Number */}
+                <div className="text-lg">
+                  <span className="font-semibold text-slate-800">Serial #: </span>
+                  <span className="text-slate-700">{cardData.serialNumber || 'None'}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Condition */}
+            <div className="text-lg">
+              <span className="font-semibold text-slate-800">Condition: </span>
+              <span className="text-slate-700">{cardData.condition || 'Not detected'}</span>
+            </div>
+
+            {/* Card Features */}
+            <div className="mt-6">
+              <div className="text-lg mb-3">
+                <span className="font-semibold text-slate-800">Card Features:</span>
+              </div>
+              <div className="ml-0">
+                {cardData.isRookieCard === true || cardData.isAutographed === true || cardData.isNumbered === true ? (
+                  <div className="flex flex-wrap gap-3">
+                    {cardData.isRookieCard === true && (
+                      <span className="inline-flex items-center rounded-full bg-green-100 px-3 py-1 text-sm font-medium text-green-800">
+                        Rookie Card
+                      </span>
+                    )}
+                    {cardData.isAutographed === true && (
+                      <span className="inline-flex items-center rounded-full bg-blue-100 px-3 py-1 text-sm font-medium text-blue-800">
+                        Autographed
+                      </span>
+                    )}
+                    {cardData.isNumbered === true && (
+                      <span className="inline-flex items-center rounded-full bg-purple-100 px-3 py-1 text-sm font-medium text-purple-800">
+                        Numbered
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <span className="text-slate-500 text-lg">None detected</span>
+                )}
+              </div>
+            </div>
+          </div>
+        </CardContent>
       </Card>
 
       {/* Average Price */}
