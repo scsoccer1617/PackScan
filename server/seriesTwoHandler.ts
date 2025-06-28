@@ -1,6 +1,16 @@
 import { CardFormValues } from "@shared/schema";
 
 /**
+ * Format a name with proper capitalization
+ */
+function formatName(name: string): string {
+  return name.toLowerCase()
+    .split(' ')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(' ');
+}
+
+/**
  * Special handler for Topps Series Two cards
  * These cards have "SERIES TWO" at the top which is getting confused with the player name
  */
@@ -81,10 +91,10 @@ export function processSeriesTwoCard(text: string, cardDetails: Partial<CardForm
       if (playerNameLine) {
         const nameParts = playerNameLine.trim().split(' ');
         if (nameParts.length >= 2) {
-          cardDetails.playerFirstName = nameParts[0];
-          cardDetails.playerLastName = nameParts.slice(1).join(' ');
+          cardDetails.playerFirstName = formatName(nameParts[0]);
+          cardDetails.playerLastName = formatName(nameParts.slice(1).join(' '));
         } else if (nameParts.length === 1) {
-          cardDetails.playerFirstName = nameParts[0];
+          cardDetails.playerFirstName = formatName(nameParts[0]);
           cardDetails.playerLastName = '';
         }
         
