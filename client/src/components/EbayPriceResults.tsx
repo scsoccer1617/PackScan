@@ -241,12 +241,6 @@ export default function EbayPriceResults({ cardData, frontImage, backImage }: Eb
                   <span className="text-slate-700">{cardData.foilType || 'None detected'}</span>
                 </div>
 
-                {/* Foil Status */}
-                <div className="text-lg">
-                  <span className="font-semibold text-slate-800">Is Foil: </span>
-                  <span className="text-slate-700">{cardData.isFoil ? 'Yes' : 'No'}</span>
-                </div>
-
                 {/* Rookie Card Status */}
                 <div className="text-lg">
                   <span className="font-semibold text-slate-800">Rookie Card: </span>
