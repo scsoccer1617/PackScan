@@ -193,9 +193,15 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     // FOIL VARIANT DETECTION - Check for foil, chrome, refractor, and other special finishes
     const foilResult = detectFoilVariant(fullText);
     if (foilResult.isFoil) {
-      cardDetails.isFoil = true;
-      cardDetails.foilType = foilResult.foilType;
-      console.log(`Detected foil variant: ${foilResult.foilType} (confidence: ${foilResult.confidence})`);
+      // Special handling for Chrome cards - set as collection, not variant
+      if (foilResult.foilType === 'Chrome' && !cardDetails.collection) {
+        cardDetails.collection = 'Chrome';
+        console.log(`Detected Chrome collection (not variant)`);
+      } else {
+        cardDetails.isFoil = true;
+        cardDetails.foilType = foilResult.foilType;
+        console.log(`Detected foil variant: ${foilResult.foilType} (confidence: ${foilResult.confidence})`);
+      }
       console.log(`Foil indicators: ${foilResult.indicators.join(', ')}`);
     }
     

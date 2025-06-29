@@ -130,10 +130,10 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       console.log(`Detected collection: Heritage`);
     }
     
-    // STEP 5: Check for Chrome variant
-    if (cleanText.includes('CHROME') && !cardDetails.variant) {
-      cardDetails.variant = 'Chrome';
-      console.log(`Detected variant: Chrome`);
+    // STEP 5: Check for Chrome collection
+    else if (cleanText.includes('CHROME') && !cardDetails.collection) {
+      cardDetails.collection = 'Chrome';
+      console.log(`Detected collection: Chrome`);
     }
     
     // STEP 6: Look for copyright year
