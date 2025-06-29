@@ -249,10 +249,10 @@ export async function handleCardImageAnalysis(req: MulterRequest, res: Response)
       console.log(`Detected collection: Heritage`);
     }
     
-    // CHROME VARIANT DETECTION
-    if (cleanText.includes('CHROME') && !cardDetails.variant) {
-      cardDetails.variant = 'Chrome';
-      console.log(`Detected variant: Chrome`);
+    // CHROME COLLECTION DETECTION  
+    else if (cleanText.includes('CHROME') && !cardDetails.collection) {
+      cardDetails.collection = 'Chrome';
+      console.log(`Detected collection: Chrome`);
     }
     
     // YEAR DETECTION - Try multiple patterns for copyright year

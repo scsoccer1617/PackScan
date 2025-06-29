@@ -803,7 +803,7 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>)
       { pattern: /CHROME STARS OF MLB|CSMLB/, name: "Stars of MLB", variant: "Chrome" },
       { pattern: /HERITAGE/i, name: "Heritage" },
       { pattern: /ALLEN & GINTER|ALLEN AND GINTER/i, name: "Allen & Ginter" },
-      { pattern: /CHROME/i, name: "", variant: "Chrome" },
+      { pattern: /TOPPS CHROME|CHROME/i, name: "Chrome" }, // Chrome is a collection, not variant
       { pattern: /PRIZM/i, name: "Prizm" },
       { pattern: /OPTIC/i, name: "Optic" },
       { pattern: /OPENING DAY/i, name: "Opening Day" },
