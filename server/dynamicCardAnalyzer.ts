@@ -220,6 +220,20 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
  */
 function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>): void {
   try {
+    // HIGHEST PRIORITY: Check for known basketball players first
+    const basketballPlayerMatch = text.match(/\b(JAYSON TATUM|JAYLEN BROWN|LUKA DONCIC|GIANNIS ANTETOKOUNMPO|LEBRON JAMES|STEPHEN CURRY|KEVIN DURANT|NIKOLA JOKIC|JOEL EMBIID|JA MORANT|TRAE YOUNG|DEVIN BOOKER|ZION WILLIAMSON|LAMELO BALL|ANTHONY EDWARDS|TYRESE HALIBURTON|JAMAL MURRAY|SHAI GILGEOUS-ALEXANDER|DAMIAN LILLARD|CJ MCCOLLUM|KAWHI LEONARD|PAUL GEORGE|RUSSELL WESTBROOK|JAMES HARDEN|KYRIE IRVING|JIMMY BUTLER|BAM ADEBAYO|TYLER HERRO|KRIS MIDDLETON|JRUE HOLIDAY|BROOK LOPEZ|DONOVAN MITCHELL|DARIUS GARLAND|EVAN MOBLEY|JARRETT ALLEN|SCOTTIE BARNES|FRED VANVLEET|PASCAL SIAKAM|OG ANUNOBY|JULIUS RANDLE|RJ BARRETT|JALEN BRUNSON|TYRESE MAXEY|TOBIAS HARRIS|BRADLEY BEAL|KRISTAPS PORZINGIS)\b/i);
+    if (basketballPlayerMatch) {
+      const playerFullName = basketballPlayerMatch[1];
+      const nameParts = playerFullName.split(' ');
+      if (nameParts.length >= 2) {
+        cardDetails.playerFirstName = nameParts[0].charAt(0).toUpperCase() + nameParts[0].slice(1).toLowerCase();
+        cardDetails.playerLastName = nameParts.slice(1).join(' ').charAt(0).toUpperCase() + nameParts.slice(1).join(' ').slice(1).toLowerCase();
+        cardDetails.sport = "Basketball"; // Force basketball sport
+        console.log(`NBA player name found in extractPlayerName: ${cardDetails.playerFirstName} ${cardDetails.playerLastName} (Sport: Basketball)`);
+        return;
+      }
+    }
+    
     // Special cases for specific cards
     if (text.includes('CHRIS JAMES') && text.includes('STADIUM CLUB')) {
       cardDetails.playerFirstName = 'Chris';
@@ -1052,9 +1066,19 @@ function detectSport(text: string, cardDetails: Partial<CardFormValues>): void {
     }
     
     // Check for known basketball players first (high confidence)
-    if (text.match(/\bJAYSON TATUM\b|\bJAYLEN BROWN\b|\bLUKA DONCIC\b|\bGIANNIS ANTETOKOUNMPO\b|\bLEBRON JAMES\b|\bSTEPHEN CURRY\b|\bKEVIN DURANT\b|\bNIKOLA JOKIC\b|\bJOEL EMBIID\b|\bJA MORANT\b|\bTRAE YOUNG\b|\bDEVIN BOOKER\b|\bZION WILLIAMSON\b|\bLAMELO BALL\b|\bANTHONY EDWARDS\b|\bTYRESE HALIBURTON\b|\bJAMAL MURRAY\b|\bSHAI GILGEOUS-ALEXANDER\b|\bDAMIAN LILLARD\b|\bCJ MCCOLLUM\b|\bKAWHI LEONARD\b|\bPAUL GEORGE\b|\bRUSSELL WESTBROOK\b|\bJAMES HARDEN\b|\bKYRIE IRVING\b|\bJIMMY BUTLER\b|\bBAM ADEBAYO\b|\bTYLER HERRO\b|\bKRIS MIDDLETON\b|\bJRUE HOLIDAY\b|\bBROOK LOPEZ\b|\bDONOVAN MITCHELL\b|\bDARIUS GARLAND\b|\bEVAN MOBLEY\b|\bJARRETT ALLEN\b|\bSCOTTIE BARNES\b|\bFRED VANVLEET\b|\bPASCAL SIAKAM\b|\bOG ANUNOBY\b|\bJULIUS RANDLE\b|\bRJ BARRETT\b|\bJALEN BRUNSON\b|\bTYRESE MAXEY\b|\bTOBIAS HARRIS\b|\bBRADLEY BEAL\b|\bKRISTAPS PORZINGIS\b/i)) {
+    const basketballPlayerMatch = text.match(/\b(JAYSON TATUM|JAYLEN BROWN|LUKA DONCIC|GIANNIS ANTETOKOUNMPO|LEBRON JAMES|STEPHEN CURRY|KEVIN DURANT|NIKOLA JOKIC|JOEL EMBIID|JA MORANT|TRAE YOUNG|DEVIN BOOKER|ZION WILLIAMSON|LAMELO BALL|ANTHONY EDWARDS|TYRESE HALIBURTON|JAMAL MURRAY|SHAI GILGEOUS-ALEXANDER|DAMIAN LILLARD|CJ MCCOLLUM|KAWHI LEONARD|PAUL GEORGE|RUSSELL WESTBROOK|JAMES HARDEN|KYRIE IRVING|JIMMY BUTLER|BAM ADEBAYO|TYLER HERRO|KRIS MIDDLETON|JRUE HOLIDAY|BROOK LOPEZ|DONOVAN MITCHELL|DARIUS GARLAND|EVAN MOBLEY|JARRETT ALLEN|SCOTTIE BARNES|FRED VANVLEET|PASCAL SIAKAM|OG ANUNOBY|JULIUS RANDLE|RJ BARRETT|JALEN BRUNSON|TYRESE MAXEY|TOBIAS HARRIS|BRADLEY BEAL|KRISTAPS PORZINGIS)\b/i);
+    if (basketballPlayerMatch) {
       cardDetails.sport = "Basketball";
       console.log("Sport detected (known NBA player): Basketball");
+      
+      // Extract the player name from the match
+      const playerFullName = basketballPlayerMatch[1];
+      const nameParts = playerFullName.split(' ');
+      if (nameParts.length >= 2) {
+        cardDetails.playerFirstName = nameParts[0].charAt(0).toUpperCase() + nameParts[0].slice(1).toLowerCase();
+        cardDetails.playerLastName = nameParts.slice(1).join(' ').charAt(0).toUpperCase() + nameParts.slice(1).join(' ').slice(1).toLowerCase();
+        console.log(`NBA player name extracted: ${cardDetails.playerFirstName} ${cardDetails.playerLastName}`);
+      }
       return;
     }
     
