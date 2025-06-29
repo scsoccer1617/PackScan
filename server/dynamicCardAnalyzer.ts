@@ -79,7 +79,9 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     // Extract the text from the image
     const { fullText, textAnnotations } = await getTextFromImage(base64Image);
     
-    console.log('Full OCR text:', fullText);
+    console.log('=== RAW OCR TEXT FROM IMAGE ===');
+    console.log(fullText);
+    console.log('=== END RAW OCR TEXT ===');
     
     // Check for Stars of MLB cards first
     const starsOfMLBResult = processStarsOfMLBCard(fullText);

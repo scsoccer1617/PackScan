@@ -74,6 +74,15 @@ export async function handleCardImageAnalysis(req: MulterRequest, res: Response)
       // First get the raw OCR text for all our special handlers
       const ocrResult = await analyzeSportsCardImage(base64Image);
       if (typeof ocrResult === 'object') {
+        console.log("=== FULL OCR ANALYSIS RESULT ===");
+        console.log("Player First Name:", ocrResult.playerFirstName);
+        console.log("Player Last Name:", ocrResult.playerLastName);
+        console.log("Sport:", ocrResult.sport);
+        console.log("Brand:", ocrResult.brand);
+        console.log("Collection:", ocrResult.collection);
+        console.log("Card Number:", ocrResult.cardNumber);
+        console.log("Year:", ocrResult.year);
+        console.log("Variant:", ocrResult.variant);
         console.log("OCR result object:", JSON.stringify(ocrResult, null, 2));
         
         // Get the full OCR text from Google Vision response
