@@ -1049,6 +1049,13 @@ function detectSport(text: string, cardDetails: Partial<CardFormValues>): void {
       return;
     }
     
+    // Check for known basketball players first (high confidence)
+    if (text.match(/\bJAYSON TATUM\b|\bJAYLEN BROWN\b|\bLUKA DONCIC\b|\bGIANNIS ANTETOKOUNMPO\b|\bLEBRON JAMES\b|\bSTEPHEN CURRY\b|\bKEVIN DURANT\b|\bNIKOLA JOKIC\b|\bJOEL EMBIID\b|\bJA MORANT\b|\bTRAE YOUNG\b|\bDEVIN BOOKER\b|\bZION WILLIAMSON\b|\bLAMELO BALL\b|\bANTHONY EDWARDS\b|\bTYRESE HALIBURTON\b|\bJAMAL MURRAY\b|\bSHAI GILGEOUS-ALEXANDER\b|\bDAMIAN LILLARD\b|\bCJ MCCOLLUM\b|\bKAWHI LEONARD\b|\bPAUL GEORGE\b|\bRUSSELL WESTBROOK\b|\bJAMES HARDEN\b|\bKYRIE IRVING\b|\bJIMMY BUTLER\b|\bBAM ADEBAYO\b|\bTYLER HERRO\b|\bKRIS MIDDLETON\b|\bJRUE HOLIDAY\b|\bBROOK LOPEZ\b|\bDONOVAN MITCHELL\b|\bDARIUS GARLAND\b|\bEVAN MOBLEY\b|\bJARRETT ALLEN\b|\bSCOTTIE BARNES\b|\bFRED VANVLEET\b|\bPASCAL SIAKAM\b|\bOG ANUNOBY\b|\bJULIUS RANDLE\b|\bRJ BARRETT\b|\bJALEN BRUNSON\b|\bTYRESE MAXEY\b|\bTOBIAS HARRIS\b|\bBRADLEY BEAL\b|\bKRISTAPS PORZINGIS\b/i)) {
+      cardDetails.sport = "Basketball";
+      console.log("Sport detected (known NBA player): Basketball");
+      return;
+    }
+    
     // Initialize scores for each sport
     let baseballScore = 0;
     let footballScore = 0; 
@@ -1084,7 +1091,9 @@ function detectSport(text: string, cardDetails: Partial<CardFormValues>): void {
       { term: /\bBASKETBALL\b/i, weight: 3 },
       { term: /\bLAKERS\b|\bCELTICS\b|\bBULLS\b|\bWARRIORS\b|\bSPURS\b|\bHEAT\b|\bKNICKS\b|\bNETS\b|\bMAVERICKS\b|\bSIXERS\b|\b76ERS\b|\bCLIPPERS\b|\bROCKETS\b|\bBUCKS\b|\bTHUNDER\b|\bCAVALIERS\b|\bCAVS\b|\bNUGGETS\b|\bGRIZZLIES\b|\bTRAIL BLAZERS\b|\bBLAZERS\b|\bJAZZ\b|\bSUNS\b|\bHAWKS\b|\bHORNETS\b|\bPACERS\b|\bKINGS\b|\bTIMBERWOLVES\b|\bWOLVES\b|\bPELICANS\b|\bRAPTORS\b|\bMAGIC\b|\bWIZARDS\b|\bPISTONS\b/i, weight: 2 },
       { term: /\bPOINT GUARD\b|\bPG\b|\bSHOOTING GUARD\b|\bSG\b|\bSMALL FORWARD\b|\bSF\b|\bPOWER FORWARD\b|\bPF\b|\bCENTER\b|\bC\b/i, weight: 2 },
-      { term: /\bPOINTS\b|\bPTS\b|\bREBOUNDS\b|\bREB\b|\bASSISTS\b|\bAST\b|\bSTEALS\b|\bSTL\b|\bBLOCKS\b|\bBLK\b|\bDUNK\b|\bTHREE-POINTER\b|\b3-POINTER\b|\bFREE THROW\b|\bFT\b|\bDOUBLE-DOUBLE\b|\bTRIPLE-DOUBLE\b/i, weight: 1 }
+      { term: /\bPOINTS\b|\bPTS\b|\bREBOUNDS\b|\bREB\b|\bASSISTS\b|\bAST\b|\bSTEALS\b|\bSTL\b|\bBLOCKS\b|\bBLK\b|\bDUNK\b|\bTHREE-POINTER\b|\b3-POINTER\b|\bFREE THROW\b|\bFT\b|\bDOUBLE-DOUBLE\b|\bTRIPLE-DOUBLE\b/i, weight: 1 },
+      // Known NBA players (current stars and recent players)
+      { term: /\bJAYSON TATUM\b|\bJAYLEN BROWN\b|\bLUKA DONCIC\b|\bGIANNIS ANTETOKOUNMPO\b|\bLEBRON JAMES\b|\bSTEPHEN CURRY\b|\bKEVIN DURANT\b|\bNIKOLA JOKIC\b|\bJOEL EMBIID\b|\bJA MORANT\b|\bTRAE YOUNG\b|\bDEVIN BOOKER\b|\bZION WILLIAMSON\b|\bLAMELO BALL\b|\bANTHONY EDWARDS\b|\bTYRESE HALIBURTON\b|\bJAMAL MURRAY\b|\bSHAI GILGEOUS-ALEXANDER\b|\bDAMIAN LILLARD\b|\bCJ MCCOLLUM\b|\bKAWHI LEONARD\b|\bPAUL GEORGE\b|\bRUSSELL WESTBROOK\b|\bJAMES HARDEN\b|\bKYRIE IRVING\b|\bJIMMY BUTLER\b|\bBAM ADEBAYO\b|\bTYLER HERRO\b|\bKRIS MIDDLETON\b|\bJRUE HOLIDAY\b|\bBROOK LOPEZ\b|\bDONOVAN MITCHELL\b|\bDARIUS GARLAND\b|\bEVAN MOBLEY\b|\bJARRETT ALLEN\b|\bSCOTTIE BARNES\b|\bFRED VANVLEET\b|\bPASCAL SIAKAM\b|\bOG ANUNOBY\b|\bJULIUS RANDLE\b|\bRJ BARRETT\b|\bJALEN BRUNSON\b|\bJOEL EMBIID\b|\bTYRESE MAXEY\b|\bTOBIAS HARRIS\b|\bBRADLEY BEAL\b|\bKRISTAPS PORZINGIS\b/i, weight: 3 }
     ];
     
     // HOCKEY KEYWORDS WITH WEIGHTS
