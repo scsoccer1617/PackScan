@@ -83,6 +83,12 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     console.log(fullText);
     console.log('=== END RAW OCR TEXT ===');
     
+    // Additional debug for basketball card detection
+    if (fullText.toLowerCase().includes('jayson') || fullText.toLowerCase().includes('tatum')) {
+      console.log('*** BASKETBALL PLAYER DETECTED IN OCR TEXT ***');
+      console.log('Text contains Jayson or Tatum - this should be a basketball card!');
+    }
+    
     // Check for Stars of MLB cards first
     const starsOfMLBResult = processStarsOfMLBCard(fullText);
     if (starsOfMLBResult) {
@@ -221,22 +227,34 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
 function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>): void {
   try {
     // HIGHEST PRIORITY: Check for known basketball players first with flexible matching
+    const textLower = text.toLowerCase();
+    
+    // Check for Jayson Tatum specifically with flexible matching
+    if ((textLower.includes('jayson') && textLower.includes('tatum')) || 
+        textLower.includes('j. tatum') || textLower.includes('j tatum')) {
+      cardDetails.playerFirstName = 'Jayson';
+      cardDetails.playerLastName = 'Tatum';
+      cardDetails.sport = "Basketball";
+      console.log(`NBA player detected: Jayson Tatum (Sport: Basketball)`);
+      return;
+    }
+    
+    // Check other basketball players with flexible patterns
     const basketballPlayers = [
-      { pattern: /JAYSON\s+TATUM/i, first: 'Jayson', last: 'Tatum' },
-      { pattern: /JAYLEN\s+BROWN/i, first: 'Jaylen', last: 'Brown' },
-      { pattern: /LUKA\s+DONCIC/i, first: 'Luka', last: 'Doncic' },
-      { pattern: /GIANNIS\s+ANTETOKOUNMPO/i, first: 'Giannis', last: 'Antetokounmpo' },
-      { pattern: /LEBRON\s+JAMES/i, first: 'LeBron', last: 'James' },
-      { pattern: /STEPHEN\s+CURRY/i, first: 'Stephen', last: 'Curry' },
-      { pattern: /KEVIN\s+DURANT/i, first: 'Kevin', last: 'Durant' },
-      { pattern: /NIKOLA\s+JOKIC/i, first: 'Nikola', last: 'Jokic' },
-      { pattern: /JOEL\s+EMBIID/i, first: 'Joel', last: 'Embiid' },
-      { pattern: /JA\s+MORANT/i, first: 'Ja', last: 'Morant' },
-      { pattern: /TRAE\s+YOUNG/i, first: 'Trae', last: 'Young' },
-      { pattern: /DEVIN\s+BOOKER/i, first: 'Devin', last: 'Booker' },
-      { pattern: /ZION\s+WILLIAMSON/i, first: 'Zion', last: 'Williamson' },
-      { pattern: /LAMELO\s+BALL/i, first: 'LaMelo', last: 'Ball' },
-      { pattern: /ANTHONY\s+EDWARDS/i, first: 'Anthony', last: 'Edwards' }
+      { pattern: /jaylen\s*brown/i, first: 'Jaylen', last: 'Brown' },
+      { pattern: /luka\s*doncic/i, first: 'Luka', last: 'Doncic' },
+      { pattern: /giannis\s*antetokounmpo/i, first: 'Giannis', last: 'Antetokounmpo' },
+      { pattern: /lebron\s*james/i, first: 'LeBron', last: 'James' },
+      { pattern: /stephen\s*curry/i, first: 'Stephen', last: 'Curry' },
+      { pattern: /kevin\s*durant/i, first: 'Kevin', last: 'Durant' },
+      { pattern: /nikola\s*jokic/i, first: 'Nikola', last: 'Jokic' },
+      { pattern: /joel\s*embiid/i, first: 'Joel', last: 'Embiid' },
+      { pattern: /ja\s*morant/i, first: 'Ja', last: 'Morant' },
+      { pattern: /trae\s*young/i, first: 'Trae', last: 'Young' },
+      { pattern: /devin\s*booker/i, first: 'Devin', last: 'Booker' },
+      { pattern: /zion\s*williamson/i, first: 'Zion', last: 'Williamson' },
+      { pattern: /lamelo\s*ball/i, first: 'LaMelo', last: 'Ball' },
+      { pattern: /anthony\s*edwards/i, first: 'Anthony', last: 'Edwards' }
     ];
 
     for (const player of basketballPlayers) {
