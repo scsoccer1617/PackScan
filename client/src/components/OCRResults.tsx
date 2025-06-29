@@ -359,6 +359,19 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
                 <span className="font-semibold text-slate-800">Player: </span>
                 <span className="text-slate-700">{data.playerFirstName || ''} {data.playerLastName || 'Not detected'}</span>
               </div>
+              
+              {/* Debug information */}
+              {(data as any)?._debug && (
+                <div className="mt-4 p-3 bg-gray-100 rounded-lg text-sm">
+                  <div className="font-semibold mb-2">Debug Info:</div>
+                  <div className="space-y-1">
+                    <div><strong>Extracted OCR Text:</strong></div>
+                    <div className="bg-white p-2 rounded border text-xs font-mono whitespace-pre-wrap max-h-32 overflow-y-auto">
+                      {(data as any)._debug.extractedText}
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Two-column layout for card details */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">

@@ -85,6 +85,29 @@ export async function handleCardImageAnalysis(req: MulterRequest, res: Response)
         console.log("Variant:", ocrResult.variant);
         console.log("OCR result object:", JSON.stringify(ocrResult, null, 2));
         
+        // Try to get the full OCR text for debugging
+        let extractedText = 'No text extracted';
+        try {
+          const { getTextFromImage } = await import('./dynamicCardAnalyzer');
+          const ocrTextResult = await getTextFromImage(base64Image);
+          extractedText = ocrTextResult.fullText || 'No text found';
+        } catch (error) {
+          console.error('Error getting OCR text for debug:', error);
+        }
+        
+        // Return OCR debugging information to the frontend
+        const debugInfo = {
+          extractedText: extractedText,
+          detectedPlayer: `${ocrResult.playerFirstName || 'Unknown'} ${ocrResult.playerLastName || 'Player'}`,
+          detectedSport: ocrResult.sport || 'Unknown',
+          analysisResult: ocrResult
+        };
+        
+        return res.json({
+          ...ocrResult,
+          _debug: debugInfo
+        });
+        
         // Get the full OCR text from Google Vision response
         // This will be available from googleVisionFetch.ts which sets fullText
         if ('fullText' in ocrResult && typeof ocrResult.fullText === 'string') {
