@@ -958,7 +958,179 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Combined OCR + eBay price lookup endpoint
+  // Dual-image OCR + eBay price lookup endpoint (front for RC, back for details)
+  app.post(`${apiPrefix}/analyze-card-dual-images`, upload.fields([
+    { name: 'frontImage', maxCount: 1 },
+    { name: 'backImage', maxCount: 1 }
+  ]), async (req, res) => {
+    try {
+      const files = req.files as { [fieldname: string]: Express.Multer.File[] };
+      
+      if (!files || !files.backImage || !files.backImage[0]) {
+        return res.status(400).json({ 
+          success: false,
+          message: 'Back image is required for card analysis',
+          error: 'missing_back_image'
+        });
+      }
+
+      console.log('Starting dual-image OCR + eBay price analysis...');
+      
+      // Analyze back image for detailed card information
+      const backFile = files.backImage[0];
+      console.log('Analyzing back image for card details...');
+      
+      const backOcrResponse = await new Promise<any>((resolve, reject) => {
+        const mockReq = { file: backFile };
+        const mockRes = {
+          json: (data: any) => resolve(data),
+          status: (code: number) => ({
+            json: (data: any) => reject(new Error(`Back OCR failed with status ${code}: ${JSON.stringify(data)}`))
+          })
+        };
+        
+        handleCardImageAnalysis(mockReq as any, mockRes as any);
+      });
+
+      let isRookieCard = false;
+      
+      // Analyze front image specifically for rookie card detection if provided
+      if (files.frontImage && files.frontImage[0]) {
+        const frontFile = files.frontImage[0];
+        console.log('Analyzing front image for rookie card detection...');
+        
+        try {
+          const frontBase64 = frontFile.buffer.toString('base64');
+          const frontOcrResult = await extractTextFromImage(frontBase64);
+          const frontText = frontOcrResult.fullText;
+          
+          console.log('=== FRONT IMAGE RC DETECTION ===');
+          console.log('Front image OCR text:', frontText);
+          
+          // Simple but effective RC detection on front image
+          const upperFrontText = frontText.toUpperCase();
+          
+          // Look for RC logo patterns (common on front of rookie cards)
+          if (upperFrontText.includes('RC') || 
+              upperFrontText.includes('ROOKIE') ||
+              /\bRC\b/.test(upperFrontText) ||
+              /ROOKIE CARD/i.test(frontText)) {
+            isRookieCard = true;
+            console.log('✅ ROOKIE CARD DETECTED on front image!');
+          } else {
+            console.log('❌ No RC indicators found on front image');
+          }
+          
+        } catch (frontError) {
+          console.log('Error analyzing front image for RC detection:', frontError);
+          // Continue without front image RC detection
+        }
+      } else {
+        console.log('No front image provided, skipping RC detection');
+      }
+
+      // Apply rookie card detection result to back image analysis
+      if (backOcrResponse.success && backOcrResponse.data) {
+        backOcrResponse.data.isRookieCard = isRookieCard;
+        console.log(`Applied RC detection result: ${isRookieCard}`);
+      }
+
+      if (!backOcrResponse.success || !backOcrResponse.data) {
+        return res.json({
+          success: true,
+          data: {
+            ...backOcrResponse.data,
+            isRookieCard: isRookieCard,
+            ebayResults: {
+              averageValue: 0,
+              results: [],
+              searchUrl: '',
+              errorMessage: 'Could not analyze card for pricing',
+              dataType: 'sold'
+            }
+          }
+        });
+      }
+
+      console.log('OCR analysis successful, starting eBay price lookup...');
+      
+      // Continue with eBay price lookup using back image data
+      const cardData = backOcrResponse.data;
+      
+      try {
+        const searchQuery = `${cardData.playerFirstName || ''} ${cardData.playerLastName || ''} ${cardData.brand || ''} ${cardData.collection || ''} ${cardData.cardNumber || ''} ${cardData.year || ''}`.trim();
+        
+        if (searchQuery.length > 5) {
+          console.log('Searching eBay with query:', searchQuery);
+          
+          const ebayResults = await searchCardValues({
+            playerFirstName: cardData.playerFirstName,
+            playerLastName: cardData.playerLastName,
+            brand: cardData.brand,
+            collection: cardData.collection,
+            cardNumber: cardData.cardNumber,
+            year: cardData.year,
+            variant: cardData.variant,
+            isRookieCard: isRookieCard,
+            sport: cardData.sport
+          });
+          
+          console.log('eBay search results:', ebayResults);
+          
+          return res.json({
+            success: true,
+            data: {
+              ...cardData,
+              isRookieCard: isRookieCard,
+              ebayResults: ebayResults
+            }
+          });
+        } else {
+          console.log('Search query too short, skipping eBay lookup');
+          return res.json({
+            success: true,
+            data: {
+              ...cardData,
+              isRookieCard: isRookieCard,
+              ebayResults: {
+                averageValue: 0,
+                results: [],
+                searchUrl: '',
+                errorMessage: 'Insufficient card information for price lookup',
+                dataType: 'sold'
+              }
+            }
+          });
+        }
+      } catch (ebayError) {
+        console.error('eBay search error:', ebayError);
+        return res.json({
+          success: true,
+          data: {
+            ...cardData,
+            isRookieCard: isRookieCard,
+            ebayResults: {
+              averageValue: 0,
+              results: [],
+              searchUrl: '',
+              errorMessage: 'eBay search failed',
+              dataType: 'sold'
+            }
+          }
+        });
+      }
+
+    } catch (error: any) {
+      console.error('Error in dual-image analysis:', error);
+      return res.status(500).json({
+        success: false,
+        message: error.message || 'Dual-image analysis failed',
+        error: 'analysis_failed'
+      });
+    }
+  });
+
+  // Combined OCR + eBay price lookup endpoint (legacy single image)
   app.post(`${apiPrefix}/analyze-card-with-prices`, upload.single('image'), async (req, res) => {
     try {
       if (!req.file) {

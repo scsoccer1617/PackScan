@@ -26,7 +26,7 @@ export default function PriceLookup() {
     if (!backImage) {
       toast({
         title: "Back Image Required",
-        description: "Please upload the BACK of the card for analysis. Card numbers and details are typically found on the back.",
+        description: "Please upload the BACK of the card for detailed card information.",
         variant: "destructive",
       });
       return;
@@ -34,22 +34,34 @@ export default function PriceLookup() {
     
     setAnalyzing(true);
     try {
-      // Use the new combined endpoint for OCR + price lookup
-      const response = await fetch('/api/analyze-card-with-prices', {
+      // Use the new combined endpoint for OCR + price lookup with both images
+      const response = await fetch('/api/analyze-card-dual-images', {
         method: 'POST',
         body: (() => {
           const formData = new FormData();
           
-          // Convert base64 image to file for upload
-          const byteCharacters = atob(backImage.split(',')[1]);
-          const byteNumbers = new Array(byteCharacters.length);
-          for (let i = 0; i < byteCharacters.length; i++) {
-            byteNumbers[i] = byteCharacters.charCodeAt(i);
+          // Convert back image (required for card details)
+          const backByteCharacters = atob(backImage.split(',')[1]);
+          const backByteNumbers = new Array(backByteCharacters.length);
+          for (let i = 0; i < backByteCharacters.length; i++) {
+            backByteNumbers[i] = backByteCharacters.charCodeAt(i);
           }
-          const byteArray = new Uint8Array(byteNumbers);
-          const blob = new Blob([byteArray], { type: 'image/jpeg' });
+          const backByteArray = new Uint8Array(backByteNumbers);
+          const backBlob = new Blob([backByteArray], { type: 'image/jpeg' });
+          formData.append('backImage', backBlob, 'back.jpg');
           
-          formData.append('image', blob, 'card.jpg');
+          // Convert front image (optional, for RC detection only)
+          if (frontImage) {
+            const frontByteCharacters = atob(frontImage.split(',')[1]);
+            const frontByteNumbers = new Array(frontByteCharacters.length);
+            for (let i = 0; i < frontByteCharacters.length; i++) {
+              frontByteNumbers[i] = frontByteCharacters.charCodeAt(i);
+            }
+            const frontByteArray = new Uint8Array(frontByteNumbers);
+            const frontBlob = new Blob([frontByteArray], { type: 'image/jpeg' });
+            formData.append('frontImage', frontBlob, 'front.jpg');
+          }
+          
           return formData;
         })()
       });
