@@ -92,11 +92,13 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
         
         // Try to determine if this is a Score card first by checking brand name
         const frontText = await extractTextForBrandDetection(frontBase64);
+        console.log(`Front text detection: ${frontText.substring(0, 100)}`);
         if (frontText.toUpperCase().includes('SCORE')) {
           console.log('Detected Score card brand from front image, using specialized analyzer');
           frontResult = await Promise.race([analyzeScoreCard(frontBase64), createTimeout()]);
         } else {
           // Use standard analyzer for other card brands
+          console.log('Using standard analyzer for front image');
           frontResult = await Promise.race([analyzeSportsCardImage(frontBase64), createTimeout()]);
         }
         console.log('Front image analysis complete');
@@ -112,11 +114,13 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
         
         // Try to determine if this is a Score card first by checking brand name
         const backText = await extractTextForBrandDetection(backBase64);
+        console.log(`Back text detection: ${backText.substring(0, 100)}`);
         if (backText.toUpperCase().includes('SCORE')) {
           console.log('Detected Score card brand from back image, using specialized analyzer');
           backResult = await Promise.race([analyzeScoreCard(backBase64), createTimeout()]);
         } else {
           // Use standard analyzer for other card brands
+          console.log('Using standard analyzer for back image');
           backResult = await Promise.race([analyzeSportsCardImage(backBase64), createTimeout()]);
         }
         console.log('Back image analysis complete');
