@@ -148,7 +148,11 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
     // and priority to back image for copyright year, stats, and detailed information
     let combinedResult;
     try {
+      console.log('About to call combineCardResults...');
+      console.log('Front result before combine:', JSON.stringify(frontResult, null, 2));
+      console.log('Back result before combine:', JSON.stringify(backResult, null, 2));
       combinedResult = await combineCardResults(frontResult, backResult, frontOCRText, backOCRText);
+      console.log('combineCardResults completed. Result:', JSON.stringify(combinedResult, null, 2));
     } catch (error) {
       console.error('Error in combineCardResults:', error);
       console.error('Error details:', error.message);
@@ -215,6 +219,8 @@ async function combineCardResults(
   console.log('=== COMBINE CARD RESULTS STARTED ===');
   console.log('Front result foilType:', frontResult.foilType);
   console.log('Back result foilType:', backResult.foilType);
+  console.log('Front result keys:', Object.keys(frontResult));
+  console.log('Back result keys:', Object.keys(backResult));
   console.log('Front OCR text length:', frontOCRText.length);
   console.log('Back OCR text length:', backOCRText.length);
   console.log('=== COMBINING CARD RESULTS ===');
