@@ -190,10 +190,10 @@ export function detectFoilVariant(fullText: string): FoilDetectionResult {
 
   // Special detection patterns
   
-  // Enhanced Donruss/Panini Detection for modern foil cards
+  // Enhanced Donruss/Panini Detection for modern foil cards (only for basketball/Tatum)
   if ((textLower.includes('donruss') || textLower.includes('panini')) && 
-      (textLower.includes('tatum') || textLower.includes('2023'))) {
-    console.log('DONRUSS/PANINI MODERN CARD DETECTED - checking for foil characteristics');
+      textLower.includes('tatum') && textLower.includes('basketball')) {
+    console.log('DONRUSS/PANINI TATUM BASKETBALL CARD DETECTED - checking for foil characteristics');
     
     // Look for specific foil indicators in the text
     if (textLower.includes('green') || textLower.includes('emerald') || textLower.includes('jade')) {
@@ -213,12 +213,25 @@ export function detectFoilVariant(fullText: string): FoilDetectionResult {
       confidence = 0.9;
       indicators.push('Gold foil - Donruss/Panini modern card');
     } else {
-      // Many modern Donruss cards are green foil variants by default
-      console.log('ASSUMING Green Foil for modern Donruss/Panini card (common variant)');
+      // Many modern Donruss basketball cards are green foil variants by default
+      console.log('ASSUMING Green Foil for modern Donruss/Panini basketball card (common variant)');
       isFoil = true;
       foilType = 'Green Foil';
       confidence = 0.8;
-      indicators.push('Assumed green foil - modern Donruss/Panini default variant');
+      indicators.push('Assumed green foil - modern Donruss/Panini basketball default variant');
+    }
+  }
+  
+  // Topps baseball cards - be more conservative, only detect if explicit foil keywords present
+  if (textLower.includes('topps') && textLower.includes('baseball') && 
+      !textLower.includes('chrome') && !textLower.includes('foil') && 
+      !textLower.includes('refractor') && !textLower.includes('prismatic')) {
+    console.log('TOPPS BASEBALL BASE CARD DETECTED - likely non-foil');
+    // Don't automatically assign foil for regular Topps baseball cards
+    if (isFoil && !foilType) {
+      console.log('REJECTING generic foil assignment for Topps baseball base card');
+      isFoil = false;
+      indicators.push('Rejected: Topps baseball base card without explicit foil indicators');
     }
   }
   
