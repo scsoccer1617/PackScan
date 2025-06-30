@@ -147,6 +147,13 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
     // Combine the results with priority to front image for player name, number, and rookie status
     // and priority to back image for copyright year, stats, and detailed information
     let combinedResult;
+    
+    console.log('=== BEFORE COMBINE FUNCTION ===');
+    console.log('frontResult exists:', !!frontResult);
+    console.log('backResult exists:', !!backResult);
+    console.log('frontOCRText length:', frontOCRText?.length || 0);
+    console.log('backOCRText length:', backOCRText?.length || 0);
+    
     try {
       console.log('About to call combineCardResults...');
       console.log('Front result before combine:', JSON.stringify(frontResult, null, 2));
