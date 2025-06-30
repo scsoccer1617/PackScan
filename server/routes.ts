@@ -17,7 +17,7 @@ import * as schema from '../shared/schema';
 import { storage } from './storage';
 import { searchCardValues, getEbaySearchUrl, clearEbayCache } from './ebayService';
 import { z } from 'zod';
-import { handleCardImageAnalysis } from './directOCR';
+import { handleDualSideCardAnalysis } from './dualSideOCR';
 import { extractTextFromImage, analyzeSportsCardImage } from './googleVisionFetch';
 import { handleJordanWicksCard } from './jordanWicksRoute';
 import { join } from 'path';
@@ -882,7 +882,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
     
     // If not the Jordan Wicks card, use the regular handler
-    return handleCardImageAnalysis(req, res);
+    return handleDualSideCardAnalysis(req, res);
   });
 
   // eBay search endpoint
@@ -1136,7 +1136,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           })
         };
         
-        handleCardImageAnalysis(req, mockRes as any);
+        handleDualSideCardAnalysis(req, mockRes as any);
       });
 
       if (!ocrResponse.success || !ocrResponse.data) {
