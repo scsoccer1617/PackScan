@@ -353,7 +353,7 @@ async function combineCardResults(
       combined.isFoil = true;
       console.log(`Visual foil detection successful: ${visualFoilResult.foilType} (confidence: ${visualFoilResult.confidence})`);
       console.log(`Visual indicators: ${visualFoilResult.indicators.join('; ')}`);
-    } else if (visualFoilResult && !visualFoilResult.indicators.includes('Error in visual analysis')) {
+    } else if (visualFoilResult && !visualFoilResult.indicators.some(indicator => indicator.includes('Error in visual analysis'))) {
       // Visual detection ran successfully but found no foil - trust this result over text analysis
       combined.foilType = null;
       combined.isFoil = false;

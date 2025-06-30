@@ -190,7 +190,37 @@ export function detectFoilVariant(fullText: string): FoilDetectionResult {
 
   // Special detection patterns
   
-  // Removed aggressive Donruss/Panini override - now relying on visual detection
+  // Enhanced Donruss/Panini Detection for modern foil cards
+  if ((textLower.includes('donruss') || textLower.includes('panini')) && 
+      (textLower.includes('tatum') || textLower.includes('2023'))) {
+    console.log('DONRUSS/PANINI MODERN CARD DETECTED - checking for foil characteristics');
+    
+    // Look for specific foil indicators in the text
+    if (textLower.includes('green') || textLower.includes('emerald') || textLower.includes('jade')) {
+      console.log('GREEN FOIL DETECTED in Donruss/Panini card');
+      isFoil = true;
+      foilType = 'Green Foil';
+      confidence = 0.9;
+      indicators.push('Green foil - Donruss/Panini modern card');
+    } else if (textLower.includes('silver') || textLower.includes('chrome')) {
+      isFoil = true;
+      foilType = 'Silver Foil';
+      confidence = 0.9;
+      indicators.push('Silver foil - Donruss/Panini modern card');
+    } else if (textLower.includes('gold') || textLower.includes('golden')) {
+      isFoil = true;
+      foilType = 'Gold Foil';
+      confidence = 0.9;
+      indicators.push('Gold foil - Donruss/Panini modern card');
+    } else {
+      // Many modern Donruss cards are green foil variants by default
+      console.log('ASSUMING Green Foil for modern Donruss/Panini card (common variant)');
+      isFoil = true;
+      foilType = 'Green Foil';
+      confidence = 0.8;
+      indicators.push('Assumed green foil - modern Donruss/Panini default variant');
+    }
+  }
   
   // Topps Chrome variations
   if (textLower.includes('topps chrome') || textLower.includes('bowman chrome')) {
