@@ -926,6 +926,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Simple eBay search endpoint for price lookup (no card saving)
+  // Clear eBay cache endpoint
+  app.get(`${apiPrefix}/ebay-cache-clear`, (req, res) => {
+    clearEbayCache();
+    res.json({ message: 'eBay cache cleared' });
+  });
+
   app.get(`${apiPrefix}/ebay-search`, async (req, res) => {
     try {
       const { playerName, cardNumber, brand, year, collection, condition, isNumbered, foilType, serialNumber } = req.query;
