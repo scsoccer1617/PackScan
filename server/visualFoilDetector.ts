@@ -32,7 +32,26 @@ export async function detectFoilFromImage(base64Image: string): Promise<FoilDete
       ],
     };
 
-    const [result] = await client.annotateImage(request);
+    let result;
+    try {
+      [result] = await client.annotateImage(request);
+    } catch (visionError: any) {
+      // Handle decoder errors and other Google Vision API issues
+      console.log('Google Vision API error:', visionError.message || visionError);
+      
+      if (visionError.message?.includes('DECODER') || visionError.message?.includes('unsupported')) {
+        console.log('Image decoder error - likely image format issue, falling back to basic detection');
+        // Return conservative result when visual analysis fails
+        return {
+          isFoil: false,
+          foilType: null,
+          confidence: 0,
+          indicators: ['Visual analysis failed due to image format/decoder error']
+        };
+      }
+      
+      throw visionError; // Re-throw if it's not a decoder error
+    }
     
     let isFoil = false;
     let foilType: string | null = null;
@@ -133,9 +152,20 @@ export async function detectFoilFromImage(base64Image: string): Promise<FoilDete
           indicators.push(`Metallic color detected: RGB(${r},${g},${b}) - saturation: ${saturation}, coverage: ${(pixelFraction * 100).toFixed(1)}%`);
         }
         
-        // Check for green-tinted metallic (common in foil cards)
-        // Require higher saturation to avoid false positives from white balance issues
-        if (g > r + 20 && g > b + 20 && g > 120 && saturation > 40 && pixelFraction > 0.12) {
+        // Check for aqua/cyan-tinted metallic (common in Series Two foil cards)
+        if (g > r + 15 && b > r + 15 && g > 120 && b > 120 && saturation > 35 && pixelFraction > 0.10) {
+          hasGreenTint = true; // Use same flag but detect aqua
+          indicators.push(`Aqua/cyan metallic tint detected: RGB(${r},${g},${b}) - ${(pixelFraction * 100).toFixed(1)}%, saturation: ${saturation}`);
+          
+          // Specifically detect aqua foil based on balanced blue-green
+          if (Math.abs(g - b) < 30 && g > 120 && b > 120) {
+            foilType = 'Aqua Foil';
+            indicators.push('Aqua foil detected based on balanced blue-green metallic tint');
+          }
+        }
+        
+        // Check for green-tinted metallic (traditional green foil)
+        else if (g > r + 20 && g > b + 20 && g > 120 && saturation > 40 && pixelFraction > 0.12) {
           hasGreenTint = true;
           indicators.push(`Green metallic tint detected: ${(pixelFraction * 100).toFixed(1)}%, saturation: ${saturation}`);
         }
