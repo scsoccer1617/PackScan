@@ -113,6 +113,7 @@ This is a streamlined web application focused on sports card price lookup using 
 - June 28, 2025: Added dual-side OCR integration for serial number detection on both front and back images
 - June 28, 2025: Implemented comprehensive foil variant detection system for chrome, refractor, autograph, and special finish cards
 - June 28, 2025: Added foil-specific eBay search keywords to improve pricing accuracy for premium card variants
+- June 30, 2025: Fixed critical foil detection false positive issue - removed foilType from front analyzer priority to prevent "Foil" being set for non-foil cards
 
 ## User Preferences
 
