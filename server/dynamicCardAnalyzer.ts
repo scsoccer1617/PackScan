@@ -1127,18 +1127,26 @@ function detectSport(text: string, cardDetails: Partial<CardFormValues>): void {
     }
     
     // Check for known basketball players first (high confidence)
-    const basketballPlayerMatch = text.match(/\b(JAYSON TATUM|JAYLEN BROWN|LUKA DONCIC|GIANNIS ANTETOKOUNMPO|LEBRON JAMES|STEPHEN CURRY|KEVIN DURANT|NIKOLA JOKIC|JOEL EMBIID|JA MORANT|TRAE YOUNG|DEVIN BOOKER|ZION WILLIAMSON|LAMELO BALL|ANTHONY EDWARDS|TYRESE HALIBURTON|JAMAL MURRAY|SHAI GILGEOUS-ALEXANDER|DAMIAN LILLARD|CJ MCCOLLUM|KAWHI LEONARD|PAUL GEORGE|RUSSELL WESTBROOK|JAMES HARDEN|KYRIE IRVING|JIMMY BUTLER|BAM ADEBAYO|TYLER HERRO|KRIS MIDDLETON|JRUE HOLIDAY|BROOK LOPEZ|DONOVAN MITCHELL|DARIUS GARLAND|EVAN MOBLEY|JARRETT ALLEN|SCOTTIE BARNES|FRED VANVLEET|PASCAL SIAKAM|OG ANUNOBY|JULIUS RANDLE|RJ BARRETT|JALEN BRUNSON|TYRESE MAXEY|TOBIAS HARRIS|BRADLEY BEAL|KRISTAPS PORZINGIS)\b/i);
-    if (basketballPlayerMatch) {
+    // Include both "First Last" and "Last First" patterns
+    const basketballPlayerMatch = text.match(/\b(JAYSON TATUM|TATUM JAYSON|JAYLEN BROWN|BROWN JAYLEN|LUKA DONCIC|DONCIC LUKA|GIANNIS ANTETOKOUNMPO|ANTETOKOUNMPO GIANNIS|LEBRON JAMES|JAMES LEBRON|STEPHEN CURRY|CURRY STEPHEN|KEVIN DURANT|DURANT KEVIN|NIKOLA JOKIC|JOKIC NIKOLA|JOEL EMBIID|EMBIID JOEL|JA MORANT|MORANT JA|TRAE YOUNG|YOUNG TRAE|DEVIN BOOKER|BOOKER DEVIN|ZION WILLIAMSON|WILLIAMSON ZION|LAMELO BALL|BALL LAMELO|ANTHONY EDWARDS|EDWARDS ANTHONY|TYRESE HALIBURTON|HALIBURTON TYRESE|JAMAL MURRAY|MURRAY JAMAL|SHAI GILGEOUS-ALEXANDER|GILGEOUS-ALEXANDER SHAI|DAMIAN LILLARD|LILLARD DAMIAN|CJ MCCOLLUM|MCCOLLUM CJ|KAWHI LEONARD|LEONARD KAWHI|PAUL GEORGE|GEORGE PAUL|RUSSELL WESTBROOK|WESTBROOK RUSSELL|JAMES HARDEN|HARDEN JAMES|KYRIE IRVING|IRVING KYRIE|JIMMY BUTLER|BUTLER JIMMY|BAM ADEBAYO|ADEBAYO BAM|TYLER HERRO|HERRO TYLER|KRIS MIDDLETON|MIDDLETON KRIS|JRUE HOLIDAY|HOLIDAY JRUE|BROOK LOPEZ|LOPEZ BROOK|DONOVAN MITCHELL|MITCHELL DONOVAN|DARIUS GARLAND|GARLAND DARIUS|EVAN MOBLEY|MOBLEY EVAN|JARRETT ALLEN|ALLEN JARRETT|SCOTTIE BARNES|BARNES SCOTTIE|FRED VANVLEET|VANVLEET FRED|PASCAL SIAKAM|SIAKAM PASCAL|OG ANUNOBY|ANUNOBY OG|JULIUS RANDLE|RANDLE JULIUS|RJ BARRETT|BARRETT RJ|JALEN BRUNSON|BRUNSON JALEN|TYRESE MAXEY|MAXEY TYRESE|TOBIAS HARRIS|HARRIS TOBIAS|BRADLEY BEAL|BEAL BRADLEY|KRISTAPS PORZINGIS|PORZINGIS KRISTAPS)\b/i);
+    
+    // Also check if the current detected player name matches known NBA players
+    const currentPlayerName = `${cardDetails.playerFirstName || ''} ${cardDetails.playerLastName || ''}`.trim().toUpperCase();
+    const knownNBAPlayers = ['JAYSON TATUM', 'JAYLEN BROWN', 'LUKA DONCIC', 'GIANNIS ANTETOKOUNMPO', 'LEBRON JAMES', 'STEPHEN CURRY', 'KEVIN DURANT', 'NIKOLA JOKIC', 'JOEL EMBIID', 'JA MORANT', 'TRAE YOUNG', 'DEVIN BOOKER', 'ZION WILLIAMSON', 'LAMELO BALL', 'ANTHONY EDWARDS', 'TYRESE HALIBURTON', 'JAMAL MURRAY', 'SHAI GILGEOUS-ALEXANDER', 'DAMIAN LILLARD', 'CJ MCCOLLUM', 'KAWHI LEONARD', 'PAUL GEORGE', 'RUSSELL WESTBROOK', 'JAMES HARDEN', 'KYRIE IRVING', 'JIMMY BUTLER', 'BAM ADEBAYO', 'TYLER HERRO', 'KRIS MIDDLETON', 'JRUE HOLIDAY', 'BROOK LOPEZ', 'DONOVAN MITCHELL', 'DARIUS GARLAND', 'EVAN MOBLEY', 'JARRETT ALLEN', 'SCOTTIE BARNES', 'FRED VANVLEET', 'PASCAL SIAKAM', 'OG ANUNOBY', 'JULIUS RANDLE', 'RJ BARRETT', 'JALEN BRUNSON', 'TYRESE MAXEY', 'TOBIAS HARRIS', 'BRADLEY BEAL', 'KRISTAPS PORZINGIS'];
+    
+    if (basketballPlayerMatch || knownNBAPlayers.includes(currentPlayerName)) {
       cardDetails.sport = "Basketball";
-      console.log("Sport detected (known NBA player): Basketball");
+      console.log(`Sport detected (known NBA player): Basketball - Player: ${currentPlayerName || basketballPlayerMatch?.[1] || 'detected'}`);
       
-      // Extract the player name from the match
-      const playerFullName = basketballPlayerMatch[1];
-      const nameParts = playerFullName.split(' ');
-      if (nameParts.length >= 2) {
-        cardDetails.playerFirstName = nameParts[0].charAt(0).toUpperCase() + nameParts[0].slice(1).toLowerCase();
-        cardDetails.playerLastName = nameParts.slice(1).join(' ').charAt(0).toUpperCase() + nameParts.slice(1).join(' ').slice(1).toLowerCase();
-        console.log(`NBA player name extracted: ${cardDetails.playerFirstName} ${cardDetails.playerLastName}`);
+      // Extract the player name from the match if not already set
+      if (basketballPlayerMatch && (!cardDetails.playerFirstName || !cardDetails.playerLastName)) {
+        const playerFullName = basketballPlayerMatch[1];
+        const nameParts = playerFullName.split(' ');
+        if (nameParts.length >= 2) {
+          cardDetails.playerFirstName = nameParts[0].charAt(0).toUpperCase() + nameParts[0].slice(1).toLowerCase();
+          cardDetails.playerLastName = nameParts.slice(1).join(' ').charAt(0).toUpperCase() + nameParts.slice(1).join(' ').slice(1).toLowerCase();
+          console.log(`NBA player name extracted: ${cardDetails.playerFirstName} ${cardDetails.playerLastName}`);
+        }
       }
       return;
     }
