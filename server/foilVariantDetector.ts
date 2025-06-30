@@ -49,6 +49,7 @@ const FOIL_VARIANTS: Record<string, string> = {
   'teal foil': 'Teal Foil',
   'purple foil': 'Purple Foil',
   'orange foil': 'Orange Foil',
+  'green': 'Green Foil',
   'black foil': 'Black Foil',
   'pink foil': 'Pink Foil',
   'platinum': 'Platinum',
@@ -96,7 +97,9 @@ function hasGenuineFoilContext(text: string, keyword: string): boolean {
   const genuineIndicators = [
     'chrome', 'refractor', 'parallel', 'variant', 'series',
     'numbered', 'limited', 'exclusive', 'special', 'premium',
-    'holographic', 'metallic', 'prismatic', 'rainbow'
+    'holographic', 'metallic', 'prismatic', 'rainbow',
+    'green', 'silver', 'gold', 'blue', 'red', 'teal', 'aqua',
+    'donruss', 'panini', 'topps', 'bowman', 'optic'
   ];
   
   // Lighting artifact indicators
@@ -250,10 +253,16 @@ export function detectFoilVariant(fullText: string): FoilDetectionResult {
   confidence = Math.min(confidence, 1.0);
 
   // Default foil type if detected but not specified
-  // Only set default "Foil" if we have high confidence (>=0.6) or multiple indicators
+  // Be more lenient for genuine card manufacturers and color variants
   if (isFoil && !foilType) {
-    if (confidence >= 0.6 || indicators.length >= 2) {
+    const hasManufacturer = textLower.includes('donruss') || textLower.includes('panini') || 
+                          textLower.includes('topps') || textLower.includes('bowman');
+    const hasColorVariant = textLower.includes('green') || textLower.includes('silver') || 
+                          textLower.includes('gold') || textLower.includes('rainbow');
+    
+    if (confidence >= 0.4 || indicators.length >= 2 || hasManufacturer || hasColorVariant) {
       foilType = 'Foil';
+      console.log(`Setting foil type to "Foil" - confidence: ${confidence}, indicators: ${indicators.length}, manufacturer: ${hasManufacturer}, color: ${hasColorVariant}`);
     } else {
       // Low confidence detection - likely false positive
       console.log(`Low confidence foil detection (${confidence}) with ${indicators.length} indicators: [${indicators.join(', ')}] - setting to null`);
