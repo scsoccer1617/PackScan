@@ -982,9 +982,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     { name: 'backImage', maxCount: 1 }
   ]), async (req, res) => {
     try {
+      console.log('=== DUAL IMAGE ROUTE CALLED ===');
+      console.log('Request received at:', new Date().toISOString());
+      
       const files = req.files as { [fieldname: string]: Express.Multer.File[] };
+      console.log('Files received:', files ? Object.keys(files) : 'No files');
       
       if (!files || !files.backImage || !files.backImage[0]) {
+        console.log('Missing back image - returning error');
         return res.status(400).json({ 
           success: false,
           message: 'Back image is required for card analysis',
