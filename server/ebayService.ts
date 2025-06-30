@@ -195,7 +195,7 @@ export async function searchCardValues(
         const error = data.errorMessage[0]?.error?.[0];
         const errorMessage = `eBay API error: ${error?.message?.[0] || 'Unknown error'}`;
         
-        const searchUrl = getEbaySearchUrl(playerName, cardNumber, brand, year, collection);
+        const searchUrl = getEbaySearchUrl(playerName, cardNumber, brand, year, collection, '', isNumbered, foilType, serialNumber);
         return { 
           averageValue: 0, 
           results: [],
@@ -256,7 +256,7 @@ export async function searchCardValues(
         const error = data.errors[0];
         const errorMessage = `eBay API error: ${error.message || 'Unknown error'}`;
         
-        const searchUrl = getEbaySearchUrl(playerName, cardNumber, brand, year, collection);
+        const searchUrl = getEbaySearchUrl(playerName, cardNumber, brand, year, collection, '', isNumbered, foilType, serialNumber);
         return { 
           averageValue: 0, 
           results: [],
@@ -323,7 +323,7 @@ export async function searchCardValues(
     const result = {
       averageValue,
       results: results.slice(0, 5), // Return only top 5 results
-      searchUrl: getEbaySearchUrl(playerName, cardNumber, brand, year, collection),
+      searchUrl: getEbaySearchUrl(playerName, cardNumber, brand, year, collection, '', isNumbered, foilType, serialNumber),
       dataType: dataType as 'sold' | 'current'
     };
 
@@ -376,7 +376,8 @@ export function getEbaySearchUrl(
   collection?: string,
   condition?: string,
   isNumbered?: boolean,
-  foilType?: string
+  foilType?: string,
+  serialNumber?: string
 ): string {
   // Split player name into first and last name for more flexible search
   const nameComponents = playerName.split(' ');
@@ -412,8 +413,16 @@ export function getEbaySearchUrl(
     }
   }
   
-  // Add "numbered" for serialized cards to get accurate pricing
-  if (isNumbered) {
+  // Add serial number suffix for serialized cards (e.g., "/399" instead of "numbered")
+  if (isNumbered && serialNumber && serialNumber.includes('/')) {
+    // Extract serial number suffix from serialNumber parameter
+    const serialMatch = serialNumber.match(/\/(\d+)$/);
+    if (serialMatch) {
+      keywords += ` /${serialMatch[1]}`;
+    } else {
+      keywords += ' numbered';
+    }
+  } else if (isNumbered) {
     keywords += ' numbered';
   }
   
