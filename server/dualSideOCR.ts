@@ -151,12 +151,6 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
     // Make sure we have all required fields with defaults if needed
     const finalResult = ensureRequiredFields(combinedResult);
     
-    // TEMPORARY DEBUG: Force foil type to null for non-foil cards
-    console.log('BEFORE FOIL OVERRIDE - foilType:', finalResult.foilType, 'isFoil:', finalResult.isFoil);
-    finalResult.foilType = null;
-    finalResult.isFoil = false;
-    console.log('AFTER FOIL OVERRIDE - foilType:', finalResult.foilType, 'isFoil:', finalResult.isFoil);
-    
     console.log('Combined card analysis result:', JSON.stringify(finalResult, null, 2));
     console.timeEnd('dual-card-analysis-total');
     
@@ -223,7 +217,7 @@ async function combineCardResults(
   // Fields where front image has priority
   const frontPriorityFields: (keyof CardFormValues)[] = [
     'playerFirstName', 'playerLastName', 'cardNumber', 
-    'isRookieCard', 'brand', 'collection', 'variant', 'foilType'
+    'isRookieCard', 'brand', 'collection', 'variant'
   ];
   
   // Fields where back image has priority
@@ -233,13 +227,6 @@ async function combineCardResults(
   
   // Copy front priority fields first
   frontPriorityFields.forEach(field => {
-    // TEMPORARY FIX: Skip foilType from results to prevent false positives
-    if (field === 'foilType') {
-      console.log(`TEMP: Skipping foilType from both results - will be determined by raw OCR text only`);
-      console.log(`Front foilType was: ${frontResult[field]}, Back foilType was: ${backResult[field]}`);
-      return;
-    }
-    
     if (frontResult[field] !== undefined && frontResult[field] !== null && frontResult[field] !== '') {
       combined[field] = frontResult[field];
     } else if (backResult[field] !== undefined && backResult[field] !== null && backResult[field] !== '') {
