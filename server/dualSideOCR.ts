@@ -274,9 +274,10 @@ async function combineCardResults(
   console.log('Combined result sport:', combined.sport);
   
   // Final foil detection pass - use all available text
-  if (!combined.foilType || combined.foilType === 'None detected') {
-    console.log('=== FINAL FOIL DETECTION PASS ===');
-    // Use the imported detectFoilVariant function
+  // Always run this to potentially find more specific foil variants
+  console.log('=== FINAL FOIL DETECTION PASS ===');
+  console.log('Current foil type before final detection:', combined.foilType);
+  // Use the imported detectFoilVariant function
     
     // Combine all OCR text for comprehensive foil detection
     let allText = '';
@@ -287,6 +288,14 @@ async function combineCardResults(
     if (backResult && typeof backResult === 'object') {
       allText += ' ' + JSON.stringify(backResult);
     }
+    
+    console.log('=== ALL TEXT FOR FOIL DETECTION ===');
+    console.log('Front result type:', typeof frontResult);
+    console.log('Back result type:', typeof backResult);
+    console.log('Combined text length:', allText.length);
+    console.log('Combined text (first 500 chars):', allText.substring(0, 500));
+    console.log('Combined text contains "green":', allText.toLowerCase().includes('green'));
+    console.log('Combined text contains "foil":', allText.toLowerCase().includes('foil'));
     
     // Test with known patterns for this specific card
     const testTexts = [
@@ -308,7 +317,6 @@ async function combineCardResults(
         break;
       }
     }
-  }
   
   console.log('=== COMBINATION COMPLETE ===');
   
