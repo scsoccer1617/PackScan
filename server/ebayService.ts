@@ -42,6 +42,121 @@ export function clearEbayCache() {
 // Clear cache immediately on module load to start fresh
 clearEbayCache();
 
+/**
+ * Prioritize eBay listings based on how well they match the card information
+ * Higher scores = better matches = higher priority
+ */
+function prioritizeListingsByCardMatch(
+  results: EbaySearchResult[],
+  playerName: string,
+  cardNumber: string,
+  brand: string,
+  year: number,
+  collection?: string,
+  foilType?: string
+): EbaySearchResult[] {
+  return results.map(result => {
+    const title = result.title.toLowerCase();
+    let score = 0;
+    const matchedElements: string[] = [];
+    
+    // Player name match (highest priority - 100 points)
+    const playerFirstName = playerName.split(' ')[0].toLowerCase();
+    const playerLastName = playerName.split(' ').slice(1).join(' ').toLowerCase();
+    
+    if (title.includes(playerFirstName) && title.includes(playerLastName)) {
+      score += 100;
+      matchedElements.push('full name');
+    } else if (title.includes(playerLastName)) {
+      score += 75;
+      matchedElements.push('last name');
+    } else if (title.includes(playerFirstName)) {
+      score += 50;
+      matchedElements.push('first name');
+    }
+    
+    // Card number match (high priority - 75 points if exact match)
+    if (cardNumber && cardNumber.trim()) {
+      // Look for exact card number match with common formats
+      const cardNumRegex = new RegExp(`\\b${cardNumber}\\b|#${cardNumber}\\b|${cardNumber}\\s|\\s${cardNumber}\\b`, 'i');
+      if (cardNumRegex.test(title)) {
+        score += 75;
+        matchedElements.push(`card #${cardNumber}`);
+      }
+    }
+    
+    // Year match (high priority - 60 points)
+    if (year && year > 0) {
+      const yearStr = year.toString();
+      // Look for year in common formats: "2023", "2023-24", "23-24"
+      if (title.includes(yearStr) || title.includes(`${yearStr}-${(year + 1).toString().slice(-2)}`)) {
+        score += 60;
+        matchedElements.push(`year ${yearStr}`);
+      }
+    }
+    
+    // Brand match (medium priority - 40 points)
+    if (brand && title.includes(brand.toLowerCase())) {
+      score += 40;
+      matchedElements.push(`brand ${brand}`);
+    }
+    
+    // Collection match (medium priority - 30 points)
+    if (collection && title.includes(collection.toLowerCase())) {
+      score += 30;
+      matchedElements.push(`collection ${collection}`);
+    }
+    
+    // Foil type match (medium priority - 50 points for special variants)
+    if (foilType) {
+      const foilSearchTerm = getFoilSearchTerm(foilType).toLowerCase();
+      if (foilSearchTerm && title.includes(foilSearchTerm)) {
+        score += 50;
+        matchedElements.push(`foil ${foilType}`);
+      }
+      
+      // Also check for common foil terminology
+      const foilKeywords = ['holo', 'foil', 'chrome', 'refractor', 'laser', 'prizm'];
+      for (const keyword of foilKeywords) {
+        if (title.includes(keyword)) {
+          score += 25;
+          matchedElements.push(`foil variant`);
+          break;
+        }
+      }
+    }
+    
+    // Penalize generic listings (reduce score)
+    const genericPhrases = [
+      'you pick', 'choose', 'select', 'various', 'multiple', 
+      'lot of', 'mixed lot', 'random', 'grab bag'
+    ];
+    
+    for (const phrase of genericPhrases) {
+      if (title.includes(phrase)) {
+        score -= 30;
+        break;
+      }
+    }
+    
+    // Penalize very different years (major penalty)
+    if (year && year > 0) {
+      const yearMatches = title.match(/\b(19|20)\d{2}\b/g);
+      if (yearMatches) {
+        const listingYears = yearMatches.map(y => parseInt(y));
+        const hasCorrectYear = listingYears.some(y => Math.abs(y - year) <= 1);
+        if (!hasCorrectYear) {
+          score -= 50; // Major penalty for wrong year
+        }
+      }
+    }
+    
+    console.log(`Listing "${result.title}" scored ${score} points (matched: ${matchedElements.join(', ') || 'none'})`);
+    
+    return { ...result, matchScore: score };
+  }).sort((a, b) => (b as any).matchScore - (a as any).matchScore);
+}
+
 export async function searchCardValues(
   playerName: string,
   cardNumber: string,
@@ -346,8 +461,19 @@ export async function searchCardValues(
       }
     }
 
+    // Prioritize results based on card information match
+    const prioritizedResults = prioritizeListingsByCardMatch(
+      results, 
+      playerName, 
+      cardNumber, 
+      brand, 
+      year, 
+      collection, 
+      foilType
+    );
+    
     // Only use top 5 results for display and calculation
-    const topResults = results.slice(0, 5);
+    const topResults = prioritizedResults.slice(0, 5);
     
     // Calculate average value based on the top 5 displayed results only
     const displayedTotal = topResults.reduce((sum, item) => sum + item.price, 0);
