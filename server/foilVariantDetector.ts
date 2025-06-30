@@ -190,37 +190,7 @@ export function detectFoilVariant(fullText: string): FoilDetectionResult {
 
   // Special detection patterns
   
-  // Aggressive Donruss/Panini Detection - assume most modern cards are foil variants
-  if ((textLower.includes('donruss') || textLower.includes('panini')) && 
-      textLower.includes('tatum')) {
-    console.log('DONRUSS/PANINI TATUM DETECTED - applying aggressive foil detection');
-    
-    // If we have any color indicators or foil-like terms, use specific type
-    if (textLower.includes('green')) {
-      console.log('GREEN FOIL DETECTED in Donruss/Panini card');
-      isFoil = true;
-      foilType = 'Green Foil';
-      confidence = 1.0;
-      indicators.push('Green foil override');
-    } else if (textLower.includes('silver') || textLower.includes('chrome')) {
-      isFoil = true;
-      foilType = 'Silver Foil';
-      confidence = 1.0;
-      indicators.push('Silver foil override');
-    } else if (textLower.includes('gold')) {
-      isFoil = true;
-      foilType = 'Gold Foil';
-      confidence = 1.0;
-      indicators.push('Gold foil override');
-    } else {
-      // Fallback: assume it's a green foil based on visual characteristics commonly seen
-      console.log('FALLBACK: Assuming Green Foil for modern Donruss/Panini card');
-      isFoil = true;
-      foilType = 'Green Foil';
-      confidence = 0.8;
-      indicators.push('Modern Donruss/Panini fallback - likely green foil');
-    }
-  }
+  // Removed aggressive Donruss/Panini override - now relying on visual detection
   
   // Topps Chrome variations
   if (textLower.includes('topps chrome') || textLower.includes('bowman chrome')) {

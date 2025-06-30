@@ -38,12 +38,12 @@ export async function detectFoilFromImage(base64Image: string): Promise<FoilDete
     let foilType: string | null = null;
     let confidence = 0;
     const indicators: string[] = [];
+    let hasStrongFoilIndicators = false;
+    let hasWhiteBorderReflection = false;
 
     // Analyze labels for foil-related characteristics
     const labels = result.labelAnnotations || [];
     console.log('Image labels found:', labels.map(l => `${l.description} (${l.score})`));
-    
-    let hasStrongFoilIndicators = false;
     
     for (const label of labels) {
       const description = label.description?.toLowerCase() || '';
@@ -105,7 +105,6 @@ export async function detectFoilFromImage(base64Image: string): Promise<FoilDete
       const colors = imageProps.dominantColors.colors;
       let hasMetallicColors = false;
       let hasGreenTint = false;
-      let hasWhiteBorderReflection = false;
       let totalColorVariance = 0;
       
       for (const colorInfo of colors) {
@@ -162,12 +161,30 @@ export async function detectFoilFromImage(base64Image: string): Promise<FoilDete
       }
     }
 
+    // Apply strict rejection criteria for likely false positives
+    if (isFoil && !hasStrongFoilIndicators) {
+      // If we only have weak indicators and potential white border reflection, reject
+      if (hasWhiteBorderReflection || confidence < 0.4) {
+        console.log('REJECTING foil detection - insufficient strong indicators or white border detected');
+        isFoil = false;
+        foilType = null;
+        confidence = 0;
+        indicators.push('REJECTED: Likely false positive from lighting/white border');
+      }
+    }
+    
     // Cap confidence at 1.0
     confidence = Math.min(confidence, 1.0);
     
-    // If we detected foil characteristics but no specific type, assign a generic type
-    if (isFoil && !foilType) {
+    // Only assign generic foil type if we have strong indicators
+    if (isFoil && !foilType && hasStrongFoilIndicators) {
       foilType = 'Foil';
+    } else if (isFoil && !foilType) {
+      // If no strong indicators but still detected, be more conservative
+      console.log('No strong foil indicators detected, rejecting detection');
+      isFoil = false;
+      confidence = 0;
+      indicators.push('REJECTED: No strong foil indicators found');
     }
 
     console.log('=== VISUAL FOIL DETECTION RESULT ===');
