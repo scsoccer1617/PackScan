@@ -940,7 +940,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: 'Missing required parameters' });
       }
       
-      console.log('eBay search request:', { playerName, cardNumber, brand, year, collection, isNumbered, foilType, serialNumber });
+      console.log('eBay search request:', { 
+        playerName, 
+        cardNumber, 
+        brand, 
+        year, 
+        collection, 
+        isNumbered, 
+        foilType: foilType || 'UNDEFINED', 
+        serialNumber 
+      });
       
       const results = await searchCardValues(
         playerName as string,
