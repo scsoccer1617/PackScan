@@ -989,67 +989,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const backFile = files.backImage[0];
       console.log('Analyzing back image for card details...');
       
+      // Use dual-side analysis for both front and back images
+      const { handleDualSideCardAnalysis } = await import('./dualSideOCR');
+      
       const backOcrResponse = await new Promise<any>((resolve, reject) => {
-        const mockReq = { file: backFile };
-        const mockRes = {
+        const mockReqDual = { 
+          files: { 
+            backImage: [backFile],
+            ...(files.frontImage && { frontImage: files.frontImage })
+          } 
+        };
+        const mockResDual = {
           json: (data: any) => resolve(data),
           status: (code: number) => ({
-            json: (data: any) => reject(new Error(`Back OCR failed with status ${code}: ${JSON.stringify(data)}`))
+            json: (data: any) => reject(new Error(`Dual OCR failed with status ${code}: ${JSON.stringify(data)}`))
           })
         };
         
-        handleCardImageAnalysis(mockReq as any, mockRes as any);
+        handleDualSideCardAnalysis(mockReqDual as any, mockResDual as any);
       });
 
-      let isRookieCard = false;
-      
-      // Analyze front image specifically for rookie card detection if provided
-      if (files.frontImage && files.frontImage[0]) {
-        const frontFile = files.frontImage[0];
-        console.log('Analyzing front image for rookie card detection...');
-        
-        try {
-          const frontBase64 = frontFile.buffer.toString('base64');
-          const frontOcrResult = await extractTextFromImage(frontBase64);
-          const frontText = frontOcrResult.fullText;
-          
-          console.log('=== FRONT IMAGE RC DETECTION ===');
-          console.log('Front image OCR text:', frontText);
-          
-          // Simple but effective RC detection on front image
-          const upperFrontText = frontText.toUpperCase();
-          
-          // Look for RC logo patterns (common on front of rookie cards)
-          if (upperFrontText.includes('RC') || 
-              upperFrontText.includes('ROOKIE') ||
-              /\bRC\b/.test(upperFrontText) ||
-              /ROOKIE CARD/i.test(frontText)) {
-            isRookieCard = true;
-            console.log('✅ ROOKIE CARD DETECTED on front image!');
-          } else {
-            console.log('❌ No RC indicators found on front image');
-          }
-          
-        } catch (frontError) {
-          console.log('Error analyzing front image for RC detection:', frontError);
-          // Continue without front image RC detection
-        }
-      } else {
-        console.log('No front image provided, skipping RC detection');
-      }
-
-      // Apply rookie card detection result to back image analysis
-      if (backOcrResponse.success && backOcrResponse.data) {
-        backOcrResponse.data.isRookieCard = isRookieCard;
-        console.log(`Applied RC detection result: ${isRookieCard}`);
-      }
+      // Dual-side analysis now handles rookie card detection automatically
 
       if (!backOcrResponse.success || !backOcrResponse.data) {
         return res.json({
           success: true,
           data: {
             ...backOcrResponse.data,
-            isRookieCard: isRookieCard,
             ebayResults: {
               averageValue: 0,
               results: [],
@@ -1091,7 +1057,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
             success: true,
             data: {
               ...cardData,
-              isRookieCard: isRookieCard,
               ebayResults: ebayResults
             }
           });
