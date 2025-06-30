@@ -151,6 +151,12 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
     // Make sure we have all required fields with defaults if needed
     const finalResult = ensureRequiredFields(combinedResult);
     
+    // TEMPORARY DEBUG: Force foil type to null for non-foil cards
+    console.log('BEFORE FOIL OVERRIDE - foilType:', finalResult.foilType, 'isFoil:', finalResult.isFoil);
+    finalResult.foilType = null;
+    finalResult.isFoil = false;
+    console.log('AFTER FOIL OVERRIDE - foilType:', finalResult.foilType, 'isFoil:', finalResult.isFoil);
+    
     console.log('Combined card analysis result:', JSON.stringify(finalResult, null, 2));
     console.timeEnd('dual-card-analysis-total');
     
