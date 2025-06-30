@@ -83,12 +83,6 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     console.log(fullText);
     console.log('=== END RAW OCR TEXT ===');
     
-    // Additional debug for basketball card detection
-    if (fullText.toLowerCase().includes('jayson') || fullText.toLowerCase().includes('tatum')) {
-      console.log('*** BASKETBALL PLAYER DETECTED IN OCR TEXT ***');
-      console.log('Text contains Jayson or Tatum - this should be a basketball card!');
-    }
-    
     // Check for Stars of MLB cards first
     const starsOfMLBResult = processStarsOfMLBCard(fullText);
     if (starsOfMLBResult) {
@@ -226,43 +220,16 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
  */
 function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>): void {
   try {
-    // HIGHEST PRIORITY: Check for known basketball players first with flexible matching
-    const textLower = text.toLowerCase();
-    
-    // Check for Jayson Tatum specifically with flexible matching
-    if ((textLower.includes('jayson') && textLower.includes('tatum')) || 
-        textLower.includes('j. tatum') || textLower.includes('j tatum')) {
-      cardDetails.playerFirstName = 'Jayson';
-      cardDetails.playerLastName = 'Tatum';
-      cardDetails.sport = "Basketball";
-      console.log(`NBA player detected: Jayson Tatum (Sport: Basketball)`);
-      return;
-    }
-    
-    // Check other basketball players with flexible patterns
-    const basketballPlayers = [
-      { pattern: /jaylen\s*brown/i, first: 'Jaylen', last: 'Brown' },
-      { pattern: /luka\s*doncic/i, first: 'Luka', last: 'Doncic' },
-      { pattern: /giannis\s*antetokounmpo/i, first: 'Giannis', last: 'Antetokounmpo' },
-      { pattern: /lebron\s*james/i, first: 'LeBron', last: 'James' },
-      { pattern: /stephen\s*curry/i, first: 'Stephen', last: 'Curry' },
-      { pattern: /kevin\s*durant/i, first: 'Kevin', last: 'Durant' },
-      { pattern: /nikola\s*jokic/i, first: 'Nikola', last: 'Jokic' },
-      { pattern: /joel\s*embiid/i, first: 'Joel', last: 'Embiid' },
-      { pattern: /ja\s*morant/i, first: 'Ja', last: 'Morant' },
-      { pattern: /trae\s*young/i, first: 'Trae', last: 'Young' },
-      { pattern: /devin\s*booker/i, first: 'Devin', last: 'Booker' },
-      { pattern: /zion\s*williamson/i, first: 'Zion', last: 'Williamson' },
-      { pattern: /lamelo\s*ball/i, first: 'LaMelo', last: 'Ball' },
-      { pattern: /anthony\s*edwards/i, first: 'Anthony', last: 'Edwards' }
-    ];
-
-    for (const player of basketballPlayers) {
-      if (text.match(player.pattern)) {
-        cardDetails.playerFirstName = player.first;
-        cardDetails.playerLastName = player.last;
-        cardDetails.sport = "Basketball";
-        console.log(`NBA player detected: ${player.first} ${player.last} (Sport: Basketball)`);
+    // HIGHEST PRIORITY: Check for known basketball players first
+    const basketballPlayerMatch = text.match(/\b(JAYSON TATUM|JAYLEN BROWN|LUKA DONCIC|GIANNIS ANTETOKOUNMPO|LEBRON JAMES|STEPHEN CURRY|KEVIN DURANT|NIKOLA JOKIC|JOEL EMBIID|JA MORANT|TRAE YOUNG|DEVIN BOOKER|ZION WILLIAMSON|LAMELO BALL|ANTHONY EDWARDS|TYRESE HALIBURTON|JAMAL MURRAY|SHAI GILGEOUS-ALEXANDER|DAMIAN LILLARD|CJ MCCOLLUM|KAWHI LEONARD|PAUL GEORGE|RUSSELL WESTBROOK|JAMES HARDEN|KYRIE IRVING|JIMMY BUTLER|BAM ADEBAYO|TYLER HERRO|KRIS MIDDLETON|JRUE HOLIDAY|BROOK LOPEZ|DONOVAN MITCHELL|DARIUS GARLAND|EVAN MOBLEY|JARRETT ALLEN|SCOTTIE BARNES|FRED VANVLEET|PASCAL SIAKAM|OG ANUNOBY|JULIUS RANDLE|RJ BARRETT|JALEN BRUNSON|TYRESE MAXEY|TOBIAS HARRIS|BRADLEY BEAL|KRISTAPS PORZINGIS)\b/i);
+    if (basketballPlayerMatch) {
+      const playerFullName = basketballPlayerMatch[1];
+      const nameParts = playerFullName.split(' ');
+      if (nameParts.length >= 2) {
+        cardDetails.playerFirstName = nameParts[0].charAt(0).toUpperCase() + nameParts[0].slice(1).toLowerCase();
+        cardDetails.playerLastName = nameParts.slice(1).join(' ').charAt(0).toUpperCase() + nameParts.slice(1).join(' ').slice(1).toLowerCase();
+        cardDetails.sport = "Basketball"; // Force basketball sport
+        console.log(`NBA player name found in extractPlayerName: ${cardDetails.playerFirstName} ${cardDetails.playerLastName} (Sport: Basketball)`);
         return;
       }
     }
@@ -410,74 +377,50 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>): 
       return;
     }
     
-    // DYNAMIC PLAYER NAME DETECTION - Look for any player name patterns
+    // First, look for name patterns in the first few lines of the card
     const lines = text.split('\n');
     
-    console.log('=== DYNAMIC PLAYER NAME DETECTION ===');
-    console.log('Total lines found:', lines.length);
-    
-    // Check each line for potential player names
-    for (let i = 0; i < Math.min(8, lines.length); i++) {
-      const line = lines[i].trim();
-      console.log(`Line ${i}: "${line}"`);
+    // HIGHEST PRIORITY: Check the second line of text for player name
+    // This is usually where the player name appears on most cards after the card number on the first line
+    if (lines.length > 1) {
+      // Second line often contains just the player name
+      const secondLine = lines[1].trim();
       
-      // Skip empty lines or lines with only numbers
-      if (!line || /^\d+$/.test(line)) continue;
+      console.log(`Checking second line for player name: "${secondLine}"`);
       
-      // Skip lines that are clearly not names
-      const skipWords = ['TOPPS', 'PANINI', 'UPPER DECK', 'SERIES', 'PRIZM', 'CHROME', 'OPTIC', 'HOOPS', 'DONRUSS', 'BOWMAN', 'HERITAGE', 'ROOKIE', 'CARD', 'NBA', 'BASKETBALL', 'FOOTBALL', 'BASEBALL', 'HOCKEY', 'COLLECTION', 'EDITION', 'LICENSED', 'COPYRIGHT', 'TM'];
-      
-      let isNameLine = true;
-      for (const skipWord of skipWords) {
-        if (line.includes(skipWord)) {
-          isNameLine = false;
-          break;
+      // If the second line looks like a name (all caps, no numbers, reasonable length)
+      if (secondLine && 
+          secondLine.length > 0 &&
+          /^[A-Z][A-Z\s\-\.']{2,30}$/.test(secondLine) && 
+          !secondLine.includes('TOPPS') && 
+          !secondLine.includes('SERIES') &&
+          !secondLine.includes('OPENING DAY')) {
+        
+        // Split into first and last name
+        const nameParts = secondLine.split(' ');
+        
+        if (nameParts.length >= 2) {
+          // Format the names properly
+          const firstName = nameParts[0];
+          const lastName = nameParts.slice(1).join(' ');
+          
+          cardDetails.playerFirstName = firstName.charAt(0).toUpperCase() + 
+                                       firstName.slice(1).toLowerCase();
+          cardDetails.playerLastName = lastName.charAt(0).toUpperCase() + 
+                                      lastName.slice(1).toLowerCase();
+          
+          console.log(`Detected player name from second line: ${cardDetails.playerFirstName} ${cardDetails.playerLastName}`);
+          return;
+        } else if (nameParts.length === 1) {
+          // Just a single word name
+          const lastName = nameParts[0];
+          cardDetails.playerLastName = lastName.charAt(0).toUpperCase() + 
+                                      lastName.slice(1).toLowerCase();
+          console.log(`Detected single-word player name: ${cardDetails.playerLastName}`);
+          return;
         }
-      }
-      
-      if (!isNameLine) continue;
-      
-      // Look for patterns that match player names:
-      // 1. Two words, each starting with capital letter (JAYSON TATUM)
-      // 2. First word 2-15 characters, second word 2-20 characters
-      // 3. Contains only letters, spaces, apostrophes, hyphens
-      const namePattern = /^([A-Z][A-Za-z''-]{1,14})\s+([A-Z][A-Za-z''-]{1,19})(\s+([A-Z][A-Za-z''-]{1,14}))?$/;
-      const nameMatch = line.match(namePattern);
-      
-      if (nameMatch) {
-        const firstName = nameMatch[1];
-        const lastName = nameMatch[2];
-        const middleName = nameMatch[4];
-        
-        console.log(`Potential player name found: ${firstName} ${lastName}${middleName ? ' ' + middleName : ''}`);
-        
-        // Set the names
-        cardDetails.playerFirstName = firstName.charAt(0).toUpperCase() + firstName.slice(1).toLowerCase();
-        cardDetails.playerLastName = lastName.charAt(0).toUpperCase() + lastName.slice(1).toLowerCase();
-        
-        console.log(`Player name extracted: ${cardDetails.playerFirstName} ${cardDetails.playerLastName}`);
-        
-        // Try to detect sport based on the context around the name
-        const contextText = lines.slice(Math.max(0, i-2), Math.min(lines.length, i+3)).join(' ').toUpperCase();
-        if (contextText.includes('NBA') || contextText.includes('BASKETBALL') || contextText.includes('HOOPS') || contextText.includes('PRIZM')) {
-          cardDetails.sport = "Basketball";
-          console.log(`Sport detected from context: Basketball`);
-        } else if (contextText.includes('NFL') || contextText.includes('FOOTBALL')) {
-          cardDetails.sport = "Football";
-          console.log(`Sport detected from context: Football`);
-        } else if (contextText.includes('MLB') || contextText.includes('BASEBALL')) {
-          cardDetails.sport = "Baseball";
-          console.log(`Sport detected from context: Baseball`);
-        } else if (contextText.includes('NHL') || contextText.includes('HOCKEY')) {
-          cardDetails.sport = "Hockey";
-          console.log(`Sport detected from context: Hockey`);
-        }
-        
-        return;
       }
     }
-    
-    console.log('=== END DYNAMIC PLAYER NAME DETECTION ===');
     
     // Check for multi-line player names (common in some cards like Score)
     // This handles cases like "JUAN\nBELL" where the name is split across lines
@@ -1122,20 +1065,21 @@ function detectSport(text: string, cardDetails: Partial<CardFormValues>): void {
       return;
     }
     
-    // Check for known basketball players first (high confidence) with flexible matching
-    const basketballPlayers = [
-      'JAYSON TATUM', 'JAYLEN BROWN', 'LUKA DONCIC', 'GIANNIS ANTETOKOUNMPO', 'LEBRON JAMES',
-      'STEPHEN CURRY', 'KEVIN DURANT', 'NIKOLA JOKIC', 'JOEL EMBIID', 'JA MORANT',
-      'TRAE YOUNG', 'DEVIN BOOKER', 'ZION WILLIAMSON', 'LAMELO BALL', 'ANTHONY EDWARDS'
-    ];
-    
-    for (const player of basketballPlayers) {
-      const playerPattern = new RegExp(player.replace(/\s+/g, '\\s+'), 'i');
-      if (text.match(playerPattern)) {
-        cardDetails.sport = "Basketball";
-        console.log(`Sport detected (known NBA player): Basketball - ${player}`);
-        return;
+    // Check for known basketball players first (high confidence)
+    const basketballPlayerMatch = text.match(/\b(JAYSON TATUM|JAYLEN BROWN|LUKA DONCIC|GIANNIS ANTETOKOUNMPO|LEBRON JAMES|STEPHEN CURRY|KEVIN DURANT|NIKOLA JOKIC|JOEL EMBIID|JA MORANT|TRAE YOUNG|DEVIN BOOKER|ZION WILLIAMSON|LAMELO BALL|ANTHONY EDWARDS|TYRESE HALIBURTON|JAMAL MURRAY|SHAI GILGEOUS-ALEXANDER|DAMIAN LILLARD|CJ MCCOLLUM|KAWHI LEONARD|PAUL GEORGE|RUSSELL WESTBROOK|JAMES HARDEN|KYRIE IRVING|JIMMY BUTLER|BAM ADEBAYO|TYLER HERRO|KRIS MIDDLETON|JRUE HOLIDAY|BROOK LOPEZ|DONOVAN MITCHELL|DARIUS GARLAND|EVAN MOBLEY|JARRETT ALLEN|SCOTTIE BARNES|FRED VANVLEET|PASCAL SIAKAM|OG ANUNOBY|JULIUS RANDLE|RJ BARRETT|JALEN BRUNSON|TYRESE MAXEY|TOBIAS HARRIS|BRADLEY BEAL|KRISTAPS PORZINGIS)\b/i);
+    if (basketballPlayerMatch) {
+      cardDetails.sport = "Basketball";
+      console.log("Sport detected (known NBA player): Basketball");
+      
+      // Extract the player name from the match
+      const playerFullName = basketballPlayerMatch[1];
+      const nameParts = playerFullName.split(' ');
+      if (nameParts.length >= 2) {
+        cardDetails.playerFirstName = nameParts[0].charAt(0).toUpperCase() + nameParts[0].slice(1).toLowerCase();
+        cardDetails.playerLastName = nameParts.slice(1).join(' ').charAt(0).toUpperCase() + nameParts.slice(1).join(' ').slice(1).toLowerCase();
+        console.log(`NBA player name extracted: ${cardDetails.playerFirstName} ${cardDetails.playerLastName}`);
       }
+      return;
     }
     
     // Initialize scores for each sport
