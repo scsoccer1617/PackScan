@@ -65,6 +65,59 @@ const FOIL_VARIANTS: Record<string, string> = {
 };
 
 /**
+ * Check for lighting reflection artifacts that might cause false foil detection
+ */
+function hasLightingArtifacts(text: string): boolean {
+  const lightingIndicators = [
+    'white border', 'border white', 'white edge', 'edge white',
+    'reflection', 'glare', 'lighting', 'flash', 'bright',
+    'overexposed', 'washed out', 'bleached'
+  ];
+  
+  const textLower = text.toLowerCase();
+  return lightingIndicators.some(indicator => textLower.includes(indicator));
+}
+
+/**
+ * Check for genuine foil context vs lighting artifacts
+ */
+function hasGenuineFoilContext(text: string, keyword: string): boolean {
+  const textLower = text.toLowerCase();
+  const keywordIndex = textLower.indexOf(keyword.toLowerCase());
+  
+  if (keywordIndex === -1) return false;
+  
+  // Get context around the foil keyword (50 characters before and after)
+  const start = Math.max(0, keywordIndex - 50);
+  const end = Math.min(textLower.length, keywordIndex + keyword.length + 50);
+  const context = textLower.substring(start, end);
+  
+  // Genuine foil indicators
+  const genuineIndicators = [
+    'chrome', 'refractor', 'parallel', 'variant', 'series',
+    'numbered', 'limited', 'exclusive', 'special', 'premium',
+    'holographic', 'metallic', 'prismatic', 'rainbow'
+  ];
+  
+  // Lighting artifact indicators
+  const artifactIndicators = [
+    'border', 'edge', 'corner', 'lighting', 'flash', 'glare',
+    'reflection', 'bright', 'white', 'overexposed'
+  ];
+  
+  const hasGenuine = genuineIndicators.some(indicator => context.includes(indicator));
+  const hasArtifact = artifactIndicators.some(indicator => context.includes(indicator));
+  
+  // If we have artifact indicators but no genuine indicators, likely false positive
+  if (hasArtifact && !hasGenuine) {
+    console.log(`Potential lighting artifact detected for "${keyword}" in context: "${context}"`);
+    return false;
+  }
+  
+  return true;
+}
+
+/**
  * Detect foil variants from OCR text
  */
 export function detectFoilVariant(fullText: string): FoilDetectionResult {
@@ -77,6 +130,11 @@ export function detectFoilVariant(fullText: string): FoilDetectionResult {
   console.log('=== FOIL VARIANT DETECTION DETAILED DEBUG ===');
   console.log('Full text for foil detection (first 300 chars):', fullText.substring(0, 300));
   console.log('Text length:', fullText.length);
+  
+  // Early detection of lighting artifacts
+  if (hasLightingArtifacts(fullText)) {
+    console.log('Detected potential lighting artifacts in text - applying stricter foil detection');
+  }
 
   // Check for explicit foil keywords with context validation
   for (const keyword of FOIL_KEYWORDS) {
@@ -99,6 +157,12 @@ export function detectFoilVariant(fullText: string): FoilDetectionResult {
           console.log(`Skipping generic "foil" keyword - no card context found`);
           continue;
         }
+      }
+      
+      // Check for lighting artifacts that might cause false positives
+      if (!hasGenuineFoilContext(fullText, keyword)) {
+        console.log(`Skipping "${keyword}" - likely lighting artifact or reflection`);
+        continue;
       }
       
       indicators.push(keyword);
