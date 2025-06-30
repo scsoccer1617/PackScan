@@ -31,13 +31,16 @@ interface EbayResponse {
  */
 // Simple cache to reduce API calls
 const searchCache = new Map<string, { data: any; timestamp: number }>();
-const CACHE_DURATION = 60000; // 1 minute cache
+const CACHE_DURATION = 30000; // 30 second cache to allow fresh searches
 
 // Clear cache function for debugging
 export function clearEbayCache() {
   searchCache.clear();
   console.log('eBay search cache cleared');
 }
+
+// Clear cache immediately on module load to start fresh
+clearEbayCache();
 
 export async function searchCardValues(
   playerName: string,
