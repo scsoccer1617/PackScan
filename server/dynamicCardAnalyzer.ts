@@ -1264,10 +1264,10 @@ function detectSport(text: string, cardDetails: Partial<CardFormValues>): void {
     // Log scores for debugging
     console.log("Sport detection scores:", sportScores.map(s => `${s.sport}: ${s.score}`).join(", "));
     
-    // If highest score is zero, default to Baseball
+    // If highest score is zero, set to "Not detected"
     if (sportScores[0].score === 0) {
-      cardDetails.sport = "Baseball"; // Default
-      console.log("No sport indicators found, defaulting to Baseball");
+      cardDetails.sport = "Not detected"; // No default sport
+      console.log("No sport indicators found, setting to 'Not detected'");
     } else {
       // Use sport with highest score
       cardDetails.sport = sportScores[0].sport;
@@ -1277,8 +1277,8 @@ function detectSport(text: string, cardDetails: Partial<CardFormValues>): void {
     console.log(`Final sport: ${cardDetails.sport}`);
   } catch (error) {
     console.error('Error detecting sport:', error);
-    // Default to baseball if there's an error
-    cardDetails.sport = "Baseball";
-    console.log(`Sport detection error, defaulted to: ${cardDetails.sport}`);
+    // Set to "Not detected" if there's an error
+    cardDetails.sport = "Not detected";
+    console.log(`Sport detection error, set to: ${cardDetails.sport}`);
   }
 }

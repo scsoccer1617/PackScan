@@ -185,6 +185,8 @@ export function getFoilSearchTerm(foilType: string | null): string {
     'Aqua Foil': 'aqua foil',
     'Blue Foil': 'blue foil',
     'Teal Foil': 'teal foil',
+    'Green Foil': 'green foil',
+    'Green': 'green',
     'Parallel': 'parallel'
   };
 
