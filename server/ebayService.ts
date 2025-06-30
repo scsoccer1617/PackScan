@@ -106,9 +106,23 @@ export async function searchCardValues(
     }
     // Standard cards
     else {
-      // For regular cards, we use a broader search
-      keywords = `${lastName} ${brand} ${year}`;
-      console.log('Using standard search strategy');
+      // For regular cards, include full player name, brand, collection, card number, and year
+      keywords = `${playerName} ${brand}`;
+      
+      // Add collection if available
+      if (collection) {
+        keywords += ` ${collection}`;
+      }
+      
+      // Add card number if available
+      if (cardNumber && /^\d+$/.test(cardNumber)) {
+        keywords += ` ${cardNumber}`;
+      }
+      
+      // Add year
+      keywords += ` ${year}`;
+      
+      console.log('Using comprehensive standard search strategy with full card details');
     }
     
     // Add serial number suffix for serialized cards to get accurate pricing for limited editions
