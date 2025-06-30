@@ -993,6 +993,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       console.log('Starting dual-image OCR + eBay price analysis...');
+      console.log('ROUTE HANDLER IS DEFINITELY CALLED!');
       
       // Analyze back image for detailed card information
       const backFile = files.backImage[0];
