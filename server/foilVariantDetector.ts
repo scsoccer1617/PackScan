@@ -17,12 +17,14 @@ export interface FoilDetectionResult {
  */
 const FOIL_KEYWORDS = [
   'foil', 'chrome', 'refractor', 'prismatic', 'rainbow', 'holographic', 'hologram',
-  'shimmer', 'metallic', 'silver', 'gold', 'platinum', 'mirror', 'prism',
-  'superfractor', 'refractor', 'xfractor', 'sepia', 'negative',
+  'shimmer', 'metallic', 'platinum', 'mirror', 'prism',
+  'superfractor', 'xfractor', 'sepia', 'negative',
   'wave', 'atomic', 'crystal', 'diamond', 'emerald', 'ruby', 'sapphire',
   'topps chrome', 'bowman chrome', 'chrome series', 'chrome variations',
   'certified autograph', 'jersey autograph', 'patch autograph',
-  'aqua', 'aqua foil', 'blue foil', 'teal foil', 'green foil', 'green', 'parallel'
+  'aqua foil', 'blue foil', 'teal foil', 'green foil', 'silver foil', 'gold foil',
+  'red foil', 'purple foil', 'orange foil', 'black foil', 'pink foil',
+  'parallel'
 ];
 
 /**
@@ -38,8 +40,17 @@ const FOIL_VARIANTS: Record<string, string> = {
   'holographic': 'Foil',
   'hologram': 'Foil',
   'metallic': 'Foil',
-  'silver': 'Silver Foil',
-  'gold': 'Gold Foil',
+  'silver foil': 'Silver Foil',
+  'gold foil': 'Gold Foil',
+  'green foil': 'Green Foil',
+  'blue foil': 'Blue Foil',
+  'red foil': 'Red Foil',
+  'aqua foil': 'Aqua Foil',
+  'teal foil': 'Teal Foil',
+  'purple foil': 'Purple Foil',
+  'orange foil': 'Orange Foil',
+  'black foil': 'Black Foil',
+  'pink foil': 'Pink Foil',
   'platinum': 'Platinum',
   'mirror': 'Mirror',
   'prism': 'Prism',
@@ -50,12 +61,6 @@ const FOIL_VARIANTS: Record<string, string> = {
   'certified autograph': 'Autograph',
   'jersey autograph': 'Jersey Autograph',
   'patch autograph': 'Patch Autograph',
-  'aqua': 'Aqua Foil',
-  'aqua foil': 'Aqua Foil',
-  'blue foil': 'Blue Foil',
-  'teal foil': 'Teal Foil',
-  'green foil': 'Green Foil',
-  'green': 'Green',
   'parallel': 'Parallel'
 };
 
@@ -73,18 +78,38 @@ export function detectFoilVariant(fullText: string): FoilDetectionResult {
   console.log('Full text for foil detection (first 300 chars):', fullText.substring(0, 300));
   console.log('Text length:', fullText.length);
 
-  // Check for explicit foil keywords
+  // Check for explicit foil keywords with context validation
   for (const keyword of FOIL_KEYWORDS) {
-    if (textLower.includes(keyword.toLowerCase())) {
+    const keywordLower = keyword.toLowerCase();
+    if (textLower.includes(keywordLower)) {
+      // Special handling for generic "foil" - require it to be in a card context
+      if (keywordLower === 'foil') {
+        // Only detect "foil" if it appears with card-specific context
+        const foilContextPatterns = [
+          /\bfoil\s+(?:card|variant|parallel|finish|series)\b/,
+          /\b(?:card|variant|parallel|finish|series)\s+foil\b/,
+          /\b(?:silver|gold|green|blue|red|rainbow)\s+foil\b/,
+          /\bfoil\s+(?:silver|gold|green|blue|red|rainbow)\b/,
+          /\btopps\s+foil\b/,
+          /\bfoil\s+topps\b/
+        ];
+        
+        const hasCardContext = foilContextPatterns.some(pattern => pattern.test(textLower));
+        if (!hasCardContext) {
+          console.log(`Skipping generic "foil" keyword - no card context found`);
+          continue;
+        }
+      }
+      
       indicators.push(keyword);
       isFoil = true;
       confidence += 0.2;
       
-      console.log(`Found foil keyword: "${keyword}" -> maps to: "${FOIL_VARIANTS[keyword.toLowerCase()]}"`);
+      console.log(`Found foil keyword: "${keyword}" -> maps to: "${FOIL_VARIANTS[keywordLower]}"`);
       
       // Set specific foil type if found
-      if (FOIL_VARIANTS[keyword.toLowerCase()]) {
-        foilType = FOIL_VARIANTS[keyword.toLowerCase()];
+      if (FOIL_VARIANTS[keywordLower]) {
+        foilType = FOIL_VARIANTS[keywordLower];
         console.log(`Set foil type to: "${foilType}"`);
       }
     }
