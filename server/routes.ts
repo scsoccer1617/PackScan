@@ -1066,7 +1066,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             success: true,
             data: {
               ...cardData,
-              isRookieCard: isRookieCard,
+
               ebayResults: {
                 averageValue: 0,
                 results: [],
@@ -1083,7 +1083,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           success: true,
           data: {
             ...cardData,
-            isRookieCard: isRookieCard,
+
             ebayResults: {
               averageValue: 0,
               results: [],
