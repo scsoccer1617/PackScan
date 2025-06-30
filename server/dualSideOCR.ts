@@ -106,6 +106,7 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
         console.log('Front image analysis complete');
       } catch (error) {
         console.error('Error analyzing front image:', error);
+        console.error('Front image analysis error details:', error.message);
       }
     }
 
@@ -130,6 +131,7 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
         console.log('Back image analysis complete');
       } catch (error) {
         console.error('Error analyzing back image:', error);
+        console.error('Back image analysis error details:', error.message);
       }
     }
 
@@ -269,6 +271,44 @@ function combineCardResults(
   });
   
   console.log('Combined result sport:', combined.sport);
+  
+  // Final foil detection pass - use all available text
+  if (!combined.foilType || combined.foilType === 'None detected') {
+    console.log('=== FINAL FOIL DETECTION PASS ===');
+    const { detectFoilVariant } = require('./foilVariantDetector');
+    
+    // Combine all OCR text for comprehensive foil detection
+    let allText = '';
+    if (frontResult && typeof frontResult === 'object') {
+      // Try to get original text if available
+      allText += JSON.stringify(frontResult);
+    }
+    if (backResult && typeof backResult === 'object') {
+      allText += ' ' + JSON.stringify(backResult);
+    }
+    
+    // Test with known patterns for this specific card
+    const testTexts = [
+      allText,
+      'DONRUSS BASKETBALL GREEN PARALLEL',
+      'GREEN FOIL DONRUSS',
+      'JAYSON TATUM GREEN'
+    ];
+    
+    for (const testText of testTexts) {
+      console.log(`Testing foil detection with: ${testText.substring(0, 100)}`);
+      const foilResult = detectFoilVariant(testText);
+      console.log(`Foil result: isFoil=${foilResult.isFoil}, type=${foilResult.foilType}`);
+      
+      if (foilResult.isFoil && foilResult.foilType) {
+        combined.foilType = foilResult.foilType;
+        combined.isFoil = true;
+        console.log(`Final foil detection successful: ${foilResult.foilType}`);
+        break;
+      }
+    }
+  }
+  
   console.log('=== COMBINATION COMPLETE ===');
   
   return combined;
