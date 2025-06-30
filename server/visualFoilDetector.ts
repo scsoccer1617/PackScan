@@ -208,11 +208,13 @@ export async function detectFoilFromImage(base64Image: string): Promise<FoilDete
 
   } catch (error) {
     console.error('Error in visual foil detection:', error);
+    console.error('Error details:', error instanceof Error ? error.message : error);
+    console.error('Error stack:', error instanceof Error ? error.stack : 'No stack trace');
     return {
       isFoil: false,
       foilType: null,
       confidence: 0,
-      indicators: ['Error in visual analysis']
+      indicators: [`Error in visual analysis: ${error instanceof Error ? error.message : String(error)}`]
     };
   }
 }

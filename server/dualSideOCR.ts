@@ -353,8 +353,8 @@ async function combineCardResults(
       combined.isFoil = true;
       console.log(`Visual foil detection successful: ${visualFoilResult.foilType} (confidence: ${visualFoilResult.confidence})`);
       console.log(`Visual indicators: ${visualFoilResult.indicators.join('; ')}`);
-    } else if (visualFoilResult) {
-      // Visual detection ran but found no foil - trust this result over text analysis
+    } else if (visualFoilResult && !visualFoilResult.indicators.includes('Error in visual analysis')) {
+      // Visual detection ran successfully but found no foil - trust this result over text analysis
       combined.foilType = null;
       combined.isFoil = false;
       console.log('Visual foil detection explicitly rejected foil characteristics');
