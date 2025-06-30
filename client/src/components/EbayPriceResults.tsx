@@ -187,7 +187,7 @@ export default function EbayPriceResults({ cardData, frontImage, backImage }: Eb
               {/* Sport */}
               <div className="text-base">
                 <span className="font-semibold text-slate-800">Sport: </span>
-                <span className="text-slate-700">{cardData.sport || 'Baseball'}</span>
+                <span className="text-slate-700">{cardData.sport || 'Not detected'}</span>
               </div>
 
               {/* Player */}

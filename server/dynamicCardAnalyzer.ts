@@ -102,7 +102,7 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       variant: '',
       serialNumber: '',
       estimatedValue: 0, // Default value
-      sport: 'Baseball', // Default sport
+      sport: '', // No default sport - will be detected
       isRookieCard: false,
       isAutographed: false,
       isNumbered: false,
@@ -1087,13 +1087,24 @@ function detectCardFeatures(text: string, cardDetails: Partial<CardFormValues>):
  */
 function detectSport(text: string, cardDetails: Partial<CardFormValues>): void {
   try {
-    // If sport is already explicitly set, don't override it
-    if (cardDetails.sport && cardDetails.sport !== 'Baseball') {
+    console.log(`=== SPORT DETECTION START ===`);
+    console.log(`Input text (first 200 chars): ${text.substring(0, 200)}`);
+    console.log(`Current sport before detection: ${cardDetails.sport}`);
+    console.log(`Current player: ${cardDetails.playerFirstName} ${cardDetails.playerLastName}`);
+    
+    // If sport is already explicitly set to non-baseball, don't override it
+    if (cardDetails.sport && cardDetails.sport !== 'Baseball' && cardDetails.sport !== '') {
+      console.log(`Sport already set to ${cardDetails.sport}, skipping detection`);
       return;
     }
     
     // First, check for explicit sport indicators that should override everything else
-    if (text.match(/\bBASEBALL CARD\b|\bMAJOR LEAGUE BASEBALL\b|\bMLB\b/i)) {
+    if (text.match(/\bBASKETBALL\b|\bNBA\b|\bNATIONAL BASKETBALL ASSOCIATION\b/i)) {
+      cardDetails.sport = "Basketball";
+      console.log("Sport detected (explicit indicator): Basketball");
+      return;
+    }
+    else if (text.match(/\bBASEBALL CARD\b|\bMAJOR LEAGUE BASEBALL\b|\bMLB\b/i)) {
       cardDetails.sport = "Baseball";
       console.log("Sport detected (explicit indicator): Baseball");
       return;
@@ -1101,11 +1112,6 @@ function detectSport(text: string, cardDetails: Partial<CardFormValues>): void {
     else if (text.match(/\bFOOTBALL CARD\b|\bNATIONAL FOOTBALL LEAGUE\b|\bNFL\b/i)) {
       cardDetails.sport = "Football";
       console.log("Sport detected (explicit indicator): Football");
-      return;
-    } 
-    else if (text.match(/\bBASKETBALL CARD\b|\bNATIONAL BASKETBALL ASSOCIATION\b|\bNBA\b/i)) {
-      cardDetails.sport = "Basketball";
-      console.log("Sport detected (explicit indicator): Basketball");
       return;
     } 
     else if (text.match(/\bHOCKEY CARD\b|\bNATIONAL HOCKEY LEAGUE\b|\bNHL\b/i)) {
@@ -1266,9 +1272,12 @@ function detectSport(text: string, cardDetails: Partial<CardFormValues>): void {
       cardDetails.sport = sportScores[0].sport;
       console.log(`Sport detected with highest score (${sportScores[0].score}): ${cardDetails.sport}`);
     }
+    console.log(`=== SPORT DETECTION END ===`);
+    console.log(`Final sport: ${cardDetails.sport}`);
   } catch (error) {
     console.error('Error detecting sport:', error);
     // Default to baseball if there's an error
     cardDetails.sport = "Baseball";
+    console.log(`Sport detection error, defaulted to: ${cardDetails.sport}`);
   }
 }
