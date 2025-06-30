@@ -1002,21 +1002,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Use dual-side analysis for both front and back images
       const { handleDualSideCardAnalysis } = await import('./dualSideOCR');
       
-      const backOcrResponse = await new Promise<any>((resolve, reject) => {
-        const mockReqDual = { 
-          files: { 
-            backImage: [backFile],
-            ...(files.frontImage && { frontImage: files.frontImage })
-          } 
-        };
-        const mockResDual = {
-          json: (data: any) => resolve(data),
+      // Call the dual-side handler directly
+      console.log('About to call handleDualSideCardAnalysis directly...');
+      const dualRequest = { 
+        files: { 
+          backImage: [backFile],
+          ...(files.frontImage && { frontImage: files.frontImage })
+        } 
+      } as any;
+      
+      let backOcrResponse: any = null;
+      
+      await new Promise<void>((resolve, reject) => {
+        const mockResponse = {
+          json: (data: any) => {
+            console.log('Mock response received:', JSON.stringify(data, null, 2));
+            backOcrResponse = data;
+            resolve();
+          },
           status: (code: number) => ({
-            json: (data: any) => reject(new Error(`Dual OCR failed with status ${code}: ${JSON.stringify(data)}`))
+            json: (data: any) => {
+              console.error(`Dual OCR failed with status ${code}:`, data);
+              reject(new Error(`Dual OCR failed with status ${code}: ${JSON.stringify(data)}`));
+            }
           })
         };
         
-        handleDualSideCardAnalysis(mockReqDual as any, mockResDual as any);
+        handleDualSideCardAnalysis(dualRequest, mockResponse as any);
       });
 
       // Dual-side analysis now handles rookie card detection automatically
