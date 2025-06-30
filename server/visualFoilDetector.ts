@@ -161,16 +161,19 @@ export async function detectFoilFromImage(base64Image: string): Promise<FoilDete
       }
     }
 
-    // Apply strict rejection criteria for likely false positives
+    // Apply very strict rejection criteria for likely false positives
     if (isFoil && !hasStrongFoilIndicators) {
-      // If we only have weak indicators and potential white border reflection, reject
-      if (hasWhiteBorderReflection || confidence < 0.4) {
-        console.log('REJECTING foil detection - insufficient strong indicators or white border detected');
-        isFoil = false;
-        foilType = null;
-        confidence = 0;
-        indicators.push('REJECTED: Likely false positive from lighting/white border');
-      }
+      console.log('REJECTING foil detection - no strong foil indicators found');
+      isFoil = false;
+      foilType = null;
+      confidence = 0;
+      indicators.push('REJECTED: No strong foil indicators (prismatic/chrome/metallic) detected');
+    } else if (isFoil && hasWhiteBorderReflection && confidence < 0.7) {
+      console.log('REJECTING foil detection - likely white border reflection');
+      isFoil = false;
+      foilType = null;
+      confidence = 0;
+      indicators.push('REJECTED: Likely false positive from white border reflection');
     }
     
     // Cap confidence at 1.0
@@ -191,7 +194,10 @@ export async function detectFoilFromImage(base64Image: string): Promise<FoilDete
     console.log(`Is Foil: ${isFoil}`);
     console.log(`Foil Type: ${foilType}`);
     console.log(`Confidence: ${confidence.toFixed(2)}`);
+    console.log(`Strong indicators present: ${hasStrongFoilIndicators}`);
+    console.log(`White border reflection detected: ${hasWhiteBorderReflection}`);
     console.log(`Indicators: ${indicators.join('; ')}`);
+    console.log('=== END VISUAL FOIL DETECTION ===');
 
     return {
       isFoil,
