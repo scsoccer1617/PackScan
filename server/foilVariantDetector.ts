@@ -138,20 +138,15 @@ export function detectFoilVariant(fullText: string): FoilDetectionResult {
     confidence += 0.4;
   }
   
-  // Special case for Donruss green parallels
-  // Many Donruss cards have green parallel variants that don't explicitly say "green" in OCR
+  // Special case for explicit green parallels only when foil indicators are present
   if ((textLower.includes('donruss') || textLower.includes('panini')) && 
       textLower.includes('basketball') &&
-      (textLower.includes('tatum') || textLower.includes('jayson'))) {
-    // Check if this appears to be a foil card based on visual indicators
-    // Foil cards often have poor OCR due to reflective surface
-    if (fullText.length < 200 || fullText.includes('197')) { // Card #197 is often green parallel
-      indicators.push('Donruss green parallel detected');
-      isFoil = true;
-      foilType = 'Green';
-      confidence += 0.6;
-      console.log('🟢 Special detection: Donruss Tatum #197 - likely green parallel');
-    }
+      (textLower.includes('green') || textLower.includes('laser') || textLower.includes('holo'))) {
+    indicators.push('Donruss green parallel detected from explicit foil text');
+    isFoil = true;
+    foilType = 'Green';
+    confidence += 0.6;
+    console.log('Green parallel detected: Explicit foil indicators found in text');
   }
 
   // Visual indicators from text patterns

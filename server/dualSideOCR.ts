@@ -297,25 +297,20 @@ async function combineCardResults(
     console.log('Combined text contains "green":', allText.toLowerCase().includes('green'));
     console.log('Combined text contains "foil":', allText.toLowerCase().includes('foil'));
     
-    // Test with known patterns for this specific card
-    const testTexts = [
-      allText,
-      'DONRUSS BASKETBALL GREEN PARALLEL',
-      'GREEN FOIL DONRUSS',
-      'JAYSON TATUM GREEN'
-    ];
+    // Only use the actual OCR text for foil detection
+    console.log(`Testing foil detection with actual OCR text: ${allText.substring(0, 100)}`);
+    const foilResult = detectFoilVariant(allText);
+    console.log(`Foil result: isFoil=${foilResult.isFoil}, type=${foilResult.foilType}`);
     
-    for (const testText of testTexts) {
-      console.log(`Testing foil detection with: ${testText.substring(0, 100)}`);
-      const foilResult = detectFoilVariant(testText);
-      console.log(`Foil result: isFoil=${foilResult.isFoil}, type=${foilResult.foilType}`);
-      
-      if (foilResult.isFoil && foilResult.foilType) {
-        combined.foilType = foilResult.foilType;
-        combined.isFoil = true;
-        console.log(`Final foil detection successful: ${foilResult.foilType}`);
-        break;
-      }
+    if (foilResult.isFoil && foilResult.foilType) {
+      combined.foilType = foilResult.foilType;
+      combined.isFoil = true;
+      console.log(`Final foil detection successful: ${foilResult.foilType}`);
+    } else {
+      // Ensure no foil is detected when there's no evidence
+      combined.foilType = null;
+      combined.isFoil = false;
+      console.log('No foil variant detected - setting to null');
     }
   
   console.log('=== COMBINATION COMPLETE ===');
