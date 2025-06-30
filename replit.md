@@ -114,6 +114,9 @@ This is a streamlined web application focused on sports card price lookup using 
 - June 28, 2025: Implemented comprehensive foil variant detection system for chrome, refractor, autograph, and special finish cards
 - June 28, 2025: Added foil-specific eBay search keywords to improve pricing accuracy for premium card variants
 - June 30, 2025: Fixed critical foil detection false positive issue - removed foilType from front analyzer priority to prevent "Foil" being set for non-foil cards
+- June 30, 2025: Implemented comprehensive visual foil detection system using Google Vision API for metallic surfaces, reflectivity, and prismatic effects analysis
+- June 30, 2025: Fixed foil detection false positives for white border reflections with strict rejection criteria and sport-specific text detection
+- June 30, 2025: Enhanced fallback logic to properly handle visual detection errors and use conservative text-based detection as backup
 
 ## User Preferences
 
