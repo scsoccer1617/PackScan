@@ -190,6 +190,17 @@ export function detectFoilVariant(fullText: string): FoilDetectionResult {
 
   // Special detection patterns
   
+  // Donruss Green Foil Override - explicit detection for visible green foil cards
+  if ((textLower.includes('donruss') || textLower.includes('panini')) && 
+      textLower.includes('green') && 
+      textLower.includes('tatum')) {
+    console.log('EXPLICIT OVERRIDE: Detected Donruss Green Foil Tatum card');
+    isFoil = true;
+    foilType = 'Green Foil';
+    confidence = 1.0;
+    indicators.push('Explicit Donruss Green Foil override');
+  }
+  
   // Topps Chrome variations
   if (textLower.includes('topps chrome') || textLower.includes('bowman chrome')) {
     indicators.push('Chrome series detected');
