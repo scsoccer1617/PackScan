@@ -354,7 +354,7 @@ export async function searchCardValues(
     }
     
     // Return search URL as fallback when API fails
-    const searchUrl = getEbaySearchUrl(playerName, cardNumber, brand, year, collection, '', isNumbered);
+    const searchUrl = getEbaySearchUrl(playerName, cardNumber, brand, year, collection, '', isNumbered, foilType, serialNumber);
     return { 
       averageValue: 0, 
       results: [],
