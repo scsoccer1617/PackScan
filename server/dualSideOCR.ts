@@ -99,18 +99,11 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
         // Get raw OCR text for foil detection
         frontOCRText = await extractTextForBrandDetection(frontBase64);
         
-        // Try to determine if this is a Score card first by checking brand name
-        console.log(`Front text detection: ${frontOCRText.substring(0, 100)}`);
-        if (frontOCRText.toUpperCase().includes('SCORE')) {
-          console.log('Detected Score card brand from front image, using specialized analyzer');
-          frontResult = await Promise.race([analyzeScoreCard(frontBase64), createTimeout()]);
-        } else {
-          // Use standard analyzer for other card brands
-          console.log('Using standard analyzer for front image');
-          console.log('Calling analyzeSportsCardImage...');
-          frontResult = await Promise.race([analyzeSportsCardImage(frontBase64), createTimeout()]);
-          console.log('analyzeSportsCardImage returned:', frontResult);
-        }
+        // Use dynamic analyzer that can handle all card types
+        console.log(`Front text detection: ${frontOCRText.substring(0, 200)}`);
+        console.log('Using dynamic analyzer for front image');
+        frontResult = await Promise.race([analyzeSportsCardImage(frontBase64), createTimeout()]);
+        console.log('Front image analysis returned:', frontResult);
         console.log('Front image analysis complete');
       } catch (error) {
         console.error('Error analyzing front image:', error);
@@ -126,18 +119,11 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
         // Get raw OCR text for foil detection
         backOCRText = await extractTextForBrandDetection(backBase64);
         
-        // Try to determine if this is a Score card first by checking brand name
-        console.log(`Back text detection: ${backOCRText.substring(0, 100)}`);
-        if (backOCRText.toUpperCase().includes('SCORE')) {
-          console.log('Detected Score card brand from back image, using specialized analyzer');
-          backResult = await Promise.race([analyzeScoreCard(backBase64), createTimeout()]);
-        } else {
-          // Use standard analyzer for other card brands
-          console.log('Using standard analyzer for back image');
-          console.log('Calling analyzeSportsCardImage for back...');
-          backResult = await Promise.race([analyzeSportsCardImage(backBase64), createTimeout()]);
-          console.log('analyzeSportsCardImage returned for back:', backResult);
-        }
+        // Use dynamic analyzer that can handle all card types
+        console.log(`Back text detection: ${backOCRText.substring(0, 200)}`);
+        console.log('Using dynamic analyzer for back image');
+        backResult = await Promise.race([analyzeSportsCardImage(backBase64), createTimeout()]);
+        console.log('Back image analysis returned:', backResult);
         console.log('Back image analysis complete');
       } catch (error) {
         console.error('Error analyzing back image:', error);
