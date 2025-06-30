@@ -69,6 +69,10 @@ export function detectFoilVariant(fullText: string): FoilDetectionResult {
   let foilType: string | null = null;
   let confidence = 0;
 
+  console.log('=== FOIL VARIANT DETECTION DETAILED DEBUG ===');
+  console.log('Full text for foil detection (first 300 chars):', fullText.substring(0, 300));
+  console.log('Text length:', fullText.length);
+
   // Check for explicit foil keywords
   for (const keyword of FOIL_KEYWORDS) {
     if (textLower.includes(keyword.toLowerCase())) {
@@ -76,12 +80,17 @@ export function detectFoilVariant(fullText: string): FoilDetectionResult {
       isFoil = true;
       confidence += 0.2;
       
+      console.log(`Found foil keyword: "${keyword}" -> maps to: "${FOIL_VARIANTS[keyword.toLowerCase()]}"`);
+      
       // Set specific foil type if found
       if (FOIL_VARIANTS[keyword.toLowerCase()]) {
         foilType = FOIL_VARIANTS[keyword.toLowerCase()];
+        console.log(`Set foil type to: "${foilType}"`);
       }
     }
   }
+  
+  console.log(`After keyword detection: isFoil=${isFoil}, foilType=${foilType}, indicators=[${indicators.join(', ')}]`);
 
   // Special detection patterns
   
