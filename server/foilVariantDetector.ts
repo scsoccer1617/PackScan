@@ -186,8 +186,16 @@ export function detectFoilVariant(fullText: string): FoilDetectionResult {
   confidence = Math.min(confidence, 1.0);
 
   // Default foil type if detected but not specified
+  // Only set default "Foil" if we have high confidence (>=0.6) or multiple indicators
   if (isFoil && !foilType) {
-    foilType = 'Foil';
+    if (confidence >= 0.6 || indicators.length >= 2) {
+      foilType = 'Foil';
+    } else {
+      // Low confidence detection - likely false positive
+      console.log(`Low confidence foil detection (${confidence}) with ${indicators.length} indicators: [${indicators.join(', ')}] - setting to null`);
+      isFoil = false;
+      foilType = null;
+    }
   }
 
   return {
