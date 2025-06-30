@@ -1016,6 +1016,42 @@ function detectCardFeatures(text: string, cardDetails: Partial<CardFormValues>):
         break;
       }
     }
+    
+    // FOIL VARIANT DETECTION
+    // Import and use the foil variant detector
+    const { detectFoilVariant } = require('./foilVariantDetector');
+    const foilResult = detectFoilVariant(text);
+    
+    if (foilResult.isFoil) {
+      cardDetails.isFoil = true;
+      cardDetails.foilType = foilResult.foilType;
+      console.log(`Detected foil variant: ${foilResult.foilType} (confidence: ${foilResult.confidence})`);
+      console.log(`Foil indicators: ${foilResult.indicators.join(', ')}`);
+      
+      // For numbered cards, likely aqua foil or similar special variant
+      if (cardDetails.isNumbered && cardDetails.serialNumber) {
+        // Check if it's a low-numbered card (likely premium foil)
+        const serialMatch = cardDetails.serialNumber.match(/(\d+)\/(\d+)/);
+        if (serialMatch) {
+          const total = parseInt(serialMatch[2]);
+          if (total <= 999) { // Most aqua foils are /399 or similar
+            cardDetails.foilType = 'Aqua Foil';
+            cardDetails.variant = 'Aqua Foil';
+            console.log(`Updated to Aqua Foil variant based on serial number: ${cardDetails.serialNumber}`);
+          }
+        }
+      }
+    } else {
+      // Enhanced visual-based foil detection for cards with limited OCR text
+      // This is common with foil cards due to reflective surfaces interfering with OCR
+      if (text.length < 50 && cardDetails.isNumbered) {
+        // Short OCR text + numbered card often indicates foil
+        cardDetails.isFoil = true;
+        cardDetails.foilType = 'Aqua Foil';
+        cardDetails.variant = 'Aqua Foil';
+        console.log('Detected Aqua Foil variant based on limited OCR text and numbered status');
+      }
+    }
   } catch (error) {
     console.error('Error detecting card features:', error);
   }

@@ -21,7 +21,8 @@ const FOIL_KEYWORDS = [
   'superfractor', 'refractor', 'xfractor', 'sepia', 'negative',
   'wave', 'atomic', 'crystal', 'diamond', 'emerald', 'ruby', 'sapphire',
   'topps chrome', 'bowman chrome', 'chrome series', 'chrome variations',
-  'certified autograph', 'jersey autograph', 'patch autograph'
+  'certified autograph', 'jersey autograph', 'patch autograph',
+  'aqua', 'aqua foil', 'blue foil', 'teal foil', 'parallel'
 ];
 
 /**
@@ -48,7 +49,12 @@ const FOIL_VARIANTS: Record<string, string> = {
   'atomic': 'Atomic Refractor',
   'certified autograph': 'Autograph',
   'jersey autograph': 'Jersey Autograph',
-  'patch autograph': 'Patch Autograph'
+  'patch autograph': 'Patch Autograph',
+  'aqua': 'Aqua Foil',
+  'aqua foil': 'Aqua Foil',
+  'blue foil': 'Blue Foil',
+  'teal foil': 'Teal Foil',
+  'parallel': 'Parallel'
 };
 
 /**
@@ -173,7 +179,11 @@ export function getFoilSearchTerm(foilType: string | null): string {
     'Jersey Autograph': 'jersey autograph',
     'Patch Autograph': 'patch autograph',
     'Numbered Foil': 'foil',
-    'Prizm': 'prizm'
+    'Prizm': 'prizm',
+    'Aqua Foil': 'aqua foil',
+    'Blue Foil': 'blue foil',
+    'Teal Foil': 'teal foil',
+    'Parallel': 'parallel'
   };
 
   return searchTerms[foilType] || foilType.toLowerCase();
