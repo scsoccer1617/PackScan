@@ -332,6 +332,7 @@ async function combineCardResults(
     
     // Only use the actual OCR text for foil detection (not processed results)
     console.log(`Testing foil detection with raw OCR text: ${combinedOCRText.substring(0, 100)}`);
+    console.log('CALLING detectFoilVariant function now...');
     const foilResult = detectFoilVariant(combinedOCRText);
     console.log(`Foil result: isFoil=${foilResult.isFoil}, type=${foilResult.foilType}`);
     
