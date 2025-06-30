@@ -202,6 +202,11 @@ async function combineCardResults(
   frontOCRText: string = '',
   backOCRText: string = ''
 ): Promise<Partial<CardFormValues>> {
+  console.log('=== COMBINE CARD RESULTS STARTED ===');
+  console.log('Front result foilType:', frontResult.foilType);
+  console.log('Back result foilType:', backResult.foilType);
+  console.log('Front OCR text length:', frontOCRText.length);
+  console.log('Back OCR text length:', backOCRText.length);
   console.log('=== COMBINING CARD RESULTS ===');
   console.log('Front result sport:', frontResult.sport);
   console.log('Back result sport:', backResult.sport);
