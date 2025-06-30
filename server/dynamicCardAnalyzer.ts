@@ -1108,6 +1108,10 @@ function detectCardFeatures(text: string, cardDetails: Partial<CardFormValues>):
     const foilResult = detectFoilVariant(text);
     console.log(`Foil detection result:`, foilResult);
     
+    // TEMPORARILY DISABLE ALL FOIL DETECTION IN detectCardFeatures
+    console.log('TEMP: Skipping all foil detection in detectCardFeatures - will be handled in dual-side combine function');
+    console.log(`Foil indicators found: [${foilResult.indicators.join(', ')}]`);
+    /*
     if (foilResult.isFoil) {
       cardDetails.isFoil = true;
       cardDetails.foilType = foilResult.foilType;
@@ -1154,6 +1158,7 @@ function detectCardFeatures(text: string, cardDetails: Partial<CardFormValues>):
         }
       }
     }
+    */
     
     console.log(`Final foil status: isFoil=${cardDetails.isFoil}, foilType=${cardDetails.foilType}`);
     console.log(`=== END FOIL DETECTION ===`);
