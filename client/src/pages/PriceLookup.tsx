@@ -76,11 +76,6 @@ export default function PriceLookup() {
         setCardData(result.data);
         setShowOCRResults(true);
         setShowPriceResults(true); // Show both OCR and price results
-        
-        toast({
-          title: "Analysis Complete",
-          description: `Found ${result.data.ebayResults?.length || 0} recent sales with average value of $${result.data.averageValue || 0}`,
-        });
       } else {
         throw new Error(result.message || 'Analysis failed');
       }
