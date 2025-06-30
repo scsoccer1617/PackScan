@@ -146,7 +146,17 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
 
     // Combine the results with priority to front image for player name, number, and rookie status
     // and priority to back image for copyright year, stats, and detailed information
-    const combinedResult = await combineCardResults(frontResult, backResult, frontOCRText, backOCRText);
+    let combinedResult;
+    try {
+      combinedResult = await combineCardResults(frontResult, backResult, frontOCRText, backOCRText);
+    } catch (error) {
+      console.error('Error in combineCardResults:', error);
+      console.error('Error details:', error.message);
+      return res.status(500).json({
+        success: false,
+        error: 'Error combining card analysis results'
+      });
+    }
     
     // Make sure we have all required fields with defaults if needed
     const finalResult = ensureRequiredFields(combinedResult);
