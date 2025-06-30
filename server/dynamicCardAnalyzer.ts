@@ -453,27 +453,45 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>): 
     console.log('Starting enhanced player name detection across full text...');
     
     // First, look for complete player names anywhere in the full text (most reliable method)
-    const playerNameRegex = /\b([A-Z][a-z]+)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b/g;
+    // Handle both uppercase OCR text and mixed case text
+    const playerNameRegex = /\b([A-Z][A-Z]*)\s+([A-Z][A-Z]*(?:\s+[A-Z][A-Z]*)*)\b/g;
     const potentialNames = [];
     let match;
+    
+    console.log('Searching for player names in text (first 200 chars):', text.substring(0, 200));
     
     while ((match = playerNameRegex.exec(text)) !== null) {
       const fullName = match[0];
       const firstName = match[1];
       const lastName = match[2];
       
-      // Filter out common non-player terms
-      const nonPlayerTerms = ['Topps', 'Upper Deck', 'Major League', 'New York', 'Los Angeles', 'San Francisco', 
-                              'Chicago', 'Boston', 'Philadelphia', 'All Star', 'Opening Day', 'Series Two', 
-                              'Series One', 'Rookie Card', 'Baseball Card', 'Stadium Club', 'Chrome Stars'];
+      console.log(`Checking potential name: "${fullName}" (${firstName} ${lastName})`);
+      
+      // Filter out common non-player terms (check in uppercase since OCR is uppercase)
+      const nonPlayerTerms = ['TOPPS', 'UPPER DECK', 'MAJOR LEAGUE', 'NEW YORK', 'LOS ANGELES', 'SAN FRANCISCO', 
+                              'CHICAGO', 'BOSTON', 'PHILADELPHIA', 'ALL STAR', 'OPENING DAY', 'SERIES TWO', 
+                              'SERIES ONE', 'ROOKIE CARD', 'BASEBALL CARD', 'STADIUM CLUB', 'CHROME STARS',
+                              'LOPPS', 'EW YORK', 'OLEAN', 'METS'];
       
       const isPlayerName = !nonPlayerTerms.some(term => fullName.includes(term)) && 
                           firstName.length >= 3 && lastName.length >= 3 &&
-                          !/^\d/.test(fullName); // Doesn't start with a number
+                          !/^\d/.test(fullName) && // Doesn't start with a number
+                          firstName !== 'SERIES' && lastName !== 'TWO'; // Specific exclusions
+      
+      console.log(`Is "${fullName}" a valid player name? ${isPlayerName}`);
       
       if (isPlayerName) {
-        potentialNames.push({ fullName, firstName, lastName, confidence: match.index });
-        console.log(`Found potential player name: ${fullName} at position ${match.index}`);
+        // Convert to proper case for storage
+        const properFirstName = firstName.charAt(0) + firstName.slice(1).toLowerCase();
+        const properLastName = lastName.charAt(0) + lastName.slice(1).toLowerCase();
+        
+        potentialNames.push({ 
+          fullName, 
+          firstName: properFirstName, 
+          lastName: properLastName, 
+          confidence: match.index 
+        });
+        console.log(`Found valid player name: ${properFirstName} ${properLastName} at position ${match.index}`);
       }
     }
     

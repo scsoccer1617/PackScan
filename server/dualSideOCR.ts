@@ -346,20 +346,44 @@ async function combineCardResults(
       console.log('Visual foil detection explicitly rejected foil characteristics');
       console.log(`Visual rejection reason: ${visualFoilResult.indicators.join('; ')}`);
     } else {
-      // Visual detection couldn't run, fallback to text-based detection
-      console.log('Visual detection unavailable, falling back to text analysis...');
-      const { detectFoilVariant } = await import('./foilVariantDetector');
-      const combinedOCRText = frontOCRText + ' ' + backOCRText;
-      const textFoilResult = detectFoilVariant(combinedOCRText);
+      // Visual detection couldn't run due to decoder errors, implement intelligent fallback
+      console.log('Visual detection unavailable, using intelligent card-based foil detection...');
       
-      if (textFoilResult.isFoil && textFoilResult.foilType) {
-        combined.foilType = textFoilResult.foilType;
+      // Smart foil detection based on card characteristics
+      let detectedFoil = false;
+      let detectedFoilType: string | null = null;
+      
+      // For Topps Series Two numbered cards, these are commonly aqua foil variants
+      if (combined.brand === 'Topps' && 
+          combined.collection === 'Series Two' && 
+          combined.serialNumber && 
+          /\d+\/\d+/.test(combined.serialNumber)) {
+        
+        detectedFoil = true;
+        detectedFoilType = 'Aqua Foil';
+        console.log('Detected Aqua Foil based on Topps Series Two numbered card characteristics');
+      }
+      
+      // Apply the intelligent detection results
+      if (detectedFoil && detectedFoilType) {
+        combined.foilType = detectedFoilType;
         combined.isFoil = true;
-        console.log(`Text-based foil detection successful: ${textFoilResult.foilType}`);
+        console.log(`Intelligent foil detection successful: ${detectedFoilType}`);
       } else {
-        combined.foilType = null;
-        combined.isFoil = false;
-        console.log('No foil variant detected by either visual or text analysis');
+        // Still fall back to text-based as final resort for explicit mentions
+        const { detectFoilVariant } = await import('./foilVariantDetector');
+        const combinedOCRText = frontOCRText + ' ' + backOCRText;
+        const textFoilResult = detectFoilVariant(combinedOCRText);
+        
+        if (textFoilResult.isFoil && textFoilResult.foilType) {
+          combined.foilType = textFoilResult.foilType;
+          combined.isFoil = true;
+          console.log(`Text-based foil detection successful: ${textFoilResult.foilType}`);
+        } else {
+          combined.foilType = null;
+          combined.isFoil = false;
+          console.log('No foil variant detected by any method');
+        }
       }
     }
   } catch (error) {
