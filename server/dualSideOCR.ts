@@ -318,6 +318,8 @@ async function combineCardResults(
   // Visual foil detection pass - analyze the actual card images for foil characteristics
   console.log('=== VISUAL FOIL DETECTION PASS ===');
   console.log('Current foil type before visual detection:', combined.foilType);
+  console.log('Front image buffer available:', !!frontImageBuffer, frontImageBuffer ? `(${frontImageBuffer.length} bytes)` : '');
+  console.log('Back image buffer available:', !!backImageBuffer, backImageBuffer ? `(${backImageBuffer.length} bytes)` : '');
   
   try {
     const { detectFoilFromImage } = await import('./visualFoilDetector');
@@ -328,14 +330,22 @@ async function combineCardResults(
     if (frontImageBuffer) {
       console.log('Running visual foil detection on front image buffer...');
       const frontBase64 = frontImageBuffer.toString('base64');
+      console.log('Base64 conversion successful, calling visual detector...');
       visualFoilResult = await detectFoilFromImage(frontBase64);
+      console.log('Visual detection result from front image:', visualFoilResult);
+    } else {
+      console.log('No front image buffer available for visual detection');
     }
     
     // If front image detection didn't work or wasn't available, try back image
     if (!visualFoilResult?.isFoil && backImageBuffer) {
       console.log('Running visual foil detection on back image buffer...');
       const backBase64 = backImageBuffer.toString('base64');
+      console.log('Base64 conversion successful, calling visual detector on back image...');
       visualFoilResult = await detectFoilFromImage(backBase64);
+      console.log('Visual detection result from back image:', visualFoilResult);
+    } else if (!backImageBuffer) {
+      console.log('No back image buffer available for visual detection');
     }
     
     if (visualFoilResult?.isFoil && visualFoilResult.foilType) {
@@ -343,9 +353,15 @@ async function combineCardResults(
       combined.isFoil = true;
       console.log(`Visual foil detection successful: ${visualFoilResult.foilType} (confidence: ${visualFoilResult.confidence})`);
       console.log(`Visual indicators: ${visualFoilResult.indicators.join('; ')}`);
+    } else if (visualFoilResult) {
+      // Visual detection ran but found no foil - trust this result over text analysis
+      combined.foilType = null;
+      combined.isFoil = false;
+      console.log('Visual foil detection explicitly rejected foil characteristics');
+      console.log(`Visual rejection reason: ${visualFoilResult.indicators.join('; ')}`);
     } else {
-      // Fallback to text-based detection for edge cases
-      console.log('Visual detection failed, falling back to text analysis...');
+      // Visual detection couldn't run, fallback to text-based detection
+      console.log('Visual detection unavailable, falling back to text analysis...');
       const { detectFoilVariant } = await import('./foilVariantDetector');
       const combinedOCRText = frontOCRText + ' ' + backOCRText;
       const textFoilResult = detectFoilVariant(combinedOCRText);
