@@ -227,6 +227,13 @@ async function combineCardResults(
   
   // Copy front priority fields first
   frontPriorityFields.forEach(field => {
+    // TEMPORARY FIX: Skip foilType from results to prevent false positives
+    if (field === 'foilType') {
+      console.log(`TEMP: Skipping foilType from both results - will be determined by raw OCR text only`);
+      console.log(`Front foilType was: ${frontResult[field]}, Back foilType was: ${backResult[field]}`);
+      return;
+    }
+    
     if (frontResult[field] !== undefined && frontResult[field] !== null && frontResult[field] !== '') {
       combined[field] = frontResult[field];
     } else if (backResult[field] !== undefined && backResult[field] !== null && backResult[field] !== '') {
