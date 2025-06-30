@@ -331,12 +331,12 @@ export async function searchCardValues(
     if (error.response?.data?.errors && Array.isArray(error.response.data.errors)) {
       const ebayError = error.response.data.errors[0];
       if (ebayError?.errorId === 1001 || ebayError?.errorId === '1001') {
-        errorMessage = 'eBay API rate limit exceeded - please try again later';
+        errorMessage = 'eBay OAuth token has expired. Please update your EBAY_BROWSE_TOKEN with a fresh token from eBay Developer Console.';
       } else if (ebayError?.message) {
         errorMessage = `eBay API error: ${ebayError.message}`;
       }
     } else if (error.response?.status === 401) {
-      errorMessage = 'eBay OAuth token invalid - check Browse API credentials';
+      errorMessage = 'eBay OAuth token has expired. Please generate a new EBAY_BROWSE_TOKEN from eBay Developer Console.';
     } else if (error.response?.status === 403) {
       errorMessage = 'eBay API access forbidden - OAuth token may lack Browse API permissions';
     } else if (error.response?.status === 429) {
