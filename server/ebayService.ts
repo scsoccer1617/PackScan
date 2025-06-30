@@ -127,14 +127,20 @@ export async function searchCardValues(
     }
     
     // Add foil variant for special finishes to get accurate pricing for foil variants
+    console.log(`DEBUG: foilType parameter = "${foilType}"`);
     if (foilType) {
       // Import the helper function to get the eBay-friendly search term
       const { getFoilSearchTerm } = require('./foilVariantDetector');
       const foilSearchTerm = getFoilSearchTerm(foilType);
+      console.log(`DEBUG: getFoilSearchTerm("${foilType}") = "${foilSearchTerm}"`);
       if (foilSearchTerm) {
         keywords += ` ${foilSearchTerm}`;
         console.log(`Added "${foilSearchTerm}" to search for ${foilType} foil variant`);
+      } else {
+        console.log(`No foil search term found for ${foilType}`);
       }
+    } else {
+      console.log('DEBUG: No foilType provided to eBay search');
     }
     
     console.log('Searching eBay for SOLD listings with keywords:', keywords);
@@ -350,8 +356,9 @@ export async function searchCardValues(
     console.error('Error response data:', error.response?.data);
     
     // If this is a complex search (with foil or serial), try a simpler search as fallback
-    if ((foilType || serialNumber)) {
-      console.log('Complex search failed, trying simpler fallback search...');
+    // But keep foilType since that's important for accurate pricing
+    if (serialNumber) {
+      console.log('Complex search failed, trying simpler fallback search (keeping foil type)...');
       return await searchCardValues(
         playerName, 
         cardNumber, 
@@ -360,7 +367,7 @@ export async function searchCardValues(
         collection, 
         condition, 
         false, // remove isNumbered
-        undefined, // remove foilType
+        foilType, // KEEP foilType for accurate pricing
         undefined  // remove serialNumber
       );
     }
