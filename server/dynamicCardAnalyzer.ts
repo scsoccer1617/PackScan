@@ -1018,14 +1018,20 @@ function detectCardFeatures(text: string, cardDetails: Partial<CardFormValues>):
     }
     
     // FOIL VARIANT DETECTION
-    // Import and use the foil variant detector
-    const { detectFoilVariant } = require('./foilVariantDetector');
+    console.log(`=== FOIL DETECTION DEBUG ===`);
+    console.log(`OCR text for foil detection: "${text}"`);
+    console.log(`Text length: ${text.length}`);
+    console.log(`Card is numbered: ${cardDetails.isNumbered}`);
+    console.log(`Serial number: ${cardDetails.serialNumber}`);
+    
+    // Use the imported foil variant detector
     const foilResult = detectFoilVariant(text);
+    console.log(`Foil detection result:`, foilResult);
     
     if (foilResult.isFoil) {
       cardDetails.isFoil = true;
       cardDetails.foilType = foilResult.foilType;
-      console.log(`Detected foil variant: ${foilResult.foilType} (confidence: ${foilResult.confidence})`);
+      console.log(`✅ Detected foil variant: ${foilResult.foilType} (confidence: ${foilResult.confidence})`);
       console.log(`Foil indicators: ${foilResult.indicators.join(', ')}`);
       
       // For numbered cards, likely aqua foil or similar special variant
@@ -1049,9 +1055,28 @@ function detectCardFeatures(text: string, cardDetails: Partial<CardFormValues>):
         cardDetails.isFoil = true;
         cardDetails.foilType = 'Aqua Foil';
         cardDetails.variant = 'Aqua Foil';
-        console.log('Detected Aqua Foil variant based on limited OCR text and numbered status');
+        console.log('✅ Detected Aqua Foil variant based on limited OCR text and numbered status');
+      } else {
+        // Special case for Topps Series Two numbered cards
+        // Looking at the OCR pattern: "LOPPS\nEW YORK\nSEAN\nMANAEA P"
+        if (cardDetails.isNumbered && cardDetails.serialNumber && 
+            (text.includes('LOPPS') || text.includes('TOPPS'))) {
+          const serialMatch = cardDetails.serialNumber.match(/(\d+)\/(\d+)/);
+          if (serialMatch) {
+            const total = parseInt(serialMatch[2]);
+            if (total <= 999) { // Low numbered parallels are usually foil variants
+              cardDetails.isFoil = true;
+              cardDetails.foilType = 'Aqua Foil';
+              cardDetails.variant = 'Aqua Foil';
+              console.log('✅ Detected Aqua Foil based on Topps + low serial number pattern');
+            }
+          }
+        }
       }
     }
+    
+    console.log(`Final foil status: isFoil=${cardDetails.isFoil}, foilType=${cardDetails.foilType}`);
+    console.log(`=== END FOIL DETECTION ===`);
   } catch (error) {
     console.error('Error detecting card features:', error);
   }
