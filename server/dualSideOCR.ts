@@ -86,15 +86,21 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
     let frontResult: Partial<CardFormValues> = {};
     let backResult: Partial<CardFormValues> = {};
 
+    // Store raw OCR text for foil detection
+    let frontOCRText = '';
+    let backOCRText = '';
+
     // Analyze front image if provided
     if (frontImage) {
       try {
         const frontBase64 = frontImage.buffer.toString('base64');
         
+        // Get raw OCR text for foil detection
+        frontOCRText = await extractTextForBrandDetection(frontBase64);
+        
         // Try to determine if this is a Score card first by checking brand name
-        const frontText = await extractTextForBrandDetection(frontBase64);
-        console.log(`Front text detection: ${frontText.substring(0, 100)}`);
-        if (frontText.toUpperCase().includes('SCORE')) {
+        console.log(`Front text detection: ${frontOCRText.substring(0, 100)}`);
+        if (frontOCRText.toUpperCase().includes('SCORE')) {
           console.log('Detected Score card brand from front image, using specialized analyzer');
           frontResult = await Promise.race([analyzeScoreCard(frontBase64), createTimeout()]);
         } else {
@@ -116,10 +122,12 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
       try {
         const backBase64 = backImage.buffer.toString('base64');
         
+        // Get raw OCR text for foil detection
+        backOCRText = await extractTextForBrandDetection(backBase64);
+        
         // Try to determine if this is a Score card first by checking brand name
-        const backText = await extractTextForBrandDetection(backBase64);
-        console.log(`Back text detection: ${backText.substring(0, 100)}`);
-        if (backText.toUpperCase().includes('SCORE')) {
+        console.log(`Back text detection: ${backOCRText.substring(0, 100)}`);
+        if (backOCRText.toUpperCase().includes('SCORE')) {
           console.log('Detected Score card brand from back image, using specialized analyzer');
           backResult = await Promise.race([analyzeScoreCard(backBase64), createTimeout()]);
         } else {
@@ -138,7 +146,7 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
 
     // Combine the results with priority to front image for player name, number, and rookie status
     // and priority to back image for copyright year, stats, and detailed information
-    const combinedResult = await combineCardResults(frontResult, backResult);
+    const combinedResult = await combineCardResults(frontResult, backResult, frontOCRText, backOCRText);
     
     // Make sure we have all required fields with defaults if needed
     const finalResult = ensureRequiredFields(combinedResult);
@@ -190,7 +198,9 @@ async function extractTextForBrandDetection(base64Image: string): Promise<string
  */
 async function combineCardResults(
   frontResult: Partial<CardFormValues>, 
-  backResult: Partial<CardFormValues>
+  backResult: Partial<CardFormValues>,
+  frontOCRText: string = '',
+  backOCRText: string = ''
 ): Promise<Partial<CardFormValues>> {
   console.log('=== COMBINING CARD RESULTS ===');
   console.log('Front result sport:', frontResult.sport);
@@ -279,27 +289,21 @@ async function combineCardResults(
   console.log('Current foil type before final detection:', combined.foilType);
   // Use the imported detectFoilVariant function
     
-    // Combine all OCR text for comprehensive foil detection
-    let allText = '';
-    if (frontResult && typeof frontResult === 'object') {
-      // Try to get original text if available
-      allText += JSON.stringify(frontResult);
-    }
-    if (backResult && typeof backResult === 'object') {
-      allText += ' ' + JSON.stringify(backResult);
-    }
+    // Use only the raw OCR text for foil detection (not the result objects)
+    const combinedOCRText = frontOCRText + ' ' + backOCRText;
     
-    console.log('=== ALL TEXT FOR FOIL DETECTION ===');
-    console.log('Front result type:', typeof frontResult);
-    console.log('Back result type:', typeof backResult);
-    console.log('Combined text length:', allText.length);
-    console.log('Combined text (first 500 chars):', allText.substring(0, 500));
-    console.log('Combined text contains "green":', allText.toLowerCase().includes('green'));
-    console.log('Combined text contains "foil":', allText.toLowerCase().includes('foil'));
+    console.log('=== RAW OCR TEXT FOR FOIL DETECTION ===');
+    console.log('Front OCR text length:', frontOCRText.length);
+    console.log('Back OCR text length:', backOCRText.length);
+    console.log('Combined OCR text (first 500 chars):', combinedOCRText.substring(0, 500));
+    console.log('Combined OCR text contains "green":', combinedOCRText.toLowerCase().includes('green'));
+    console.log('Combined OCR text contains "foil":', combinedOCRText.toLowerCase().includes('foil'));
+    console.log('Combined OCR text contains "holo":', combinedOCRText.toLowerCase().includes('holo'));
+    console.log('Combined OCR text contains "laser":', combinedOCRText.toLowerCase().includes('laser'));
     
-    // Only use the actual OCR text for foil detection
-    console.log(`Testing foil detection with actual OCR text: ${allText.substring(0, 100)}`);
-    const foilResult = detectFoilVariant(allText);
+    // Only use the actual OCR text for foil detection (not processed results)
+    console.log(`Testing foil detection with raw OCR text: ${combinedOCRText.substring(0, 100)}`);
+    const foilResult = detectFoilVariant(combinedOCRText);
     console.log(`Foil result: isFoil=${foilResult.isFoil}, type=${foilResult.foilType}`);
     
     if (foilResult.isFoil && foilResult.foilType) {
