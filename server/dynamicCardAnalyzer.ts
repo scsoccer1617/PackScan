@@ -448,10 +448,57 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>): 
     // First, look for name patterns in the first few lines of the card
     const lines = text.split('\n');
     
-    // HIGHEST PRIORITY: Check the second line of text for player name
-    // This is usually where the player name appears on most cards after the card number on the first line
+    // ENHANCED PLAYER NAME DETECTION: Look for complete player names anywhere in the text
+    // This handles cases where OCR misreads brand names but correctly extracts player names
+    console.log('Starting enhanced player name detection across full text...');
+    
+    // First, look for complete player names anywhere in the full text (most reliable method)
+    const playerNameRegex = /\b([A-Z][a-z]+)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b/g;
+    const potentialNames = [];
+    let match;
+    
+    while ((match = playerNameRegex.exec(text)) !== null) {
+      const fullName = match[0];
+      const firstName = match[1];
+      const lastName = match[2];
+      
+      // Filter out common non-player terms
+      const nonPlayerTerms = ['Topps', 'Upper Deck', 'Major League', 'New York', 'Los Angeles', 'San Francisco', 
+                              'Chicago', 'Boston', 'Philadelphia', 'All Star', 'Opening Day', 'Series Two', 
+                              'Series One', 'Rookie Card', 'Baseball Card', 'Stadium Club', 'Chrome Stars'];
+      
+      const isPlayerName = !nonPlayerTerms.some(term => fullName.includes(term)) && 
+                          firstName.length >= 3 && lastName.length >= 3 &&
+                          !/^\d/.test(fullName); // Doesn't start with a number
+      
+      if (isPlayerName) {
+        potentialNames.push({ fullName, firstName, lastName, confidence: match.index });
+        console.log(`Found potential player name: ${fullName} at position ${match.index}`);
+      }
+    }
+    
+    // If we found potential names, use the most likely one
+    if (potentialNames.length > 0) {
+      // For Series Two cards, prioritize names that appear after "SERIES TWO" text
+      let selectedName = potentialNames[0];
+      
+      if (text.includes('SERIES TWO')) {
+        const seriesTwoIndex = text.indexOf('SERIES TWO');
+        const namesAfterSeriesTwo = potentialNames.filter(name => name.confidence > seriesTwoIndex);
+        if (namesAfterSeriesTwo.length > 0) {
+          selectedName = namesAfterSeriesTwo[0];
+          console.log('Selected name that appears after SERIES TWO text');
+        }
+      }
+      
+      cardDetails.playerFirstName = selectedName.firstName;
+      cardDetails.playerLastName = selectedName.lastName;
+      console.log(`Selected player name: ${cardDetails.playerFirstName} ${cardDetails.playerLastName}`);
+      return;
+    }
+    
+    // FALLBACK: Check the second line of text for player name (original logic)
     if (lines.length > 1) {
-      // Second line often contains just the player name
       const secondLine = lines[1].trim();
       
       console.log(`Checking second line for player name: "${secondLine}"`);
@@ -464,11 +511,9 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>): 
           !secondLine.includes('SERIES') &&
           !secondLine.includes('OPENING DAY')) {
         
-        // Split into first and last name
         const nameParts = secondLine.split(' ');
         
         if (nameParts.length >= 2) {
-          // Format the names properly
           const firstName = nameParts[0];
           const lastName = nameParts.slice(1).join(' ');
           
@@ -478,13 +523,6 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>): 
                                       lastName.slice(1).toLowerCase();
           
           console.log(`Detected player name from second line: ${cardDetails.playerFirstName} ${cardDetails.playerLastName}`);
-          return;
-        } else if (nameParts.length === 1) {
-          // Just a single word name
-          const lastName = nameParts[0];
-          cardDetails.playerLastName = lastName.charAt(0).toUpperCase() + 
-                                      lastName.slice(1).toLowerCase();
-          console.log(`Detected single-word player name: ${cardDetails.playerLastName}`);
           return;
         }
       }

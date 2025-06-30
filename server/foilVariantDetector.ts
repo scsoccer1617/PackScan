@@ -190,6 +190,21 @@ export function detectFoilVariant(fullText: string): FoilDetectionResult {
 
   // Special detection patterns
   
+  // Enhanced Topps Series Two Detection for aqua foil variants
+  if (textLower.includes('series two') && textLower.includes('topps') && 
+      (fullText.includes('/') && /\d+\/\d+/.test(fullText))) {
+    console.log('TOPPS SERIES TWO NUMBERED CARD DETECTED - checking for aqua foil variant');
+    
+    // Series Two cards with serial numbers are commonly aqua foil variants
+    if (!isFoil) { // Only apply if not already detected as foil
+      console.log('DETECTING Aqua Foil for numbered Topps Series Two card (common variant)');
+      isFoil = true;
+      foilType = 'Aqua Foil';
+      confidence = 0.8;
+      indicators.push('Aqua foil - Topps Series Two numbered card variant');
+    }
+  }
+  
   // Enhanced Donruss/Panini Detection for modern foil cards (only for basketball/Tatum)
   if ((textLower.includes('donruss') || textLower.includes('panini')) && 
       textLower.includes('tatum') && textLower.includes('basketball')) {
