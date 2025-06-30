@@ -836,7 +836,8 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>)
       { pattern: /35TH ANNIVERSARY/i, name: "35th Anniversary" },
       { pattern: /COLLECTOR'?S?[\s-]*CHOICE/i, name: "Collector's Choice", brandOverride: "Upper Deck" },
       { pattern: /SERIES ONE|SERIES 1/i, name: "Series One" },
-      { pattern: /SERIES TWO|SERIES 2/i, name: "Series Two" }
+      { pattern: /SERIES TWO|SERIES 2/i, name: "Series Two" },
+      { pattern: /DONRUSS/i, name: "Donruss" }
     ];
     
     for (const collectionData of collectionPatterns) {

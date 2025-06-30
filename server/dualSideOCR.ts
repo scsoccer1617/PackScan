@@ -150,7 +150,7 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
       error: 'analysis_failed',
       data: {
         condition: 'PSA 8',
-        sport: 'Baseball',
+        sport: 'Not detected',
         brand: 'Unknown',
         year: new Date().getFullYear(),
         errorMessage: 'Failed to analyze the card images'
@@ -265,7 +265,7 @@ function combineCardResults(
 function ensureRequiredFields(result: Partial<CardFormValues>): Partial<CardFormValues> {
   const defaultsIfMissing = {
     condition: 'PSA 8',
-    sport: 'Baseball',
+    sport: 'Not detected',
     brand: result.brand || 'Unknown',
     year: result.year || new Date().getFullYear(),
     playerFirstName: result.playerFirstName || 'Unknown',

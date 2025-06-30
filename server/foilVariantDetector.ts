@@ -22,7 +22,7 @@ const FOIL_KEYWORDS = [
   'wave', 'atomic', 'crystal', 'diamond', 'emerald', 'ruby', 'sapphire',
   'topps chrome', 'bowman chrome', 'chrome series', 'chrome variations',
   'certified autograph', 'jersey autograph', 'patch autograph',
-  'aqua', 'aqua foil', 'blue foil', 'teal foil', 'parallel'
+  'aqua', 'aqua foil', 'blue foil', 'teal foil', 'green foil', 'green', 'parallel'
 ];
 
 /**
@@ -54,6 +54,8 @@ const FOIL_VARIANTS: Record<string, string> = {
   'aqua foil': 'Aqua Foil',
   'blue foil': 'Blue Foil',
   'teal foil': 'Teal Foil',
+  'green foil': 'Green Foil',
+  'green': 'Green',
   'parallel': 'Parallel'
 };
 
