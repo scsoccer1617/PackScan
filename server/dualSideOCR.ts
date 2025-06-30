@@ -99,7 +99,9 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
         } else {
           // Use standard analyzer for other card brands
           console.log('Using standard analyzer for front image');
+          console.log('Calling analyzeSportsCardImage...');
           frontResult = await Promise.race([analyzeSportsCardImage(frontBase64), createTimeout()]);
+          console.log('analyzeSportsCardImage returned:', frontResult);
         }
         console.log('Front image analysis complete');
       } catch (error) {
@@ -121,7 +123,9 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
         } else {
           // Use standard analyzer for other card brands
           console.log('Using standard analyzer for back image');
+          console.log('Calling analyzeSportsCardImage for back...');
           backResult = await Promise.race([analyzeSportsCardImage(backBase64), createTimeout()]);
+          console.log('analyzeSportsCardImage returned for back:', backResult);
         }
         console.log('Back image analysis complete');
       } catch (error) {
