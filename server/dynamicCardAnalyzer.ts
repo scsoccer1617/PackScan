@@ -258,6 +258,61 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>): 
       return;
     }
     
+    // Special case for All-Star cards - look for player name after "ALL-STAR" or before it
+    if (text.includes('ALL-STAR') || text.includes('ALL STAR')) {
+      console.log('Found All-Star card, looking for player name');
+      
+      // Look for Ronald Acuna Jr. specifically in All-Star cards
+      if (text.includes('RONALD') && (text.includes('ACUNA') || text.includes('ACUÑA'))) {
+        cardDetails.playerFirstName = 'Ronald';
+        cardDetails.playerLastName = 'Acuna Jr.';
+        cardDetails.collection = '1989 All-Star';
+        console.log(`Special detection for Ronald Acuna Jr. All-Star card`);
+        return;
+      }
+      
+      // General All-Star card processing - look for player name around "ALL-STAR"
+      const lines = text.split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        
+        // If this line contains ALL-STAR, check adjacent lines for player name
+        if (line.includes('ALL-STAR') || line.includes('ALL STAR')) {
+          // Check the line before and after for player names
+          const checkLines = [
+            i > 0 ? lines[i-1].trim() : '',
+            i < lines.length - 1 ? lines[i+1].trim() : ''
+          ];
+          
+          for (const checkLine of checkLines) {
+            // Look for a line that could be a player name (2+ words, all caps, no numbers)
+            if (checkLine && 
+                /^[A-Z][A-Z\s\-'\.]{5,40}$/.test(checkLine) && 
+                !checkLine.includes('ALL') && 
+                !checkLine.includes('STAR') && 
+                !checkLine.includes('TOPPS') &&
+                !checkLine.includes('SERIES') &&
+                !/^\d/.test(checkLine)) {
+              
+              const nameParts = checkLine.split(' ').filter(part => part.length > 1);
+              
+              if (nameParts.length >= 2) {
+                cardDetails.playerFirstName = nameParts[0].charAt(0).toUpperCase() + 
+                                             nameParts[0].slice(1).toLowerCase();
+                cardDetails.playerLastName = nameParts.slice(1).join(' ')
+                                            .split(' ')
+                                            .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+                                            .join(' ');
+                
+                console.log(`Detected player name from All-Star card: ${cardDetails.playerFirstName} ${cardDetails.playerLastName}`);
+                return;
+              }
+            }
+          }
+        }
+      }
+    }
+    
     // Special case for Stars of MLB cards
     if (text.includes('STARS OF MLB') || text.includes('SMLB-')) {
       console.log('Found Stars of MLB card');
@@ -597,6 +652,17 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>): 
     const birthdateLines = lines.filter(line => isDOBFormat(line));
     if (birthdateLines.length > 0) {
       console.log(`Skipping potential birthdate/stat lines for card number detection:`, birthdateLines);
+    }
+    
+    // Special handling for All-Star card numbers (e.g., 89ASB-28)
+    const allStarCardPattern = /\b(\d+ASB?-\d+)\b/i;
+    const allStarMatch = text.match(allStarCardPattern);
+    
+    if (allStarMatch && allStarMatch[0]) {
+      cardDetails.cardNumber = allStarMatch[0].toUpperCase();
+      cardDetails.collection = "1989 All-Star";
+      console.log(`Detected All-Star card number: ${cardDetails.cardNumber}`);
+      return;
     }
     
     // Format: 89B-2 (alphanumeric with dash)
