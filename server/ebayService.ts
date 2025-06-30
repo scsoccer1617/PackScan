@@ -63,8 +63,8 @@ export async function searchCardValues(
     const cacheKey = `${playerName}-${cardNumber}-${brand}-${year}-${collection || ''}-${isNumbered || ''}-${foilType || ''}-${serialNumber || ''}`;
     const cached = searchCache.get(cacheKey);
     
-    // Return cached result if still valid
-    if (cached && (Date.now() - cached.timestamp) < CACHE_DURATION) {
+    // Return cached result if still valid and not an error
+    if (cached && (Date.now() - cached.timestamp) < CACHE_DURATION && cached.data.results?.length > 0) {
       console.log('Returning cached eBay Browse API results for:', cacheKey);
       return cached.data;
     }
@@ -344,6 +344,22 @@ export async function searchCardValues(
   } catch (error: any) {
     console.error('Error searching eBay Browse API:', error);
     console.error('Error response data:', error.response?.data);
+    
+    // If this is a complex search (with foil or serial), try a simpler search as fallback
+    if ((foilType || serialNumber)) {
+      console.log('Complex search failed, trying simpler fallback search...');
+      return await searchCardValues(
+        playerName, 
+        cardNumber, 
+        brand, 
+        year, 
+        collection, 
+        condition, 
+        false, // remove isNumbered
+        undefined, // remove foilType
+        undefined  // remove serialNumber
+      );
+    }
     
     // Check for specific eBay Browse API error messages
     let errorMessage = 'eBay Browse API error - check credentials';
