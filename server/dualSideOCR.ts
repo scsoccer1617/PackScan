@@ -28,6 +28,7 @@ type MulterRequest = Request & {
  * This handler combines data from both sides for more accurate results
  */
 export async function handleDualSideCardAnalysis(req: MulterRequest, res: Response) {
+  console.log('=== DUAL SIDE OCR HANDLER CALLED ===');
   console.time('dual-card-analysis-total');
   try {
     // Check if we have at least one image
