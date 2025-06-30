@@ -327,12 +327,16 @@ export async function searchCardValues(
       }
     }
 
-    // Calculate average value
-    const averageValue = itemCount > 0 ? Math.round(totalValue / itemCount) : 0;
+    // Only use top 5 results for display and calculation
+    const topResults = results.slice(0, 5);
+    
+    // Calculate average value based on the top 5 displayed results only
+    const displayedTotal = topResults.reduce((sum, item) => sum + item.price, 0);
+    const averageValue = topResults.length > 0 ? Math.floor((displayedTotal / topResults.length) * 100) / 100 : 0;
 
     const result = {
       averageValue,
-      results: results.slice(0, 5), // Return only top 5 results
+      results: topResults,
       searchUrl: getEbaySearchUrl(playerName, cardNumber, brand, year, collection, '', isNumbered, foilType, serialNumber),
       dataType: dataType as 'sold' | 'current'
     };
