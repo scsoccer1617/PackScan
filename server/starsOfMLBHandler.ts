@@ -5,8 +5,8 @@ import { CardFormValues } from "@shared/schema";
  * These cards have unique formatting that requires specific handling
  */
 export function processStarsOfMLBCard(fullText: string): Partial<CardFormValues> | null {
-  // Check if this is a Stars of MLB card
-  if (!fullText.includes('STARS OF') || !fullText.includes('MLB')) {
+  // Check if this is a Stars of MLB card - be more specific to avoid false positives
+  if (!fullText.includes('STARS OF MLB') && !fullText.includes('SMLB-')) {
     return null;
   }
   
