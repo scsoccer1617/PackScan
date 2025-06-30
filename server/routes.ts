@@ -15,7 +15,7 @@ import {
 } from '../shared/schema';
 import * as schema from '../shared/schema';
 import { storage } from './storage';
-import { searchCardValues, getEbaySearchUrl } from './ebayService';
+import { searchCardValues, getEbaySearchUrl, clearEbayCache } from './ebayService';
 import { z } from 'zod';
 import { handleCardImageAnalysis } from './directOCR';
 import { extractTextFromImage, analyzeSportsCardImage } from './googleVisionFetch';

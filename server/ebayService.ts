@@ -32,6 +32,12 @@ interface EbayResponse {
 const searchCache = new Map<string, { data: any; timestamp: number }>();
 const CACHE_DURATION = 60000; // 1 minute cache
 
+// Clear cache function for debugging
+export function clearEbayCache() {
+  searchCache.clear();
+  console.log('eBay search cache cleared');
+}
+
 export async function searchCardValues(
   playerName: string,
   cardNumber: string,
@@ -49,8 +55,8 @@ export async function searchCardValues(
       return { averageValue: 0, results: [] };
     }
 
-    // Create cache key from search parameters
-    const cacheKey = `${playerName}-${cardNumber}-${brand}-${year}-${collection || ''}`;
+    // Create cache key from search parameters including foil type and serial number
+    const cacheKey = `${playerName}-${cardNumber}-${brand}-${year}-${collection || ''}-${isNumbered || ''}-${foilType || ''}-${serialNumber || ''}`;
     const cached = searchCache.get(cacheKey);
     
     // Return cached result if still valid
