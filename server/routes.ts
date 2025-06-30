@@ -1153,6 +1153,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const cardData = ocrResponse.data;
       console.log('OCR completed, starting eBay search for:', cardData);
+      console.log('OCR foilType specifically:', cardData.foilType);
 
       // Then perform eBay price lookup with the OCR results
       let ebayResults = [];
