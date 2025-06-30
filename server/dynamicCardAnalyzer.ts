@@ -76,6 +76,7 @@ export async function getTextFromImage(base64Image: string): Promise<OCRResult> 
  */
 export async function analyzeSportsCardImage(base64Image: string): Promise<Partial<CardFormValues>> {
   try {
+    console.log('=== STARTING DYNAMIC CARD ANALYSIS ===');
     // Extract the text from the image
     const { fullText, textAnnotations } = await getTextFromImage(base64Image);
     
@@ -193,7 +194,9 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     detectSport(cleanText, cardDetails);
     
     // FOIL VARIANT DETECTION - Check for foil, chrome, refractor, and other special finishes
+    console.log('=== FOIL DETECTION START ===');
     const foilResult = detectFoilVariant(fullText);
+    console.log(`Foil detection result: isFoil=${foilResult.isFoil}, type=${foilResult.foilType}, confidence=${foilResult.confidence}`);
     if (foilResult.isFoil) {
       // Special handling for Chrome cards - set as collection, not variant
       if (foilResult.foilType === 'Chrome' && !cardDetails.collection) {

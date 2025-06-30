@@ -181,6 +181,10 @@ function combineCardResults(
   frontResult: Partial<CardFormValues>, 
   backResult: Partial<CardFormValues>
 ): Partial<CardFormValues> {
+  console.log('=== COMBINING CARD RESULTS ===');
+  console.log('Front result sport:', frontResult.sport);
+  console.log('Back result sport:', backResult.sport);
+  
   // Start with an empty object
   const combined: Partial<CardFormValues> = {};
   
@@ -255,6 +259,9 @@ function combineCardResults(
       combined[field] = backResult[field];
     }
   });
+  
+  console.log('Combined result sport:', combined.sport);
+  console.log('=== COMBINATION COMPLETE ===');
   
   return combined;
 }
