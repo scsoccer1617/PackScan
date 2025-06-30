@@ -131,8 +131,12 @@ export function detectFoilVariant(fullText: string): FoilDetectionResult {
   let confidence = 0;
 
   console.log('=== FOIL VARIANT DETECTION DETAILED DEBUG ===');
-  console.log('Full text for foil detection (first 300 chars):', fullText.substring(0, 300));
+  console.log('Full text for foil detection (first 500 chars):', fullText.substring(0, 500));
   console.log('Text length:', fullText.length);
+  console.log('Text contains "green":', textLower.includes('green'));
+  console.log('Text contains "foil":', textLower.includes('foil'));
+  console.log('Text contains "donruss":', textLower.includes('donruss'));
+  console.log('Text contains "panini":', textLower.includes('panini'));
   
   // Early detection of lighting artifacts
   if (hasLightingArtifacts(fullText)) {
