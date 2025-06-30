@@ -932,7 +932,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: 'Missing required parameters' });
       }
       
-      console.log('eBay search request:', { playerName, cardNumber, brand, year, collection, isNumbered, foilType });
+      console.log('eBay search request:', { playerName, cardNumber, brand, year, collection, isNumbered, foilType, serialNumber });
       
       const results = await searchCardValues(
         playerName as string,
@@ -942,7 +942,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         collection as string || '',
         condition as string || '',
         isNumbered === 'true',
-        foilType as string || undefined
+        foilType as string || undefined,
+        serialNumber as string || undefined
       );
       
       console.log('eBay search results:', results);

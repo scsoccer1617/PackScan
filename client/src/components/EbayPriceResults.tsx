@@ -54,7 +54,8 @@ export default function EbayPriceResults({ cardData, frontImage, backImage }: Eb
           collection: cardData.collection || "",
           condition: cardData.condition || "",
           isNumbered: cardData.isNumbered ? "true" : "false",
-          foilType: cardData.foilType || ""
+          foilType: cardData.foilType || "",
+          serialNumber: cardData.serialNumber || ""
         });
 
         const response = await fetch(`/api/ebay-search?${searchParams}`);
