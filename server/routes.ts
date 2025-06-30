@@ -1309,6 +1309,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return brand?.name || '';
   }
 
+  // Test foil detection directly
+  app.post('/api/test-foil-detection', (req, res) => {
+    const { detectFoilVariant } = require('./foilVariantDetector');
+    
+    // Test with sample text that should detect green foil
+    const testText = "2023-24 Donruss Basketball Jayson Tatum #197 Green Parallel Boston Celtics";
+    console.log('Testing foil detection with text:', testText);
+    
+    const result = detectFoilVariant(testText);
+    console.log('Foil detection test result:', result);
+    
+    res.json({
+      testText,
+      result,
+      success: true
+    });
+  });
+
   const httpServer = createServer(app);
   return httpServer;
 }
