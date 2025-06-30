@@ -926,7 +926,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Simple eBay search endpoint for price lookup (no card saving)
   app.get(`${apiPrefix}/ebay-search`, async (req, res) => {
     try {
-      const { playerName, cardNumber, brand, year, collection, condition, isNumbered, foilType } = req.query;
+      const { playerName, cardNumber, brand, year, collection, condition, isNumbered, foilType, serialNumber } = req.query;
       
       if (!playerName || !brand || !year) {
         return res.status(400).json({ error: 'Missing required parameters' });

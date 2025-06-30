@@ -40,7 +40,8 @@ export async function searchCardValues(
   collection?: string,
   condition?: string,
   isNumbered?: boolean,
-  foilType?: string
+  foilType?: string,
+  serialNumber?: string
 ): Promise<EbayResponse> {
   try {
     if (!EBAY_APP_ID || !EBAY_BROWSE_TOKEN) {
@@ -100,10 +101,19 @@ export async function searchCardValues(
       console.log('Using standard search strategy');
     }
     
-    // Add "numbered" for serialized cards to get accurate pricing for limited editions
-    if (isNumbered) {
-      keywords += ' numbered';
-      console.log('Added "numbered" to search for serialized card');
+    // Add serial number suffix for serialized cards to get accurate pricing for limited editions
+    if (isNumbered && serialNumber) {
+      // Extract the suffix (e.g., "/399" from "010/399")
+      const serialMatch = serialNumber.match(/\/(\d+)$/);
+      if (serialMatch) {
+        const serialSuffix = `/${serialMatch[1]}`;
+        keywords += ` ${serialSuffix}`;
+        console.log(`Added serial number suffix "${serialSuffix}" to search for numbered card`);
+      } else {
+        // Fallback to "numbered" if we can't extract the suffix
+        keywords += ' numbered';
+        console.log('Added "numbered" to search for serialized card (fallback)');
+      }
     }
     
     // Add foil variant for special finishes to get accurate pricing for foil variants
