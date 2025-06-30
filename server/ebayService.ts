@@ -458,10 +458,21 @@ export function getEbaySearchUrl(
   }
   // Standard cards
   else {
-    keywords = `${lastName} ${brand} ${year}`;
-    if (/^\d+$/.test(cardNumber)) {
+    // Use comprehensive format: Full player name, brand, collection, card number, year
+    keywords = `${playerName} ${brand}`;
+    
+    // Add collection if available
+    if (collection) {
+      keywords += ` ${collection}`;
+    }
+    
+    // Add card number if available
+    if (cardNumber && /^\d+$/.test(cardNumber)) {
       keywords += ` ${cardNumber}`;
     }
+    
+    // Add year
+    keywords += ` ${year}`;
   }
   
   // Add serial number suffix for serialized cards (e.g., "/399" instead of "numbered")
