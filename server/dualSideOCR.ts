@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { CardFormValues } from '@shared/schema';
 import { analyzeSportsCardImage } from './dynamicCardAnalyzer';
 import { analyzeScoreCard } from './scoreCardAnalyzer';
+import { detectFoilVariant } from './foilVariantDetector';
 
 // Define a standalone MulterFile interface that doesn't conflict with built-in types
 interface MulterFile {
@@ -137,7 +138,7 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
 
     // Combine the results with priority to front image for player name, number, and rookie status
     // and priority to back image for copyright year, stats, and detailed information
-    const combinedResult = combineCardResults(frontResult, backResult);
+    const combinedResult = await combineCardResults(frontResult, backResult);
     
     // Make sure we have all required fields with defaults if needed
     const finalResult = ensureRequiredFields(combinedResult);
@@ -187,10 +188,10 @@ async function extractTextForBrandDetection(base64Image: string): Promise<string
 /**
  * Combine results from front and back card analysis
  */
-function combineCardResults(
+async function combineCardResults(
   frontResult: Partial<CardFormValues>, 
   backResult: Partial<CardFormValues>
-): Partial<CardFormValues> {
+): Promise<Partial<CardFormValues>> {
   console.log('=== COMBINING CARD RESULTS ===');
   console.log('Front result sport:', frontResult.sport);
   console.log('Back result sport:', backResult.sport);
@@ -275,7 +276,7 @@ function combineCardResults(
   // Final foil detection pass - use all available text
   if (!combined.foilType || combined.foilType === 'None detected') {
     console.log('=== FINAL FOIL DETECTION PASS ===');
-    const { detectFoilVariant } = require('./foilVariantDetector');
+    // Use the imported detectFoilVariant function
     
     // Combine all OCR text for comprehensive foil detection
     let allText = '';
