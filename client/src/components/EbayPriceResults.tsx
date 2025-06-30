@@ -180,75 +180,71 @@ export default function EbayPriceResults({ cardData, frontImage, backImage }: Eb
           <CardTitle className="text-lg mb-4">Card Information</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="space-y-4">
-            {/* Sport */}
-            <div className="text-lg">
-              <span className="font-semibold text-slate-800">Sport: </span>
-              <span className="text-slate-700">{cardData.sport || 'Baseball'}</span>
-            </div>
-
-            {/* Player */}
-            <div className="text-lg">
-              <span className="font-semibold text-slate-800">Player: </span>
-              <span className="text-slate-700">{cardData.playerFirstName || ''} {cardData.playerLastName || 'Not detected'}</span>
-            </div>
-
-            {/* Two-column layout for card details */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
-              <div className="space-y-4">
-                {/* Brand */}
-                <div className="text-lg">
-                  <span className="font-semibold text-slate-800">Brand: </span>
-                  <span className="text-slate-700">{cardData.brand || 'Not detected'}</span>
-                </div>
-
-                {/* Card Number */}
-                <div className="text-lg">
-                  <span className="font-semibold text-slate-800">Card #: </span>
-                  <span className="text-slate-700">{cardData.cardNumber || 'Not detected'}</span>
-                </div>
-
-                {/* Year */}
-                <div className="text-lg">
-                  <span className="font-semibold text-slate-800">Year: </span>
-                  <span className="text-slate-700">{cardData.year || 'Not detected'}</span>
-                </div>
+          {/* Two-column layout for card details */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            {/* Left Column */}
+            <div className="space-y-4">
+              {/* Sport */}
+              <div className="text-base">
+                <span className="font-semibold text-slate-800">Sport: </span>
+                <span className="text-slate-700">{cardData.sport || 'Baseball'}</span>
               </div>
 
-              <div className="space-y-4">
-                {/* Collection */}
-                <div className="text-lg">
-                  <span className="font-semibold text-slate-800">Collection: </span>
-                  <span className="text-slate-700">{cardData.collection || 'Not detected'}</span>
-                </div>
+              {/* Player */}
+              <div className="text-base">
+                <span className="font-semibold text-slate-800">Player: </span>
+                <span className="text-slate-700">{cardData.playerFirstName || ''} {cardData.playerLastName || 'Not detected'}</span>
+              </div>
 
-                {/* Variant */}
-                <div className="text-lg">
-                  <span className="font-semibold text-slate-800">Variant: </span>
-                  <span className="text-slate-700">{cardData.variant || 'Base/Standard'}</span>
-                </div>
+              {/* Brand */}
+              <div className="text-base">
+                <span className="font-semibold text-slate-800">Brand: </span>
+                <span className="text-slate-700">{cardData.brand || 'Not detected'}</span>
+              </div>
 
-                {/* Serial Number */}
-                {cardData.serialNumber && (
-                  <div className="text-lg">
-                    <span className="font-semibold text-slate-800">Serial #: </span>
-                    <span className="text-slate-700">{cardData.serialNumber}</span>
-                  </div>
-                )}
+              {/* Card Number */}
+              <div className="text-base">
+                <span className="font-semibold text-slate-800">Card #: </span>
+                <span className="text-slate-700">{cardData.cardNumber || 'Not detected'}</span>
+              </div>
 
-                {/* Foil Type */}
-                <div className="text-lg">
-                  <span className="font-semibold text-slate-800">Foil Type: </span>
-                  <span className="text-slate-700">{cardData.foilType || 'None detected'}</span>
-                </div>
+              {/* Year */}
+              <div className="text-base">
+                <span className="font-semibold text-slate-800">Year: </span>
+                <span className="text-slate-700">{cardData.year || 'Not detected'}</span>
+              </div>
+            </div>
 
-                {/* Rookie Card Status */}
-                <div className="text-lg">
-                  <span className="font-semibold text-slate-800">Rookie Card: </span>
-                  <span className="text-slate-700">{cardData.isRookieCard ? 'Yes' : 'No'}</span>
-                </div>
+            {/* Right Column */}
+            <div className="space-y-4">
+              {/* Collection */}
+              <div className="text-base">
+                <span className="font-semibold text-slate-800">Collection: </span>
+                <span className="text-slate-700">{cardData.collection || 'Not detected'}</span>
+              </div>
 
-                
+              {/* Variant */}
+              <div className="text-base">
+                <span className="font-semibold text-slate-800">Variant: </span>
+                <span className="text-slate-700">{cardData.variant || 'Base/Standard'}</span>
+              </div>
+
+              {/* Serial Number */}
+              <div className="text-base">
+                <span className="font-semibold text-slate-800">Serial #: </span>
+                <span className="text-slate-700">{cardData.serialNumber || 'None'}</span>
+              </div>
+
+              {/* Foil Type */}
+              <div className="text-base">
+                <span className="font-semibold text-slate-800">Foil Type: </span>
+                <span className="text-slate-700">{cardData.foilType || 'None detected'}</span>
+              </div>
+
+              {/* Rookie Card Status */}
+              <div className="text-base">
+                <span className="font-semibold text-slate-800">Rookie Card: </span>
+                <span className="text-slate-700">{cardData.isRookieCard ? 'Yes' : 'No'}</span>
               </div>
             </div>
           </div>
