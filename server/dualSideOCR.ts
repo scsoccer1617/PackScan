@@ -195,7 +195,7 @@ function combineCardResults(
   // Fields where front image has priority
   const frontPriorityFields: (keyof CardFormValues)[] = [
     'playerFirstName', 'playerLastName', 'cardNumber', 
-    'isRookieCard', 'brand', 'collection', 'variant'
+    'isRookieCard', 'brand', 'collection', 'variant', 'foilType'
   ];
   
   // Fields where back image has priority

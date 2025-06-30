@@ -195,6 +195,7 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     
     // FOIL VARIANT DETECTION - Check for foil, chrome, refractor, and other special finishes
     console.log('=== FOIL DETECTION START ===');
+    console.log('Full text for foil detection:', fullText.substring(0, 200) + '...');
     const foilResult = detectFoilVariant(fullText);
     console.log(`Foil detection result: isFoil=${foilResult.isFoil}, type=${foilResult.foilType}, confidence=${foilResult.confidence}`);
     if (foilResult.isFoil) {
@@ -208,7 +209,10 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
         console.log(`Detected foil variant: ${foilResult.foilType} (confidence: ${foilResult.confidence})`);
       }
       console.log(`Foil indicators: ${foilResult.indicators.join(', ')}`);
+    } else {
+      console.log('No foil variant detected');
     }
+    console.log('=== FOIL DETECTION END ===');
     
     console.log('Extracted card details:', cardDetails);
     return cardDetails;
