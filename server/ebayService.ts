@@ -143,8 +143,7 @@ export async function searchCardValues(
     // Add foil variant for special finishes to get accurate pricing for foil variants
     console.log(`DEBUG: foilType parameter = "${foilType}"`);
     if (foilType) {
-      // Import the helper function to get the eBay-friendly search term
-      const { getFoilSearchTerm } = require('./foilVariantDetector');
+      // Use the already imported helper function to get the eBay-friendly search term
       const foilSearchTerm = getFoilSearchTerm(foilType);
       console.log(`DEBUG: getFoilSearchTerm("${foilType}") = "${foilSearchTerm}"`);
       if (foilSearchTerm) {
@@ -366,8 +365,9 @@ export async function searchCardValues(
 
     return result;
   } catch (error: any) {
-    console.error('Error searching eBay Browse API:', error);
-    console.error('Error response data:', error.response?.data);
+    console.error('Error searching eBay Browse API:', error.message);
+    console.error('Error response status:', error.response?.status);
+    console.error('Error response data:', JSON.stringify(error.response?.data, null, 2));
     
     // If this is a complex search (with foil or serial), try a simpler search as fallback
     // But keep foilType since that's important for accurate pricing
