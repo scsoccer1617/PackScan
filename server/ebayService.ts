@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { getFoilSearchTerm } from './foilVariantDetector';
 
 // eBay Browse API configuration (modern replacement for Finding API)
 const EBAY_APP_ID = process.env.EBAY_APP_ID || '';
@@ -434,7 +435,6 @@ export function getEbaySearchUrl(
   
   // Add foil variant for special finishes to get accurate pricing
   if (foilType) {
-    const { getFoilSearchTerm } = require('./foilVariantDetector');
     const foilSearchTerm = getFoilSearchTerm(foilType);
     if (foilSearchTerm) {
       keywords += ` ${foilSearchTerm}`;
