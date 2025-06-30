@@ -198,6 +198,11 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     console.log('Full text for foil detection:', fullText.substring(0, 200) + '...');
     const foilResult = detectFoilVariant(fullText);
     console.log(`Foil detection result: isFoil=${foilResult.isFoil}, type=${foilResult.foilType}, confidence=${foilResult.confidence}`);
+    console.log(`Foil indicators found: [${foilResult.indicators.join(', ')}]`);
+    
+    // TEMPORARILY DISABLE AUTOMATIC FOIL DETECTION TO DEBUG FALSE POSITIVES
+    console.log('TEMP: Skipping automatic foil detection - will be handled in dual-side combine function');
+    /* 
     if (foilResult.isFoil) {
       // Special handling for Chrome cards - set as collection, not variant
       if (foilResult.foilType === 'Chrome' && !cardDetails.collection) {
@@ -212,6 +217,7 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     } else {
       console.log('No foil variant detected');
     }
+    */
     console.log('=== FOIL DETECTION END ===');
     
     console.log('Extracted card details:', cardDetails);
