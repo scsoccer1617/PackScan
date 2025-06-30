@@ -225,6 +225,7 @@ async function combineCardResults(
   backOCRText: string = ''
 ): Promise<Partial<CardFormValues>> {
   console.log('=== COMBINE CARD RESULTS STARTED ===');
+  console.log('COMBINE FUNCTION IS DEFINITELY BEING CALLED!');
   console.log('Front result foilType:', frontResult.foilType);
   console.log('Back result foilType:', backResult.foilType);
   console.log('Front result keys:', Object.keys(frontResult));
