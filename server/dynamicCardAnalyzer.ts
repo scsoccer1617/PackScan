@@ -178,7 +178,7 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       extractPlayerName(cleanText, cardDetails, fullText);
       
       // CARD NUMBER DETECTION - Extract card number using regex patterns
-      extractCardNumber(cleanText, cardDetails);
+      extractCardNumber(cleanText, cardDetails, fullText);
       
       // COLLECTION, BRAND & YEAR DETECTION - Extract using pattern recognition
       extractCardMetadata(cleanText, cardDetails);
@@ -721,7 +721,7 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
 /**
  * Extract card number using regex patterns for common formats
  */
-function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>): void {
+function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, originalText?: string): void {
   try {
     // Look for known card number formats
     
@@ -933,8 +933,9 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>): 
     
     // Look for standalone numbers that might be card numbers
     // This catches single numbers like "206" on their own line (common in Opening Day cards)
+    const textForStandalone = originalText || text;
     const standaloneNumberPattern = /(?:^|\n)\s*(\d{1,3})\s*(?:\n|$)/;
-    const standaloneNumberMatch = text.match(standaloneNumberPattern);
+    const standaloneNumberMatch = textForStandalone.match(standaloneNumberPattern);
     
     if (standaloneNumberMatch && standaloneNumberMatch[1]) {
       // Make sure it's a reasonable card number (not too large)
@@ -947,12 +948,22 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>): 
     }
     
     // Alphanumeric patterns like: T27, TC12, etc.
-    const alphaNumPattern = /\b([A-Z]{1,3})(\d+)\b/;
-    const alphaNumMatch = text.match(alphaNumPattern);
+    const alphaNumPattern = /\b([A-Z]{1,3})(\d{1,4})\b/g;
+    let alphaNumMatch;
+    const nonCardCodePrefixes = new Set(['CMP', 'CODE', 'WWW', 'COM', 'INC', 'MLB', 'OBP', 'ERA', 'AVG', 'WAR', 'SLG', 'RBI', 'HT', 'WT', 'ACQ']);
     
-    if (alphaNumMatch && alphaNumMatch[0]) {
-      cardDetails.cardNumber = alphaNumMatch[0];
-      console.log(`Detected Alphanumeric card number: ${cardDetails.cardNumber} (example: 89BC)`);
+    while ((alphaNumMatch = alphaNumPattern.exec(text)) !== null) {
+      const prefix = alphaNumMatch[1];
+      const digits = alphaNumMatch[2];
+      const fullMatch = alphaNumMatch[0];
+      
+      if (nonCardCodePrefixes.has(prefix)) continue;
+      if (text.includes('CODE ' + fullMatch)) continue;
+      if (parseInt(digits) > 999) continue;
+      
+      cardDetails.cardNumber = fullMatch;
+      console.log(`Detected Alphanumeric card number: ${cardDetails.cardNumber}`);
+      break;
     }
   } catch (error) {
     console.error('Error detecting card number:', error);
