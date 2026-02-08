@@ -1099,8 +1099,9 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>)
     // YEAR DETECTION - Look for copyright years and isolated 4-digit years
     // Important: Look for copyright symbols as they usually indicate production year
     
-    // First check for brand name followed by year - highest confidence source
-    const brandYearPattern = /(\d{4})\s+(TOPPS|LEAF|BOWMAN|FLEER|DONRUSS|UPPER DECK)(?:\s+INC\.?|,\s+INC\.?)?/i;
+    // First check for year followed by brand company name - highest confidence source
+    // Handles: "2024 THE TOPPS COMPANY", "2025 TOPPS, INC", "1991 SCORE INC"
+    const brandYearPattern = /(\d{4})\s+(?:THE\s+)?(TOPPS|LEAF|BOWMAN|FLEER|DONRUSS|SCORE|UPPER DECK|PANINI)(?:\s+COMPANY|\s+INC\.?|,\s+INC\.?)?/i;
     const brandYearMatch = text.match(brandYearPattern);
     
     if (brandYearMatch && brandYearMatch[1]) {
@@ -1113,7 +1114,8 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>)
     }
     
     // Check for copyright year pattern next
-    const copyrightYearPattern = /(?:©|\(C\)|\&copy;|\&\s*©|\&\s*\(C\))(?:\s*)(\d{4})/i;
+    // Also handles OCR-garbled copyright symbols like "LO2024", "IO2024", "O2024" which are common OCR misreads of "© 2024"
+    const copyrightYearPattern = /(?:©|\(C\)|\&copy;|\&\s*©|\&\s*\(C\)|[LlIi]?[OoQ])(?:\s*)(\d{4})/i;
     const copyrightMatch = text.match(copyrightYearPattern);
     
     if (copyrightMatch && copyrightMatch[1]) {
