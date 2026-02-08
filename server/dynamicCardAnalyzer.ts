@@ -175,7 +175,7 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     // Only run general processors if specialized ones didn't handle it
     if (!handledBySpecialProcessor) {
       // PLAYER NAME DETECTION - Extract player name using positional and context analysis
-      extractPlayerName(cleanText, cardDetails);
+      extractPlayerName(cleanText, cardDetails, fullText);
       
       // CARD NUMBER DETECTION - Extract card number using regex patterns
       extractCardNumber(cleanText, cardDetails);
@@ -231,7 +231,7 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
 /**
  * Extract player name using pattern recognition and common positions
  */
-function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>): void {
+function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, originalText?: string): void {
   try {
     // HIGHEST PRIORITY: Check for known basketball players first
     const basketballPlayerMatch = text.match(/\b(JAYSON TATUM|JAYLEN BROWN|LUKA DONCIC|GIANNIS ANTETOKOUNMPO|LEBRON JAMES|STEPHEN CURRY|KEVIN DURANT|NIKOLA JOKIC|JOEL EMBIID|JA MORANT|TRAE YOUNG|DEVIN BOOKER|ZION WILLIAMSON|LAMELO BALL|ANTHONY EDWARDS|TYRESE HALIBURTON|JAMAL MURRAY|SHAI GILGEOUS-ALEXANDER|DAMIAN LILLARD|CJ MCCOLLUM|KAWHI LEONARD|PAUL GEORGE|RUSSELL WESTBROOK|JAMES HARDEN|KYRIE IRVING|JIMMY BUTLER|BAM ADEBAYO|TYLER HERRO|KRIS MIDDLETON|JRUE HOLIDAY|BROOK LOPEZ|DONOVAN MITCHELL|DARIUS GARLAND|EVAN MOBLEY|JARRETT ALLEN|SCOTTIE BARNES|FRED VANVLEET|PASCAL SIAKAM|OG ANUNOBY|JULIUS RANDLE|RJ BARRETT|JALEN BRUNSON|TYRESE MAXEY|TOBIAS HARRIS|BRADLEY BEAL|KRISTAPS PORZINGIS)\b/i);
@@ -448,70 +448,97 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>): 
     // First, look for name patterns in the first few lines of the card
     const lines = text.split('\n');
     
-    // ENHANCED PLAYER NAME DETECTION: Look for complete player names anywhere in the text
-    // This handles cases where OCR misreads brand names but correctly extracts player names
     console.log('Starting enhanced player name detection across full text...');
     
-    // First, look for complete player names anywhere in the full text (most reliable method)
-    // Handle both uppercase OCR text and mixed case text
-    const playerNameRegex = /\b([A-Z][A-Z]*)\s+([A-Z][A-Z]*(?:\s+[A-Z][A-Z]*)*)\b/g;
-    const potentialNames = [];
-    let match;
+    const nonNameWords = new Set([
+      'TOPPS', 'LOPPS', 'OPPS', 'CHROME', 'BOWMAN', 'FLEER', 'DONRUSS', 'PANINI', 'SCORE', 'LEAF',
+      'UPPER', 'DECK', 'SERIES', 'ONE', 'TWO', 'THREE', 'OPENING', 'DAY', 'STADIUM', 'CLUB',
+      'BASEBALL', 'CARD', 'ROOKIE', 'STARS', 'MLB', 'TILB', 'SMLB',
+      'MAJOR', 'LEAGUE', 'BATTING', 'RECORD', 'PITCHING', 'FIELDING',
+      'OUTFIELDER', 'INFIELDER', 'PITCHER', 'CATCHER', 'SHORTSTOP', 'DESIGNATED', 'HITTER',
+      'FIRST', 'SECOND', 'THIRD', 'BASEMAN', 'LEFT', 'RIGHT', 'CENTER', 'FIELDER',
+      'PHILLIES', 'PHILLIE', 'YANKEES', 'DODGERS', 'METS', 'CUBS', 'RED', 'SOX', 'BRAVES',
+      'ASTROS', 'RANGERS', 'PADRES', 'GIANTS', 'CARDINALS', 'NATIONALS', 'ORIOLES', 'GUARDIANS',
+      'TWINS', 'RAYS', 'MARLINS', 'PIRATES', 'REDS', 'BREWERS', 'TIGERS', 'ROYALS', 'ATHLETICS',
+      'MARINERS', 'ANGELS', 'ROCKIES', 'DIAMONDBACKS', 'WHITE',
+      'PHILADELPHIA', 'CHICAGO', 'BOSTON', 'FRANCISCO', 'ANGELES', 'YORK',
+      'NEW', 'SAN', 'LOS', 'SAINT', 'LOUIS', 'KANSAS', 'CITY',
+      'BATS', 'THROWS', 'DRAFTED', 'BORN', 'HOME', 'ACQ', 'FREE', 'AGENT',
+      'HT', 'WT', 'HEIGHT', 'WEIGHT',
+      'ALL', 'STAR', 'COLLECTION', 'FLAGSHIP', 'HERITAGE', 'PRIZM', 'SELECT', 'MOSAIC',
+      'REFRACTOR', 'FOIL', 'GOLD', 'SILVER', 'BRONZE', 'PLATINUM', 'SAPPHIRE',
+      'OFFICIALLY', 'LICENSED', 'PRODUCT', 'TRADEMARKS', 'COPYRIGHTS', 'RESERVED', 'RIGHTS',
+      'REGISTERED', 'COMPANY', 'INC', 'VISIT', 'CODE', 'WWW', 'COM',
+      'THE', 'AND', 'FOR', 'WITH', 'FROM', 'THAT', 'THIS', 'WAS', 'OVER', 'WENT',
+      'KEPT', 'GOING', 'REACHED', 'BASE', 'CLIP', 'THOSE', 'MONTHS', 'PLAYERS',
+      'JUNE', 'JULY', 'MAY', 'AUGUST', 'SEPTEMBER', 'OCTOBER',
+      'HUGE', 'PART', 'LEADOFF', 'MAN', 'OBP', 'ERA', 'AVG', 'RBI', 'WAR',
+      'CHOICE', 'WEB', 'PLAYERA', 'TAPPS', 'XTOPPS', 'ITALICS', 'LEADER', 'TIE',
+      'TOTALS', 'MAJ', 'LEA', 'CUBS', 'NATIONALS',
+    ]);
     
-    console.log('Searching for player names in text (first 200 chars):', text.substring(0, 200));
+    const isNonNameWord = (word: string): boolean => {
+      return nonNameWords.has(word.toUpperCase()) || word.length <= 1 || /^\d/.test(word);
+    };
     
-    while ((match = playerNameRegex.exec(text)) !== null) {
-      const fullName = match[0];
-      const firstName = match[1];
-      const lastName = match[2];
+    const potentialNames: Array<{firstName: string, lastName: string, source: string, priority: number}> = [];
+    
+    const rawLines = (originalText || text).split('\n');
+    
+    for (let i = 0; i < rawLines.length; i++) {
+      const line = rawLines[i].trim();
+      if (!line) continue;
       
-      console.log(`Checking potential name: "${fullName}" (${firstName} ${lastName})`);
+      const words = line.split(/\s+/).filter(w => w.length > 0);
       
-      // Filter out common non-player terms (check in uppercase since OCR is uppercase)
-      const nonPlayerTerms = ['TOPPS', 'UPPER DECK', 'MAJOR LEAGUE', 'NEW YORK', 'LOS ANGELES', 'SAN FRANCISCO', 
-                              'CHICAGO', 'BOSTON', 'PHILADELPHIA', 'ALL STAR', 'OPENING DAY', 'SERIES TWO', 
-                              'SERIES ONE', 'ROOKIE CARD', 'BASEBALL CARD', 'STADIUM CLUB', 'CHROME STARS',
-                              'LOPPS', 'EW YORK', 'OLEAN', 'METS'];
-      
-      const isPlayerName = !nonPlayerTerms.some(term => fullName.includes(term)) && 
-                          firstName.length >= 3 && lastName.length >= 3 &&
-                          !/^\d/.test(fullName) && // Doesn't start with a number
-                          firstName !== 'SERIES' && lastName !== 'TWO'; // Specific exclusions
-      
-      console.log(`Is "${fullName}" a valid player name? ${isPlayerName}`);
-      
-      if (isPlayerName) {
-        // Convert to proper case for storage
-        const properFirstName = firstName.charAt(0) + firstName.slice(1).toLowerCase();
-        const properLastName = lastName.charAt(0) + lastName.slice(1).toLowerCase();
+      if (words.length === 2 || words.length === 3) {
+        const allAlpha = words.every(w => /^[A-Z][A-Za-z'\-\.]+$/.test(w) || /^[A-Z]{2,}$/.test(w));
+        const noNonNameWords = words.every(w => !isNonNameWord(w));
+        const noNumbers = words.every(w => !/\d/.test(w));
+        const eachWordLen = words.every(w => w.length >= 2);
         
-        potentialNames.push({ 
-          fullName, 
-          firstName: properFirstName, 
-          lastName: properLastName, 
-          confidence: match.index 
-        });
-        console.log(`Found valid player name: ${properFirstName} ${properLastName} at position ${match.index}`);
+        if (allAlpha && noNonNameWords && noNumbers && eachWordLen) {
+          const firstName = words[0].charAt(0).toUpperCase() + words[0].slice(1).toLowerCase();
+          const lastName = words.slice(1).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+          
+          const isFollowedByTeamPosition = (i + 1 < rawLines.length) && 
+            /PHILLIES|YANKEES|DODGERS|METS|CUBS|OUTFIELDER|INFIELDER|PITCHER|CATCHER|SHORTSTOP|BASEMAN/i.test(rawLines[i + 1]);
+          
+          const priority = isFollowedByTeamPosition ? 0 : (i < 5 ? 1 : 2);
+          
+          console.log(`Line-based player name candidate: "${firstName} ${lastName}" (priority: ${priority}, line: ${i})`);
+          potentialNames.push({ firstName, lastName, source: 'line', priority });
+        }
       }
     }
     
-    // If we found potential names, use the most likely one
-    if (potentialNames.length > 0) {
-      // For Series Two cards, prioritize names that appear after "SERIES TWO" text
-      let selectedName = potentialNames[0];
+    if (potentialNames.length === 0) {
+      const upperText = text.toUpperCase();
+      const twoWordNameRegex = /\b([A-Z][A-Z]+)\s+([A-Z][A-Z]+(?:\s+[A-Z][A-Z]+)?)\b/g;
+      let match;
       
-      if (text.includes('SERIES TWO')) {
-        const seriesTwoIndex = text.indexOf('SERIES TWO');
-        const namesAfterSeriesTwo = potentialNames.filter(name => name.confidence > seriesTwoIndex);
-        if (namesAfterSeriesTwo.length > 0) {
-          selectedName = namesAfterSeriesTwo[0];
-          console.log('Selected name that appears after SERIES TWO text');
+      while ((match = twoWordNameRegex.exec(upperText)) !== null) {
+        const words = match[0].split(/\s+/);
+        if (words.length > 3) continue;
+        
+        const noNonNameWords = words.every(w => !isNonNameWord(w));
+        const eachWordLen = words.every(w => w.length >= 2);
+        
+        if (noNonNameWords && eachWordLen) {
+          const firstName = words[0].charAt(0).toUpperCase() + words[0].slice(1).toLowerCase();
+          const lastName = words.slice(1).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+          potentialNames.push({ firstName, lastName, source: 'regex', priority: 3 });
+          console.log(`Regex-based player name candidate: "${firstName} ${lastName}"`);
         }
       }
-      
-      cardDetails.playerFirstName = selectedName.firstName;
-      cardDetails.playerLastName = selectedName.lastName;
-      console.log(`Selected player name: ${cardDetails.playerFirstName} ${cardDetails.playerLastName}`);
+    }
+    
+    if (potentialNames.length > 0) {
+      potentialNames.sort((a, b) => a.priority - b.priority);
+      const selected = potentialNames[0];
+      cardDetails.playerFirstName = selected.firstName;
+      cardDetails.playerLastName = selected.lastName;
+      console.log(`Selected player name: ${selected.firstName} ${selected.lastName} (source: ${selected.source}, priority: ${selected.priority})`);
       return;
     }
     
@@ -616,7 +643,13 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>): 
       }
       
       // Avoid lines that are clearly not names
-      const nonNameWords = ['PITCHER', 'CATCHER', 'INFIELDER', 'OUTFIELDER', 'COMPLETE', 'RECORD', 'MAJOR', 'LEAGUE'];
+      const nonNameWords = [
+        'PITCHER','CATCHER','INFIELDER','OUTFIELDER','DESIGNATED','HITTER',
+        'BATS','THROWS','THROW','LEFT','RIGHT','SWITCH',
+        'HEIGHT','WEIGHT','BORN','BIRTH','DOB',
+        'MAJOR','LEAGUE','CLUB','RECORD','COMPLETE','ERA',
+        'POSITION','TEAM','OF','THE'
+      ];
       let isNonNameLine = false;
       for (const word of nonNameWords) {
         if (line.includes(word)) {
@@ -770,13 +803,20 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>): 
     }
     
     // Plain number format: #123 or No. 123
-    const plainNumberPattern = /(?:#|No\.\s*)(\d+)/i;
+    const plainNumberPattern = /(?:#|No\.?\s*)(\d+)/;
     const plainNumberMatch = text.match(plainNumberPattern);
-    
     if (plainNumberMatch && plainNumberMatch[1]) {
-      cardDetails.cardNumber = plainNumberMatch[1];
-      console.log(`Detected plain number: ${cardDetails.cardNumber}`);
-      return;
+      const candidate = plainNumberMatch[1];
+      const lineWithMatch = lines.find(line => line.includes(plainNumberMatch[0]));
+
+      if (lineWithMatch && isDOBFormat(lineWithMatch)) {
+        console.log(`Skipping plain number "${candidate}" that appears in a date/stat line`);
+      } else if (candidate.length === 1) {
+        cardDetails.cardNumber = candidate;
+      } else {
+        cardDetails.cardNumber = candidate;
+        return;
+      }
     }
     
     // Look for standalone numbers at the very beginning of the card text

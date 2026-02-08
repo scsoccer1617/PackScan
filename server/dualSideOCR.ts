@@ -267,17 +267,41 @@ async function combineCardResults(
     combined.isNumbered = true;
   }
   
-  // Special case for Score cards: if brand is detected as Score, double-check the player name
-  // to ensure we didn't mistake "SCORE" for a player's first name
-  if (combined.brand === 'Score' && combined.playerFirstName === 'Score') {
-    // If the first name is 'Score', try to get a proper name from other source
-    if (backResult.playerFirstName && backResult.playerFirstName !== 'Score') {
-      combined.playerFirstName = backResult.playerFirstName;
-      combined.playerLastName = backResult.playerLastName || '';
-    } else if (frontResult.playerLastName) {
-      // Shift the last name to first name and see if we can find another name from back result
-      combined.playerFirstName = frontResult.playerLastName;
-      combined.playerLastName = backResult.playerFirstName || '';
+  const bogusNameWords = new Set([
+    'TOPPS', 'LOPPS', 'OPPS', 'CHROME', 'BOWMAN', 'FLEER', 'DONRUSS', 'PANINI', 'SCORE', 'LEAF',
+    'SERIES', 'PHILLIE', 'PHILLIES', 'YANKEES', 'DODGERS', 'METS', 'CUBS', 'BRAVES',
+    'OUTFIELDER', 'INFIELDER', 'PITCHER', 'CATCHER', 'LEFT', 'RIGHT', 'THROWS', 'BATS',
+    'MAJOR', 'LEAGUE', 'BATTING', 'RECORD', 'STADIUM', 'CLUB', 'COLLECTION',
+    'OPENING', 'DAY', 'HERITAGE', 'PRIZM', 'SELECT', 'MOSAIC',
+    'BASEBALL', 'CARD', 'ROOKIE', 'STARS', 'MLB',
+    'DRAFTED', 'BORN', 'FREE', 'AGENT',
+  ]);
+  
+  const isBogusFn = (firstName?: string, lastName?: string): boolean => {
+    if (!firstName || !lastName) return true;
+    const fullName = `${firstName} ${lastName}`.toUpperCase();
+    const words = fullName.split(/\s+/);
+    return words.some(w => bogusNameWords.has(w)) || words.length > 4;
+  };
+  
+  const frontNameBogus = isBogusFn(combined.playerFirstName, combined.playerLastName);
+  const backNameBogus = isBogusFn(backResult.playerFirstName, backResult.playerLastName);
+  
+  if (frontNameBogus && !backNameBogus && backResult.playerFirstName && backResult.playerLastName) {
+    console.log(`Front player name "${combined.playerFirstName} ${combined.playerLastName}" looks unreliable, using back: "${backResult.playerFirstName} ${backResult.playerLastName}"`);
+    combined.playerFirstName = backResult.playerFirstName;
+    combined.playerLastName = backResult.playerLastName;
+  } else if (frontNameBogus && backNameBogus) {
+    const allText = (frontOCRText + '\n' + backOCRText).toUpperCase();
+    const nameLineMatch = allText.match(/^([A-Z][A-Z]+)\s+([A-Z][A-Z]+(?:\s+[A-Z][A-Z]+)?)\s*$/m);
+    if (nameLineMatch) {
+      const words = nameLineMatch[0].trim().split(/\s+/);
+      const noBogusFn = words.every(w => !bogusNameWords.has(w));
+      if (noBogusFn && words.length >= 2 && words.length <= 3) {
+        combined.playerFirstName = words[0].charAt(0) + words[0].slice(1).toLowerCase();
+        combined.playerLastName = words.slice(1).map(w => w.charAt(0) + w.slice(1).toLowerCase()).join(' ');
+        console.log(`Recovered player name from OCR text: ${combined.playerFirstName} ${combined.playerLastName}`);
+      }
     }
   }
   
