@@ -844,7 +844,20 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
         
         if (brandWithNumberMatch && brandWithNumberMatch[2]) {
           const number = brandWithNumberMatch[2];
-          if (parseInt(number) > 0 && parseInt(number) < 1000) {
+          const numVal = parseInt(number);
+          
+          const isLikelyYear = (number.length === 2 && (
+            (numVal >= 80 && numVal <= 99) || 
+            (numVal >= 0 && numVal <= 30)   
+          ));
+          
+          if (isLikelyYear) {
+            const fullYear = numVal >= 80 ? 1900 + numVal : 2000 + numVal;
+            if (!cardDetails.year || cardDetails.year === 0) {
+              cardDetails.year = fullYear;
+            }
+            console.log(`Number ${number} after brand "${brandWithNumberMatch[1]}" is a year (${fullYear}), not a card number`);
+          } else if (numVal > 0 && numVal < 1000) {
             cardDetails.cardNumber = number;
             console.log(`Detected card number ${number} immediately after brand "${brandWithNumberMatch[1]}" - highest confidence`);
             return;
@@ -852,17 +865,22 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
         }
         
         // If no direct brand+number pattern, check for any standalone number in the line
-        const brandLineNumberMatch = line.match(/\b(\d{1,3})\b/);
-        if (brandLineNumberMatch && brandLineNumberMatch[1]) {
-          const number = brandLineNumberMatch[1];
-          // Avoid common incorrect matches like jersey numbers, heights, weights
-          const commonIncorrectNumbers = ['00', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12'];
-          if (parseInt(number) > 0 && 
-              parseInt(number) < 1000 && 
-              !commonIncorrectNumbers.includes(number)) {
-            cardDetails.cardNumber = number;
-            console.log(`Detected card number ${number} in same line as brand - high confidence`);
-            return;
+        const brandLineNumbers = line.match(/\b(\d{1,3})\b/g);
+        if (brandLineNumbers) {
+          const commonIncorrectNumbers = new Set(['00', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12']);
+          for (const number of brandLineNumbers) {
+            const numVal = parseInt(number);
+            if (commonIncorrectNumbers.has(number)) continue;
+            const isYearLike = number.length === 2 && ((numVal >= 80 && numVal <= 99) || (numVal >= 0 && numVal <= 30));
+            if (isYearLike) {
+              console.log(`Skipping number ${number} on brand line - looks like a year`);
+              continue;
+            }
+            if (numVal > 0 && numVal < 1000) {
+              cardDetails.cardNumber = number;
+              console.log(`Detected card number ${number} in same line as brand - high confidence`);
+              return;
+            }
           }
         }
         
