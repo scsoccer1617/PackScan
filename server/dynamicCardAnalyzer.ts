@@ -1025,6 +1025,7 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>)
     // Prefer to use regex for collections to avoid false positives
     
     const collectionPatterns = [
+      { pattern: /RIFLEMAN/i, name: "Rifleman" },
       { pattern: /STARS OF MLB|SMLB/, name: "Stars of MLB" },
       { pattern: /CHROME STARS OF MLB|CSMLB/, name: "Stars of MLB", variant: "Chrome" },
       { pattern: /HERITAGE/i, name: "Heritage" },

@@ -229,13 +229,13 @@ async function combineCardResults(
   
   // Fields where front image has priority
   const frontPriorityFields: (keyof CardFormValues)[] = [
-    'playerFirstName', 'playerLastName', 'cardNumber', 
+    'playerFirstName', 'playerLastName',
     'isRookieCard', 'brand', 'collection', 'variant'
   ];
   
-  // Fields where back image has priority
+  // Fields where back image has priority (card numbers are most reliably found on the back)
   const backPriorityFields: (keyof CardFormValues)[] = [
-    'year', 'sport', 'serialNumber'
+    'cardNumber', 'year', 'sport', 'serialNumber'
   ];
   
   // Copy front priority fields first
