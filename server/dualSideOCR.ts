@@ -238,20 +238,27 @@ async function combineCardResults(
     'cardNumber', 'year', 'sport', 'serialNumber'
   ];
   
+  // Helper: check if a field value is meaningfully set (not empty, null, undefined, or 0 for numeric fields)
+  const hasValue = (val: any): boolean => {
+    if (val === undefined || val === null || val === '') return false;
+    if (typeof val === 'number' && val === 0) return false;
+    return true;
+  };
+
   // Copy front priority fields first
   frontPriorityFields.forEach(field => {
-    if (frontResult[field] !== undefined && frontResult[field] !== null && frontResult[field] !== '') {
+    if (hasValue(frontResult[field])) {
       combined[field] = frontResult[field];
-    } else if (backResult[field] !== undefined && backResult[field] !== null && backResult[field] !== '') {
+    } else if (hasValue(backResult[field])) {
       combined[field] = backResult[field];
     }
   });
   
   // Then copy back priority fields
   backPriorityFields.forEach(field => {
-    if (backResult[field] !== undefined && backResult[field] !== null && backResult[field] !== '') {
+    if (hasValue(backResult[field])) {
       combined[field] = backResult[field];
-    } else if (frontResult[field] !== undefined && frontResult[field] !== null && frontResult[field] !== '') {
+    } else if (hasValue(frontResult[field])) {
       combined[field] = frontResult[field];
     }
   });
