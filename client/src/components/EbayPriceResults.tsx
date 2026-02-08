@@ -338,7 +338,7 @@ export default function EbayPriceResults({ cardData, frontImage, backImage }: Eb
           </CardTitle>
           {dataType === 'current' && (
             <p className="text-sm text-blue-600">
-              Showing current asking prices - sold prices temporarily unavailable due to API limits
+              Showing current eBay listings and asking prices
             </p>
           )}
         </CardHeader>
@@ -371,7 +371,7 @@ export default function EbayPriceResults({ cardData, frontImage, backImage }: Eb
                       </p>
                     )}
                     <p className="text-xs text-gray-400">
-                      Sold: {formatDate(result.endTime)}
+                      {dataType === 'sold' ? `Sold: ${formatDate(result.endTime)}` : 'Active Listing'}
                     </p>
                   </div>
                   <div className="text-right flex-shrink-0">
