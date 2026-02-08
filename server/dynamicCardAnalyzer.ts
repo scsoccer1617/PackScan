@@ -740,14 +740,37 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
              /(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC|JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER)[.\s,-]+\d{1,2}/.test(text);
     };
     
-    // Split text into lines for analysis
-    const lines = text.split('\n');
+    // Use originalText (with newlines preserved) for line-based analysis when available
+    // This prevents the entire back text from being treated as one giant line
+    const textForLines = originalText || text;
+    const lines = textForLines.split('\n').map(l => l.trim()).filter(l => l.length > 0);
     
     // Check for birthdate-related lines
     const birthdateLines = lines.filter(line => isDOBFormat(line));
     if (birthdateLines.length > 0) {
       console.log(`Skipping potential birthdate/stat lines for card number detection:`, birthdateLines);
     }
+    
+    // Helper: check if a number appears in a player bio context (height, weight, draft pick, etc.)
+    const isPlayerBioNumber = (num: string, contextLine: string): boolean => {
+      const numVal = parseInt(num);
+      const upper = contextLine.toUpperCase();
+      // Weight pattern: WT: 229, WT 229, WEIGHT: 229
+      if (new RegExp(`WT[:\\s]+${num}\\b`, 'i').test(upper)) return true;
+      // Height pattern: HT: 6'0" (not a number we'd extract but guard against)
+      if (/HT[:\s]+\d/.test(upper) && upper.includes(num)) return true;
+      // Draft pick pattern: DRAFTED: CUBS #1, PICK #5
+      if (/DRAFTED|DRAFT\s*PICK/i.test(upper) && new RegExp(`#${num}\\b`).test(upper)) return true;
+      // Stats table headers/rows: lines with team abbreviations and many numbers
+      if (/\b(CUBS|REDS|PHILLIES|NATIONALS|RED SOX|YANKEES|DODGERS|GIANTS|BRAVES|ATHLETICS|ANGELS|CARDINALS|BLUE JAYS|WHITE SOX|PIRATES|MARLINS|RANGERS|MARINERS|TIGERS|TWINS|ROYALS|INDIANS|GUARDIANS|DIAMONDBACKS|ROCKIES|PADRES|RAYS|METS|ASTROS|BREWERS|ORIOLES)\b/i.test(upper)) {
+        // If the line has many numbers (stat line), skip it
+        const numberCount = (upper.match(/\b\d+\b/g) || []).length;
+        if (numberCount >= 4) return true;
+      }
+      // MAJ. LEA. TOTALS line
+      if (/MAJ\.?\s*LEA|TOTALS/i.test(upper)) return true;
+      return false;
+    };
     
     // Special handling for All-Star card numbers (e.g., 89ASB-28)
     const allStarCardPattern = /\b(\d+ASB?-\d+)\b/i;
@@ -827,7 +850,8 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
       const line = lines[i].trim();
       
       // If line contains a card brand, check for nearby card numbers
-      if (/TOPPS|BOWMAN|FLEER|DONRUSS|SCORE|LEAF|UPPER DECK/i.test(line)) {
+      // But skip lines that are clearly player bio/stat lines
+      if (/TOPPS|BOWMAN|FLEER|DONRUSS|SCORE|LEAF|UPPER DECK/i.test(line) && !isDOBFormat(line)) {
         console.log(`Found brand mention in line ${i+1}: "${line}"`);
         
         // Special case for Bobby Thigpen Fleer 549 card
@@ -874,6 +898,11 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
             const isYearLike = number.length === 2 && ((numVal >= 80 && numVal <= 99) || (numVal >= 0 && numVal <= 30));
             if (isYearLike) {
               console.log(`Skipping number ${number} on brand line - looks like a year`);
+              continue;
+            }
+            // Skip numbers that appear in player bio context (height, weight, draft pick, stats)
+            if (isPlayerBioNumber(number, line)) {
+              console.log(`Skipping number ${number} on brand line - appears in player bio context (HT/WT/draft/stats)`);
               continue;
             }
             if (numVal > 0 && numVal < 1000) {
