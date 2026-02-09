@@ -2,9 +2,15 @@ import axios from 'axios';
 import { getFoilSearchTerm } from './foilVariantDetector';
 
 // eBay Browse API configuration (modern replacement for Finding API)
-const EBAY_APP_ID = process.env.EBAY_APP_ID || '';
-const EBAY_BROWSE_TOKEN = process.env.EBAY_BROWSE_TOKEN || '';
 const EBAY_BROWSE_API_URL = 'https://api.ebay.com/buy/browse/v1';
+
+function getEbayAppId(): string {
+  return process.env.EBAY_APP_ID || '';
+}
+
+function getEbayBrowseToken(): string {
+  return process.env.EBAY_BROWSE_TOKEN || '';
+}
 
 // Interface for eBay search results
 interface EbaySearchResult {
@@ -169,7 +175,9 @@ export async function searchCardValues(
   serialNumber?: string
 ): Promise<EbayResponse> {
   try {
-    if (!EBAY_APP_ID || !EBAY_BROWSE_TOKEN) {
+    const ebayAppId = getEbayAppId();
+    const ebayBrowseToken = getEbayBrowseToken();
+    if (!ebayAppId || !ebayBrowseToken) {
       console.warn('eBay Browse API credentials not set. Cannot fetch card values.');
       return { averageValue: 0, results: [] };
     }
@@ -282,7 +290,7 @@ export async function searchCardValues(
       const findingParams = {
         'OPERATION-NAME': 'findCompletedItems',
         'SERVICE-VERSION': '1.0.0',
-        'SECURITY-APPNAME': EBAY_APP_ID,
+        'SECURITY-APPNAME': ebayAppId,
         'GLOBAL-ID': 'EBAY-US',
         'RESPONSE-DATA-FORMAT': 'JSON',
         'keywords': keywords,
@@ -317,7 +325,7 @@ export async function searchCardValues(
       response = await axios.get(browseUrl, { 
         params: browseParams,
         headers: {
-          'Authorization': `Bearer ${EBAY_BROWSE_TOKEN}`,
+          'Authorization': `Bearer ${ebayBrowseToken}`,
           'Accept': 'application/json',
           'Content-Type': 'application/json'
         },
