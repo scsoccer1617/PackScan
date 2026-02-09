@@ -117,6 +117,12 @@ This is a streamlined web application focused on sports card price lookup using 
 - June 30, 2025: Implemented comprehensive visual foil detection system using Google Vision API for metallic surfaces, reflectivity, and prismatic effects analysis
 - June 30, 2025: Fixed foil detection false positives for white border reflections with strict rejection criteria and sport-specific text detection
 - June 30, 2025: Enhanced fallback logic to properly handle visual detection errors and use conservative text-based detection as backup
+- February 9, 2026: Fixed Google Vision API decoder error in visual foil detector by aligning private key formatting with working OCR client
+- February 9, 2026: Removed all hardcoded 'Aqua Foil' variant assumptions - variant is now purely dynamic based on visual color analysis and text detection
+- February 9, 2026: Added dynamic color classification for visual foil detection (Blue, Green, Red, Gold, Purple, Orange, Pink, Silver, Aqua)
+- February 9, 2026: Variant now passed to eBay search query for more accurate pricing when card is not base/standard
+- February 9, 2026: Fixed isNumbered not being set when serialNumber detected in combined result
+- February 9, 2026: Included alphanumeric card numbers (e.g., SMLB-2) in eBay search queries
 
 ## User Preferences
 

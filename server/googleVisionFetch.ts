@@ -1046,34 +1046,6 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       console.log('Identified Topps brand from card number format:', result.cardNumber);
     }
     
-    // Special handling for the Sean Manaea card since we know it's from Series Two
-    if (result.playerFirstName === 'Sean' && result.playerLastName === 'Manaea') {
-      // Set defaults for this known card
-      if (!result.brand) result.brand = 'Topps';
-      if (!result.cardNumber) result.cardNumber = '380'; 
-      if (!result.collection) result.collection = 'Series Two';
-      
-      // For Sean Manaea's Series Two cards - ALWAYS set it as Aqua Foil variant
-      // This is because we know from the uploaded card that it's an Aqua Foil variant
-      // and OCR has trouble consistently detecting it due to the reflective surface
-      
-      // IMPORTANT: For this specific card, we're defaulting to Aqua Foil
-      result.variant = 'Aqua Foil';
-      
-      // Set the serial number if not already detected
-      if (!result.serialNumber) {
-        result.serialNumber = '010/399';
-        console.log('Set Aqua Foil variant and serial number for Sean Manaea card');
-      }
-      
-      // Ensure we keep 2025 as the correct year
-      result.year = 2025;
-      
-      // Set default condition for Sean Manaea card
-      result.condition = 'PSA 8';
-      
-      console.log('Applied special handling for Sean Manaea card: year 2025, brand Topps, number 380, condition PSA 8');
-    }
     
     // Print all text annotations for debugging
     console.log('All detected text fragments:');
@@ -1713,9 +1685,19 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       }
     }
     
-    // Check for other variants
-    if (fullText.includes('AQUA') || lowerText.includes('aqua foil')) {
-      result.variant = 'Aqua Foil';
+    // Check for variant keywords in text dynamically
+    const variantKeywords: Record<string, string> = {
+      'aqua foil': 'Aqua Foil', 'blue foil': 'Blue Foil', 'green foil': 'Green Foil',
+      'gold foil': 'Gold Foil', 'red foil': 'Red Foil', 'silver foil': 'Silver Foil',
+      'purple foil': 'Purple Foil', 'orange foil': 'Orange Foil', 'pink foil': 'Pink Foil',
+      'refractor': 'Refractor', 'xfractor': 'Xfractor', 'prizm': 'Prizm',
+    };
+    for (const [keyword, variantName] of Object.entries(variantKeywords)) {
+      if (lowerText.includes(keyword)) {
+        result.variant = variantName;
+        console.log(`Detected variant "${variantName}" from keyword "${keyword}" in text`);
+        break;
+      }
     }
     
     // Detect special collections
@@ -1936,37 +1918,10 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       }
     }
     
-    // Additional variant detection based on visual and content cues
-    // For cards with very few detected texts on the front (likely foil variants)
-    if (!result.variant) {
-      // Method 1: Limited text detection often indicates foil cards (reflective surfaces)
-      if (fullText.length < 30) {
-        const hasPlayerName = result.playerFirstName && result.playerLastName;
-        if (hasPlayerName) {
-          result.variant = 'Aqua Foil';
-          console.log('Identified potential Aqua Foil variant based on limited text detection');
-        }
-      }
-      
-      // Method 2: Numbered cards (with serial numbers) are almost always special variants
-      if (result.serialNumber && result.serialNumber.includes('/')) {
-        result.variant = 'Aqua Foil';
-        result.isNumbered = true;
-        console.log('Identified Aqua Foil variant based on serial number:', result.serialNumber);
-      }
-      
-      // Method 3: Check for known foil variant keywords anywhere in the text
-      if (!result.variant) {
-        const foilKeywords = ['foil', 'aqua', 'refractor', 'parallel', 'rainbow', 'gold', 'silver'];
-        const lowerFullText = fullText.toLowerCase();
-        for (const keyword of foilKeywords) {
-          if (lowerFullText.includes(keyword)) {
-            result.variant = 'Aqua Foil';
-            console.log(`Identified Aqua Foil variant based on keyword "${keyword}" in text`);
-            break;
-          }
-        }
-      }
+    // Set isNumbered flag when serial number is detected
+    if (!result.isNumbered && result.serialNumber && result.serialNumber.includes('/')) {
+      result.isNumbered = true;
+      console.log('Set isNumbered=true based on serial number:', result.serialNumber);
     }
     
     // Set a default condition

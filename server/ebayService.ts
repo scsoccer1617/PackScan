@@ -172,7 +172,8 @@ export async function searchCardValues(
   condition?: string,
   isNumbered?: boolean,
   foilType?: string,
-  serialNumber?: string
+  serialNumber?: string,
+  variant?: string
 ): Promise<EbayResponse> {
   try {
     const ebayAppId = getEbayAppId();
@@ -183,7 +184,7 @@ export async function searchCardValues(
     }
 
     // Create cache key from search parameters including foil type and serial number
-    const cacheKey = `${playerName}-${cardNumber}-${brand}-${year}-${collection || ''}-${isNumbered || ''}-${foilType || ''}-${serialNumber || ''}`;
+    const cacheKey = `${playerName}-${cardNumber}-${brand}-${year}-${collection || ''}-${isNumbered || ''}-${foilType || ''}-${serialNumber || ''}-${variant || ''}`;
     const cached = searchCache.get(cacheKey);
     
     // Return cached result if still valid and not an error
@@ -277,6 +278,16 @@ export async function searchCardValues(
       }
     } else {
       console.log('DEBUG: No foilType provided to eBay search');
+    }
+    
+    // Add variant to search if it's not empty and different from foilType (avoid duplication)
+    if (variant && variant.trim() && variant !== foilType) {
+      const variantLower = variant.toLowerCase();
+      const keywordsLower = keywords.toLowerCase();
+      if (!keywordsLower.includes(variantLower)) {
+        keywords += ` ${variant}`;
+        console.log(`Added variant "${variant}" to eBay search keywords`);
+      }
     }
     
     console.log('Searching eBay for SOLD listings with keywords:', keywords);
@@ -516,7 +527,8 @@ export async function searchCardValues(
         condition, 
         false, // remove isNumbered
         foilType, // KEEP foilType for accurate pricing
-        undefined  // remove serialNumber
+        undefined,  // remove serialNumber
+        variant // KEEP variant for accurate pricing
       );
     }
     

@@ -1,10 +1,45 @@
-import vision from '@google-cloud/vision';
+import { ImageAnnotatorClient } from '@google-cloud/vision';
 
 interface FoilDetectionResult {
   isFoil: boolean;
   foilType: string | null;
   confidence: number;
   indicators: string[];
+}
+
+function formatPrivateKey(rawKey: string): string {
+  let cleanKey = rawKey.replace(/\\n/g, '\n');
+  cleanKey = cleanKey.replace(/^["']|["']$/g, '');
+  if (!cleanKey.startsWith('-----BEGIN')) {
+    cleanKey = `-----BEGIN PRIVATE KEY-----\n${cleanKey}\n-----END PRIVATE KEY-----`;
+  }
+  const lines = cleanKey.split('\n');
+  return lines.map(line => line.trim()).filter(line => line.length > 0).join('\n');
+}
+
+function classifyDominantColor(r: number, g: number, b: number): string | null {
+  const maxChannel = Math.max(r, g, b);
+  const minChannel = Math.min(r, g, b);
+  const saturation = maxChannel - minChannel;
+  const brightness = (r + g + b) / 3;
+  
+  // Silver detection: high brightness, low saturation (near-white metallic)
+  if (brightness > 160 && saturation < 30 && r > 150 && g > 150 && b > 150) return 'Silver';
+  
+  if (saturation < 30) return null;
+  
+  if (b > r + 30 && b > g + 10 && b > 100) {
+    if (g > r + 15 && Math.abs(g - b) < 40) return 'Aqua';
+    return 'Blue';
+  }
+  if (g > r + 25 && g > b + 25 && g > 100) return 'Green';
+  if (r > g + 40 && r > b + 40 && r > 120) return 'Red';
+  if (r > 180 && g > 120 && g < 200 && b < 80) return 'Gold';
+  if (r > 100 && g < 80 && b > r - 30 && b > 100) return 'Purple';
+  if (r > 200 && g > 100 && g < 180 && b < 80) return 'Orange';
+  if (r > 200 && g < 150 && b > 150) return 'Pink';
+  
+  return null;
 }
 
 /**
@@ -15,10 +50,24 @@ export async function detectFoilFromImage(base64Image: string): Promise<FoilDete
   console.log('=== VISUAL FOIL DETECTION STARTING ===');
   
   try {
-    const client = new vision.ImageAnnotatorClient({
+    const clientEmail = process.env.GOOGLE_CLIENT_EMAIL;
+    const privateKey = process.env.GOOGLE_PRIVATE_KEY;
+    
+    if (!clientEmail || !privateKey) {
+      return {
+        isFoil: false,
+        foilType: null,
+        confidence: 0,
+        indicators: ['Missing Google Cloud credentials for visual analysis']
+      };
+    }
+    
+    const formattedKey = formatPrivateKey(privateKey);
+    
+    const client = new ImageAnnotatorClient({
       credentials: {
-        client_email: process.env.GOOGLE_CLIENT_EMAIL,
-        private_key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+        client_email: clientEmail,
+        private_key: formattedKey,
       },
     });
 
@@ -123,7 +172,7 @@ export async function detectFoilFromImage(base64Image: string): Promise<FoilDete
       
       const colors = imageProps.dominantColors.colors;
       let hasMetallicColors = false;
-      let hasGreenTint = false;
+      let detectedColorTint: string | null = null;
       let totalColorVariance = 0;
       
       for (const colorInfo of colors) {
@@ -137,52 +186,40 @@ export async function detectFoilFromImage(base64Image: string): Promise<FoilDete
         
         const brightness = (r + g + b) / 3;
         const saturation = Math.max(r, g, b) - Math.min(r, g, b);
+        const maxChannel = Math.max(r, g, b);
         
-        // Check for white border reflection (high brightness, low saturation, significant coverage)
+        console.log(`Color: RGB(${r},${g},${b}) brightness=${brightness.toFixed(0)} saturation=${saturation} coverage=${(pixelFraction * 100).toFixed(1)}%`);
+        
         if (brightness > 220 && saturation < 20 && pixelFraction > 0.2) {
           hasWhiteBorderReflection = true;
           indicators.push(`White border reflection detected: RGB(${r},${g},${b}) - ${(pixelFraction * 100).toFixed(1)}%`);
         }
         
-        // True metallic surfaces have more color variety and prismatic effects
-        // They should have moderate to high saturation, not just brightness
         if (brightness > 160 && saturation > 50 && pixelFraction > 0.08) {
           hasMetallicColors = true;
           totalColorVariance += saturation * pixelFraction;
           indicators.push(`Metallic color detected: RGB(${r},${g},${b}) - saturation: ${saturation}, coverage: ${(pixelFraction * 100).toFixed(1)}%`);
         }
         
-        // Check for aqua/cyan-tinted metallic (common in Series Two foil cards)
-        if (g > r + 15 && b > r + 15 && g > 120 && b > 120 && saturation > 35 && pixelFraction > 0.10) {
-          hasGreenTint = true; // Use same flag but detect aqua
-          indicators.push(`Aqua/cyan metallic tint detected: RGB(${r},${g},${b}) - ${(pixelFraction * 100).toFixed(1)}%, saturation: ${saturation}`);
-          
-          // Specifically detect aqua foil based on balanced blue-green
-          if (Math.abs(g - b) < 30 && g > 120 && b > 120) {
-            foilType = 'Aqua Foil';
-            indicators.push('Aqua foil detected based on balanced blue-green metallic tint');
+        if (saturation > 35 && pixelFraction > 0.08 && maxChannel > 100) {
+          const colorName = classifyDominantColor(r, g, b);
+          if (colorName && !detectedColorTint) {
+            detectedColorTint = colorName;
+            indicators.push(`Dominant ${colorName} tint detected: RGB(${r},${g},${b}) - ${(pixelFraction * 100).toFixed(1)}%`);
           }
-        }
-        
-        // Check for green-tinted metallic (traditional green foil)
-        else if (g > r + 20 && g > b + 20 && g > 120 && saturation > 40 && pixelFraction > 0.12) {
-          hasGreenTint = true;
-          indicators.push(`Green metallic tint detected: ${(pixelFraction * 100).toFixed(1)}%, saturation: ${saturation}`);
         }
       }
       
-      // Reject foil detection if it's likely just white border reflection
       if (hasWhiteBorderReflection && !hasMetallicColors) {
         indicators.push('Rejected: Likely white border reflection without metallic characteristics');
         console.log('Rejected foil detection - appears to be white border reflection');
       } else if (hasMetallicColors && totalColorVariance > 3.0) {
-        // Only consider it foil if there's sufficient color variance indicating prismatic effects
         confidence += 0.4;
         isFoil = true;
         
-        if (hasGreenTint && !foilType) {
-          foilType = 'Green Foil';
-          indicators.push('Green foil type assigned based on color analysis');
+        if (detectedColorTint && !foilType) {
+          foilType = `${detectedColorTint} Foil`;
+          indicators.push(`${detectedColorTint} foil type assigned based on color analysis`);
         }
         
         indicators.push(`Color variance score: ${totalColorVariance.toFixed(2)} (threshold: 3.0)`);

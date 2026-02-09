@@ -399,50 +399,39 @@ async function combineCardResults(
       console.log('Visual foil detection explicitly rejected foil characteristics');
       console.log(`Visual rejection reason: ${visualFoilResult.indicators.join('; ')}`);
     } else {
-      // Visual detection couldn't run due to decoder errors, implement intelligent fallback
-      console.log('Visual detection unavailable, using intelligent card-based foil detection...');
+      // Visual detection couldn't run, fall back to text-based detection for explicit mentions
+      console.log('Visual detection unavailable, falling back to text-based foil detection...');
       
-      // Smart foil detection based on card characteristics
-      let detectedFoil = false;
-      let detectedFoilType: string | null = null;
+      const { detectFoilVariant } = await import('./foilVariantDetector');
+      const combinedOCRText = frontOCRText + ' ' + backOCRText;
+      const textFoilResult = detectFoilVariant(combinedOCRText);
       
-      // For Topps Series Two numbered cards, these are commonly aqua foil variants
-      if (combined.brand === 'Topps' && 
-          combined.collection === 'Series Two' && 
-          combined.serialNumber && 
-          /\d+\/\d+/.test(combined.serialNumber)) {
-        
-        detectedFoil = true;
-        detectedFoilType = 'Aqua Foil';
-        console.log('Detected Aqua Foil based on Topps Series Two numbered card characteristics');
-      }
-      
-      // Apply the intelligent detection results
-      if (detectedFoil && detectedFoilType) {
-        combined.foilType = detectedFoilType;
+      if (textFoilResult.isFoil && textFoilResult.foilType) {
+        combined.foilType = textFoilResult.foilType;
         combined.isFoil = true;
-        console.log(`Intelligent foil detection successful: ${detectedFoilType}`);
+        console.log(`Text-based foil detection successful: ${textFoilResult.foilType}`);
       } else {
-        // Still fall back to text-based as final resort for explicit mentions
-        const { detectFoilVariant } = await import('./foilVariantDetector');
-        const combinedOCRText = frontOCRText + ' ' + backOCRText;
-        const textFoilResult = detectFoilVariant(combinedOCRText);
-        
-        if (textFoilResult.isFoil && textFoilResult.foilType) {
-          combined.foilType = textFoilResult.foilType;
-          combined.isFoil = true;
-          console.log(`Text-based foil detection successful: ${textFoilResult.foilType}`);
-        } else {
-          combined.foilType = null;
-          combined.isFoil = false;
-          console.log('No foil variant detected by any method');
-        }
+        combined.foilType = null;
+        combined.isFoil = false;
+        console.log('No foil variant detected by any method');
       }
     }
   } catch (error) {
     console.error('Error in foil detection:', error);
     combined.foilType = null;
     combined.isFoil = false;
+  }
+  
+  // Set variant from foilType if foil was detected and no variant was set
+  if (combined.isFoil && combined.foilType && !combined.variant) {
+    combined.variant = combined.foilType;
+    console.log(`Set variant to "${combined.foilType}" from foil detection`);
+  }
+  
+  // Fix isNumbered when serialNumber is detected
+  if (combined.serialNumber && /\d+\/\d+/.test(combined.serialNumber) && !combined.isNumbered) {
+    combined.isNumbered = true;
+    console.log(`Set isNumbered=true based on serial number: ${combined.serialNumber}`);
   }
   
   console.log('=== COMBINATION COMPLETE ===');

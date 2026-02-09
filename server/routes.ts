@@ -934,7 +934,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get(`${apiPrefix}/ebay-search`, async (req, res) => {
     try {
-      const { playerName, cardNumber, brand, year, collection, condition, isNumbered, foilType, serialNumber } = req.query;
+      const { playerName, cardNumber, brand, year, collection, condition, isNumbered, foilType, serialNumber, variant } = req.query;
       
       if (!playerName || !brand || !year) {
         return res.status(400).json({ error: 'Missing required parameters' });
@@ -948,7 +948,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         collection, 
         isNumbered, 
         foilType: foilType || 'UNDEFINED', 
-        serialNumber 
+        serialNumber,
+        variant: variant || 'NONE'
       });
       
       const results = await searchCardValues(
@@ -960,7 +961,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         condition as string || '',
         isNumbered === 'true',
         foilType as string || undefined,
-        serialNumber as string || undefined
+        serialNumber as string || undefined,
+        variant as string || undefined
       );
       
       console.log('eBay search results:', results);
@@ -1075,7 +1077,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             '',
             cardData.isNumbered || false,
             cardData.foilType,
-            cardData.serialNumber
+            cardData.serialNumber,
+            cardData.variant
           );
           
           console.log('eBay search results:', ebayResults);
@@ -1189,7 +1192,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             cardData.condition || '',
             cardData.isNumbered || false,
             cardData.foilType || undefined,
-            cardData.serialNumber || undefined
+            cardData.serialNumber || undefined,
+            cardData.variant || undefined
           );
           
           ebayResults = ebayData.results || [];
