@@ -41,10 +41,109 @@ function classifyDominantColor(r: number, g: number, b: number): string | null {
   return null;
 }
 
-/**
- * Detect foil characteristics using visual analysis of the card image
- * This analyzes the actual visual properties like reflectivity, color patterns, etc.
- */
+type TextureType = 'Crackle' | 'Shimmer' | 'Ice' | null;
+
+function detectTextureFromLabels(labels: Array<{ description?: string | null; score?: number | null }>): { texture: TextureType; textureConfidence: number; labelIndicators: string[] } {
+  const labelIndicators: string[] = [];
+  const scores: Record<string, number> = { Crackle: 0, Shimmer: 0, Ice: 0 };
+  
+  const crackleLabels = ['glitter', 'sparkle', 'speckle', 'confetti', 'dotted', 'spotted', 'sprinkle', 'particle', 'sequin'];
+  const shimmerLabels = ['shimmer', 'sheen', 'luster', 'lustre', 'gleam', 'glow'];
+  const iceLabels = ['ice', 'frost', 'frozen', 'crystal', 'crystalline'];
+  
+  for (const label of labels) {
+    const desc = label.description?.toLowerCase() || '';
+    const score = label.score || 0;
+    
+    for (const keyword of crackleLabels) {
+      if (desc.includes(keyword) && score > 0.3) {
+        scores.Crackle += score;
+        labelIndicators.push(`Crackle texture label: "${desc}" (${score.toFixed(2)})`);
+      }
+    }
+    for (const keyword of shimmerLabels) {
+      if (desc.includes(keyword) && score > 0.3) {
+        scores.Shimmer += score;
+        labelIndicators.push(`Shimmer texture label: "${desc}" (${score.toFixed(2)})`);
+      }
+    }
+    for (const keyword of iceLabels) {
+      if (desc.includes(keyword) && score > 0.3) {
+        scores.Ice += score;
+        labelIndicators.push(`Ice texture label: "${desc}" (${score.toFixed(2)})`);
+      }
+    }
+  }
+  
+  const best = Object.entries(scores).sort((a, b) => b[1] - a[1])[0];
+  if (best[1] > 0) {
+    return { texture: best[0] as TextureType, textureConfidence: best[1], labelIndicators };
+  }
+  
+  return { texture: null, textureConfidence: 0, labelIndicators };
+}
+
+interface ColorEntry {
+  r: number;
+  g: number;
+  b: number;
+  brightness: number;
+  saturation: number;
+  pixelFraction: number;
+  colorName: string | null;
+}
+
+function detectTextureFromColors(colors: ColorEntry[]): { texture: TextureType; textureConfidence: number; textureIndicators: string[] } {
+  const textureIndicators: string[] = [];
+  
+  const brightSaturatedSmall = colors.filter(c => 
+    c.brightness > 80 && c.saturation > 20 && c.pixelFraction < 0.04 && c.pixelFraction > 0.005
+  );
+  
+  const smallCoverage = brightSaturatedSmall.reduce((sum, c) => sum + c.pixelFraction, 0);
+  
+  const brightVariedColors = colors.filter(c => 
+    c.brightness > 60 && c.saturation > 15 && c.pixelFraction > 0.005
+  );
+  
+  const uniqueHues = new Set<string>();
+  for (const c of brightVariedColors) {
+    const hue = c.r > c.g && c.r > c.b ? 'R' : 
+                c.g > c.r && c.g > c.b ? 'G' : 
+                c.b > c.r && c.b > c.g ? 'B' :
+                c.r > c.b ? 'RG' : c.g > c.b ? 'GB' : 'RB';
+    uniqueHues.add(hue);
+  }
+  
+  const smoothLargeRegions = colors.filter(c => 
+    c.brightness > 100 && c.saturation > 20 && c.pixelFraction > 0.08
+  );
+  
+  const colorSpread = brightSaturatedSmall.length;
+  const hueVariety = uniqueHues.size;
+  
+  textureIndicators.push(`Texture analysis: ${colorSpread} small bright regions (${(smallCoverage * 100).toFixed(1)}% coverage), ${hueVariety} hue groups, ${smoothLargeRegions.length} large uniform regions`);
+  
+  if (colorSpread >= 3 && hueVariety >= 3 && smallCoverage > 0.05 && smoothLargeRegions.length === 0) {
+    const conf = Math.min(0.8, (colorSpread / 5) * 0.4 + (hueVariety / 4) * 0.4);
+    textureIndicators.push(`Strong crackle pattern: ${colorSpread} scattered regions, ${hueVariety} hues, ${(smallCoverage * 100).toFixed(1)}% small-region coverage`);
+    return { texture: 'Crackle', textureConfidence: conf, textureIndicators };
+  }
+  
+  if (colorSpread >= 3 && hueVariety >= 2 && smallCoverage > 0.04) {
+    const conf = Math.min(0.5, (colorSpread / 5) * 0.3 + (hueVariety / 4) * 0.2);
+    textureIndicators.push(`Possible crackle pattern: ${colorSpread} scattered regions, ${hueVariety} hues, ${(smallCoverage * 100).toFixed(1)}% coverage`);
+    return { texture: 'Crackle', textureConfidence: conf, textureIndicators };
+  }
+  
+  if (smoothLargeRegions.length >= 1 && colorSpread < 2) {
+    textureIndicators.push(`Smooth foil pattern: ${smoothLargeRegions.length} large uniform regions`);
+    return { texture: 'Shimmer', textureConfidence: 0.4, textureIndicators };
+  }
+  
+  return { texture: null, textureConfidence: 0, textureIndicators };
+}
+
 export async function detectFoilFromImage(base64Image: string): Promise<FoilDetectionResult> {
   console.log('=== VISUAL FOIL DETECTION STARTING ===');
   
@@ -75,7 +174,7 @@ export async function detectFoilFromImage(base64Image: string): Promise<FoilDete
         content: base64Image,
       },
       features: [
-        { type: 'LABEL_DETECTION' as const, maxResults: 20 },
+        { type: 'LABEL_DETECTION' as const, maxResults: 30 },
         { type: 'IMAGE_PROPERTIES' as const }
       ],
     };
@@ -84,12 +183,10 @@ export async function detectFoilFromImage(base64Image: string): Promise<FoilDete
     try {
       [result] = await client.annotateImage(request);
     } catch (visionError: any) {
-      // Handle decoder errors and other Google Vision API issues
       console.log('Google Vision API error:', visionError.message || visionError);
       
       if (visionError.message?.includes('DECODER') || visionError.message?.includes('unsupported')) {
         console.log('Image decoder error - likely image format issue, falling back to basic detection');
-        // Return conservative result when visual analysis fails
         return {
           isFoil: false,
           foilType: null,
@@ -98,7 +195,7 @@ export async function detectFoilFromImage(base64Image: string): Promise<FoilDete
         };
       }
       
-      throw visionError; // Re-throw if it's not a decoder error
+      throw visionError;
     }
     
     let isFoil = false;
@@ -108,15 +205,20 @@ export async function detectFoilFromImage(base64Image: string): Promise<FoilDete
     let hasStrongFoilIndicators = false;
     let hasWhiteBorderReflection = false;
 
-    // Analyze labels for foil-related characteristics
     const labels = result.labelAnnotations || [];
     console.log('Image labels found:', labels.map(l => `${l.description} (${l.score})`));
+    
+    const { texture: labelTexture, textureConfidence: labelTextureConf, labelIndicators } = detectTextureFromLabels(labels);
+    indicators.push(...labelIndicators);
+    let textureConfidence = labelTextureConf;
+    if (labelTexture) {
+      console.log(`Label-based texture detected: ${labelTexture} (confidence: ${labelTextureConf.toFixed(2)})`);
+    }
     
     for (const label of labels) {
       const description = label.description?.toLowerCase() || '';
       const score = label.score || 0;
       
-      // Strong foil indicators (high confidence)
       if (description.includes('rainbow') || description.includes('prismatic') || description.includes('iridescent')) {
         indicators.push(`Strong prismatic effect detected (${score.toFixed(2)})`);
         confidence += score * 0.7;
@@ -125,7 +227,6 @@ export async function detectFoilFromImage(base64Image: string): Promise<FoilDete
         foilType = 'Rainbow Foil';
       }
       
-      // Chrome/metal detection with higher threshold
       if ((description.includes('chrome') || description.includes('metallic')) && score > 0.6) {
         indicators.push(`Chrome/metallic surface detected (${score.toFixed(2)})`);
         confidence += score * 0.6;
@@ -134,7 +235,6 @@ export async function detectFoilFromImage(base64Image: string): Promise<FoilDete
         if (!foilType) foilType = 'Chrome';
       }
       
-      // Color-specific metallic detection
       if (description.includes('silver') && score > 0.5) {
         indicators.push(`Silver surface detected (${score.toFixed(2)})`);
         confidence += score * 0.5;
@@ -149,34 +249,33 @@ export async function detectFoilFromImage(base64Image: string): Promise<FoilDete
         foilType = 'Gold Foil';
       }
       
-      // Weaker indicators - only count if score is high
       if ((description.includes('reflect') || description.includes('shiny') || description.includes('gloss')) && score > 0.7) {
         indicators.push(`Reflective surface detected (${score.toFixed(2)})`);
         confidence += score * 0.3;
-        // Don't set isFoil = true here, let other indicators decide
       }
       
-      // Exclude common false positives
       if (description.includes('paper') || description.includes('text') || description.includes('white')) {
         indicators.push(`Non-foil material detected: ${description} (${score.toFixed(2)})`);
-        // Reduce confidence if we detect paper/text materials
         confidence -= score * 0.2;
       }
     }
 
-    // Analyze color properties for foil characteristics
     const imageProps = result.imagePropertiesAnnotation;
+    let detectedTexture: TextureType = labelTexture;
+    
     if (imageProps?.dominantColors?.colors) {
       console.log('Analyzing color properties for foil detection...');
       
-      const colors = imageProps.dominantColors.colors;
+      const rawColors = imageProps.dominantColors.colors;
       let hasMetallicColors = false;
       let detectedColorTint: string | null = null;
       let totalColorVariance = 0;
       let tintedColorCount = 0;
       const detectedTints: { name: string; coverage: number }[] = [];
       
-      for (const colorInfo of colors) {
+      const parsedColors: ColorEntry[] = [];
+      
+      for (const colorInfo of rawColors) {
         const color = colorInfo.color;
         if (!color) continue;
         
@@ -188,8 +287,11 @@ export async function detectFoilFromImage(base64Image: string): Promise<FoilDete
         const brightness = (r + g + b) / 3;
         const saturation = Math.max(r, g, b) - Math.min(r, g, b);
         const maxChannel = Math.max(r, g, b);
+        const colorName = classifyDominantColor(r, g, b);
         
-        console.log(`Color: RGB(${r},${g},${b}) brightness=${brightness.toFixed(0)} saturation=${saturation} coverage=${(pixelFraction * 100).toFixed(1)}%`);
+        parsedColors.push({ r, g, b, brightness, saturation, pixelFraction, colorName });
+        
+        console.log(`Color: RGB(${r},${g},${b}) brightness=${brightness.toFixed(0)} saturation=${saturation} coverage=${(pixelFraction * 100).toFixed(1)}% name=${colorName || 'none'}`);
         
         if (brightness > 220 && saturation < 20 && pixelFraction > 0.2) {
           hasWhiteBorderReflection = true;
@@ -203,7 +305,6 @@ export async function detectFoilFromImage(base64Image: string): Promise<FoilDete
         }
         
         if (saturation > 25 && pixelFraction > 0.03 && maxChannel > 70) {
-          const colorName = classifyDominantColor(r, g, b);
           if (colorName) {
             tintedColorCount++;
             detectedTints.push({ name: colorName, coverage: pixelFraction });
@@ -215,11 +316,22 @@ export async function detectFoilFromImage(base64Image: string): Promise<FoilDete
         }
       }
       
+      if (!detectedTexture) {
+        const { texture: colorTexture, textureConfidence: colorTextureConf, textureIndicators } = detectTextureFromColors(parsedColors);
+        indicators.push(...textureIndicators);
+        if (colorTexture) {
+          detectedTexture = colorTexture;
+          textureConfidence = Math.max(textureConfidence, colorTextureConf);
+          console.log(`Color-based texture detected: ${colorTexture} (confidence: ${colorTextureConf.toFixed(2)})`);
+        }
+      }
+      
       const hasSimilarTintedRegions = detectedTints.length >= 2 && 
         detectedTints.some(t => t.name === detectedColorTint && t !== detectedTints[0]);
       const totalTintCoverage = detectedTints.reduce((sum, t) => sum + t.coverage, 0);
       
       console.log(`Tinted color regions: ${tintedColorCount}, similar tints: ${hasSimilarTintedRegions}, total tint coverage: ${(totalTintCoverage * 100).toFixed(1)}%`);
+      console.log(`Detected texture: ${detectedTexture || 'none'}`);
       
       if (hasWhiteBorderReflection && !hasMetallicColors) {
         indicators.push('Rejected: Likely white border reflection without metallic characteristics');
@@ -229,8 +341,12 @@ export async function detectFoilFromImage(base64Image: string): Promise<FoilDete
         isFoil = true;
         
         if (!foilType) {
-          foilType = `${detectedColorTint} Foil`;
-          indicators.push(`${detectedColorTint} foil type assigned based on color analysis (${tintedColorCount} tinted regions)`);
+          if (detectedTexture && textureConfidence >= 0.3) {
+            foilType = `${detectedColorTint} ${detectedTexture} Foil`;
+          } else {
+            foilType = `${detectedColorTint} Foil`;
+          }
+          indicators.push(`Foil type assigned: ${foilType} (${tintedColorCount} tinted regions, texture: ${detectedTexture || 'standard'}, texture confidence: ${textureConfidence.toFixed(2)})`);
         }
         
         indicators.push(`Color variance score: ${totalColorVariance.toFixed(2)}, tint coverage: ${(totalTintCoverage * 100).toFixed(1)}%`);
@@ -240,6 +356,16 @@ export async function detectFoilFromImage(base64Image: string): Promise<FoilDete
     }
 
     const hasColorBasedFoil = isFoil && foilType && foilType !== 'Foil';
+    
+    const MIN_TEXTURE_CONFIDENCE = 0.3;
+    if (isFoil && foilType && detectedTexture && textureConfidence >= MIN_TEXTURE_CONFIDENCE &&
+        !foilType.includes('Crackle') && !foilType.includes('Shimmer') && !foilType.includes('Ice')) {
+      const colorPart = foilType.replace(/\s*Foil\s*$/i, '').trim();
+      if (colorPart && colorPart !== 'Rainbow' && colorPart !== 'Chrome' && colorPart !== 'Silver' && colorPart !== 'Gold') {
+        foilType = `${colorPart} ${detectedTexture} Foil`;
+        indicators.push(`Texture refinement: updated to "${foilType}" (texture confidence: ${textureConfidence.toFixed(2)})`);
+      }
+    }
     
     if (isFoil && !hasStrongFoilIndicators && !hasColorBasedFoil) {
       console.log('REJECTING foil detection - no strong foil indicators or color-based detection found');
@@ -255,7 +381,6 @@ export async function detectFoilFromImage(base64Image: string): Promise<FoilDete
       indicators.push('REJECTED: Likely false positive from white border reflection');
     }
     
-    // Cap confidence at 1.0
     confidence = Math.min(confidence, 1.0);
     
     if (isFoil && !foilType && (hasStrongFoilIndicators || hasColorBasedFoil)) {
@@ -270,6 +395,7 @@ export async function detectFoilFromImage(base64Image: string): Promise<FoilDete
     console.log('=== VISUAL FOIL DETECTION RESULT ===');
     console.log(`Is Foil: ${isFoil}`);
     console.log(`Foil Type: ${foilType}`);
+    console.log(`Texture: ${detectedTexture || 'none'}`);
     console.log(`Confidence: ${confidence.toFixed(2)}`);
     console.log(`Strong indicators present: ${hasStrongFoilIndicators}`);
     console.log(`White border reflection detected: ${hasWhiteBorderReflection}`);

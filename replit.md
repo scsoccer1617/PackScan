@@ -128,6 +128,8 @@ This is a streamlined web application focused on sports card price lookup using 
 - February 9, 2026: Implemented eBay-assisted variant discovery - dynamically discovers specific variant names (e.g., "Aqua Crackle Foil") by parsing listing titles from broader searches
 - February 9, 2026: Improved visual foil detection for border foils - detects multiple similarly-tinted color regions indicating foil gradient patterns
 - February 9, 2026: Serial number suffix (/399) kept in eBay searches for accurate rarity-based pricing
+- February 9, 2026: Added visual texture pattern detection - distinguishes Crackle Foil (speckled prismatic spots) from standard smooth foil using color distribution analysis and Vision API labels
+- February 9, 2026: Texture detection uses confidence scoring with minimum threshold (0.3) to avoid false crackle classifications; excludes Silver/Gold/Rainbow/Chrome from texture refinement
 
 ## User Preferences
 
