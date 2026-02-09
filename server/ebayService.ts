@@ -1,8 +1,72 @@
 import axios from 'axios';
 import { getFoilSearchTerm } from './foilVariantDetector';
 
-// eBay Browse API configuration (modern replacement for Finding API)
 const EBAY_BROWSE_API_URL = 'https://api.ebay.com/buy/browse/v1';
+
+function normalizeCollectionForSearch(collection: string): string {
+  return collection
+    .replace(/\bSeries Two\b/gi, 'Series 2')
+    .replace(/\bSeries One\b/gi, 'Series 1')
+    .replace(/\bSeries Three\b/gi, 'Series 3');
+}
+
+function discoverVariantFromListings(titles: string[], detectedColor: string | null): string | null {
+  if (!detectedColor) return null;
+  
+  const colorLower = detectedColor.toLowerCase();
+  const variantCounts: Record<string, number> = {};
+  
+  const variantDescriptors = new Set([
+    'foil', 'crackle', 'ice', 'shimmer', 'refractor', 'chrome', 'prizm',
+    'parallel', 'mojo', 'wave', 'sparkle', 'glitter', 'holo', 'rainbow',
+    'atomic', 'sapphire', 'optic', 'mosaic', 'flash', 'laser', 'speckle',
+    'mega', 'hyper', 'ultra', 'mini', 'diamond', 'crystal', 'silk',
+    'xfractor', 'scope', 'velocity', 'fractal', 'pulsar', 'orbit'
+  ]);
+  
+  for (const title of titles) {
+    const titleLower = title.toLowerCase();
+    const colorIdx = titleLower.indexOf(colorLower);
+    if (colorIdx === -1) continue;
+    
+    const afterColor = titleLower.substring(colorIdx + colorLower.length).trim();
+    const words = afterColor.split(/\s+/);
+    
+    const descriptors: string[] = [];
+    for (const word of words) {
+      const cleanWord = word.replace(/[^a-z]/g, '');
+      if (cleanWord && variantDescriptors.has(cleanWord)) {
+        descriptors.push(cleanWord);
+      } else {
+        break;
+      }
+    }
+    
+    if (descriptors.length > 0) {
+      const variantName = descriptors
+        .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(' ');
+      const fullVariant = `${detectedColor} ${variantName}`;
+      variantCounts[fullVariant] = (variantCounts[fullVariant] || 0) + 1;
+    }
+  }
+  
+  const sorted = Object.entries(variantCounts).sort((a, b) => b[1] - a[1]);
+  if (sorted.length > 0) {
+    console.log(`Discovered variant "${sorted[0][0]}" from ${sorted[0][1]} eBay listing(s)`);
+    return sorted[0][0];
+  }
+  return null;
+}
+
+function extractColorFromVariant(variant: string | undefined): string | null {
+  if (!variant) return null;
+  const colors = ['Aqua', 'Blue', 'Green', 'Red', 'Gold', 'Silver', 'Purple', 'Orange', 'Pink'];
+  for (const color of colors) {
+    if (variant.toLowerCase().startsWith(color.toLowerCase())) return color;
+  }
+  return null;
+}
 
 function getEbayAppId(): string {
   return process.env.EBAY_APP_ID || '';
@@ -193,103 +257,48 @@ export async function searchCardValues(
       return cached.data;
     }
 
-    // Build search query based on card details
-    // Note: We intentionally exclude the condition (PSA grade) from the search
-    // to get a wider range of results
+    const searchCollection = collection ? normalizeCollectionForSearch(collection) : '';
     
-    // Split player name into first and last name for more flexible search
-    const nameComponents = playerName.split(' ');
-    const lastName = nameComponents.length > 1 ? nameComponents[nameComponents.length - 1] : playerName;
-    
-    // Special handling for different card types
-    let keywords = '';
-    
-    // Check for Stars of MLB cards
-    if (typeof collection === 'string' && collection.toLowerCase().includes('stars of mlb')) {
-      // For Stars of MLB cards, use the exact format that works on eBay
-      keywords = `${playerName} ${brand} ${collection} ${cardNumber}`;
-      console.log('Using Stars of MLB search strategy with card number');
-    }
-    // Check for Heritage cards
-    else if (typeof collection === 'string' && collection.toLowerCase().includes('heritage')) {
-      // For Heritage cards, we use a more specific format that works better
-      keywords = `${lastName} ${brand} Heritage ${year}`;
-      if (/^\d+$/.test(cardNumber)) {
-        keywords += ` ${cardNumber}`;
-      }
-      console.log('Using Heritage search strategy');
-    }
-    // Check for Series Two cards
-    else if (typeof collection === 'string' && collection.toLowerCase().includes('series two')) {
-      // For Series Two cards, include the full collection name for better results
-      keywords = `${playerName} ${brand} Series Two ${year}`;
-      if (cardNumber && /^\d+$/.test(cardNumber)) {
-        keywords += ` ${cardNumber}`;
-      }
-      console.log('Using Series Two search strategy with full player name and collection');
-    }
-    // Standard cards
-    else {
-      // For regular cards, include full player name, brand, collection, card number, and year
-      keywords = `${playerName} ${brand}`;
-      
-      // Add collection if available
-      if (collection) {
-        keywords += ` ${collection}`;
-      }
-      
-      // Add card number if available (include alphanumeric card numbers like SMLB-2, not just numeric ones)
-      if (cardNumber) {
-        keywords += ` ${cardNumber}`;
-      }
-      
-      // Add year
-      keywords += ` ${year}`;
-      
-      console.log('Using comprehensive standard search strategy with full card details');
-    }
-    
-    // Add serial number suffix for serialized cards to get accurate pricing for limited editions
+    let serialSuffix = '';
     if (isNumbered && serialNumber) {
-      // Extract the suffix (e.g., "/399" from "010/399")
       const serialMatch = serialNumber.match(/\/(\d+)$/);
       if (serialMatch) {
-        const serialSuffix = `/${serialMatch[1]}`;
-        keywords += ` ${serialSuffix}`;
-        console.log(`Added serial number suffix "${serialSuffix}" to search for numbered card`);
-      } else {
-        // Fallback to "numbered" if we can't extract the suffix
-        keywords += ' numbered';
-        console.log('Added "numbered" to search for serialized card (fallback)');
+        serialSuffix = `/${serialMatch[1]}`;
       }
     }
     
-    // Add foil variant for special finishes to get accurate pricing for foil variants
-    console.log(`DEBUG: foilType parameter = "${foilType}"`);
-    if (foilType) {
-      // Use the already imported helper function to get the eBay-friendly search term
-      const foilSearchTerm = getFoilSearchTerm(foilType);
-      console.log(`DEBUG: getFoilSearchTerm("${foilType}") = "${foilSearchTerm}"`);
-      if (foilSearchTerm) {
-        keywords += ` ${foilSearchTerm}`;
-        console.log(`Added "${foilSearchTerm}" to search for ${foilType} foil variant`);
-      } else {
-        console.log(`No foil search term found for ${foilType}`);
-      }
-    } else {
-      console.log('DEBUG: No foilType provided to eBay search');
+    let variantKeyword = '';
+    if (variant && variant.trim()) {
+      variantKeyword = variant;
+    } else if (foilType) {
+      variantKeyword = foilType;
     }
     
-    // Add variant to search if it's not empty and different from foilType (avoid duplication)
-    if (variant && variant.trim() && variant !== foilType) {
-      const variantLower = variant.toLowerCase();
-      const keywordsLower = keywords.toLowerCase();
-      if (!keywordsLower.includes(variantLower)) {
-        keywords += ` ${variant}`;
-        console.log(`Added variant "${variant}" to eBay search keywords`);
+    const buildKeywords = (opts: { includeVariant?: boolean; includeCardNumber?: boolean; includeSerial?: boolean } = {}): string => {
+      const { includeVariant = true, includeCardNumber = true, includeSerial = true } = opts;
+      const parts: string[] = [];
+      
+      if (year > 0) parts.push(String(year));
+      if (brand) parts.push(brand);
+      if (searchCollection) parts.push(searchCollection);
+      parts.push(playerName);
+      
+      if (includeCardNumber && cardNumber) {
+        parts.push(/^\d+$/.test(cardNumber) ? `#${cardNumber}` : cardNumber);
       }
+      
+      if (includeVariant && variantKeyword) {
+        parts.push(variantKeyword);
+      }
+      
+      if (includeSerial && serialSuffix) {
+        parts.push(serialSuffix);
+      }
+      
+      return parts.filter(Boolean).join(' ');
     }
     
+    let keywords = buildKeywords();
     console.log('Searching eBay for SOLD listings with keywords:', keywords);
 
     // Try Finding API first for sold listings (most valuable data)
@@ -480,20 +489,104 @@ export async function searchCardValues(
       }
     }
 
-    if (results.length === 0 && isNumbered && serialNumber) {
-      console.log('No results found with serial number, retrying without serial number suffix...');
-      return await searchCardValues(
-        playerName, cardNumber, brand, year, collection, condition,
-        false, foilType, undefined, variant
-      );
-    }
-    
-    if (results.length === 0 && cardNumber) {
-      console.log('No results found with card number, retrying without card number...');
-      return await searchCardValues(
-        playerName, '', brand, year, collection, condition,
-        false, foilType, undefined, variant
-      );
+    if (results.length === 0) {
+      console.log('No results with initial query, trying variant discovery search...');
+      
+      const discoveryKeywords = buildKeywords({ includeVariant: false, includeCardNumber: false });
+      console.log('Discovery search keywords:', discoveryKeywords);
+      
+      let discoveryResults: EbaySearchResult[] = [];
+      try {
+        const browseUrl = `${EBAY_BROWSE_API_URL}/item_summary/search`;
+        const discoveryParams = {
+          q: discoveryKeywords,
+          limit: 20,
+          filter: 'buyingOptions:{AUCTION|FIXED_PRICE},deliveryCountry:US',
+          sort: 'price',
+          fieldgroups: 'EXTENDED',
+          category_ids: '213'
+        };
+        
+        const discoveryResponse = await axios.get(browseUrl, {
+          params: discoveryParams,
+          headers: {
+            'Authorization': `Bearer ${getEbayBrowseToken()}`,
+            'Accept': 'application/json',
+          },
+          timeout: 15000
+        });
+        
+        if (discoveryResponse.data?.itemSummaries) {
+          discoveryResults = discoveryResponse.data.itemSummaries.map((item: any) => ({
+            title: item.title || '',
+            price: parseFloat(item.price?.value || '0'),
+            currency: item.price?.currency || 'USD',
+            url: item.itemWebUrl || '',
+            imageUrl: item.image?.imageUrl || item.thumbnailImages?.[0]?.imageUrl || '',
+            condition: item.condition || '',
+            endTime: item.itemEndDate || ''
+          }));
+        }
+      } catch (discoveryError: any) {
+        console.log('Discovery search failed:', discoveryError.message);
+      }
+      
+      if (discoveryResults.length > 0) {
+        const titles = discoveryResults.map(r => r.title);
+        const detectedColor = extractColorFromVariant(variantKeyword || undefined);
+        const discoveredVariant = discoverVariantFromListings(titles, detectedColor);
+        
+        if (discoveredVariant && discoveredVariant !== variantKeyword) {
+          console.log(`Discovered more specific variant: "${discoveredVariant}" (was "${variantKeyword}")`);
+          variantKeyword = discoveredVariant;
+          
+          const refinedKeywords = buildKeywords();
+          console.log('Refined search with discovered variant:', refinedKeywords);
+          
+          try {
+            const browseUrl = `${EBAY_BROWSE_API_URL}/item_summary/search`;
+            const refinedParams = {
+              q: refinedKeywords,
+              limit: 10,
+              filter: 'buyingOptions:{AUCTION|FIXED_PRICE},deliveryCountry:US',
+              sort: 'price',
+              fieldgroups: 'EXTENDED',
+              category_ids: '213'
+            };
+            
+            const refinedResponse = await axios.get(browseUrl, {
+              params: refinedParams,
+              headers: {
+                'Authorization': `Bearer ${getEbayBrowseToken()}`,
+                'Accept': 'application/json',
+              },
+              timeout: 15000
+            });
+            
+            if (refinedResponse.data?.itemSummaries && refinedResponse.data.itemSummaries.length > 0) {
+              results = refinedResponse.data.itemSummaries.map((item: any) => ({
+                title: item.title || '',
+                price: parseFloat(item.price?.value || '0'),
+                currency: item.price?.currency || 'USD',
+                url: item.itemWebUrl || '',
+                imageUrl: item.image?.imageUrl || item.thumbnailImages?.[0]?.imageUrl || '',
+                condition: item.condition || '',
+                endTime: item.itemEndDate || ''
+              }));
+              dataType = 'current';
+              console.log(`Refined search returned ${results.length} results`);
+            }
+          } catch (refinedError: any) {
+            console.log('Refined search failed:', refinedError.message);
+          }
+        }
+        
+        if (results.length === 0) {
+          results = discoveryResults;
+          dataType = 'current';
+          console.log(`Using discovery results: ${results.length} listings found`);
+        }
+      }
     }
 
     const prioritizedResults = prioritizeListingsByCardMatch(
@@ -516,8 +609,9 @@ export async function searchCardValues(
     const result = {
       averageValue,
       results: topResults,
-      searchUrl: getEbaySearchUrl(playerName, cardNumber, brand, year, collection, '', isNumbered, foilType, serialNumber),
-      dataType: dataType as 'sold' | 'current'
+      searchUrl: getEbaySearchUrl(playerName, cardNumber, brand, year, collection, '', isNumbered, variantKeyword || foilType, serialNumber),
+      dataType: dataType as 'sold' | 'current',
+      discoveredVariant: variantKeyword !== (variant || foilType || '') ? variantKeyword : undefined
     };
 
     // Cache the successful result
@@ -528,38 +622,6 @@ export async function searchCardValues(
     console.error('Error searching eBay Browse API:', error.message);
     console.error('Error response status:', error.response?.status);
     console.error('Error response data:', JSON.stringify(error.response?.data, null, 2));
-    
-    if (serialNumber) {
-      console.log('Complex search failed, trying simpler fallback without serial number...');
-      return await searchCardValues(
-        playerName, 
-        cardNumber, 
-        brand, 
-        year, 
-        collection, 
-        condition, 
-        false,
-        foilType,
-        undefined,
-        variant
-      );
-    }
-    
-    if (cardNumber) {
-      console.log('Search with card number failed, trying without card number...');
-      return await searchCardValues(
-        playerName, 
-        '',
-        brand, 
-        year, 
-        collection, 
-        condition, 
-        false,
-        foilType,
-        undefined,
-        variant
-      );
-    }
     
     // Check for specific eBay Browse API error messages
     let errorMessage = 'eBay Browse API error - check credentials';
@@ -605,50 +667,17 @@ export function getEbaySearchUrl(
   foilType?: string,
   serialNumber?: string
 ): string {
-  // Split player name into first and last name for more flexible search
-  const nameComponents = playerName.split(' ');
-  const lastName = nameComponents.length > 1 ? nameComponents[nameComponents.length - 1] : playerName;
+  const searchCollection = collection ? normalizeCollectionForSearch(collection) : '';
   
-  // Build search terms using same logic as API search - use full details for better results
-  let keywords = '';
+  const parts: string[] = [];
+  if (year > 0) parts.push(String(year));
+  if (brand) parts.push(brand);
+  if (searchCollection) parts.push(searchCollection);
+  parts.push(playerName);
+  if (cardNumber) parts.push(/^\d+$/.test(cardNumber) ? `#${cardNumber}` : cardNumber);
+  if (foilType) parts.push(foilType);
   
-  // Check for Stars of MLB cards
-  if (collection && collection.toLowerCase().includes('stars of mlb')) {
-    // For Stars of MLB cards, use the exact format that works on eBay
-    keywords = `${playerName} ${brand} ${collection} ${cardNumber}`;
-  }
-  // Check for Heritage cards
-  else if (collection && collection.toLowerCase().includes('heritage')) {
-    keywords = `${lastName} ${brand} Heritage ${year}`;
-    if (/^\d+$/.test(cardNumber)) {
-      keywords += ` ${cardNumber}`;
-    }
-  }
-  // Check for Series Two cards
-  else if (collection && collection.toLowerCase().includes('series two')) {
-    keywords = `${playerName} ${brand} Series Two ${year}`;
-    if (cardNumber && /^\d+$/.test(cardNumber)) {
-      keywords += ` ${cardNumber}`;
-    }
-  }
-  // Standard cards
-  else {
-    // Use comprehensive format: Full player name, brand, collection, card number, year
-    keywords = `${playerName} ${brand}`;
-    
-    // Add collection if available
-    if (collection) {
-      keywords += ` ${collection}`;
-    }
-    
-    // Add card number if available
-    if (cardNumber && /^\d+$/.test(cardNumber)) {
-      keywords += ` ${cardNumber}`;
-    }
-    
-    // Add year
-    keywords += ` ${year}`;
-  }
+  let keywords = parts.filter(Boolean).join(' ');
   
   // Add serial number suffix for serialized cards (e.g., "/399" instead of "numbered")
   if (isNumbered && serialNumber && serialNumber.includes('/')) {

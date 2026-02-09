@@ -123,6 +123,11 @@ This is a streamlined web application focused on sports card price lookup using 
 - February 9, 2026: Variant now passed to eBay search query for more accurate pricing when card is not base/standard
 - February 9, 2026: Fixed isNumbered not being set when serialNumber detected in combined result
 - February 9, 2026: Included alphanumeric card numbers (e.g., SMLB-2) in eBay search queries
+- February 9, 2026: Normalized collection names for eBay search (Series Two → Series 2) for better listing matches
+- February 9, 2026: Restructured eBay search query format to match eBay listing conventions (year-first, #cardNumber prefix)
+- February 9, 2026: Implemented eBay-assisted variant discovery - dynamically discovers specific variant names (e.g., "Aqua Crackle Foil") by parsing listing titles from broader searches
+- February 9, 2026: Improved visual foil detection for border foils - detects multiple similarly-tinted color regions indicating foil gradient patterns
+- February 9, 2026: Serial number suffix (/399) kept in eBay searches for accurate rarity-based pricing
 
 ## User Preferences
 
