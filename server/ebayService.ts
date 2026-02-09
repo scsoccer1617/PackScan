@@ -480,7 +480,22 @@ export async function searchCardValues(
       }
     }
 
-    // Prioritize results based on card information match
+    if (results.length === 0 && isNumbered && serialNumber) {
+      console.log('No results found with serial number, retrying without serial number suffix...');
+      return await searchCardValues(
+        playerName, cardNumber, brand, year, collection, condition,
+        false, foilType, undefined, variant
+      );
+    }
+    
+    if (results.length === 0 && cardNumber) {
+      console.log('No results found with card number, retrying without card number...');
+      return await searchCardValues(
+        playerName, '', brand, year, collection, condition,
+        false, foilType, undefined, variant
+      );
+    }
+
     const prioritizedResults = prioritizeListingsByCardMatch(
       results, 
       playerName, 
@@ -514,10 +529,8 @@ export async function searchCardValues(
     console.error('Error response status:', error.response?.status);
     console.error('Error response data:', JSON.stringify(error.response?.data, null, 2));
     
-    // If this is a complex search (with foil or serial), try a simpler search as fallback
-    // But keep foilType since that's important for accurate pricing
     if (serialNumber) {
-      console.log('Complex search failed, trying simpler fallback search (keeping foil type)...');
+      console.log('Complex search failed, trying simpler fallback without serial number...');
       return await searchCardValues(
         playerName, 
         cardNumber, 
@@ -525,10 +538,26 @@ export async function searchCardValues(
         year, 
         collection, 
         condition, 
-        false, // remove isNumbered
-        foilType, // KEEP foilType for accurate pricing
-        undefined,  // remove serialNumber
-        variant // KEEP variant for accurate pricing
+        false,
+        foilType,
+        undefined,
+        variant
+      );
+    }
+    
+    if (cardNumber) {
+      console.log('Search with card number failed, trying without card number...');
+      return await searchCardValues(
+        playerName, 
+        '',
+        brand, 
+        year, 
+        collection, 
+        condition, 
+        false,
+        foilType,
+        undefined,
+        variant
       );
     }
     

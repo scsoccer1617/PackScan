@@ -23,21 +23,20 @@ function classifyDominantColor(r: number, g: number, b: number): string | null {
   const saturation = maxChannel - minChannel;
   const brightness = (r + g + b) / 3;
   
-  // Silver detection: high brightness, low saturation (near-white metallic)
   if (brightness > 160 && saturation < 30 && r > 150 && g > 150 && b > 150) return 'Silver';
   
-  if (saturation < 30) return null;
+  if (saturation < 20) return null;
   
-  if (b > r + 30 && b > g + 10 && b > 100) {
-    if (g > r + 15 && Math.abs(g - b) < 40) return 'Aqua';
-    return 'Blue';
+  if ((b > r + 20 && b > g) || (g > r + 10 && b > r + 10 && Math.abs(g - b) < 30)) {
+    if (g > r + 10 && Math.abs(g - b) < 35 && b > 70) return 'Aqua';
+    if (b > r + 20 && b > g + 5 && b > 80) return 'Blue';
   }
-  if (g > r + 25 && g > b + 25 && g > 100) return 'Green';
-  if (r > g + 40 && r > b + 40 && r > 120) return 'Red';
-  if (r > 180 && g > 120 && g < 200 && b < 80) return 'Gold';
-  if (r > 100 && g < 80 && b > r - 30 && b > 100) return 'Purple';
-  if (r > 200 && g > 100 && g < 180 && b < 80) return 'Orange';
-  if (r > 200 && g < 150 && b > 150) return 'Pink';
+  if (g > r + 20 && g > b + 20 && g > 80) return 'Green';
+  if (r > g + 35 && r > b + 35 && r > 100) return 'Red';
+  if (r > 150 && g > 100 && g < 200 && b < 80) return 'Gold';
+  if (r > 80 && g < 80 && b > r - 30 && b > 80) return 'Purple';
+  if (r > 180 && g > 80 && g < 180 && b < 80) return 'Orange';
+  if (r > 180 && g < 150 && b > 130) return 'Pink';
   
   return null;
 }
@@ -174,6 +173,8 @@ export async function detectFoilFromImage(base64Image: string): Promise<FoilDete
       let hasMetallicColors = false;
       let detectedColorTint: string | null = null;
       let totalColorVariance = 0;
+      let tintedColorCount = 0;
+      const detectedTints: { name: string; coverage: number }[] = [];
       
       for (const colorInfo of colors) {
         const color = colorInfo.color;
@@ -195,46 +196,57 @@ export async function detectFoilFromImage(base64Image: string): Promise<FoilDete
           indicators.push(`White border reflection detected: RGB(${r},${g},${b}) - ${(pixelFraction * 100).toFixed(1)}%`);
         }
         
-        if (brightness > 160 && saturation > 50 && pixelFraction > 0.08) {
+        if (brightness > 60 && saturation > 30 && pixelFraction > 0.03) {
           hasMetallicColors = true;
           totalColorVariance += saturation * pixelFraction;
           indicators.push(`Metallic color detected: RGB(${r},${g},${b}) - saturation: ${saturation}, coverage: ${(pixelFraction * 100).toFixed(1)}%`);
         }
         
-        if (saturation > 35 && pixelFraction > 0.08 && maxChannel > 100) {
+        if (saturation > 25 && pixelFraction > 0.03 && maxChannel > 70) {
           const colorName = classifyDominantColor(r, g, b);
-          if (colorName && !detectedColorTint) {
-            detectedColorTint = colorName;
-            indicators.push(`Dominant ${colorName} tint detected: RGB(${r},${g},${b}) - ${(pixelFraction * 100).toFixed(1)}%`);
+          if (colorName) {
+            tintedColorCount++;
+            detectedTints.push({ name: colorName, coverage: pixelFraction });
+            if (!detectedColorTint) {
+              detectedColorTint = colorName;
+            }
+            indicators.push(`${colorName} tint detected: RGB(${r},${g},${b}) - ${(pixelFraction * 100).toFixed(1)}%`);
           }
         }
       }
       
+      const hasSimilarTintedRegions = detectedTints.length >= 2 && 
+        detectedTints.some(t => t.name === detectedColorTint && t !== detectedTints[0]);
+      const totalTintCoverage = detectedTints.reduce((sum, t) => sum + t.coverage, 0);
+      
+      console.log(`Tinted color regions: ${tintedColorCount}, similar tints: ${hasSimilarTintedRegions}, total tint coverage: ${(totalTintCoverage * 100).toFixed(1)}%`);
+      
       if (hasWhiteBorderReflection && !hasMetallicColors) {
         indicators.push('Rejected: Likely white border reflection without metallic characteristics');
         console.log('Rejected foil detection - appears to be white border reflection');
-      } else if (hasMetallicColors && totalColorVariance > 3.0) {
+      } else if (hasMetallicColors && detectedColorTint && (hasSimilarTintedRegions || totalTintCoverage > 0.08)) {
         confidence += 0.4;
         isFoil = true;
         
-        if (detectedColorTint && !foilType) {
+        if (!foilType) {
           foilType = `${detectedColorTint} Foil`;
-          indicators.push(`${detectedColorTint} foil type assigned based on color analysis`);
+          indicators.push(`${detectedColorTint} foil type assigned based on color analysis (${tintedColorCount} tinted regions)`);
         }
         
-        indicators.push(`Color variance score: ${totalColorVariance.toFixed(2)} (threshold: 3.0)`);
+        indicators.push(`Color variance score: ${totalColorVariance.toFixed(2)}, tint coverage: ${(totalTintCoverage * 100).toFixed(1)}%`);
       } else if (hasMetallicColors) {
-        indicators.push(`Insufficient color variance for foil: ${totalColorVariance.toFixed(2)} (threshold: 3.0)`);
+        indicators.push(`Insufficient foil evidence: variance=${totalColorVariance.toFixed(2)}, tinted regions=${tintedColorCount}, coverage=${(totalTintCoverage * 100).toFixed(1)}%`);
       }
     }
 
-    // Apply very strict rejection criteria for likely false positives
-    if (isFoil && !hasStrongFoilIndicators) {
-      console.log('REJECTING foil detection - no strong foil indicators found');
+    const hasColorBasedFoil = isFoil && foilType && foilType !== 'Foil';
+    
+    if (isFoil && !hasStrongFoilIndicators && !hasColorBasedFoil) {
+      console.log('REJECTING foil detection - no strong foil indicators or color-based detection found');
       isFoil = false;
       foilType = null;
       confidence = 0;
-      indicators.push('REJECTED: No strong foil indicators (prismatic/chrome/metallic) detected');
+      indicators.push('REJECTED: No strong foil indicators (prismatic/chrome/metallic) or color-based detection');
     } else if (isFoil && hasWhiteBorderReflection && confidence < 0.7) {
       console.log('REJECTING foil detection - likely white border reflection');
       isFoil = false;
@@ -246,15 +258,13 @@ export async function detectFoilFromImage(base64Image: string): Promise<FoilDete
     // Cap confidence at 1.0
     confidence = Math.min(confidence, 1.0);
     
-    // Only assign generic foil type if we have strong indicators
-    if (isFoil && !foilType && hasStrongFoilIndicators) {
+    if (isFoil && !foilType && (hasStrongFoilIndicators || hasColorBasedFoil)) {
       foilType = 'Foil';
     } else if (isFoil && !foilType) {
-      // If no strong indicators but still detected, be more conservative
-      console.log('No strong foil indicators detected, rejecting detection');
+      console.log('No strong foil indicators or color detection, rejecting');
       isFoil = false;
       confidence = 0;
-      indicators.push('REJECTED: No strong foil indicators found');
+      indicators.push('REJECTED: No strong foil indicators or color-based detection found');
     }
 
     console.log('=== VISUAL FOIL DETECTION RESULT ===');
