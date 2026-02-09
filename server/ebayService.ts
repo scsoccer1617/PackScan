@@ -237,8 +237,8 @@ export async function searchCardValues(
         keywords += ` ${collection}`;
       }
       
-      // Add card number if available
-      if (cardNumber && /^\d+$/.test(cardNumber)) {
+      // Add card number if available (include alphanumeric card numbers like SMLB-2, not just numeric ones)
+      if (cardNumber) {
         keywords += ` ${cardNumber}`;
       }
       
