@@ -288,7 +288,8 @@ export async function searchCardValues(
   isNumbered?: boolean,
   foilType?: string,
   serialNumber?: string,
-  variant?: string
+  variant?: string,
+  _isRetry?: boolean
 ): Promise<EbayResponse> {
   try {
     const ebayAppId = getEbayAppId();
@@ -676,7 +677,7 @@ export async function searchCardValues(
         const discoveryResponse = await axios.get(browseUrl, {
           params: discoveryParams,
           headers: {
-            'Authorization': `Bearer ${getEbayBrowseToken()}`,
+            'Authorization': `Bearer ${ebayBrowseToken}`,
             'Accept': 'application/json',
           },
           timeout: 15000
@@ -722,7 +723,7 @@ export async function searchCardValues(
             const refinedResponse = await axios.get(browseUrl, {
               params: refinedParams,
               headers: {
-                'Authorization': `Bearer ${getEbayBrowseToken()}`,
+                'Authorization': `Bearer ${ebayBrowseToken}`,
                 'Accept': 'application/json',
               },
               timeout: 15000
@@ -791,15 +792,18 @@ export async function searchCardValues(
     // Check for specific eBay Browse API error messages
     let errorMessage = 'eBay Browse API error - check credentials';
     
-    if (error.response?.data?.errors && Array.isArray(error.response.data.errors)) {
+    if (error.response?.status === 401 || (error.response?.data?.errors && error.response.data.errors[0]?.errorId === 1001)) {
+      clearCachedToken();
+      if (!_isRetry) {
+        console.log('eBay token expired, refreshing and retrying...');
+        return searchCardValues(playerName, cardNumber, brand, year, collection, condition, isNumbered, foilType, serialNumber, variant, true);
+      }
+      errorMessage = 'eBay OAuth token refresh failed. Please check your EBAY_APP_ID and EBAY_CERT_ID credentials.';
+    } else if (error.response?.data?.errors && Array.isArray(error.response.data.errors)) {
       const ebayError = error.response.data.errors[0];
-      if (ebayError?.errorId === 1001 || ebayError?.errorId === '1001') {
-        errorMessage = 'eBay OAuth token has expired. Please update your EBAY_BROWSE_TOKEN with a fresh token from eBay Developer Console.';
-      } else if (ebayError?.message) {
+      if (ebayError?.message) {
         errorMessage = `eBay API error: ${ebayError.message}`;
       }
-    } else if (error.response?.status === 401) {
-      errorMessage = 'eBay OAuth token has expired. Please generate a new EBAY_BROWSE_TOKEN from eBay Developer Console.';
     } else if (error.response?.status === 403) {
       errorMessage = 'eBay API access forbidden - OAuth token may lack Browse API permissions';
     } else if (error.response?.status === 429) {

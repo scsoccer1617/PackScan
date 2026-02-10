@@ -149,6 +149,9 @@ This is a streamlined web application focused on sports card price lookup using 
 - February 10, 2026: Renamed "Foil Type" label to "Parallel" throughout UI to match collector terminology
 - February 10, 2026: Fixed Bowman Chrome false positive - collection detection now filters out legal/trademark text lines to prevent "BOWMAN CHROME ARE REGISTERED TRADEMARKS" from falsely setting collection
 - February 10, 2026: Expanded rookie card detection to recognize "1st Bowman" and "First Bowman" indicators (not just "RC")
+- February 10, 2026: Improved card number detection - hyphenated alphanumeric patterns (BD-7, HRC-42) now detected before standalone numbers in brand-adjacent lines
+- February 10, 2026: Fixed brand detection - brand mentions in legal/trademark/URL/code lines are deprioritized; non-legal mentions (e.g., "BOWMAN BRIEFING") take precedence over legal text (e.g., "TOPPS AND BOWMAN ARE REGISTERED TRADEMARKS")
+- February 10, 2026: Implemented automatic eBay OAuth token management - tokens auto-generated via Client Credentials flow using EBAY_APP_ID and EBAY_CERT_ID, cached in memory with 5-min-early refresh, auto-retry on 401 errors; EBAY_BROWSE_TOKEN no longer needs manual refresh
 
 ## User Preferences
 
