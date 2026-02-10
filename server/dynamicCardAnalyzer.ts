@@ -869,12 +869,41 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>,
       { search: 'ULTRA', display: 'Ultra' }
     ];
     
+    // Use original text with newlines for brand detection to distinguish
+    // contextual brand mentions from legal/trademark text
+    const brandDetectionText = originalText || text;
+    const brandLines = brandDetectionText.toUpperCase().split(/\r?\n/);
+    const legalLinePattern = /(?:REGISTERED\s+)?TRADEMARK|ALL\s+RIGHTS\s+RESERVED|©|\(C\)|OFFICIALLY\s+LICENSED|THE\s+TOPPS\s+COMPANY/i;
+    
+    // First pass: look for brand mentions in non-legal lines (high confidence)
+    let brandFromLegal: string | null = null;
     for (const brand of brands) {
-      if (text.includes(brand.search)) {
+      let foundInNonLegal = false;
+      let foundInLegal = false;
+      for (const line of brandLines) {
+        if (line.includes(brand.search)) {
+          if (legalLinePattern.test(line)) {
+            foundInLegal = true;
+          } else {
+            foundInNonLegal = true;
+            break;
+          }
+        }
+      }
+      if (foundInNonLegal) {
         cardDetails.brand = brand.display;
-        console.log(`Detected brand: ${cardDetails.brand}`);
+        console.log(`Detected brand: ${cardDetails.brand} (from non-legal text)`);
         break;
       }
+      if (foundInLegal && !brandFromLegal) {
+        brandFromLegal = brand.display;
+      }
+    }
+    
+    // Fallback: use brand found only in legal text if no non-legal brand found
+    if (!cardDetails.brand && brandFromLegal) {
+      cardDetails.brand = brandFromLegal;
+      console.log(`Detected brand: ${cardDetails.brand} (from legal text fallback)`);
     }
     
     // COLLECTION DETECTION - Look for common collections/sets
