@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { getFoilSearchTerm } from './foilVariantDetector';
+import { getEbayAccessToken, clearCachedToken } from './ebayTokenManager';
 
 const EBAY_BROWSE_API_URL = 'https://api.ebay.com/buy/browse/v1';
 
@@ -124,9 +125,6 @@ function getEbayAppId(): string {
   return process.env.EBAY_APP_ID || '';
 }
 
-function getEbayBrowseToken(): string {
-  return process.env.EBAY_BROWSE_TOKEN || '';
-}
 
 // Interface for eBay search results
 interface EbaySearchResult {
@@ -294,9 +292,15 @@ export async function searchCardValues(
 ): Promise<EbayResponse> {
   try {
     const ebayAppId = getEbayAppId();
-    const ebayBrowseToken = getEbayBrowseToken();
-    if (!ebayAppId || !ebayBrowseToken) {
-      console.warn('eBay Browse API credentials not set. Cannot fetch card values.');
+    let ebayBrowseToken: string;
+    try {
+      ebayBrowseToken = await getEbayAccessToken();
+    } catch (tokenError: any) {
+      console.warn('Failed to get eBay access token:', tokenError.message);
+      return { averageValue: 0, results: [] };
+    }
+    if (!ebayAppId) {
+      console.warn('eBay APP ID not set. Cannot fetch card values.');
       return { averageValue: 0, results: [] };
     }
 
@@ -571,7 +575,7 @@ export async function searchCardValues(
           const refinedResponse = await axios.get(browseUrl, {
             params: refinedParams,
             headers: {
-              'Authorization': `Bearer ${getEbayBrowseToken()}`,
+              'Authorization': `Bearer ${ebayBrowseToken}`,
               'Accept': 'application/json',
             },
             timeout: 15000
@@ -624,7 +628,7 @@ export async function searchCardValues(
           const refinedResponse = await axios.get(browseUrl, {
             params: refinedParams,
             headers: {
-              'Authorization': `Bearer ${getEbayBrowseToken()}`,
+              'Authorization': `Bearer ${ebayBrowseToken}`,
               'Accept': 'application/json',
             },
             timeout: 15000
