@@ -37,9 +37,6 @@ export default function SimpleImageUploader({
             <Camera className="h-8 w-8 text-slate-400" />
           </div>
         )}
-        <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-60 text-white text-xs py-1 px-2 font-medium">
-          {label}
-        </div>
       </div>
       
       <div className="mt-2 flex space-x-2">
