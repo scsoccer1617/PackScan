@@ -774,6 +774,31 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
       return;
     }
     
+    // Alphanumeric patterns like: T27, T119, TC12, etc. (letter prefix + digits, no dash)
+    // Check these BEFORE standalone numbers to avoid "59" overriding "T119"
+    const alphaNumPatternEarly = /\b([A-Z]{1,3})(\d{1,4})\b/g;
+    let alphaNumMatchEarly;
+    
+    while ((alphaNumMatchEarly = alphaNumPatternEarly.exec(text)) !== null) {
+      const prefix = alphaNumMatchEarly[1];
+      const digits = alphaNumMatchEarly[2];
+      const fullMatch = alphaNumMatchEarly[0];
+      
+      if (nonCardCodePrefixes.has(prefix)) continue;
+      if (text.includes('CODE ' + fullMatch)) continue;
+      if (parseInt(digits) > 999) continue;
+      // Skip patterns that look like brand abbreviations, common words, or stat/bio prefixes
+      if (/^(OF|IN|AT|TO|BY|OR|ON|IS|IT|AS|IF|UP|NO|SO|DO|AN|AM|BE|HE|WE|MY|US|THE|AND|FOR|ARE|BUT|NOT|YOU|ALL|HAS|HIS|HOW|ITS|MAY|OUR|OUT|WAY|WHO|DID|GET|HIM|LET|SAY|SHE|TOO|USE|MLB|NFL|NBA|NHL|USA|NL|AL|FT|LB|LBS|HR|AB|BB|SO|IP|ER|GS|SV|WL|GP|GF|RS|BA)$/i.test(prefix)) continue;
+      // Skip if the match appears in a bio/stat line
+      const lineWithAlphaNum = lines.find(line => line.includes(fullMatch));
+      if (lineWithAlphaNum && isDOBFormat(lineWithAlphaNum)) continue;
+      if (lineWithAlphaNum && isPlayerBioNumber(digits, lineWithAlphaNum)) continue;
+      
+      cardDetails.cardNumber = fullMatch;
+      console.log(`Detected Alphanumeric card number (early check): ${cardDetails.cardNumber}`);
+      return;
+    }
+    
     // Second priority: Check if the very first line is ONLY a number
     // This is also a reliable way to detect card numbers at the top of a card
     const firstLine = lines[0].trim();
@@ -822,23 +847,7 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
       }
     }
     
-    // Alphanumeric patterns like: T27, TC12, etc.
-    const alphaNumPattern = /\b([A-Z]{1,3})(\d{1,4})\b/g;
-    let alphaNumMatch;
-    
-    while ((alphaNumMatch = alphaNumPattern.exec(text)) !== null) {
-      const prefix = alphaNumMatch[1];
-      const digits = alphaNumMatch[2];
-      const fullMatch = alphaNumMatch[0];
-      
-      if (nonCardCodePrefixes.has(prefix)) continue;
-      if (text.includes('CODE ' + fullMatch)) continue;
-      if (parseInt(digits) > 999) continue;
-      
-      cardDetails.cardNumber = fullMatch;
-      console.log(`Detected Alphanumeric card number: ${cardDetails.cardNumber}`);
-      break;
-    }
+    // Alphanumeric patterns already checked earlier in priority chain
   } catch (error) {
     console.error('Error detecting card number:', error);
   }
