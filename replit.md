@@ -133,6 +133,13 @@ This is a streamlined web application focused on sports card price lookup using 
 - February 10, 2026: Reverted regional image analysis - returned to full-image analysis for foil color detection (border-only crops lost too much signal)
 - February 10, 2026: Added blind eBay variant discovery - scans listing titles for variant keywords (Foil, Refractor, etc.) even when NO foil was visually detected, especially for numbered cards
 - February 10, 2026: eBay-discovered variants now update card data (foilType, variant, isFoil) in the dual-image analysis response
+- February 10, 2026: MAJOR REFACTOR - Removed ALL hardcoded card-specific logic (Anthony Volpe, Joey Bart, Jordan Wicks, George Frazier, Bobby Thigpen, Chris James, Andy Van Slyke, Ronald Acuna Jr handlers, directCardFixes, hardcoded NBA player lists)
+- February 10, 2026: All card processing now uses purely generic dynamic detection (line-based, regex-based, positional, scoring)
+- February 10, 2026: Added card-number-prefix player name detection (e.g., "89B2-32 ALEX BREGMAN" extracts "Alex Bregman")
+- February 10, 2026: Expanded bogus name filtering - catches stat abbreviations (SLG, BB, OBP), partial words (ANNIV, ERSARY), team names, city names
+- February 10, 2026: Added collection fragment reassembly for "35th Anniversary" from fragmented OCR text (ANNIV + ERSARY fragments)
+- February 10, 2026: Fixed 35th Anniversary card number regex to match "89B2-32" format (not just "89B-9")
+- February 10, 2026: Tightened visual foil detection thresholds - requires 3+ similar tints, or 2+ tints with 20%+ coverage, or 25%+ total tint coverage (was 6%)
 
 ## User Preferences
 
