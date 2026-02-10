@@ -140,6 +140,9 @@ This is a streamlined web application focused on sports card price lookup using 
 - February 10, 2026: Added collection fragment reassembly for "35th Anniversary" from fragmented OCR text (ANNIV + ERSARY fragments)
 - February 10, 2026: Fixed 35th Anniversary card number regex to match "89B2-32" format (not just "89B-9")
 - February 10, 2026: Tightened visual foil detection thresholds - requires 3+ similar tints, or 2+ tints with 20%+ coverage, or 25%+ total tint coverage (was 6%)
+- February 10, 2026: Fixed Red Foil false positives - color-based foil detection now requires Vision API label support (metallic/chrome/reflective keywords) OR extremely strong color evidence (5+ tints, 40%+ coverage)
+- February 10, 2026: Chrome variant fix - "Chrome" is set as variant when another collection (e.g., Stars of MLB) already exists, skipping when collection already contains "Chrome" (e.g., Bowman Chrome)
+- February 10, 2026: Added OCR noise fragments (LOP, PPS, TANKY, LOPPS) to bogus name list; added generic short-word-pair rejection (both words ≤3 chars)
 
 ## User Preferences
 
