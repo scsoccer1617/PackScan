@@ -48,7 +48,7 @@ export default function SimpleImageUploader({
           className="flex-1 bg-slate-600 hover:bg-slate-700 active:bg-slate-800 text-white"
         >
           <Upload className="h-4 w-4 mr-1" />
-          {existingImage ? "Replace Image" : "Upload Image"}
+          {existingImage ? `Replace ${label.replace('Upload ', '')}` : label}
         </Button>
       </div>
       
