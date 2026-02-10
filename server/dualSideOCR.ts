@@ -376,15 +376,10 @@ async function combineCardResults(
       console.log('No front image buffer available for visual detection');
     }
     
-    // If front image detection didn't work or wasn't available, try back image
-    if (!visualFoilResult?.isFoil && backImageBuffer) {
-      console.log('Running visual foil detection on back image buffer...');
-      const backBase64 = backImageBuffer.toString('base64');
-      console.log('Base64 conversion successful, calling visual detector on back image...');
-      visualFoilResult = await detectFoilFromImage(backBase64);
-      console.log('Visual detection result from back image:', visualFoilResult);
-    } else if (!backImageBuffer) {
-      console.log('No back image buffer available for visual detection');
+    // Foil detection only uses the front image - back images have colored backgrounds
+    // (e.g., red Topps backs) that cause false positives
+    if (!frontImageBuffer) {
+      console.log('No front image available - skipping back image foil detection (back colors cause false positives)');
     }
     
     if (visualFoilResult?.isFoil && visualFoilResult.foilType) {
