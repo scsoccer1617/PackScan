@@ -956,6 +956,8 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>,
     const filteredLines = rawLines.filter(line => !legalTextPattern.test(line));
     const nonLegalText = filteredLines.length > 0 ? filteredLines.join(' ') : text;
     
+    const fullTextUpper = (originalText || text).toUpperCase().replace(/\r?\n/g, ' ');
+    
     for (const collectionData of collectionPatterns) {
       if (nonLegalText.match(collectionData.pattern)) {
         if (collectionData.name) {
@@ -974,6 +976,29 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>,
         }
         
         break;
+      }
+    }
+    
+    if (!cardDetails.collection) {
+      for (const collectionData of collectionPatterns) {
+        if (fullTextUpper.match(collectionData.pattern)) {
+          if (collectionData.name) {
+            cardDetails.collection = collectionData.name;
+            console.log(`Detected collection from legal/full text fallback: ${cardDetails.collection}`);
+          }
+          
+          if (collectionData.variant) {
+            cardDetails.variant = collectionData.variant;
+            console.log(`Detected variant from legal/full text fallback: ${cardDetails.variant}`);
+          }
+          
+          if (collectionData.brandOverride) {
+            cardDetails.brand = collectionData.brandOverride;
+            console.log(`Brand override from legal/full text fallback: ${cardDetails.brand}`);
+          }
+          
+          break;
+        }
       }
     }
     
