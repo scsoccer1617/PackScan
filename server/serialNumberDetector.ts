@@ -20,8 +20,12 @@ export function detectSerialNumber(fullText: string, textAnnotations: any[]): Se
   // First try: Look for serial numbers in text annotations with position data
   const positionBasedResult = detectSerialNumberFromPositions(textAnnotations);
   if (positionBasedResult.isNumbered) {
-    console.log(`Serial number found via position detection: ${positionBasedResult.serialNumber}`);
-    return positionBasedResult;
+    if (isSerialNumberInBioContext(positionBasedResult.serialNumber, fullText)) {
+      console.log(`Rejecting serial number "${positionBasedResult.serialNumber}" - appears in bio/stats context (likely a date)`);
+    } else {
+      console.log(`Serial number found via position detection: ${positionBasedResult.serialNumber}`);
+      return positionBasedResult;
+    }
   }
   
   // Second try: Look for serial numbers in the full text using pattern matching
@@ -202,6 +206,32 @@ function checkIfIsolated(targetAnnotation: any, allAnnotations: any[]): boolean 
   } catch (error) {
     return false;
   }
+}
+
+/**
+ * Check if a serial number candidate appears within bio/stats context
+ * This catches dates like "8/20" that appear in player bio text (e.g., "stolen base, 8/20.")
+ */
+function isSerialNumberInBioContext(serialNumber: string, fullText: string): boolean {
+  const lines = fullText.split('\n');
+  
+  for (const line of lines) {
+    if (!line.includes(serialNumber)) continue;
+    
+    const upper = line.toUpperCase();
+    
+    if (/RESUME|CAREER|HIGHLIGHTS|BRIEFING|SKILLS|CLOSE|SCOUTING|BIOGRAPHY|PROFILE/i.test(upper)) return true;
+    if (/BORN|DRAFTED|SIGNED|ACQUIRED|ACQ:|HOME:|BATS:|THROWS:|HT:|WT:/i.test(upper)) return true;
+    if (/HOMER|HIT|RBI|STOLEN|BASE|BATTING|PITCHING|LEAGUE|SEASON|RECORD/i.test(upper)) return true;
+    if (/WEEK|CIRCUIT|LOGGED|BOOKED|POSTED|NOTCHED|SLASHED|BATTED|THREW/i.test(upper)) return true;
+    
+    const datePatterns = (line.match(/\d{1,2}\/\d{1,2}/g) || []).length;
+    if (datePatterns >= 2) return true;
+    
+    if (line.length > 80) return true;
+  }
+  
+  return false;
 }
 
 /**
