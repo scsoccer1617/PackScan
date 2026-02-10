@@ -436,7 +436,7 @@ async function combineCardResults(
       console.log('Running visual foil detection on front image buffer...');
       const frontBase64 = frontImageBuffer.toString('base64');
       console.log('Base64 conversion successful, calling visual detector...');
-      visualFoilResult = await detectFoilFromImage(frontBase64);
+      visualFoilResult = await detectFoilFromImage(frontBase64, { isNumbered: !!combined.isNumbered });
       console.log('Visual detection result from front image:', visualFoilResult);
     } else {
       console.log('No front image buffer available for visual detection');

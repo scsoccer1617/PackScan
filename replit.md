@@ -145,6 +145,8 @@ This is a streamlined web application focused on sports card price lookup using 
 - February 10, 2026: Added OCR noise fragments (LOP, PPS, TANKY, LOPPS) to bogus name list; added generic short-word-pair rejection (both words ≤3 chars)
 - February 10, 2026: Fixed collection combine logic - when front collection matches back variant (e.g., front="Chrome", back collection="Stars of MLB" + variant="Chrome"), back's more specific collection is used
 - February 10, 2026: Added manual edit & re-lookup feature - users can edit any detected card field and re-run eBay price search with corrected data
+- February 10, 2026: Fixed foil detection regression for numbered cards - numbered cards (/399 etc.) now use relaxed visual thresholds (2+ similar tints with 8%+ coverage) since being numbered is itself evidence of a variant
+- February 10, 2026: Renamed "Foil Type" label to "Parallel" throughout UI to match collector terminology
 
 ## User Preferences
 

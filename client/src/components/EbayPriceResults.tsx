@@ -269,7 +269,7 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
                   <Input id="edit-serialNumber" value={editData.serialNumber || ''} onChange={e => updateEditField('serialNumber', e.target.value)} />
                 </div>
                 <div>
-                  <Label htmlFor="edit-foilType">Foil Type</Label>
+                  <Label htmlFor="edit-foilType">Parallel</Label>
                   <Input id="edit-foilType" value={editData.foilType || ''} onChange={e => updateEditField('foilType', e.target.value || null)} />
                 </div>
                 <div>

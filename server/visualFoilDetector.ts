@@ -161,7 +161,7 @@ function parseVisionColors(rawColors: any[]): ColorEntry[] {
   return parsed;
 }
 
-export async function detectFoilFromImage(base64Image: string): Promise<FoilDetectionResult> {
+export async function detectFoilFromImage(base64Image: string, options?: { isNumbered?: boolean }): Promise<FoilDetectionResult> {
   console.log('=== VISUAL FOIL DETECTION STARTING (FULL IMAGE ANALYSIS) ===');
   
   try {
@@ -312,8 +312,12 @@ export async function detectFoilFromImage(base64Image: string): Promise<FoilDete
       
       const hasVeryStrongColorEvidence = similarTintCount >= 5 && totalTintCoverage > 0.40;
       const hasLabelSupport = hasStrongFoilIndicators || hasReflectiveLabels;
+      const isNumbered = options?.isNumbered || false;
+      const hasNumberedCardEvidence = isNumbered && similarTintCount >= 2 && totalTintCoverage > 0.08;
       
-      if (hasMetallicColors && detectedColorTint && (hasLabelSupport || hasVeryStrongColorEvidence) && (hasStrongSimilarTints || hasModestSimilarTints || totalTintCoverage > 0.25)) {
+      indicators.push(`Numbered card context: isNumbered=${isNumbered}, numberedEvidence=${hasNumberedCardEvidence}`);
+      
+      if (hasMetallicColors && detectedColorTint && (hasLabelSupport || hasVeryStrongColorEvidence || hasNumberedCardEvidence) && (hasStrongSimilarTints || hasModestSimilarTints || totalTintCoverage > 0.25 || hasNumberedCardEvidence)) {
         isFoil = true;
         confidence += Math.min(0.6, totalColorVariance * 2 + totalTintCoverage);
         
