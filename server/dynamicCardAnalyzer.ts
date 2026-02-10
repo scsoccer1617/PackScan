@@ -750,6 +750,23 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
       }
     }
     
+    // Check for hyphenated alphanumeric card numbers (BD-7, BDC-15, HRC-42, etc.)
+    // These are high-confidence and should be checked before standalone numbers
+    const nonCardCodePrefixes = new Set(['CMP', 'CODE', 'WWW', 'COM', 'INC', 'MLB', 'OBP', 'ERA', 'AVG', 'WAR', 'SLG', 'RBI', 'HT', 'WT', 'ACQ']);
+    const hyphenAlphaNumPatternEarly = /\b([A-Z]{1,4})-(\d{1,4})\b/g;
+    let hyphenMatchEarly;
+    while ((hyphenMatchEarly = hyphenAlphaNumPatternEarly.exec(text)) !== null) {
+      const prefix = hyphenMatchEarly[1];
+      const digits = hyphenMatchEarly[2];
+      const fullMatch = hyphenMatchEarly[0];
+      if (nonCardCodePrefixes.has(prefix)) continue;
+      if (text.includes('CODE ' + fullMatch)) continue;
+      if (parseInt(digits) > 999) continue;
+      cardDetails.cardNumber = fullMatch;
+      console.log(`Detected hyphenated card number: ${cardDetails.cardNumber}`);
+      return;
+    }
+    
     // Second priority: Check if the very first line is ONLY a number
     // This is also a reliable way to detect card numbers at the top of a card
     const firstLine = lines[0].trim();
@@ -801,7 +818,6 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
     // Alphanumeric patterns like: T27, TC12, etc.
     const alphaNumPattern = /\b([A-Z]{1,3})(\d{1,4})\b/g;
     let alphaNumMatch;
-    const nonCardCodePrefixes = new Set(['CMP', 'CODE', 'WWW', 'COM', 'INC', 'MLB', 'OBP', 'ERA', 'AVG', 'WAR', 'SLG', 'RBI', 'HT', 'WT', 'ACQ']);
     
     while ((alphaNumMatch = alphaNumPattern.exec(text)) !== null) {
       const prefix = alphaNumMatch[1];
