@@ -873,7 +873,7 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>,
     // contextual brand mentions from legal/trademark text
     const brandDetectionText = originalText || text;
     const brandLines = brandDetectionText.toUpperCase().split(/\r?\n/);
-    const legalLinePattern = /(?:REGISTERED\s+)?TRADEMARK|ALL\s+RIGHTS\s+RESERVED|©|\(C\)|OFFICIALLY\s+LICENSED|THE\s+TOPPS\s+COMPANY/i;
+    const legalLinePattern = /(?:REGISTERED\s+)?TRADEMARK|ALL\s+RIGHTS\s+RESERVED|©|\(C\)|OFFICIALLY\s+LICENSED|THE\s+TOPPS\s+COMPANY|WWW\.\w+\.COM|CODE#/i;
     
     // First pass: look for brand mentions in non-legal lines (high confidence)
     let brandFromLegal: string | null = null;
