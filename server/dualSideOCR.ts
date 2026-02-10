@@ -277,18 +277,29 @@ async function combineCardResults(
   const bogusNameWords = new Set([
     'TOPPS', 'LOPPS', 'OPPS', 'CHROME', 'BOWMAN', 'FLEER', 'DONRUSS', 'PANINI', 'SCORE', 'LEAF',
     'SERIES', 'PHILLIE', 'PHILLIES', 'YANKEES', 'DODGERS', 'METS', 'CUBS', 'BRAVES',
+    'ASTROS', 'RANGERS', 'PADRES', 'GIANTS', 'CARDINALS', 'NATIONALS', 'ORIOLES', 'GUARDIANS',
+    'TWINS', 'RAYS', 'MARLINS', 'PIRATES', 'REDS', 'BREWERS', 'TIGERS', 'ROYALS', 'ATHLETICS',
+    'MARINERS', 'ANGELS', 'ROCKIES', 'DIAMONDBACKS', 'WHITE', 'SOX',
     'OUTFIELDER', 'INFIELDER', 'PITCHER', 'CATCHER', 'LEFT', 'RIGHT', 'THROWS', 'BATS',
     'MAJOR', 'LEAGUE', 'BATTING', 'RECORD', 'STADIUM', 'CLUB', 'COLLECTION',
     'OPENING', 'DAY', 'HERITAGE', 'PRIZM', 'SELECT', 'MOSAIC',
     'BASEBALL', 'CARD', 'ROOKIE', 'STARS', 'MLB',
     'DRAFTED', 'BORN', 'FREE', 'AGENT',
+    'ANNIV', 'ANNIVERSARY', 'ERSARY', 'COMPLETE',
+    'AVG', 'SLG', 'OBP', 'ERA', 'RBI', 'HR', 'BB', 'SO', 'AB',
+    'TOTALS', 'MAJ', 'LEA', 'THIRD', 'FIRST', 'SECOND', 'BASE',
+    'OUTFIELD', 'HOUSTON', 'MILWAUKEE', 'PHILADELPHIA', 'CHICAGO',
+    'EPPS', 'STROS', 'OXY',
   ]);
   
   const isBogusFn = (firstName?: string, lastName?: string): boolean => {
     if (!firstName || !lastName) return true;
     const fullName = `${firstName} ${lastName}`.toUpperCase();
     const words = fullName.split(/\s+/);
-    return words.some(w => bogusNameWords.has(w)) || words.length > 4;
+    if (words.some(w => bogusNameWords.has(w)) || words.length > 4) return true;
+    if (words.some(w => w.length <= 1)) return true;
+    if (words.some(w => /^\d/.test(w))) return true;
+    return false;
   };
   
   const frontNameBogus = isBogusFn(combined.playerFirstName, combined.playerLastName);
@@ -322,19 +333,60 @@ async function combineCardResults(
   
   if (frontNameBogus && backNameBogus) {
     const allText = (frontOCRText + '\n' + backOCRText).toUpperCase();
-    const nameLineMatch = allText.match(/^([A-Z][A-Z]+)\s+([A-Z][A-Z]+(?:\s+[A-Z][A-Z]+)?)\s*$/m);
-    if (nameLineMatch) {
-      const words = nameLineMatch[0].trim().split(/\s+/);
-      const noBogusFn = words.every(w => !bogusNameWords.has(w));
-      if (noBogusFn && words.length >= 2 && words.length <= 3) {
-        combined.playerFirstName = words[0].charAt(0) + words[0].slice(1).toLowerCase();
-        combined.playerLastName = words.slice(1).map(w => w.charAt(0) + w.slice(1).toLowerCase()).join(' ');
-        console.log(`Recovered player name from OCR text: ${combined.playerFirstName} ${combined.playerLastName}`);
+    let nameRecovered = false;
+    
+    const lines = allText.split('\n');
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      
+      let nameCandidate = trimmed;
+      const firstWord = trimmed.split(/\s+/)[0];
+      if (/^[A-Z0-9]+-\d+$/.test(firstWord) || /^\d+[A-Z]\d*-\d+$/.test(firstWord)) {
+        nameCandidate = trimmed.substring(firstWord.length).trim();
+      }
+      
+      const words = nameCandidate.split(/\s+/).filter(w => w.length > 0);
+      if (words.length >= 2 && words.length <= 3) {
+        const allAlpha = words.every(w => /^[A-Z]{2,}$/.test(w));
+        const noBogus = words.every(w => !bogusNameWords.has(w));
+        const noNumbers = words.every(w => !/\d/.test(w));
+        
+        if (allAlpha && noBogus && noNumbers) {
+          combined.playerFirstName = words[0].charAt(0) + words[0].slice(1).toLowerCase();
+          combined.playerLastName = words.slice(1).map(w => w.charAt(0) + w.slice(1).toLowerCase()).join(' ');
+          console.log(`Recovered player name from OCR text: ${combined.playerFirstName} ${combined.playerLastName} (from line: "${trimmed}")`);
+          nameRecovered = true;
+          break;
+        }
+      }
+    }
+    
+    if (!nameRecovered) {
+      const nameLineMatch = allText.match(/^([A-Z][A-Z]+)\s+([A-Z][A-Z]+(?:\s+[A-Z][A-Z]+)?)\s*$/m);
+      if (nameLineMatch) {
+        const words = nameLineMatch[0].trim().split(/\s+/);
+        const noBogusFn = words.every(w => !bogusNameWords.has(w));
+        if (noBogusFn && words.length >= 2 && words.length <= 3) {
+          combined.playerFirstName = words[0].charAt(0) + words[0].slice(1).toLowerCase();
+          combined.playerLastName = words.slice(1).map(w => w.charAt(0) + w.slice(1).toLowerCase()).join(' ');
+          console.log(`Recovered player name from OCR text (fallback): ${combined.playerFirstName} ${combined.playerLastName}`);
+        }
       }
     }
   }
   
-  // Special case for Score cards: ensure collection includes the year
+  if (!combined.collection) {
+    const allText = (frontOCRText + ' ' + backOCRText).toUpperCase();
+    
+    if (/ANNIV.*ERSARY|35TH\s*ANNIVERSARY/i.test(allText) || 
+        (allText.includes('ANNIV') && allText.includes('ERSARY')) ||
+        (allText.includes('35') && (allText.includes('ANNIV') || allText.includes('ANNIVERSARY')))) {
+      combined.collection = '35th Anniversary';
+      console.log('Detected collection from fragmented OCR text: 35th Anniversary');
+    }
+  }
+  
   if (combined.brand === 'Score' && combined.year && !combined.collection) {
     combined.collection = `${combined.year} Score`;
   }

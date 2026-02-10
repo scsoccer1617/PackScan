@@ -1,45 +1,6 @@
 import { CardFormValues } from "@shared/schema";
 import { extractTextFromImage } from "./googleVisionFetch";
-import { processFlagshipCollectionCard } from "./flagshipCardHandler";
-import { applyDirectCardFixes } from "./directCardFixes";
-import { processJordanWicksCard } from "./jordanWicksHandler";
-import { processSeriesTwoCard } from "./seriesTwoHandler";
-import { processStarsOfMLBCard } from "./starsOfMLBHandler";
 import { detectFoilVariant } from "./foilVariantDetector";
-
-/**
- * Process the Anthony Volpe Stars of MLB card
- * This card has a specific format that requires special handling
- */
-export function processAnthonyVolpeCard(fullText: string): Partial<CardFormValues> | null {
-  // Check if this is the Anthony Volpe card by looking for key patterns
-  if ((fullText.includes('STARS OF MLB') || fullText.includes('STARS OF TILB') || fullText.includes('SMLB-')) && 
-      (fullText.includes('ANTHONY VOLPE') || (fullText.includes('ANTHONY') && fullText.includes('VOLPE')))) {
-    
-    console.log('Detected Anthony Volpe Stars of MLB card - using special handler');
-    
-    // Extract card number from SMLB-XX format
-    const smlbMatch = fullText.match(/SMLB-(\d+)/);
-    const cardNumber = smlbMatch ? `SMLB-${smlbMatch[1]}` : 'SMLB-76';
-    
-    return {
-      playerFirstName: 'Anthony',
-      playerLastName: 'Volpe',
-      brand: 'Topps',
-      collection: 'Stars of MLB',
-      cardNumber: cardNumber,
-      year: 2024,
-      sport: 'Baseball',
-      condition: 'PSA 8',
-      estimatedValue: 5,
-      isRookieCard: true,
-      isAutographed: false,
-      isNumbered: false
-    };
-  }
-  
-  return null;
-}
 
 interface TextAnnotation {
   description: string;
@@ -84,13 +45,6 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     console.log(fullText);
     console.log('=== END RAW OCR TEXT ===');
     
-    // Check for Stars of MLB cards first
-    const starsOfMLBResult = processStarsOfMLBCard(fullText);
-    if (starsOfMLBResult) {
-      console.log('Using special Stars of MLB handler result:', starsOfMLBResult);
-      return starsOfMLBResult;
-    }
-    
     // Initialize card details object with default values
     const cardDetails: Partial<CardFormValues> = {
       condition: 'PSA 8', // Default condition per requirements
@@ -114,75 +68,14 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     // Parse all extracted text
     const cleanText = fullText.toUpperCase().replace(/\s+/g, ' ').trim();
     
-    // Try explicit Jordan Wicks handler first (highest priority)
-    let handledByJordanWicks = false;
-    if (fullText.includes('JORDAN WICKS')) {
-      console.log("Found JORDAN WICKS in text, trying specialized handler");
-      handledByJordanWicks = processJordanWicksCard(fullText, cardDetails);
-      if (handledByJordanWicks) {
-        console.log("Jordan Wicks card successfully processed with specialized handler");
-        // Skip all other processing
-        return cardDetails;
-      }
-    }
+    // PLAYER NAME DETECTION - Extract player name using positional and context analysis
+    extractPlayerName(cleanText, cardDetails, fullText);
     
-    // Try direct card fixes for other known problematic card types
-    let handledByDirectFix = applyDirectCardFixes(fullText, cardDetails);
+    // CARD NUMBER DETECTION - Extract card number using regex patterns
+    extractCardNumber(cleanText, cardDetails, fullText);
     
-    // Try specialized card handlers as a fallback
-    let handledBySpecialProcessor = false;
-    
-    if (!handledByDirectFix) {
-      // Check if this is a Topps Flagship Collection card
-      if (cleanText.includes('FLAGSHIP') && cleanText.includes('COLLECTION')) {
-        handledBySpecialProcessor = processFlagshipCollectionCard(fullText, cardDetails);
-        console.log(`Topps Flagship Collection card detected: ${handledBySpecialProcessor ? 'successfully processed' : 'failed to process'}`);
-      }
-    } else {
-      console.log("Direct card fix was applied, skipping other processors");
-      handledBySpecialProcessor = true; // Mark as handled by specialized processor
-    }
-    
-    // Try Joey Bart Opening Day special handler
-    let handledByJoeyBart = false;
-    if (!handledBySpecialProcessor && fullText.includes('JOEY BART') && fullText.includes('OPENING DAY')) {
-      console.log("Found JOEY BART OPENING DAY in text, trying specialized handler");
-      
-      // Hard-coded special case for this specific card
-      cardDetails.playerFirstName = 'Joey';
-      cardDetails.playerLastName = 'Bart';
-      cardDetails.brand = 'Topps';
-      cardDetails.cardNumber = '206';
-      cardDetails.collection = 'Opening Day';
-      cardDetails.year = 2022;
-      cardDetails.sport = 'Baseball';
-      cardDetails.isRookieCard = false;
-      
-      console.log("Directly set Joey Bart Opening Day card values");
-      handledBySpecialProcessor = true;
-      handledByJoeyBart = true;
-    }
-    
-    // Try Series Two special handler
-    if (!handledBySpecialProcessor && fullText.includes('SERIES TWO')) {
-      console.log("Found SERIES TWO in text, trying specialized handler");
-      handledBySpecialProcessor = processSeriesTwoCard(fullText, cardDetails);
-      if (handledBySpecialProcessor) {
-        console.log("Series Two card successfully processed with specialized handler");
-      }
-    }
-    
-    // Only run general processors if specialized ones didn't handle it
-    if (!handledBySpecialProcessor) {
-      // PLAYER NAME DETECTION - Extract player name using positional and context analysis
-      extractPlayerName(cleanText, cardDetails, fullText);
-      
-      // CARD NUMBER DETECTION - Extract card number using regex patterns
-      extractCardNumber(cleanText, cardDetails, fullText);
-      
-      // COLLECTION, BRAND & YEAR DETECTION - Extract using pattern recognition
-      extractCardMetadata(cleanText, cardDetails);
-    }
+    // COLLECTION, BRAND & YEAR DETECTION - Extract using pattern recognition
+    extractCardMetadata(cleanText, cardDetails);
     
     // SERIAL NUMBER DETECTION - Look for serial numbering with enhanced detection
     await extractSerialNumber(cleanText, cardDetails, textAnnotations);
@@ -233,49 +126,9 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
  */
 function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, originalText?: string): void {
   try {
-    // HIGHEST PRIORITY: Check for known basketball players first
-    const basketballPlayerMatch = text.match(/\b(JAYSON TATUM|JAYLEN BROWN|LUKA DONCIC|GIANNIS ANTETOKOUNMPO|LEBRON JAMES|STEPHEN CURRY|KEVIN DURANT|NIKOLA JOKIC|JOEL EMBIID|JA MORANT|TRAE YOUNG|DEVIN BOOKER|ZION WILLIAMSON|LAMELO BALL|ANTHONY EDWARDS|TYRESE HALIBURTON|JAMAL MURRAY|SHAI GILGEOUS-ALEXANDER|DAMIAN LILLARD|CJ MCCOLLUM|KAWHI LEONARD|PAUL GEORGE|RUSSELL WESTBROOK|JAMES HARDEN|KYRIE IRVING|JIMMY BUTLER|BAM ADEBAYO|TYLER HERRO|KRIS MIDDLETON|JRUE HOLIDAY|BROOK LOPEZ|DONOVAN MITCHELL|DARIUS GARLAND|EVAN MOBLEY|JARRETT ALLEN|SCOTTIE BARNES|FRED VANVLEET|PASCAL SIAKAM|OG ANUNOBY|JULIUS RANDLE|RJ BARRETT|JALEN BRUNSON|TYRESE MAXEY|TOBIAS HARRIS|BRADLEY BEAL|KRISTAPS PORZINGIS)\b/i);
-    if (basketballPlayerMatch) {
-      const playerFullName = basketballPlayerMatch[1];
-      const nameParts = playerFullName.split(' ');
-      if (nameParts.length >= 2) {
-        cardDetails.playerFirstName = nameParts[0].charAt(0).toUpperCase() + nameParts[0].slice(1).toLowerCase();
-        cardDetails.playerLastName = nameParts.slice(1).join(' ').charAt(0).toUpperCase() + nameParts.slice(1).join(' ').slice(1).toLowerCase();
-        cardDetails.sport = "Basketball"; // Force basketball sport
-        console.log(`NBA player name found in extractPlayerName: ${cardDetails.playerFirstName} ${cardDetails.playerLastName} (Sport: Basketball)`);
-        return;
-      }
-    }
-    
-    // Special cases for specific cards
-    if (text.includes('CHRIS JAMES') && text.includes('STADIUM CLUB')) {
-      cardDetails.playerFirstName = 'Chris';
-      cardDetails.playerLastName = 'James';
-      console.log(`Special detection for Chris James Stadium Club card`);
-      return;
-    }
-    
-    // Special case for Andy Van Slyke card
-    if (text.includes('ANDY VAN SLYKE') || 
-        (text.includes('ANDY') && text.includes('VAN SLYKE') && text.includes('PIRATES'))) {
-      cardDetails.playerFirstName = 'Andy';
-      cardDetails.playerLastName = 'Van Slyke';
-      console.log(`Special detection for Andy Van Slyke card`);
-      return;
-    }
-    
     // Special case for All-Star cards - look for player name after "ALL-STAR" or before it
     if (text.includes('ALL-STAR') || text.includes('ALL STAR')) {
       console.log('Found All-Star card, looking for player name');
-      
-      // Look for Ronald Acuna Jr. specifically in All-Star cards
-      if (text.includes('RONALD') && (text.includes('ACUNA') || text.includes('ACUÑA'))) {
-        cardDetails.playerFirstName = 'Ronald';
-        cardDetails.playerLastName = 'Acuna Jr.';
-        cardDetails.collection = '1989 All-Star';
-        console.log(`Special detection for Ronald Acuna Jr. All-Star card`);
-        return;
-      }
       
       // General All-Star card processing - look for player name around "ALL-STAR"
       const lines = text.split('\n');
@@ -322,23 +175,6 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
     // Special case for Stars of MLB cards
     if (text.includes('STARS OF MLB') || text.includes('SMLB-')) {
       console.log('Found Stars of MLB card');
-      
-      // First, check for ANTHONY VOLPE explicitly (direct fix)
-      if (text.includes('ANTHONY VOLPE') || text.includes('ANTHONY') && text.includes('VOLPE')) {
-        cardDetails.playerFirstName = 'Anthony';
-        cardDetails.playerLastName = 'Volpe';
-        cardDetails.collection = "Stars of MLB";
-        cardDetails.brand = 'Topps';
-        
-        // Extract card number - keep the full SMLB-XX format
-        const smlbMatch = text.match(/SMLB-\d+/);
-        if (smlbMatch) {
-          cardDetails.cardNumber = smlbMatch[0];
-        }
-        
-        console.log(`Direct detection for Anthony Volpe Stars of MLB card`);
-        return;
-      }
       
       const lines = text.split('\n');
       
@@ -404,33 +240,6 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
         }
       }
       
-      // Last resort: look for known player names in the text
-      for (const playerPattern of [
-        { first: 'ANTHONY', last: 'VOLPE' },
-        { first: 'JUAN', last: 'SOTO' },
-        { first: 'CORBIN', last: 'CARROLL' }
-      ]) {
-        if (text.includes(playerPattern.first) && text.includes(playerPattern.last)) {
-          cardDetails.playerFirstName = playerPattern.first.charAt(0).toUpperCase() + 
-                                       playerPattern.first.slice(1).toLowerCase();
-          cardDetails.playerLastName = playerPattern.last.charAt(0).toUpperCase() + 
-                                      playerPattern.last.slice(1).toLowerCase();
-          
-          console.log(`Detected known player from Stars of MLB card: ${cardDetails.playerFirstName} ${cardDetails.playerLastName}`);
-          
-          // Set collection
-          cardDetails.collection = "Stars of MLB";
-          cardDetails.brand = 'Topps';
-          
-          // Try to extract card number
-          const smlbMatch = text.match(/SMLB-(\d+)/);
-          if (smlbMatch && smlbMatch[1]) {
-            cardDetails.cardNumber = smlbMatch[1];
-          }
-          
-          return;
-        }
-      }
     }
     
     // Special case for multi-word last names and special formats like Collector's Choice
@@ -508,6 +317,30 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
           
           console.log(`Line-based player name candidate: "${firstName} ${lastName}" (priority: ${priority}, line: ${i})`);
           potentialNames.push({ firstName, lastName, source: 'line', priority });
+        }
+      }
+      
+      const cardNumberPrefix = words[0];
+      if (/^[A-Z0-9]+-\d+$/.test(cardNumberPrefix) || /^\d+$/.test(cardNumberPrefix)) {
+        const remainingWords = words.slice(1);
+        if (remainingWords.length >= 2 && remainingWords.length <= 3) {
+          const allAlphaRemaining = remainingWords.every(w => /^[A-Z][A-Za-z'\-\.]+$/.test(w) || /^[A-Z]{2,}$/.test(w));
+          const noNonNameWordsRemaining = remainingWords.every(w => !isNonNameWord(w));
+          const noNumbersRemaining = remainingWords.every(w => !/\d/.test(w));
+          const eachWordLenRemaining = remainingWords.every(w => w.length >= 2);
+          
+          if (allAlphaRemaining && noNonNameWordsRemaining && noNumbersRemaining && eachWordLenRemaining) {
+            const firstName = remainingWords[0].charAt(0).toUpperCase() + remainingWords[0].slice(1).toLowerCase();
+            const lastName = remainingWords.slice(1).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+            
+            const isFollowedByTeamPosition = (i + 1 < rawLines.length) && 
+              /PHILLIES|YANKEES|DODGERS|METS|CUBS|OUTFIELDER|INFIELDER|PITCHER|CATCHER|SHORTSTOP|BASEMAN|ASTROS|BREWERS|PADRES|GIANTS|THIRD BASE|FIRST BASE|SECOND BASE/i.test(rawLines[i + 1]);
+            
+            const priority = isFollowedByTeamPosition ? 0 : (i < 5 ? 1 : 2);
+            
+            console.log(`Card-number-prefixed name candidate: "${firstName} ${lastName}" (priority: ${priority}, line: ${i})`);
+            potentialNames.push({ firstName, lastName, source: 'card-number-prefix', priority });
+          }
         }
       }
     }
@@ -705,14 +538,6 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
       }
     }
     
-    // As a last resort, look for George Frazier specific pattern
-    if (text.includes('GEORGE FRAZIER')) {
-      cardDetails.playerFirstName = 'George';
-      cardDetails.playerLastName = 'Frazier';
-      console.log('Detected George Frazier by explicit match');
-      return;
-    }
-    
   } catch (error) {
     console.error('Error detecting player name:', error);
   }
@@ -800,7 +625,7 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
         console.log(`Detected card number with dash: ${cardDetails.cardNumber}`);
         
         // 35th Anniversary cards have format like 89B-2
-        if (matchedText.match(/^\d+[A-Z]-\d+$/)) {
+        if (matchedText.match(/^\d+[A-Z]\d*-\d+$/)) {
           cardDetails.collection = "35th Anniversary";
           console.log(`Setting collection from card number pattern: 35th Anniversary`);
         }
@@ -853,13 +678,6 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
       // But skip lines that are clearly player bio/stat lines
       if (/TOPPS|BOWMAN|FLEER|DONRUSS|SCORE|LEAF|UPPER DECK/i.test(line) && !isDOBFormat(line)) {
         console.log(`Found brand mention in line ${i+1}: "${line}"`);
-        
-        // Special case for Bobby Thigpen Fleer 549 card
-        if (text.includes('BOBBY THIGPEN') && text.includes('FLEER') && text.includes('549')) {
-          cardDetails.cardNumber = '549';
-          console.log(`Special case: Detected Bobby Thigpen Fleer card #549`);
-          return;
-        }
         
         // First check if the brand line itself contains a number pattern like "FLEER 549"
         // Look specifically for the pattern BRAND followed by a number
@@ -962,20 +780,6 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
         console.log(`Detected top card number: ${cardDetails.cardNumber}`);
         return;
       }
-    }
-    
-    // Direct pattern match for the first line being a card number
-    if (/^[\s\n]*207[\s\n]+/i.test(text)) {
-      cardDetails.cardNumber = '207';
-      console.log('Detected 207 as the first line number in the card');
-      return;
-    }
-    
-    // Specific case for George Frazier card (and other similar 1987 Topps cards)
-    if (text.includes('GEORGE FRAZIER') && text.includes('PITCHER')) {
-      cardDetails.cardNumber = '207';
-      console.log(`Set George Frazier card number to 207 (hardcoded)`);
-      return;
     }
     
     // Look for standalone numbers that might be card numbers
@@ -1374,31 +1178,6 @@ function detectSport(text: string, cardDetails: Partial<CardFormValues>): void {
       return;
     }
     
-    // Check for known basketball players first (high confidence)
-    // Include both "First Last" and "Last First" patterns
-    const basketballPlayerMatch = text.match(/\b(JAYSON TATUM|TATUM JAYSON|JAYLEN BROWN|BROWN JAYLEN|LUKA DONCIC|DONCIC LUKA|GIANNIS ANTETOKOUNMPO|ANTETOKOUNMPO GIANNIS|LEBRON JAMES|JAMES LEBRON|STEPHEN CURRY|CURRY STEPHEN|KEVIN DURANT|DURANT KEVIN|NIKOLA JOKIC|JOKIC NIKOLA|JOEL EMBIID|EMBIID JOEL|JA MORANT|MORANT JA|TRAE YOUNG|YOUNG TRAE|DEVIN BOOKER|BOOKER DEVIN|ZION WILLIAMSON|WILLIAMSON ZION|LAMELO BALL|BALL LAMELO|ANTHONY EDWARDS|EDWARDS ANTHONY|TYRESE HALIBURTON|HALIBURTON TYRESE|JAMAL MURRAY|MURRAY JAMAL|SHAI GILGEOUS-ALEXANDER|GILGEOUS-ALEXANDER SHAI|DAMIAN LILLARD|LILLARD DAMIAN|CJ MCCOLLUM|MCCOLLUM CJ|KAWHI LEONARD|LEONARD KAWHI|PAUL GEORGE|GEORGE PAUL|RUSSELL WESTBROOK|WESTBROOK RUSSELL|JAMES HARDEN|HARDEN JAMES|KYRIE IRVING|IRVING KYRIE|JIMMY BUTLER|BUTLER JIMMY|BAM ADEBAYO|ADEBAYO BAM|TYLER HERRO|HERRO TYLER|KRIS MIDDLETON|MIDDLETON KRIS|JRUE HOLIDAY|HOLIDAY JRUE|BROOK LOPEZ|LOPEZ BROOK|DONOVAN MITCHELL|MITCHELL DONOVAN|DARIUS GARLAND|GARLAND DARIUS|EVAN MOBLEY|MOBLEY EVAN|JARRETT ALLEN|ALLEN JARRETT|SCOTTIE BARNES|BARNES SCOTTIE|FRED VANVLEET|VANVLEET FRED|PASCAL SIAKAM|SIAKAM PASCAL|OG ANUNOBY|ANUNOBY OG|JULIUS RANDLE|RANDLE JULIUS|RJ BARRETT|BARRETT RJ|JALEN BRUNSON|BRUNSON JALEN|TYRESE MAXEY|MAXEY TYRESE|TOBIAS HARRIS|HARRIS TOBIAS|BRADLEY BEAL|BEAL BRADLEY|KRISTAPS PORZINGIS|PORZINGIS KRISTAPS)\b/i);
-    
-    // Also check if the current detected player name matches known NBA players
-    const currentPlayerName = `${cardDetails.playerFirstName || ''} ${cardDetails.playerLastName || ''}`.trim().toUpperCase();
-    const knownNBAPlayers = ['JAYSON TATUM', 'JAYLEN BROWN', 'LUKA DONCIC', 'GIANNIS ANTETOKOUNMPO', 'LEBRON JAMES', 'STEPHEN CURRY', 'KEVIN DURANT', 'NIKOLA JOKIC', 'JOEL EMBIID', 'JA MORANT', 'TRAE YOUNG', 'DEVIN BOOKER', 'ZION WILLIAMSON', 'LAMELO BALL', 'ANTHONY EDWARDS', 'TYRESE HALIBURTON', 'JAMAL MURRAY', 'SHAI GILGEOUS-ALEXANDER', 'DAMIAN LILLARD', 'CJ MCCOLLUM', 'KAWHI LEONARD', 'PAUL GEORGE', 'RUSSELL WESTBROOK', 'JAMES HARDEN', 'KYRIE IRVING', 'JIMMY BUTLER', 'BAM ADEBAYO', 'TYLER HERRO', 'KRIS MIDDLETON', 'JRUE HOLIDAY', 'BROOK LOPEZ', 'DONOVAN MITCHELL', 'DARIUS GARLAND', 'EVAN MOBLEY', 'JARRETT ALLEN', 'SCOTTIE BARNES', 'FRED VANVLEET', 'PASCAL SIAKAM', 'OG ANUNOBY', 'JULIUS RANDLE', 'RJ BARRETT', 'JALEN BRUNSON', 'TYRESE MAXEY', 'TOBIAS HARRIS', 'BRADLEY BEAL', 'KRISTAPS PORZINGIS'];
-    
-    if (basketballPlayerMatch || knownNBAPlayers.includes(currentPlayerName)) {
-      cardDetails.sport = "Basketball";
-      console.log(`Sport detected (known NBA player): Basketball - Player: ${currentPlayerName || basketballPlayerMatch?.[1] || 'detected'}`);
-      
-      // Extract the player name from the match if not already set
-      if (basketballPlayerMatch && (!cardDetails.playerFirstName || !cardDetails.playerLastName)) {
-        const playerFullName = basketballPlayerMatch[1];
-        const nameParts = playerFullName.split(' ');
-        if (nameParts.length >= 2) {
-          cardDetails.playerFirstName = nameParts[0].charAt(0).toUpperCase() + nameParts[0].slice(1).toLowerCase();
-          cardDetails.playerLastName = nameParts.slice(1).join(' ').charAt(0).toUpperCase() + nameParts.slice(1).join(' ').slice(1).toLowerCase();
-          console.log(`NBA player name extracted: ${cardDetails.playerFirstName} ${cardDetails.playerLastName}`);
-        }
-      }
-      return;
-    }
-    
     // Initialize scores for each sport
     let baseballScore = 0;
     let footballScore = 0; 
@@ -1434,9 +1213,7 @@ function detectSport(text: string, cardDetails: Partial<CardFormValues>): void {
       { term: /\bBASKETBALL\b/i, weight: 3 },
       { term: /\bLAKERS\b|\bCELTICS\b|\bBULLS\b|\bWARRIORS\b|\bSPURS\b|\bHEAT\b|\bKNICKS\b|\bNETS\b|\bMAVERICKS\b|\bSIXERS\b|\b76ERS\b|\bCLIPPERS\b|\bROCKETS\b|\bBUCKS\b|\bTHUNDER\b|\bCAVALIERS\b|\bCAVS\b|\bNUGGETS\b|\bGRIZZLIES\b|\bTRAIL BLAZERS\b|\bBLAZERS\b|\bJAZZ\b|\bSUNS\b|\bHAWKS\b|\bHORNETS\b|\bPACERS\b|\bKINGS\b|\bTIMBERWOLVES\b|\bWOLVES\b|\bPELICANS\b|\bRAPTORS\b|\bMAGIC\b|\bWIZARDS\b|\bPISTONS\b/i, weight: 2 },
       { term: /\bPOINT GUARD\b|\bPG\b|\bSHOOTING GUARD\b|\bSG\b|\bSMALL FORWARD\b|\bSF\b|\bPOWER FORWARD\b|\bPF\b|\bCENTER\b|\bC\b/i, weight: 2 },
-      { term: /\bPOINTS\b|\bPTS\b|\bREBOUNDS\b|\bREB\b|\bASSISTS\b|\bAST\b|\bSTEALS\b|\bSTL\b|\bBLOCKS\b|\bBLK\b|\bDUNK\b|\bTHREE-POINTER\b|\b3-POINTER\b|\bFREE THROW\b|\bFT\b|\bDOUBLE-DOUBLE\b|\bTRIPLE-DOUBLE\b/i, weight: 1 },
-      // Known NBA players (current stars and recent players)
-      { term: /\bJAYSON TATUM\b|\bJAYLEN BROWN\b|\bLUKA DONCIC\b|\bGIANNIS ANTETOKOUNMPO\b|\bLEBRON JAMES\b|\bSTEPHEN CURRY\b|\bKEVIN DURANT\b|\bNIKOLA JOKIC\b|\bJOEL EMBIID\b|\bJA MORANT\b|\bTRAE YOUNG\b|\bDEVIN BOOKER\b|\bZION WILLIAMSON\b|\bLAMELO BALL\b|\bANTHONY EDWARDS\b|\bTYRESE HALIBURTON\b|\bJAMAL MURRAY\b|\bSHAI GILGEOUS-ALEXANDER\b|\bDAMIAN LILLARD\b|\bCJ MCCOLLUM\b|\bKAWHI LEONARD\b|\bPAUL GEORGE\b|\bRUSSELL WESTBROOK\b|\bJAMES HARDEN\b|\bKYRIE IRVING\b|\bJIMMY BUTLER\b|\bBAM ADEBAYO\b|\bTYLER HERRO\b|\bKRIS MIDDLETON\b|\bJRUE HOLIDAY\b|\bBROOK LOPEZ\b|\bDONOVAN MITCHELL\b|\bDARIUS GARLAND\b|\bEVAN MOBLEY\b|\bJARRETT ALLEN\b|\bSCOTTIE BARNES\b|\bFRED VANVLEET\b|\bPASCAL SIAKAM\b|\bOG ANUNOBY\b|\bJULIUS RANDLE\b|\bRJ BARRETT\b|\bJALEN BRUNSON\b|\bJOEL EMBIID\b|\bTYRESE MAXEY\b|\bTOBIAS HARRIS\b|\bBRADLEY BEAL\b|\bKRISTAPS PORZINGIS\b/i, weight: 3 }
+      { term: /\bPOINTS\b|\bPTS\b|\bREBOUNDS\b|\bREB\b|\bASSISTS\b|\bAST\b|\bSTEALS\b|\bSTL\b|\bBLOCKS\b|\bBLK\b|\bDUNK\b|\bTHREE-POINTER\b|\b3-POINTER\b|\bFREE THROW\b|\bFT\b|\bDOUBLE-DOUBLE\b|\bTRIPLE-DOUBLE\b/i, weight: 1 }
     ];
     
     // HOCKEY KEYWORDS WITH WEIGHTS

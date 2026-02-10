@@ -296,7 +296,11 @@ export async function detectFoilFromImage(base64Image: string): Promise<FoilDete
       
       indicators.push(`Color summary: ${tintedColorCount} tinted regions, similar=${hasSimilarTints}, tint coverage=${(totalTintCoverage * 100).toFixed(1)}%`);
 
-      if (hasMetallicColors && detectedColorTint && (hasSimilarTints || totalTintCoverage > 0.06)) {
+      const similarTintCount = detectedTints.filter(t => t.name === detectedColorTint).length;
+      const hasStrongSimilarTints = similarTintCount >= 3;
+      const hasModestSimilarTints = similarTintCount >= 2 && totalTintCoverage > 0.20;
+      
+      if (hasMetallicColors && detectedColorTint && (hasStrongSimilarTints || hasModestSimilarTints || totalTintCoverage > 0.25)) {
         isFoil = true;
         confidence += Math.min(0.6, totalColorVariance * 2 + totalTintCoverage);
         
