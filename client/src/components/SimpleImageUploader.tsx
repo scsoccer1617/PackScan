@@ -34,8 +34,7 @@ export default function SimpleImageUploader({
           <img src={existingImage} alt={`${label} preview`} className="object-contain w-full h-full" />
         ) : (
           <div className="flex flex-col items-center justify-center p-4">
-            <Camera className="h-8 w-8 text-slate-400 mb-2" />
-            <p className="text-xs text-center text-slate-500">No {label.toLowerCase()} image added</p>
+            <Camera className="h-8 w-8 text-slate-400" />
           </div>
         )}
         <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-60 text-white text-xs py-1 px-2 font-medium">
