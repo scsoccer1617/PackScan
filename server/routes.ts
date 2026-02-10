@@ -1083,10 +1083,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
           
           console.log('eBay search results:', ebayResults);
           
+          const updatedCardData = { ...cardData };
+          if (ebayResults.discoveredVariant && !cardData.foilType) {
+            console.log(`eBay discovered variant "${ebayResults.discoveredVariant}" - updating card data`);
+            updatedCardData.foilType = ebayResults.discoveredVariant;
+            updatedCardData.variant = ebayResults.discoveredVariant;
+            updatedCardData.isFoil = true;
+          }
+          
           return res.json({
             success: true,
             data: {
-              ...cardData,
+              ...updatedCardData,
               ebayResults: ebayResults
             }
           });

@@ -59,6 +59,58 @@ function discoverVariantFromListings(titles: string[], detectedColor: string | n
   return null;
 }
 
+function discoverVariantFromTitlesBlind(titles: string[], playerName: string): string | null {
+  const playerLast = playerName.split(' ').slice(-1)[0].toLowerCase();
+  
+  const variantPatterns = [
+    /\b(aqua\s+crackle\s+foil)\b/i,
+    /\b(aqua\s+ice\s+foil)\b/i,
+    /\b(aqua\s+shimmer\s+foil)\b/i,
+    /\b(aqua\s+foil)\b/i,
+    /\b(blue\s+crackle\s+foil)\b/i,
+    /\b(blue\s+foil)\b/i,
+    /\b(green\s+foil)\b/i,
+    /\b(gold\s+foil)\b/i,
+    /\b(red\s+foil)\b/i,
+    /\b(purple\s+foil)\b/i,
+    /\b(orange\s+foil)\b/i,
+    /\b(pink\s+foil)\b/i,
+    /\b(silver\s+foil)\b/i,
+    /\b(rainbow\s+foil)\b/i,
+    /\b(chrome\s+refractor)\b/i,
+    /\b(gold\s+refractor)\b/i,
+    /\b(black\s+refractor)\b/i,
+    /\b(refractor)\b/i,
+    /\b(xfractor)\b/i,
+    /\b(prizm)\b/i,
+    /\b(holo)\b/i,
+    /\b(mojo)\b/i,
+  ];
+  
+  const variantCounts: Record<string, number> = {};
+  
+  for (const title of titles) {
+    const titleLower = title.toLowerCase();
+    if (!titleLower.includes(playerLast)) continue;
+    
+    for (const pattern of variantPatterns) {
+      const match = title.match(pattern);
+      if (match) {
+        const variant = match[1].split(/\s+/).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+        variantCounts[variant] = (variantCounts[variant] || 0) + 1;
+        break;
+      }
+    }
+  }
+  
+  const sorted = Object.entries(variantCounts).sort((a, b) => b[1] - a[1]);
+  if (sorted.length > 0) {
+    console.log(`Blind variant discovery found "${sorted[0][0]}" from ${sorted[0][1]} listing(s) matching player`);
+    return sorted[0][0];
+  }
+  return null;
+}
+
 function extractColorFromVariant(variant: string | undefined): string | null {
   if (!variant) return null;
   const colors = ['Aqua', 'Blue', 'Green', 'Red', 'Gold', 'Silver', 'Purple', 'Orange', 'Pink'];
@@ -94,6 +146,7 @@ interface EbayResponse {
   searchUrl?: string;
   errorMessage?: string;
   dataType?: 'sold' | 'current';
+  discoveredVariant?: string;
 }
 
 /**
@@ -545,6 +598,59 @@ export async function searchCardValues(
       }
     }
     
+    if (results.length > 0 && !variantKeyword && isNumbered) {
+      console.log('=== BLIND VARIANT DISCOVERY (numbered card, no variant detected, scanning listing titles) ===');
+      const titles = results.map(r => r.title);
+      const blindVariant = discoverVariantFromTitlesBlind(titles, playerName);
+      
+      if (blindVariant) {
+        console.log(`Blind discovery found variant: "${blindVariant}" from eBay listing titles`);
+        variantKeyword = blindVariant;
+        
+        const refinedKeywords = buildKeywords();
+        console.log('Refined search with blind-discovered variant:', refinedKeywords);
+        
+        try {
+          const browseUrl = `${EBAY_BROWSE_API_URL}/item_summary/search`;
+          const refinedParams = {
+            q: refinedKeywords,
+            limit: 10,
+            filter: 'buyingOptions:{AUCTION|FIXED_PRICE},deliveryCountry:US',
+            sort: 'price',
+            fieldgroups: 'EXTENDED',
+            category_ids: '213'
+          };
+          
+          const refinedResponse = await axios.get(browseUrl, {
+            params: refinedParams,
+            headers: {
+              'Authorization': `Bearer ${getEbayBrowseToken()}`,
+              'Accept': 'application/json',
+            },
+            timeout: 15000
+          });
+          
+          if (refinedResponse.data?.itemSummaries && refinedResponse.data.itemSummaries.length > 0) {
+            results = refinedResponse.data.itemSummaries.map((item: any) => ({
+              title: item.title || '',
+              price: parseFloat(item.price?.value || '0'),
+              currency: item.price?.currency || 'USD',
+              url: item.itemWebUrl || '',
+              imageUrl: item.image?.imageUrl || item.thumbnailImages?.[0]?.imageUrl || '',
+              condition: item.condition || '',
+              endTime: item.itemEndDate || ''
+            }));
+            dataType = 'current';
+            console.log(`Blind variant refined search returned ${results.length} results`);
+          }
+        } catch (refinedError: any) {
+          console.log('Blind variant refined search failed:', refinedError.message);
+        }
+      } else {
+        console.log('No variant keywords found in listing titles');
+      }
+    }
+
     if (results.length === 0) {
       console.log('No results with initial query, trying broader discovery search...');
       
