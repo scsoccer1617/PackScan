@@ -75,7 +75,7 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     extractCardNumber(cleanText, cardDetails, fullText);
     
     // COLLECTION, BRAND & YEAR DETECTION - Extract using pattern recognition
-    extractCardMetadata(cleanText, cardDetails);
+    extractCardMetadata(cleanText, cardDetails, fullText);
     
     // SERIAL NUMBER DETECTION - Look for serial numbering with enhanced detection
     await extractSerialNumber(cleanText, cardDetails, textAnnotations);
@@ -824,7 +824,7 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
 /**
  * Extract card metadata (collection, brand, year) using context analysis
  */
-function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>): void {
+function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>, originalText?: string): void {
   try {
     // BRAND DETECTION - Look for common card manufacturers with proper capitalization
     const brands = [
@@ -877,8 +877,13 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>)
       { pattern: /DONRUSS/i, name: "Donruss", brandOverride: "Panini" }
     ];
     
+    const legalTextPattern = /(?:REGISTERED\s+)?TRADEMARK|ALL\s+RIGHTS\s+RESERVED|©|\(C\)|OFFICIALLY\s+LICENSED/i;
+    const rawLines = (originalText || text).toUpperCase().split(/\r?\n/);
+    const filteredLines = rawLines.filter(line => !legalTextPattern.test(line));
+    const nonLegalText = filteredLines.length > 0 ? filteredLines.join(' ') : text;
+    
     for (const collectionData of collectionPatterns) {
-      if (text.match(collectionData.pattern)) {
+      if (nonLegalText.match(collectionData.pattern)) {
         if (collectionData.name) {
           cardDetails.collection = collectionData.name;
           console.log(`Detected collection: ${cardDetails.collection}`);
@@ -898,7 +903,7 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>)
       }
     }
     
-    if (!cardDetails.variant && /\bCHROME\b/i.test(text)) {
+    if (!cardDetails.variant && /\bCHROME\b/i.test(nonLegalText)) {
       const collectionHasChrome = cardDetails.collection && /chrome/i.test(cardDetails.collection);
       if (cardDetails.collection && !collectionHasChrome) {
         cardDetails.variant = 'Chrome';
@@ -1033,10 +1038,12 @@ function detectCardFeatures(text: string, cardDetails: Partial<CardFormValues>):
     // ROOKIE CARD DETECTION
     // Check for explicit rookie indicators
     const rookiePatterns = [
-      /\bRC\b/,  // The "RC" logo
+      /\bRC\b/,
       /\bROOKIE\s+CARD\b/i,
       /\bROOKIE\b/i,
+      /\b1ST\s+BOWMAN\b/i,
       /\b1ST\s+CARD\b/i,
+      /\bFIRST\s+BOWMAN\b/i,
       /\bFIRST\s+CARD\b/i,
       /\bDEBUT\s+CARD\b/i
     ];

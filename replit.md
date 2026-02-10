@@ -147,6 +147,8 @@ This is a streamlined web application focused on sports card price lookup using 
 - February 10, 2026: Added manual edit & re-lookup feature - users can edit any detected card field and re-run eBay price search with corrected data
 - February 10, 2026: Fixed foil detection regression for numbered cards - numbered cards (/399 etc.) now use relaxed visual thresholds (2+ similar tints with 8%+ coverage) since being numbered is itself evidence of a variant
 - February 10, 2026: Renamed "Foil Type" label to "Parallel" throughout UI to match collector terminology
+- February 10, 2026: Fixed Bowman Chrome false positive - collection detection now filters out legal/trademark text lines to prevent "BOWMAN CHROME ARE REGISTERED TRADEMARKS" from falsely setting collection
+- February 10, 2026: Expanded rookie card detection to recognize "1st Bowman" and "First Bowman" indicators (not just "RC")
 
 ## User Preferences
 
