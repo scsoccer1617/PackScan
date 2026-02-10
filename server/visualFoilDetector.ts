@@ -1,4 +1,5 @@
 import { ImageAnnotatorClient } from '@google-cloud/vision';
+import sharp from 'sharp';
 
 interface FoilDetectionResult {
   isFoil: boolean;
@@ -130,8 +131,8 @@ function detectTextureFromColors(colors: ColorEntry[]): { texture: TextureType; 
     return { texture: 'Crackle', textureConfidence: conf, textureIndicators };
   }
   
-  if (colorSpread >= 3 && hueVariety >= 2 && smallCoverage > 0.04) {
-    const conf = Math.min(0.5, (colorSpread / 5) * 0.3 + (hueVariety / 4) * 0.2);
+  if (colorSpread >= 2 && hueVariety >= 2 && smallCoverage > 0.03) {
+    const conf = Math.min(0.5, (colorSpread / 4) * 0.3 + (hueVariety / 3) * 0.2);
     textureIndicators.push(`Possible crackle pattern: ${colorSpread} scattered regions, ${hueVariety} hues, ${(smallCoverage * 100).toFixed(1)}% coverage`);
     return { texture: 'Crackle', textureConfidence: conf, textureIndicators };
   }
@@ -144,8 +145,170 @@ function detectTextureFromColors(colors: ColorEntry[]): { texture: TextureType; 
   return { texture: null, textureConfidence: 0, textureIndicators };
 }
 
+interface CroppedRegions {
+  borderBase64: string;
+  centerBase64: string;
+  dimensions: { width: number; height: number };
+}
+
+async function cropCardRegions(base64Image: string): Promise<CroppedRegions> {
+  const imageBuffer = Buffer.from(base64Image, 'base64');
+  const metadata = await sharp(imageBuffer).metadata();
+  const width = metadata.width || 800;
+  const height = metadata.height || 1200;
+  
+  if (width < 100 || height < 100) {
+    throw new Error(`Image too small for regional analysis: ${width}x${height}`);
+  }
+  
+  const borderPct = 0.12;
+  const borderLeft = Math.round(width * borderPct);
+  const borderTop = Math.round(height * borderPct);
+  const borderRight = Math.round(width * borderPct);
+  const borderBottom = Math.round(height * borderPct);
+  
+  const innerW = width - borderLeft - borderRight;
+  const innerH = height - borderTop - borderBottom;
+  
+  const topStrip = await sharp(imageBuffer).extract({ left: 0, top: 0, width, height: borderTop }).toBuffer();
+  const bottomStrip = await sharp(imageBuffer).extract({ left: 0, top: height - borderBottom, width, height: borderBottom }).toBuffer();
+  const leftStrip = await sharp(imageBuffer).extract({ left: 0, top: borderTop, width: borderLeft, height: innerH }).toBuffer();
+  const rightStrip = await sharp(imageBuffer).extract({ left: width - borderRight, top: borderTop, width: borderRight, height: innerH }).toBuffer();
+  
+  const borderComposite = await sharp({
+    create: {
+      width: width,
+      height: height,
+      channels: 3,
+      background: { r: 0, g: 0, b: 0 }
+    }
+  }).composite([
+    { input: topStrip, top: 0, left: 0 },
+    { input: bottomStrip, top: height - borderBottom, left: 0 },
+    { input: leftStrip, top: borderTop, left: 0 },
+    { input: rightStrip, top: borderTop, left: width - borderRight },
+  ]).jpeg().toBuffer();
+  
+  const centerX = Math.round(width * 0.2);
+  const centerY = Math.round(height * 0.2);
+  const centerW = Math.round(width * 0.6);
+  const centerH = Math.round(height * 0.6);
+  
+  const centerCrop = await sharp(imageBuffer).extract({ 
+    left: centerX, top: centerY, width: centerW, height: centerH 
+  }).jpeg().toBuffer();
+  
+  console.log(`Cropped regions: border composite ${borderComposite.length} bytes, center ${centerCrop.length} bytes (from ${width}x${height} image)`);
+  
+  return {
+    borderBase64: borderComposite.toString('base64'),
+    centerBase64: centerCrop.toString('base64'),
+    dimensions: { width, height }
+  };
+}
+
+function parseVisionColors(rawColors: any[]): ColorEntry[] {
+  const parsed: ColorEntry[] = [];
+  for (const colorInfo of rawColors) {
+    const color = colorInfo.color;
+    if (!color) continue;
+    const r = color.red || 0;
+    const g = color.green || 0;
+    const b = color.blue || 0;
+    const pixelFraction = colorInfo.pixelFraction || 0;
+    const brightness = (r + g + b) / 3;
+    const saturation = Math.max(r, g, b) - Math.min(r, g, b);
+    const colorName = classifyDominantColor(r, g, b);
+    parsed.push({ r, g, b, brightness, saturation, pixelFraction, colorName });
+  }
+  return parsed;
+}
+
+function analyzeBorderColors(colors: ColorEntry[]): {
+  isFoil: boolean;
+  foilColor: string | null;
+  confidence: number;
+  hasWhiteBorder: boolean;
+  indicators: string[];
+} {
+  const indicators: string[] = [];
+  let hasMetallicColors = false;
+  let detectedColorTint: string | null = null;
+  let totalColorVariance = 0;
+  let tintedColorCount = 0;
+  const detectedTints: { name: string; coverage: number }[] = [];
+  let hasWhiteBorder = false;
+  
+  for (const c of colors) {
+    console.log(`  Border color: RGB(${c.r},${c.g},${c.b}) brightness=${c.brightness.toFixed(0)} saturation=${c.saturation} coverage=${(c.pixelFraction * 100).toFixed(1)}% name=${c.colorName || 'none'}`);
+    
+    if (c.brightness > 220 && c.saturation < 20 && c.pixelFraction > 0.15) {
+      hasWhiteBorder = true;
+      indicators.push(`White border detected: RGB(${c.r},${c.g},${c.b}) - ${(c.pixelFraction * 100).toFixed(1)}%`);
+    }
+    
+    if (c.brightness > 60 && c.saturation > 25 && c.pixelFraction > 0.02) {
+      hasMetallicColors = true;
+      totalColorVariance += c.saturation * c.pixelFraction;
+      indicators.push(`Border metallic color: RGB(${c.r},${c.g},${c.b}) - saturation: ${c.saturation}, coverage: ${(c.pixelFraction * 100).toFixed(1)}%`);
+    }
+    
+    if (c.saturation > 20 && c.pixelFraction > 0.02 && Math.max(c.r, c.g, c.b) > 70) {
+      if (c.colorName) {
+        tintedColorCount++;
+        detectedTints.push({ name: c.colorName, coverage: c.pixelFraction });
+        if (!detectedColorTint) {
+          detectedColorTint = c.colorName;
+        }
+        indicators.push(`Border ${c.colorName} tint: RGB(${c.r},${c.g},${c.b}) - ${(c.pixelFraction * 100).toFixed(1)}%`);
+      }
+    }
+  }
+  
+  const hasSimilarTints = detectedTints.length >= 2 && 
+    detectedTints.some(t => t.name === detectedColorTint && t !== detectedTints[0]);
+  const totalTintCoverage = detectedTints.reduce((sum, t) => sum + t.coverage, 0);
+  
+  indicators.push(`Border summary: ${tintedColorCount} tinted regions, similar=${hasSimilarTints}, tint coverage=${(totalTintCoverage * 100).toFixed(1)}%`);
+  
+  const isFoil = hasMetallicColors && detectedColorTint !== null && (hasSimilarTints || totalTintCoverage > 0.06);
+  const confidence = isFoil ? Math.min(0.6, totalColorVariance * 2 + totalTintCoverage) : 0;
+  
+  return { isFoil, foilColor: detectedColorTint, confidence, hasWhiteBorder, indicators };
+}
+
+function analyzeCenterTexture(colors: ColorEntry[], labels: any[]): {
+  texture: TextureType;
+  textureConfidence: number;
+  indicators: string[];
+} {
+  const indicators: string[] = [];
+  
+  for (const c of colors) {
+    console.log(`  Center color: RGB(${c.r},${c.g},${c.b}) brightness=${c.brightness.toFixed(0)} saturation=${c.saturation} coverage=${(c.pixelFraction * 100).toFixed(1)}% name=${c.colorName || 'none'}`);
+  }
+  
+  const { texture: labelTexture, textureConfidence: labelConf, labelIndicators } = detectTextureFromLabels(labels);
+  indicators.push(...labelIndicators.map(i => `Center ${i}`));
+  
+  const { texture: colorTexture, textureConfidence: colorConf, textureIndicators } = detectTextureFromColors(colors);
+  indicators.push(...textureIndicators.map(i => `Center ${i}`));
+  
+  if (labelTexture && labelConf > colorConf) {
+    return { texture: labelTexture, textureConfidence: labelConf, indicators };
+  }
+  if (colorTexture) {
+    return { texture: colorTexture, textureConfidence: colorConf, indicators };
+  }
+  if (labelTexture) {
+    return { texture: labelTexture, textureConfidence: labelConf, indicators };
+  }
+  
+  return { texture: null, textureConfidence: 0, indicators };
+}
+
 export async function detectFoilFromImage(base64Image: string): Promise<FoilDetectionResult> {
-  console.log('=== VISUAL FOIL DETECTION STARTING ===');
+  console.log('=== VISUAL FOIL DETECTION STARTING (REGIONAL ANALYSIS) ===');
   
   try {
     const clientEmail = process.env.GOOGLE_CLIENT_EMAIL;
@@ -169,53 +332,62 @@ export async function detectFoilFromImage(base64Image: string): Promise<FoilDete
       },
     });
 
-    const request = {
-      image: {
-        content: base64Image,
-      },
+    let regions: CroppedRegions;
+    try {
+      regions = await cropCardRegions(base64Image);
+    } catch (cropError: any) {
+      console.log('Image cropping failed, falling back to full-image analysis:', cropError.message);
+      return await detectFoilFromFullImage(base64Image, client);
+    }
+
+    console.log('=== BORDER REGION ANALYSIS (foil color detection) ===');
+    const borderRequest = {
+      image: { content: regions.borderBase64 },
+      features: [{ type: 'IMAGE_PROPERTIES' as const }],
+    };
+    
+    console.log('=== CENTER REGION ANALYSIS (texture/crackle detection) ===');
+    const centerRequest = {
+      image: { content: regions.centerBase64 },
       features: [
         { type: 'LABEL_DETECTION' as const, maxResults: 30 },
         { type: 'IMAGE_PROPERTIES' as const }
       ],
     };
 
-    let result;
+    const fullImageRequest = {
+      image: { content: base64Image },
+      features: [{ type: 'LABEL_DETECTION' as const, maxResults: 30 }],
+    };
+
+    let borderResult, centerResult, fullLabelsResult;
     try {
-      [result] = await client.annotateImage(request);
+      [borderResult, centerResult, fullLabelsResult] = await Promise.all([
+        client.annotateImage(borderRequest),
+        client.annotateImage(centerRequest),
+        client.annotateImage(fullImageRequest),
+      ]);
+      borderResult = borderResult[0] || borderResult;
+      centerResult = centerResult[0] || centerResult;
+      fullLabelsResult = fullLabelsResult[0] || fullLabelsResult;
     } catch (visionError: any) {
-      console.log('Google Vision API error:', visionError.message || visionError);
-      
+      console.log('Vision API error on regional analysis:', visionError.message);
       if (visionError.message?.includes('DECODER') || visionError.message?.includes('unsupported')) {
-        console.log('Image decoder error - likely image format issue, falling back to basic detection');
-        return {
-          isFoil: false,
-          foilType: null,
-          confidence: 0,
-          indicators: ['Visual analysis failed due to image format/decoder error']
-        };
+        return { isFoil: false, foilType: null, confidence: 0, indicators: ['Visual analysis failed due to image format/decoder error'] };
       }
-      
       throw visionError;
     }
-    
+
+    const indicators: string[] = [];
     let isFoil = false;
     let foilType: string | null = null;
     let confidence = 0;
-    const indicators: string[] = [];
     let hasStrongFoilIndicators = false;
-    let hasWhiteBorderReflection = false;
 
-    const labels = result.labelAnnotations || [];
-    console.log('Image labels found:', labels.map(l => `${l.description} (${l.score})`));
+    const fullLabels = fullLabelsResult.labelAnnotations || [];
+    console.log('Full image labels:', fullLabels.map((l: any) => `${l.description} (${l.score?.toFixed(2)})`));
     
-    const { texture: labelTexture, textureConfidence: labelTextureConf, labelIndicators } = detectTextureFromLabels(labels);
-    indicators.push(...labelIndicators);
-    let textureConfidence = labelTextureConf;
-    if (labelTexture) {
-      console.log(`Label-based texture detected: ${labelTexture} (confidence: ${labelTextureConf.toFixed(2)})`);
-    }
-    
-    for (const label of labels) {
+    for (const label of fullLabels) {
       const description = label.description?.toLowerCase() || '';
       const score = label.score || 0;
       
@@ -253,127 +425,50 @@ export async function detectFoilFromImage(base64Image: string): Promise<FoilDete
         indicators.push(`Reflective surface detected (${score.toFixed(2)})`);
         confidence += score * 0.3;
       }
-      
-      if (description.includes('paper') || description.includes('text') || description.includes('white')) {
-        indicators.push(`Non-foil material detected: ${description} (${score.toFixed(2)})`);
-        confidence -= score * 0.2;
-      }
     }
 
-    const imageProps = result.imagePropertiesAnnotation;
-    let detectedTexture: TextureType = labelTexture;
-    
-    if (imageProps?.dominantColors?.colors) {
-      console.log('Analyzing color properties for foil detection...');
+    const borderColors = borderResult.imagePropertiesAnnotation?.dominantColors?.colors || [];
+    const parsedBorderColors = parseVisionColors(borderColors);
+    const borderAnalysis = analyzeBorderColors(parsedBorderColors);
+    indicators.push(...borderAnalysis.indicators);
+
+    const centerColors = centerResult.imagePropertiesAnnotation?.dominantColors?.colors || [];
+    const parsedCenterColors = parseVisionColors(centerColors);
+    const centerLabels = centerResult.labelAnnotations || [];
+    console.log('Center image labels:', centerLabels.map((l: any) => `${l.description} (${l.score?.toFixed(2)})`));
+    const centerAnalysis = analyzeCenterTexture(parsedCenterColors, centerLabels);
+    indicators.push(...centerAnalysis.indicators);
+
+    if (borderAnalysis.isFoil && !foilType) {
+      isFoil = true;
+      confidence += borderAnalysis.confidence;
       
-      const rawColors = imageProps.dominantColors.colors;
-      let hasMetallicColors = false;
-      let detectedColorTint: string | null = null;
-      let totalColorVariance = 0;
-      let tintedColorCount = 0;
-      const detectedTints: { name: string; coverage: number }[] = [];
-      
-      const parsedColors: ColorEntry[] = [];
-      
-      for (const colorInfo of rawColors) {
-        const color = colorInfo.color;
-        if (!color) continue;
-        
-        const r = color.red || 0;
-        const g = color.green || 0;
-        const b = color.blue || 0;
-        const pixelFraction = colorInfo.pixelFraction || 0;
-        
-        const brightness = (r + g + b) / 3;
-        const saturation = Math.max(r, g, b) - Math.min(r, g, b);
-        const maxChannel = Math.max(r, g, b);
-        const colorName = classifyDominantColor(r, g, b);
-        
-        parsedColors.push({ r, g, b, brightness, saturation, pixelFraction, colorName });
-        
-        console.log(`Color: RGB(${r},${g},${b}) brightness=${brightness.toFixed(0)} saturation=${saturation} coverage=${(pixelFraction * 100).toFixed(1)}% name=${colorName || 'none'}`);
-        
-        if (brightness > 220 && saturation < 20 && pixelFraction > 0.2) {
-          hasWhiteBorderReflection = true;
-          indicators.push(`White border reflection detected: RGB(${r},${g},${b}) - ${(pixelFraction * 100).toFixed(1)}%`);
-        }
-        
-        if (brightness > 60 && saturation > 30 && pixelFraction > 0.03) {
-          hasMetallicColors = true;
-          totalColorVariance += saturation * pixelFraction;
-          indicators.push(`Metallic color detected: RGB(${r},${g},${b}) - saturation: ${saturation}, coverage: ${(pixelFraction * 100).toFixed(1)}%`);
-        }
-        
-        if (saturation > 25 && pixelFraction > 0.03 && maxChannel > 70) {
-          if (colorName) {
-            tintedColorCount++;
-            detectedTints.push({ name: colorName, coverage: pixelFraction });
-            if (!detectedColorTint) {
-              detectedColorTint = colorName;
-            }
-            indicators.push(`${colorName} tint detected: RGB(${r},${g},${b}) - ${(pixelFraction * 100).toFixed(1)}%`);
-          }
-        }
+      if (centerAnalysis.texture && centerAnalysis.textureConfidence >= 0.3) {
+        foilType = `${borderAnalysis.foilColor} ${centerAnalysis.texture} Foil`;
+      } else {
+        foilType = `${borderAnalysis.foilColor} Foil`;
       }
-      
-      if (!detectedTexture) {
-        const { texture: colorTexture, textureConfidence: colorTextureConf, textureIndicators } = detectTextureFromColors(parsedColors);
-        indicators.push(...textureIndicators);
-        if (colorTexture) {
-          detectedTexture = colorTexture;
-          textureConfidence = Math.max(textureConfidence, colorTextureConf);
-          console.log(`Color-based texture detected: ${colorTexture} (confidence: ${colorTextureConf.toFixed(2)})`);
-        }
-      }
-      
-      const hasSimilarTintedRegions = detectedTints.length >= 2 && 
-        detectedTints.some(t => t.name === detectedColorTint && t !== detectedTints[0]);
-      const totalTintCoverage = detectedTints.reduce((sum, t) => sum + t.coverage, 0);
-      
-      console.log(`Tinted color regions: ${tintedColorCount}, similar tints: ${hasSimilarTintedRegions}, total tint coverage: ${(totalTintCoverage * 100).toFixed(1)}%`);
-      console.log(`Detected texture: ${detectedTexture || 'none'}`);
-      
-      if (hasWhiteBorderReflection && !hasMetallicColors) {
-        indicators.push('Rejected: Likely white border reflection without metallic characteristics');
-        console.log('Rejected foil detection - appears to be white border reflection');
-      } else if (hasMetallicColors && detectedColorTint && (hasSimilarTintedRegions || totalTintCoverage > 0.08)) {
-        confidence += 0.4;
-        isFoil = true;
-        
-        if (!foilType) {
-          if (detectedTexture && textureConfidence >= 0.3) {
-            foilType = `${detectedColorTint} ${detectedTexture} Foil`;
-          } else {
-            foilType = `${detectedColorTint} Foil`;
-          }
-          indicators.push(`Foil type assigned: ${foilType} (${tintedColorCount} tinted regions, texture: ${detectedTexture || 'standard'}, texture confidence: ${textureConfidence.toFixed(2)})`);
-        }
-        
-        indicators.push(`Color variance score: ${totalColorVariance.toFixed(2)}, tint coverage: ${(totalTintCoverage * 100).toFixed(1)}%`);
-      } else if (hasMetallicColors) {
-        indicators.push(`Insufficient foil evidence: variance=${totalColorVariance.toFixed(2)}, tinted regions=${tintedColorCount}, coverage=${(totalTintCoverage * 100).toFixed(1)}%`);
+      indicators.push(`Regional detection: border color=${borderAnalysis.foilColor}, center texture=${centerAnalysis.texture || 'standard'} (conf: ${centerAnalysis.textureConfidence.toFixed(2)})`);
+    }
+
+    if (isFoil && foilType && centerAnalysis.texture && centerAnalysis.textureConfidence >= 0.3 &&
+        !foilType.includes('Crackle') && !foilType.includes('Shimmer') && !foilType.includes('Ice')) {
+      const colorPart = foilType.replace(/\s*Foil\s*$/i, '').trim();
+      if (colorPart && colorPart !== 'Rainbow' && colorPart !== 'Chrome' && colorPart !== 'Silver' && colorPart !== 'Gold') {
+        foilType = `${colorPart} ${centerAnalysis.texture} Foil`;
+        indicators.push(`Texture refinement from center analysis: "${foilType}" (confidence: ${centerAnalysis.textureConfidence.toFixed(2)})`);
       }
     }
 
     const hasColorBasedFoil = isFoil && foilType && foilType !== 'Foil';
     
-    const MIN_TEXTURE_CONFIDENCE = 0.3;
-    if (isFoil && foilType && detectedTexture && textureConfidence >= MIN_TEXTURE_CONFIDENCE &&
-        !foilType.includes('Crackle') && !foilType.includes('Shimmer') && !foilType.includes('Ice')) {
-      const colorPart = foilType.replace(/\s*Foil\s*$/i, '').trim();
-      if (colorPart && colorPart !== 'Rainbow' && colorPart !== 'Chrome' && colorPart !== 'Silver' && colorPart !== 'Gold') {
-        foilType = `${colorPart} ${detectedTexture} Foil`;
-        indicators.push(`Texture refinement: updated to "${foilType}" (texture confidence: ${textureConfidence.toFixed(2)})`);
-      }
-    }
-    
     if (isFoil && !hasStrongFoilIndicators && !hasColorBasedFoil) {
-      console.log('REJECTING foil detection - no strong foil indicators or color-based detection found');
+      console.log('REJECTING foil detection - no strong indicators or color-based detection');
       isFoil = false;
       foilType = null;
       confidence = 0;
-      indicators.push('REJECTED: No strong foil indicators (prismatic/chrome/metallic) or color-based detection');
-    } else if (isFoil && hasWhiteBorderReflection && confidence < 0.7) {
+      indicators.push('REJECTED: No strong foil indicators or color-based detection');
+    } else if (isFoil && borderAnalysis.hasWhiteBorder && !borderAnalysis.isFoil && confidence < 0.7) {
       console.log('REJECTING foil detection - likely white border reflection');
       isFoil = false;
       foilType = null;
@@ -386,33 +481,26 @@ export async function detectFoilFromImage(base64Image: string): Promise<FoilDete
     if (isFoil && !foilType && (hasStrongFoilIndicators || hasColorBasedFoil)) {
       foilType = 'Foil';
     } else if (isFoil && !foilType) {
-      console.log('No strong foil indicators or color detection, rejecting');
       isFoil = false;
       confidence = 0;
       indicators.push('REJECTED: No strong foil indicators or color-based detection found');
     }
 
-    console.log('=== VISUAL FOIL DETECTION RESULT ===');
+    console.log('=== VISUAL FOIL DETECTION RESULT (REGIONAL) ===');
     console.log(`Is Foil: ${isFoil}`);
     console.log(`Foil Type: ${foilType}`);
-    console.log(`Texture: ${detectedTexture || 'none'}`);
+    console.log(`Border color: ${borderAnalysis.foilColor || 'none'}`);
+    console.log(`Center texture: ${centerAnalysis.texture || 'none'} (confidence: ${centerAnalysis.textureConfidence.toFixed(2)})`);
     console.log(`Confidence: ${confidence.toFixed(2)}`);
     console.log(`Strong indicators present: ${hasStrongFoilIndicators}`);
-    console.log(`White border reflection detected: ${hasWhiteBorderReflection}`);
     console.log(`Indicators: ${indicators.join('; ')}`);
     console.log('=== END VISUAL FOIL DETECTION ===');
 
-    return {
-      isFoil,
-      foilType,
-      confidence,
-      indicators
-    };
+    return { isFoil, foilType, confidence, indicators };
 
   } catch (error) {
     console.error('Error in visual foil detection:', error);
     console.error('Error details:', error instanceof Error ? error.message : error);
-    console.error('Error stack:', error instanceof Error ? error.stack : 'No stack trace');
     return {
       isFoil: false,
       foilType: null,
@@ -420,4 +508,98 @@ export async function detectFoilFromImage(base64Image: string): Promise<FoilDete
       indicators: [`Error in visual analysis: ${error instanceof Error ? error.message : String(error)}`]
     };
   }
+}
+
+async function detectFoilFromFullImage(base64Image: string, client: ImageAnnotatorClient): Promise<FoilDetectionResult> {
+  console.log('Running fallback full-image foil detection...');
+  
+  const request = {
+    image: { content: base64Image },
+    features: [
+      { type: 'LABEL_DETECTION' as const, maxResults: 30 },
+      { type: 'IMAGE_PROPERTIES' as const }
+    ],
+  };
+
+  let result;
+  try {
+    [result] = await client.annotateImage(request);
+  } catch (visionError: any) {
+    return { isFoil: false, foilType: null, confidence: 0, indicators: ['Fallback analysis failed'] };
+  }
+  
+  let isFoil = false;
+  let foilType: string | null = null;
+  let confidence = 0;
+  const indicators: string[] = ['Using full-image fallback analysis'];
+  let hasStrongFoilIndicators = false;
+  let hasWhiteBorderReflection = false;
+
+  const labels = result.labelAnnotations || [];
+  
+  for (const label of labels) {
+    const description = label.description?.toLowerCase() || '';
+    const score = label.score || 0;
+    
+    if (description.includes('rainbow') || description.includes('prismatic') || description.includes('iridescent')) {
+      confidence += score * 0.7;
+      isFoil = true;
+      hasStrongFoilIndicators = true;
+      foilType = 'Rainbow Foil';
+    }
+    if ((description.includes('chrome') || description.includes('metallic')) && score > 0.6) {
+      confidence += score * 0.6;
+      isFoil = true;
+      hasStrongFoilIndicators = true;
+      if (!foilType) foilType = 'Chrome';
+    }
+  }
+
+  const imageProps = result.imagePropertiesAnnotation;
+  if (imageProps?.dominantColors?.colors) {
+    const parsedColors = parseVisionColors(imageProps.dominantColors.colors);
+    let detectedColorTint: string | null = null;
+    let tintedColorCount = 0;
+    const detectedTints: { name: string; coverage: number }[] = [];
+    let hasMetallicColors = false;
+    let totalColorVariance = 0;
+    
+    for (const c of parsedColors) {
+      if (c.brightness > 220 && c.saturation < 20 && c.pixelFraction > 0.2) {
+        hasWhiteBorderReflection = true;
+      }
+      if (c.brightness > 60 && c.saturation > 30 && c.pixelFraction > 0.03) {
+        hasMetallicColors = true;
+        totalColorVariance += c.saturation * c.pixelFraction;
+      }
+      if (c.saturation > 25 && c.pixelFraction > 0.03 && Math.max(c.r, c.g, c.b) > 70 && c.colorName) {
+        tintedColorCount++;
+        detectedTints.push({ name: c.colorName, coverage: c.pixelFraction });
+        if (!detectedColorTint) detectedColorTint = c.colorName;
+      }
+    }
+    
+    const hasSimilarTints = detectedTints.length >= 2;
+    const totalTintCoverage = detectedTints.reduce((sum, t) => sum + t.coverage, 0);
+    
+    if (hasMetallicColors && detectedColorTint && (hasSimilarTints || totalTintCoverage > 0.08)) {
+      confidence += 0.4;
+      isFoil = true;
+      if (!foilType) foilType = `${detectedColorTint} Foil`;
+    }
+    
+    if (hasWhiteBorderReflection && !hasMetallicColors) {
+      isFoil = false;
+      foilType = null;
+      confidence = 0;
+    }
+  }
+  
+  confidence = Math.min(confidence, 1.0);
+  if (isFoil && !foilType) {
+    if (hasStrongFoilIndicators) foilType = 'Foil';
+    else { isFoil = false; confidence = 0; }
+  }
+
+  return { isFoil, foilType, confidence, indicators };
 }

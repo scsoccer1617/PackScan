@@ -489,8 +489,64 @@ export async function searchCardValues(
       }
     }
 
+    const detectedColor = extractColorFromVariant(variantKeyword || undefined);
+    const shouldDiscoverVariant = detectedColor && variantKeyword && !variantKeyword.toLowerCase().includes('crackle') && !variantKeyword.toLowerCase().includes('shimmer') && !variantKeyword.toLowerCase().includes('ice');
+    
+    if (results.length > 0 && shouldDiscoverVariant) {
+      console.log('=== ALWAYS-ON VARIANT DISCOVERY (have results, checking for more specific variant) ===');
+      const titles = results.map(r => r.title);
+      const discoveredVariant = discoverVariantFromListings(titles, detectedColor);
+      
+      if (discoveredVariant && discoveredVariant !== variantKeyword) {
+        console.log(`Discovered more specific variant from existing results: "${discoveredVariant}" (was "${variantKeyword}")`);
+        variantKeyword = discoveredVariant;
+        
+        const refinedKeywords = buildKeywords();
+        console.log('Refined search with discovered variant:', refinedKeywords);
+        
+        try {
+          const browseUrl = `${EBAY_BROWSE_API_URL}/item_summary/search`;
+          const refinedParams = {
+            q: refinedKeywords,
+            limit: 10,
+            filter: 'buyingOptions:{AUCTION|FIXED_PRICE},deliveryCountry:US',
+            sort: 'price',
+            fieldgroups: 'EXTENDED',
+            category_ids: '213'
+          };
+          
+          const refinedResponse = await axios.get(browseUrl, {
+            params: refinedParams,
+            headers: {
+              'Authorization': `Bearer ${getEbayBrowseToken()}`,
+              'Accept': 'application/json',
+            },
+            timeout: 15000
+          });
+          
+          if (refinedResponse.data?.itemSummaries && refinedResponse.data.itemSummaries.length > 0) {
+            results = refinedResponse.data.itemSummaries.map((item: any) => ({
+              title: item.title || '',
+              price: parseFloat(item.price?.value || '0'),
+              currency: item.price?.currency || 'USD',
+              url: item.itemWebUrl || '',
+              imageUrl: item.image?.imageUrl || item.thumbnailImages?.[0]?.imageUrl || '',
+              condition: item.condition || '',
+              endTime: item.itemEndDate || ''
+            }));
+            dataType = 'current';
+            console.log(`Refined search with discovered variant returned ${results.length} results`);
+          }
+        } catch (refinedError: any) {
+          console.log('Refined variant search failed:', refinedError.message);
+        }
+      } else {
+        console.log(`No more specific variant found in listing titles (current: "${variantKeyword}")`);
+      }
+    }
+    
     if (results.length === 0) {
-      console.log('No results with initial query, trying variant discovery search...');
+      console.log('No results with initial query, trying broader discovery search...');
       
       const discoveryKeywords = buildKeywords({ includeVariant: false, includeCardNumber: false });
       console.log('Discovery search keywords:', discoveryKeywords);
@@ -533,7 +589,6 @@ export async function searchCardValues(
       
       if (discoveryResults.length > 0) {
         const titles = discoveryResults.map(r => r.title);
-        const detectedColor = extractColorFromVariant(variantKeyword || undefined);
         const discoveredVariant = discoverVariantFromListings(titles, detectedColor);
         
         if (discoveredVariant && discoveredVariant !== variantKeyword) {
