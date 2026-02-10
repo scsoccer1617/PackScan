@@ -176,13 +176,15 @@ export default function PriceLookup() {
           onCancel={() => setShowOCRResults(false)}
         />
       )}
-      {/* Price Results */}
       {showPriceResults && cardData && (
         <div className="space-y-4">
           <EbayPriceResults 
             cardData={cardData} 
             frontImage={frontImage}
             backImage={backImage}
+            onCardDataUpdate={(updatedData) => {
+              setCardData(updatedData);
+            }}
           />
           <Button 
             onClick={handleReset}

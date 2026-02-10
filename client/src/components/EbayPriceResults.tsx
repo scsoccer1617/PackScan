@@ -1,7 +1,9 @@
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ExternalLink, TrendingUp } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { ExternalLink, TrendingUp, Pencil, RotateCcw } from "lucide-react";
 import { CardFormValues } from "@shared/schema";
 
 interface EbaySearchResult {
@@ -26,18 +28,27 @@ interface EbayPriceResultsProps {
   cardData: Partial<CardFormValues>;
   frontImage?: string;
   backImage?: string;
+  onCardDataUpdate?: (updatedData: Partial<CardFormValues>) => void;
 }
 
-export default function EbayPriceResults({ cardData, frontImage, backImage }: EbayPriceResultsProps) {
+export default function EbayPriceResults({ cardData, frontImage, backImage, onCardDataUpdate }: EbayPriceResultsProps) {
   const [loading, setLoading] = useState(true);
   const [results, setResults] = useState<EbaySearchResult[]>([]);
   const [averageValue, setAverageValue] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [searchUrl, setSearchUrl] = useState<string | null>(null);
   const [dataType, setDataType] = useState<'sold' | 'current'>('sold');
+  const [editMode, setEditMode] = useState(false);
+  const [editData, setEditData] = useState<Partial<CardFormValues>>({});
 
   useEffect(() => {
     const fetchEbayData = async () => {
+      setLoading(true);
+      setError(null);
+      setResults([]);
+      setAverageValue(0);
+      setSearchUrl(null);
+      
       if (!cardData.playerFirstName || !cardData.playerLastName || !cardData.brand || !cardData.year) {
         setError("Missing required card information for price lookup");
         setLoading(false);
@@ -135,10 +146,32 @@ export default function EbayPriceResults({ cardData, frontImage, backImage }: Eb
     );
   }
 
-  // Helper function to render card information section
+  const handleStartEdit = () => {
+    setEditData({ ...cardData });
+    setEditMode(true);
+  };
+
+  const handleCancelEdit = () => {
+    setEditMode(false);
+    setEditData({});
+  };
+
+  const handleSaveAndRelookup = () => {
+    if (!editData.playerFirstName?.trim() || !editData.playerLastName?.trim() || !editData.brand?.trim() || !editData.year) {
+      return;
+    }
+    setEditMode(false);
+    if (onCardDataUpdate) {
+      onCardDataUpdate({ ...editData });
+    }
+  };
+
+  const updateEditField = (field: keyof CardFormValues, value: any) => {
+    setEditData(prev => ({ ...prev, [field]: value }));
+  };
+
   const renderCardInfoSection = () => (
     <div className="space-y-4">
-      {/* Uploaded Card Images */}
       {(frontImage || backImage) && (
         <Card>
           <CardHeader>
@@ -175,80 +208,124 @@ export default function EbayPriceResults({ cardData, frontImage, backImage }: Eb
         </Card>
       )}
 
-      {/* Card Summary - Clean Format */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg mb-4">Card Information</CardTitle>
+          <div className="flex justify-between items-center">
+            <CardTitle className="text-lg">Card Information</CardTitle>
+            {!editMode ? (
+              <Button variant="outline" size="sm" onClick={handleStartEdit}>
+                <Pencil className="h-3.5 w-3.5 mr-1.5" />
+                Edit & Re-lookup
+              </Button>
+            ) : (
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={handleCancelEdit}>
+                  Cancel
+                </Button>
+                <Button size="sm" onClick={handleSaveAndRelookup}>
+                  <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
+                  Re-lookup Prices
+                </Button>
+              </div>
+            )}
+          </div>
         </CardHeader>
         <CardContent>
-          {/* Two-column layout for card details */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-            {/* Left Column */}
-            <div className="space-y-4">
-              {/* Sport */}
-              <div className="text-base">
-                <span className="font-semibold text-slate-800">Sport: </span>
-                <span className="text-slate-700">{cardData.sport || 'Not detected'}</span>
+          {editMode ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-3">
+                <div>
+                  <Label htmlFor="edit-firstName">First Name</Label>
+                  <Input id="edit-firstName" value={editData.playerFirstName || ''} onChange={e => updateEditField('playerFirstName', e.target.value)} />
+                </div>
+                <div>
+                  <Label htmlFor="edit-lastName">Last Name</Label>
+                  <Input id="edit-lastName" value={editData.playerLastName || ''} onChange={e => updateEditField('playerLastName', e.target.value)} />
+                </div>
+                <div>
+                  <Label htmlFor="edit-brand">Brand</Label>
+                  <Input id="edit-brand" value={editData.brand || ''} onChange={e => updateEditField('brand', e.target.value)} />
+                </div>
+                <div>
+                  <Label htmlFor="edit-cardNumber">Card #</Label>
+                  <Input id="edit-cardNumber" value={editData.cardNumber || ''} onChange={e => updateEditField('cardNumber', e.target.value)} />
+                </div>
+                <div>
+                  <Label htmlFor="edit-year">Year</Label>
+                  <Input id="edit-year" type="number" value={editData.year || ''} onChange={e => updateEditField('year', parseInt(e.target.value) || 0)} />
+                </div>
               </div>
-
-              {/* Player */}
-              <div className="text-base">
-                <span className="font-semibold text-slate-800">Player: </span>
-                <span className="text-slate-700">{cardData.playerFirstName || ''} {cardData.playerLastName || 'Not detected'}</span>
-              </div>
-
-              {/* Brand */}
-              <div className="text-base">
-                <span className="font-semibold text-slate-800">Brand: </span>
-                <span className="text-slate-700">{cardData.brand || 'Not detected'}</span>
-              </div>
-
-              {/* Card Number */}
-              <div className="text-base">
-                <span className="font-semibold text-slate-800">Card #: </span>
-                <span className="text-slate-700">{cardData.cardNumber || 'Not detected'}</span>
-              </div>
-
-              {/* Year */}
-              <div className="text-base">
-                <span className="font-semibold text-slate-800">Year: </span>
-                <span className="text-slate-700">{cardData.year || 'Not detected'}</span>
-              </div>
-            </div>
-
-            {/* Right Column */}
-            <div className="space-y-4">
-              {/* Collection */}
-              <div className="text-base">
-                <span className="font-semibold text-slate-800">Collection: </span>
-                <span className="text-slate-700">{cardData.collection || 'Not detected'}</span>
-              </div>
-
-              {/* Variant */}
-              <div className="text-base">
-                <span className="font-semibold text-slate-800">Variant: </span>
-                <span className="text-slate-700">{cardData.variant || 'Base/Standard'}</span>
-              </div>
-
-              {/* Serial Number */}
-              <div className="text-base">
-                <span className="font-semibold text-slate-800">Serial #: </span>
-                <span className="text-slate-700">{cardData.serialNumber || 'None'}</span>
-              </div>
-
-              {/* Foil Type */}
-              <div className="text-base">
-                <span className="font-semibold text-slate-800">Foil Type: </span>
-                <span className="text-slate-700">{cardData.foilType || 'None detected'}</span>
-              </div>
-
-              {/* Rookie Card Status */}
-              <div className="text-base">
-                <span className="font-semibold text-slate-800">Rookie Card: </span>
-                <span className="text-slate-700">{cardData.isRookieCard ? 'Yes' : 'No'}</span>
+              <div className="space-y-3">
+                <div>
+                  <Label htmlFor="edit-collection">Collection</Label>
+                  <Input id="edit-collection" value={editData.collection || ''} onChange={e => updateEditField('collection', e.target.value)} />
+                </div>
+                <div>
+                  <Label htmlFor="edit-variant">Variant</Label>
+                  <Input id="edit-variant" value={editData.variant || ''} onChange={e => updateEditField('variant', e.target.value)} />
+                </div>
+                <div>
+                  <Label htmlFor="edit-serialNumber">Serial #</Label>
+                  <Input id="edit-serialNumber" value={editData.serialNumber || ''} onChange={e => updateEditField('serialNumber', e.target.value)} />
+                </div>
+                <div>
+                  <Label htmlFor="edit-foilType">Foil Type</Label>
+                  <Input id="edit-foilType" value={editData.foilType || ''} onChange={e => updateEditField('foilType', e.target.value || null)} />
+                </div>
+                <div>
+                  <Label htmlFor="edit-sport">Sport</Label>
+                  <Input id="edit-sport" value={editData.sport || ''} onChange={e => updateEditField('sport', e.target.value)} />
+                </div>
               </div>
             </div>
-          </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              <div className="space-y-4">
+                <div className="text-base">
+                  <span className="font-semibold text-slate-800">Sport: </span>
+                  <span className="text-slate-700">{cardData.sport || 'Not detected'}</span>
+                </div>
+                <div className="text-base">
+                  <span className="font-semibold text-slate-800">Player: </span>
+                  <span className="text-slate-700">{cardData.playerFirstName || ''} {cardData.playerLastName || 'Not detected'}</span>
+                </div>
+                <div className="text-base">
+                  <span className="font-semibold text-slate-800">Brand: </span>
+                  <span className="text-slate-700">{cardData.brand || 'Not detected'}</span>
+                </div>
+                <div className="text-base">
+                  <span className="font-semibold text-slate-800">Card #: </span>
+                  <span className="text-slate-700">{cardData.cardNumber || 'Not detected'}</span>
+                </div>
+                <div className="text-base">
+                  <span className="font-semibold text-slate-800">Year: </span>
+                  <span className="text-slate-700">{cardData.year || 'Not detected'}</span>
+                </div>
+              </div>
+              <div className="space-y-4">
+                <div className="text-base">
+                  <span className="font-semibold text-slate-800">Collection: </span>
+                  <span className="text-slate-700">{cardData.collection || 'Not detected'}</span>
+                </div>
+                <div className="text-base">
+                  <span className="font-semibold text-slate-800">Variant: </span>
+                  <span className="text-slate-700">{cardData.variant || 'Base/Standard'}</span>
+                </div>
+                <div className="text-base">
+                  <span className="font-semibold text-slate-800">Serial #: </span>
+                  <span className="text-slate-700">{cardData.serialNumber || 'None'}</span>
+                </div>
+                <div className="text-base">
+                  <span className="font-semibold text-slate-800">Foil Type: </span>
+                  <span className="text-slate-700">{cardData.foilType || 'None detected'}</span>
+                </div>
+                <div className="text-base">
+                  <span className="font-semibold text-slate-800">Rookie Card: </span>
+                  <span className="text-slate-700">{cardData.isRookieCard ? 'Yes' : 'No'}</span>
+                </div>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

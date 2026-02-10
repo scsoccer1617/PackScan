@@ -263,6 +263,18 @@ async function combineCardResults(
     }
   });
   
+  // Special case for collection/variant: when front has a generic collection (e.g., "Chrome")
+  // but back has a more specific collection + variant matching front's collection, prefer back's data
+  if (hasValue(combined.collection) && hasValue(backResult.collection) && hasValue(backResult.variant)) {
+    const frontCollection = String(combined.collection).toLowerCase();
+    const backVariant = String(backResult.variant).toLowerCase();
+    if (frontCollection === backVariant && combined.collection !== backResult.collection) {
+      console.log(`Collection override: front="${combined.collection}" matches back variant="${backResult.variant}", using back collection="${backResult.collection}"`);
+      combined.collection = backResult.collection;
+      combined.variant = backResult.variant;
+    }
+  }
+  
   // Special case for rookie card - if either side detected it, mark it as true
   if (frontResult.isRookieCard === true || backResult.isRookieCard === true) {
     combined.isRookieCard = true;
