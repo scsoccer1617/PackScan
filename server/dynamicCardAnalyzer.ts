@@ -737,6 +737,13 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
         if (i < lines.length - 1) surroundingLines.push(lines[i+1].trim());
         
         for (const nearbyLine of surroundingLines) {
+          // Check for hyphenated alphanumeric card numbers first (BD-7, HRC-42)
+          const nearbyHyphenMatch = nearbyLine.match(/\b([A-Z]{1,4})-(\d{1,4})\b/);
+          if (nearbyHyphenMatch && nearbyHyphenMatch[0]) {
+            cardDetails.cardNumber = nearbyHyphenMatch[0];
+            console.log(`Detected hyphenated card number ${nearbyHyphenMatch[0]} in line adjacent to brand - high confidence`);
+            return;
+          }
           const nearbyNumberMatch = nearbyLine.match(/\b(\d{1,3})\b/);
           if (nearbyNumberMatch && nearbyNumberMatch[1]) {
             const number = nearbyNumberMatch[1];
