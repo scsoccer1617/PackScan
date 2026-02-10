@@ -143,6 +143,8 @@ This is a streamlined web application focused on sports card price lookup using 
 - February 10, 2026: Fixed Red Foil false positives - color-based foil detection now requires Vision API label support (metallic/chrome/reflective keywords) OR extremely strong color evidence (5+ tints, 40%+ coverage)
 - February 10, 2026: Chrome variant fix - "Chrome" is set as variant when another collection (e.g., Stars of MLB) already exists, skipping when collection already contains "Chrome" (e.g., Bowman Chrome)
 - February 10, 2026: Added OCR noise fragments (LOP, PPS, TANKY, LOPPS) to bogus name list; added generic short-word-pair rejection (both words ≤3 chars)
+- February 10, 2026: Fixed collection combine logic - when front collection matches back variant (e.g., front="Chrome", back collection="Stars of MLB" + variant="Chrome"), back's more specific collection is used
+- February 10, 2026: Added manual edit & re-lookup feature - users can edit any detected card field and re-run eBay price search with corrected data
 
 ## User Preferences
 
