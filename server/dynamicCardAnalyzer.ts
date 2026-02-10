@@ -859,18 +859,17 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>)
     
     const collectionPatterns = [
       { pattern: /RIFLEMAN/i, name: "Rifleman" },
-      { pattern: /STARS OF MLB|SMLB/, name: "Stars of MLB" },
       { pattern: /CHROME STARS OF MLB|CSMLB/, name: "Stars of MLB", variant: "Chrome" },
+      { pattern: /STARS OF MLB|SMLB/, name: "Stars of MLB" },
       { pattern: /HERITAGE/i, name: "Heritage" },
       { pattern: /ALLEN & GINTER|ALLEN AND GINTER/i, name: "Allen & Ginter" },
-      { pattern: /TOPPS CHROME|CHROME/i, name: "Chrome" }, // Chrome is a collection, not variant
+      { pattern: /BOWMAN CHROME/i, name: "Bowman Chrome" },
       { pattern: /PRIZM/i, name: "Prizm" },
       { pattern: /OPTIC/i, name: "Optic" },
       { pattern: /OPENING DAY/i, name: "Opening Day" },
       { pattern: /UPDATE SERIES/i, name: "Update Series" },
       { pattern: /GOLD LABEL/i, name: "Gold Label" },
       { pattern: /STADIUM CLUB/i, name: "Stadium Club" },
-      { pattern: /BOWMAN CHROME/i, name: "Bowman Chrome" },
       { pattern: /35TH ANNIVERSARY/i, name: "35th Anniversary" },
       { pattern: /COLLECTOR'?S?[\s-]*CHOICE/i, name: "Collector's Choice", brandOverride: "Upper Deck" },
       { pattern: /SERIES ONE|SERIES 1/i, name: "Series One" },
@@ -890,13 +889,23 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>)
           console.log(`Detected variant: ${cardDetails.variant}`);
         }
         
-        // If this collection has a specific brand association, override the brand
         if (collectionData.brandOverride) {
           cardDetails.brand = collectionData.brandOverride;
           console.log(`Brand override applied for collection ${cardDetails.collection}: ${cardDetails.brand}`);
         }
         
         break;
+      }
+    }
+    
+    if (!cardDetails.variant && /\bCHROME\b/i.test(text)) {
+      const collectionHasChrome = cardDetails.collection && /chrome/i.test(cardDetails.collection);
+      if (cardDetails.collection && !collectionHasChrome) {
+        cardDetails.variant = 'Chrome';
+        console.log(`Detected Chrome as variant (collection already set to "${cardDetails.collection}")`);
+      } else if (!cardDetails.collection) {
+        cardDetails.collection = 'Chrome';
+        console.log(`Detected Chrome as collection (no other collection found)`);
       }
     }
     

@@ -207,6 +207,7 @@ export async function detectFoilFromImage(base64Image: string): Promise<FoilDete
     let foilType: string | null = null;
     let confidence = 0;
     let hasStrongFoilIndicators = false;
+    let hasReflectiveLabels = false;
     let hasWhiteBorderReflection = false;
 
     const labels = apiResult.labelAnnotations || [];
@@ -249,6 +250,13 @@ export async function detectFoilFromImage(base64Image: string): Promise<FoilDete
       if ((description.includes('reflect') || description.includes('shiny') || description.includes('gloss')) && score > 0.7) {
         indicators.push(`Reflective surface detected (${score.toFixed(2)})`);
         confidence += score * 0.3;
+        hasReflectiveLabels = true;
+      }
+      
+      if ((description.includes('metallic') || description.includes('chrome') || description.includes('foil') || 
+           description.includes('hologram') || description.includes('holographic') || description.includes('mirror') ||
+           description.includes('aluminum') || description.includes('steel') || description.includes('metal')) && score > 0.3) {
+        hasReflectiveLabels = true;
       }
     }
 
@@ -300,7 +308,12 @@ export async function detectFoilFromImage(base64Image: string): Promise<FoilDete
       const hasStrongSimilarTints = similarTintCount >= 3;
       const hasModestSimilarTints = similarTintCount >= 2 && totalTintCoverage > 0.20;
       
-      if (hasMetallicColors && detectedColorTint && (hasStrongSimilarTints || hasModestSimilarTints || totalTintCoverage > 0.25)) {
+      indicators.push(`Label support: strongFoil=${hasStrongFoilIndicators}, reflective=${hasReflectiveLabels}`);
+      
+      const hasVeryStrongColorEvidence = similarTintCount >= 5 && totalTintCoverage > 0.40;
+      const hasLabelSupport = hasStrongFoilIndicators || hasReflectiveLabels;
+      
+      if (hasMetallicColors && detectedColorTint && (hasLabelSupport || hasVeryStrongColorEvidence) && (hasStrongSimilarTints || hasModestSimilarTints || totalTintCoverage > 0.25)) {
         isFoil = true;
         confidence += Math.min(0.6, totalColorVariance * 2 + totalTintCoverage);
         

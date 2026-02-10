@@ -290,6 +290,7 @@ async function combineCardResults(
     'TOTALS', 'MAJ', 'LEA', 'THIRD', 'FIRST', 'SECOND', 'BASE',
     'OUTFIELD', 'HOUSTON', 'MILWAUKEE', 'PHILADELPHIA', 'CHICAGO',
     'EPPS', 'STROS', 'OXY',
+    'LOP', 'PPS', 'TANKY', 'LOPPS',
   ]);
   
   const isBogusFn = (firstName?: string, lastName?: string): boolean => {
@@ -299,6 +300,7 @@ async function combineCardResults(
     if (words.some(w => bogusNameWords.has(w)) || words.length > 4) return true;
     if (words.some(w => w.length <= 1)) return true;
     if (words.some(w => /^\d/.test(w))) return true;
+    if (words.length === 2 && words.every(w => w.length <= 3)) return true;
     return false;
   };
   
