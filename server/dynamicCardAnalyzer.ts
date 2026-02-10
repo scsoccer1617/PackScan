@@ -731,25 +731,38 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
           }
         }
         
-        // Check the lines immediately before and after the brand line
-        const surroundingLines = [];
-        if (i > 0) surroundingLines.push(lines[i-1].trim());
-        if (i < lines.length - 1) surroundingLines.push(lines[i+1].trim());
+        // Check lines near the brand (up to 2 lines away)
+        const surroundingLines: string[] = [];
+        for (let offset = 1; offset <= 2; offset++) {
+          if (i - offset >= 0) surroundingLines.push(lines[i - offset].trim());
+          if (i + offset < lines.length) surroundingLines.push(lines[i + offset].trim());
+        }
         
         for (const nearbyLine of surroundingLines) {
           // Check for hyphenated alphanumeric card numbers first (BD-7, HRC-42)
           const nearbyHyphenMatch = nearbyLine.match(/\b([A-Z]{1,4})-(\d{1,4})\b/);
           if (nearbyHyphenMatch && nearbyHyphenMatch[0]) {
             cardDetails.cardNumber = nearbyHyphenMatch[0];
-            console.log(`Detected hyphenated card number ${nearbyHyphenMatch[0]} in line adjacent to brand - high confidence`);
+            console.log(`Detected hyphenated card number ${nearbyHyphenMatch[0]} near brand line - high confidence`);
             return;
+          }
+          // Check for non-hyphenated alphanumeric card numbers (T119, TC12, BDP5)
+          const nearbyAlphaNumMatch = nearbyLine.match(/^([A-Z]{1,3})(\d{1,4})$/);
+          if (nearbyAlphaNumMatch) {
+            const prefix = nearbyAlphaNumMatch[1];
+            const digits = nearbyAlphaNumMatch[2];
+            if (parseInt(digits) <= 999 && !/^(OF|IN|AT|TO|BY|OR|ON|IS|IT|AS|IF|UP|NO|SO|DO|AN|AM|BE|HE|WE|MY|US|THE|AND|FOR|ARE|BUT|NOT|YOU|ALL|HAS|HIS|HOW|ITS|MAY|OUR|OUT|WAY|WHO|DID|GET|HIM|LET|SAY|SHE|TOO|USE|MLB|NFL|NBA|NHL|USA|NL|AL|FT|LB|HR|AB|BB|SO|IP|ER|GS|SV|WL|GP|GF|RS|BA|HT|WT|ACQ)$/i.test(prefix)) {
+              cardDetails.cardNumber = nearbyAlphaNumMatch[0];
+              console.log(`Detected alphanumeric card number ${nearbyAlphaNumMatch[0]} near brand line - high confidence`);
+              return;
+            }
           }
           const nearbyNumberMatch = nearbyLine.match(/\b(\d{1,3})\b/);
           if (nearbyNumberMatch && nearbyNumberMatch[1]) {
             const number = nearbyNumberMatch[1];
             if (parseInt(number) > 0 && parseInt(number) < 1000 && !isDOBFormat(nearbyLine)) {
               cardDetails.cardNumber = number;
-              console.log(`Detected card number ${number} in line adjacent to brand - high confidence`);
+              console.log(`Detected card number ${number} near brand line - high confidence`);
               return;
             }
           }
