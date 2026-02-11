@@ -976,7 +976,19 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>,
       { pattern: /COLLECTOR'?S?[\s-]*CHOICE/i, name: "Collector's Choice", brandOverride: "Upper Deck" },
       { pattern: /SERIES ONE|SERIES 1/i, name: "Series One" },
       { pattern: /SERIES TWO|SERIES 2/i, name: "Series Two" },
-      { pattern: /DONRUSS OPTIC/i, name: "Donruss Optic", brandOverride: "Panini" }
+      { pattern: /DONRUSS OPTIC/i, name: "Donruss Optic", brandOverride: "Panini" },
+      { pattern: /\bULTRA\b/i, name: "Ultra" },
+      { pattern: /\bSELECT\b/i, name: "Select" },
+      { pattern: /\bMOSAIC\b/i, name: "Mosaic" },
+      { pattern: /\bTRIBUTE\b/i, name: "Tribute" },
+      { pattern: /\bGALLERY\b/i, name: "Gallery" },
+      { pattern: /\bSKYLINES?\b/i, name: "Skylines" },
+      { pattern: /\bDIAMOND KINGS?\b/i, name: "Diamond Kings" },
+      { pattern: /\bBOWMAN DRAFT\b/i, name: "Draft" },
+      { pattern: /\bBOWMAN BEST\b/i, name: "Bowman's Best" },
+      { pattern: /\bARCHIVES?\b/i, name: "Archives" },
+      { pattern: /\bFINEST\b/i, name: "Finest" },
+      { pattern: /\bGYPSY QUEEN\b/i, name: "Gypsy Queen" }
     ];
     
     const legalTextPattern = /(?:REGISTERED\s+)?TRADEMARK|ALL\s+RIGHTS\s+RESERVED|©|\(C\)|OFFICIALLY\s+LICENSED|\b(?:TOPPS|BOWMAN|FLEER|DONRUSS|SCORE|LEAF|UPPER DECK|PANINI|PLAYOFF|PACIFIC|SKYBOX|PINNACLE)\b.*?\b(?:INC|LTD|CORP|LLC)\b|\b\d{4}\s+\w+.*?\b(?:INC|LTD|CORP|LLC)\b/i;
