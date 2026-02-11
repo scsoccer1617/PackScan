@@ -243,15 +243,21 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
     }
     
     // Special case for multi-word last names and special formats like Collector's Choice
+    const brandWords = new Set(['TOPPS', 'BOWMAN', 'DONRUSS', 'PANINI', 'FLEER', 'SCORE', 'LEAF', 'PRINTED', 'USA']);
     const multiWordNameMatch = text.match(/([A-Z][a-zA-Z]+)\s+([A-Z][A-Z\s]+)\s+(?:•|\.|\*|:|,)\s*([A-Z]+)/);
     if (multiWordNameMatch) {
       const firstName = multiWordNameMatch[1];
       const lastName = multiWordNameMatch[2];
       
-      cardDetails.playerFirstName = firstName;
-      cardDetails.playerLastName = lastName;
-      console.log(`Detected player with multi-word last name: ${firstName} ${lastName}`);
-      return;
+      const lastNameTokens = lastName.trim().split(/\s+/);
+      const hasBrandInFirst = brandWords.has(firstName.toUpperCase());
+      const hasBrandInLast = lastNameTokens.some(t => brandWords.has(t.toUpperCase()));
+      if (!hasBrandInFirst && !hasBrandInLast) {
+        cardDetails.playerFirstName = firstName;
+        cardDetails.playerLastName = lastName;
+        console.log(`Detected player with multi-word last name: ${firstName} ${lastName}`);
+        return;
+      }
     }
     
     // First, look for name patterns in the first few lines of the card
@@ -260,20 +266,23 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
     console.log('Starting enhanced player name detection across full text...');
     
     const nonNameWords = new Set([
-      'TOPPS', 'LOPPS', 'OPPS', 'CHROME', 'BOWMAN', 'FLEER', 'DONRUSS', 'PANINI', 'SCORE', 'LEAF',
+      'TOPPS', 'LOPPS', 'OPPS', 'TOPPE', 'CHROME', 'BOWMAN', 'FLEER', 'DONRUSS', 'PANINI', 'SCORE', 'LEAF',
       'UPPER', 'DECK', 'SERIES', 'ONE', 'TWO', 'THREE', 'OPENING', 'DAY', 'STADIUM', 'CLUB',
       'BASEBALL', 'CARD', 'ROOKIE', 'STARS', 'MLB', 'TILB', 'SMLB',
       'MAJOR', 'LEAGUE', 'BATTING', 'RECORD', 'PITCHING', 'FIELDING',
       'OUTFIELDER', 'INFIELDER', 'PITCHER', 'CATCHER', 'SHORTSTOP', 'DESIGNATED', 'HITTER',
       'FIRST', 'SECOND', 'THIRD', 'BASEMAN', 'LEFT', 'RIGHT', 'CENTER', 'FIELDER',
+      'OF', 'SS', 'DH', 'SP', 'RP', 'CF', 'LF', 'RF',
+      'QB', 'WR', 'RB', 'TE', 'LB', 'CB', 'DE', 'DT', 'OL', 'OT', 'OG',
+      'PG', 'SG', 'SF', 'PF',
       'PHILLIES', 'PHILLIE', 'YANKEES', 'DODGERS', 'METS', 'CUBS', 'RED', 'SOX', 'BRAVES',
       'ASTROS', 'RANGERS', 'PADRES', 'GIANTS', 'CARDINALS', 'NATIONALS', 'ORIOLES', 'GUARDIANS',
       'TWINS', 'RAYS', 'MARLINS', 'PIRATES', 'REDS', 'BREWERS', 'TIGERS', 'ROYALS', 'ATHLETICS',
-      'MARINERS', 'ANGELS', 'ROCKIES', 'DIAMONDBACKS', 'WHITE',
+      'MARINERS', 'ANGELS', 'ROCKIES', 'DIAMONDBACKS', 'WHITE', 'INDIANS',
       'PHILADELPHIA', 'CHICAGO', 'BOSTON', 'FRANCISCO', 'ANGELES', 'YORK',
       'NEW', 'SAN', 'LOS', 'SAINT', 'LOUIS', 'KANSAS', 'CITY',
       'BATS', 'THROWS', 'DRAFTED', 'BORN', 'HOME', 'ACQ', 'FREE', 'AGENT',
-      'HT', 'WT', 'HEIGHT', 'WEIGHT',
+      'HT', 'WT', 'HEIGHT', 'WEIGHT', 'PRINTED', 'USA',
       'ALL', 'STAR', 'COLLECTION', 'FLAGSHIP', 'HERITAGE', 'PRIZM', 'SELECT', 'MOSAIC',
       'REFRACTOR', 'FOIL', 'GOLD', 'SILVER', 'BRONZE', 'PLATINUM', 'SAPPHIRE',
       'OFFICIALLY', 'LICENSED', 'PRODUCT', 'TRADEMARKS', 'COPYRIGHTS', 'RESERVED', 'RIGHTS',
@@ -300,23 +309,36 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
       
       const words = line.split(/\s+/).filter(w => w.length > 0);
       
-      if (words.length === 2 || words.length === 3) {
-        const allAlpha = words.every(w => /^[A-Z][A-Za-z'\-\.]+$/.test(w) || /^[A-Z]{2,}$/.test(w));
-        const noNonNameWords = words.every(w => !isNonNameWord(w));
-        const noNumbers = words.every(w => !/\d/.test(w));
-        const eachWordLen = words.every(w => w.length >= 2);
+      if (words.length >= 2 && words.length <= 5) {
+        let nameWords = words
+          .map(w => w.replace(/[,;]+$/, ''))
+          .filter(w => /^[A-Z][A-Za-z'\-\.]+$/.test(w) || /^[A-Z]{2,}$/.test(w))
+          .filter(w => !/^(II|III|IV|JR|SR)$/i.test(w));
         
-        if (allAlpha && noNonNameWords && noNumbers && eachWordLen) {
-          const firstName = words[0].charAt(0).toUpperCase() + words[0].slice(1).toLowerCase();
-          const lastName = words.slice(1).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+        while (nameWords.length > 0 && isNonNameWord(nameWords[nameWords.length - 1])) {
+          nameWords.pop();
+        }
+        while (nameWords.length > 0 && isNonNameWord(nameWords[0])) {
+          nameWords.shift();
+        }
+        
+        if (nameWords.length >= 2 && nameWords.length <= 3) {
+          const noNonNameWords = nameWords.every(w => !isNonNameWord(w));
+          const noNumbers = nameWords.every(w => !/\d/.test(w));
+          const eachWordLen = nameWords.every(w => w.length >= 2);
           
-          const isFollowedByTeamPosition = (i + 1 < rawLines.length) && 
-            /PHILLIES|YANKEES|DODGERS|METS|CUBS|OUTFIELDER|INFIELDER|PITCHER|CATCHER|SHORTSTOP|BASEMAN/i.test(rawLines[i + 1]);
-          
-          const priority = isFollowedByTeamPosition ? 0 : (i < 5 ? 1 : 2);
-          
-          console.log(`Line-based player name candidate: "${firstName} ${lastName}" (priority: ${priority}, line: ${i})`);
-          potentialNames.push({ firstName, lastName, source: 'line', priority });
+          if (noNonNameWords && noNumbers && eachWordLen) {
+            const firstName = nameWords[0].charAt(0).toUpperCase() + nameWords[0].slice(1).toLowerCase();
+            const lastName = nameWords.slice(1).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+            
+            const isFollowedByTeamPosition = (i + 1 < rawLines.length) && 
+              /PHILLIES|YANKEES|DODGERS|METS|CUBS|OUTFIELDER|INFIELDER|PITCHER|CATCHER|SHORTSTOP|BASEMAN/i.test(rawLines[i + 1]);
+            
+            const priority = isFollowedByTeamPosition ? 0 : (i < 5 ? 1 : 2);
+            
+            console.log(`Line-based player name candidate: "${firstName} ${lastName}" (priority: ${priority}, line: ${i})`);
+            potentialNames.push({ firstName, lastName, source: 'line', priority });
+          }
         }
       }
       
@@ -948,7 +970,7 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>,
       { pattern: /COLLECTOR'?S?[\s-]*CHOICE/i, name: "Collector's Choice", brandOverride: "Upper Deck" },
       { pattern: /SERIES ONE|SERIES 1/i, name: "Series One" },
       { pattern: /SERIES TWO|SERIES 2/i, name: "Series Two" },
-      { pattern: /DONRUSS/i, name: "Donruss", brandOverride: "Panini" }
+      { pattern: /DONRUSS OPTIC/i, name: "Donruss Optic", brandOverride: "Panini" }
     ];
     
     const legalTextPattern = /(?:REGISTERED\s+)?TRADEMARK|ALL\s+RIGHTS\s+RESERVED|©|\(C\)|OFFICIALLY\s+LICENSED/i;
