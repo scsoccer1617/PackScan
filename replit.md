@@ -157,6 +157,8 @@ This is a streamlined web application focused on sports card price lookup using 
 - February 11, 2026: Fixed multi-word name regex false positive - brand words (TOPPS, BOWMAN, DONRUSS, PRINTED, USA, etc.) checked per-token to prevent "DONRUSS PRINTED IN USA" from being parsed as a player name
 - February 11, 2026: Improved line-based name detection - strips commas from words, filters Roman numeral suffixes, expanded word count limit from 3 to 5 to handle full formal names like "JAMES GORMAN THOMAS, III"
 - February 11, 2026: Front card name now always preferred over back name when both are valid - older cards have birth/legal names on the back (e.g., "Leondaus Lacy" vs "Lee Lacy") which don't match eBay listings; removed back-text cross-reference override logic
+- February 11, 2026: Fixed brand detection for lines with company suffixes (INC, LTD, CORP, LLC) - "1991 SCORE INC" now recognized as legal/company text, not a non-legal brand mention; filter narrowly targets brand+suffix or year+suffix patterns to avoid over-filtering
+- February 11, 2026: Added "40 Years of Baseball" and generic "N Years of Baseball" collection patterns for anniversary/commemorative card sets
 
 ## User Preferences
 

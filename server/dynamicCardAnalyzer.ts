@@ -917,7 +917,7 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>,
     // contextual brand mentions from legal/trademark text
     const brandDetectionText = originalText || text;
     const brandLines = brandDetectionText.toUpperCase().split(/\r?\n/);
-    const legalLinePattern = /(?:REGISTERED\s+)?TRADEMARK|ALL\s+RIGHTS\s+RESERVED|©|\(C\)|OFFICIALLY\s+LICENSED|THE\s+TOPPS\s+COMPANY|WWW\.\w+\.COM|CODE#/i;
+    const legalLinePattern = /(?:REGISTERED\s+)?TRADEMARK|ALL\s+RIGHTS\s+RESERVED|©|\(C\)|OFFICIALLY\s+LICENSED|THE\s+TOPPS\s+COMPANY|WWW\.\w+\.COM|CODE#|\b(?:TOPPS|BOWMAN|FLEER|DONRUSS|SCORE|LEAF|UPPER DECK|PANINI|PLAYOFF|PACIFIC|SKYBOX|PINNACLE)\b.*?\b(?:INC|LTD|CORP|LLC)\b|\b\d{4}\s+\w+.*?\b(?:INC|LTD|CORP|LLC)\b/i;
     
     // First pass: look for brand mentions in non-legal lines (high confidence)
     let brandFromLegal: string | null = null;
@@ -967,36 +967,44 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>,
       { pattern: /GOLD LABEL/i, name: "Gold Label" },
       { pattern: /STADIUM CLUB/i, name: "Stadium Club" },
       { pattern: /35TH ANNIVERSARY/i, name: "35th Anniversary" },
+      { pattern: /40\s*YEARS?\s+OF\s+BASEBALL/i, name: "40 Years of Baseball" },
+      { pattern: /\d+\s*YEARS?\s+OF\s+BASEBALL/i, name: "Years of Baseball" },
       { pattern: /COLLECTOR'?S?[\s-]*CHOICE/i, name: "Collector's Choice", brandOverride: "Upper Deck" },
       { pattern: /SERIES ONE|SERIES 1/i, name: "Series One" },
       { pattern: /SERIES TWO|SERIES 2/i, name: "Series Two" },
       { pattern: /DONRUSS OPTIC/i, name: "Donruss Optic", brandOverride: "Panini" }
     ];
     
-    const legalTextPattern = /(?:REGISTERED\s+)?TRADEMARK|ALL\s+RIGHTS\s+RESERVED|©|\(C\)|OFFICIALLY\s+LICENSED/i;
+    const legalTextPattern = /(?:REGISTERED\s+)?TRADEMARK|ALL\s+RIGHTS\s+RESERVED|©|\(C\)|OFFICIALLY\s+LICENSED|\b(?:TOPPS|BOWMAN|FLEER|DONRUSS|SCORE|LEAF|UPPER DECK|PANINI|PLAYOFF|PACIFIC|SKYBOX|PINNACLE)\b.*?\b(?:INC|LTD|CORP|LLC)\b|\b\d{4}\s+\w+.*?\b(?:INC|LTD|CORP|LLC)\b/i;
     const rawLines = (originalText || text).toUpperCase().split(/\r?\n/);
     const filteredLines = rawLines.filter(line => !legalTextPattern.test(line));
     const nonLegalText = filteredLines.length > 0 ? filteredLines.join(' ') : text;
     
     const fullTextUpper = (originalText || text).toUpperCase().replace(/\r?\n/g, ' ');
     
+    const applyCollectionMatch = (collectionData: typeof collectionPatterns[0], matchText: string, source: string) => {
+      if (collectionData.name) {
+        if (collectionData.name === 'Years of Baseball') {
+          const yobMatch = matchText.match(/(\d+)\s*YEARS?\s+OF\s+BASEBALL/i);
+          cardDetails.collection = yobMatch ? `${yobMatch[1]} Years of Baseball` : collectionData.name;
+        } else {
+          cardDetails.collection = collectionData.name;
+        }
+        console.log(`Detected collection${source}: ${cardDetails.collection}`);
+      }
+      if (collectionData.variant) {
+        cardDetails.variant = collectionData.variant;
+        console.log(`Detected variant${source}: ${cardDetails.variant}`);
+      }
+      if (collectionData.brandOverride) {
+        cardDetails.brand = collectionData.brandOverride;
+        console.log(`Brand override${source} for ${cardDetails.collection}: ${cardDetails.brand}`);
+      }
+    };
+
     for (const collectionData of collectionPatterns) {
       if (nonLegalText.match(collectionData.pattern)) {
-        if (collectionData.name) {
-          cardDetails.collection = collectionData.name;
-          console.log(`Detected collection: ${cardDetails.collection}`);
-        }
-        
-        if (collectionData.variant) {
-          cardDetails.variant = collectionData.variant;
-          console.log(`Detected variant: ${cardDetails.variant}`);
-        }
-        
-        if (collectionData.brandOverride) {
-          cardDetails.brand = collectionData.brandOverride;
-          console.log(`Brand override applied for collection ${cardDetails.collection}: ${cardDetails.brand}`);
-        }
-        
+        applyCollectionMatch(collectionData, nonLegalText, '');
         break;
       }
     }
@@ -1004,21 +1012,7 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>,
     if (!cardDetails.collection) {
       for (const collectionData of collectionPatterns) {
         if (fullTextUpper.match(collectionData.pattern)) {
-          if (collectionData.name) {
-            cardDetails.collection = collectionData.name;
-            console.log(`Detected collection from legal/full text fallback: ${cardDetails.collection}`);
-          }
-          
-          if (collectionData.variant) {
-            cardDetails.variant = collectionData.variant;
-            console.log(`Detected variant from legal/full text fallback: ${cardDetails.variant}`);
-          }
-          
-          if (collectionData.brandOverride) {
-            cardDetails.brand = collectionData.brandOverride;
-            console.log(`Brand override from legal/full text fallback: ${cardDetails.brand}`);
-          }
-          
+          applyCollectionMatch(collectionData, fullTextUpper, ' from legal/full text fallback');
           break;
         }
       }
