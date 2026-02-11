@@ -213,10 +213,25 @@ function checkIfIsolated(targetAnnotation: any, allAnnotations: any[]): boolean 
  * This catches dates like "8/20" that appear in player bio text (e.g., "stolen base, 8/20.")
  */
 function isSerialNumberInBioContext(serialNumber: string, fullText: string): boolean {
+  const parts = serialNumber.split('/');
+  if (parts.length === 2) {
+    const denominator = parseInt(parts[1], 10);
+    if (denominator >= 50) {
+      console.log(`Serial number "${serialNumber}" has denominator ${denominator} >= 50, not a date - accepting`);
+      return false;
+    }
+  }
+  
   const lines = fullText.split('\n');
   
   for (const line of lines) {
     if (!line.includes(serialNumber)) continue;
+    
+    const trimmed = line.trim();
+    if (trimmed === serialNumber) {
+      console.log(`Serial number "${serialNumber}" found on its own line - accepting`);
+      return false;
+    }
     
     const upper = line.toUpperCase();
     
