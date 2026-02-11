@@ -3,7 +3,6 @@ import { CardFormValues } from '@shared/schema';
 import { analyzeSportsCardImage } from './dynamicCardAnalyzer';
 import { analyzeScoreCard } from './scoreCardAnalyzer';
 import { detectFoilVariant } from './foilVariantDetector';
-import { lookupByCardNumber, loadChecklist } from './checklistLookup';
 
 // Define a standalone MulterFile interface that doesn't conflict with built-in types
 interface MulterFile {
@@ -155,54 +154,6 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
         success: false,
         error: 'Error combining card analysis results'
       });
-    }
-    
-    // === CHECKLIST DATABASE LOOKUP ===
-    // After OCR extracts card number and year, look up the checklist database
-    // for authoritative player name, brand, collection, and variant data.
-    // OCR continues to handle: sport, serial number, year, foil detection
-    if (combinedResult.cardNumber) {
-      try {
-        loadChecklist();
-        const checklistMatch = lookupByCardNumber(
-          combinedResult.cardNumber,
-          combinedResult.year ? Number(combinedResult.year) : undefined
-        );
-        
-        if (checklistMatch.found) {
-          console.log('=== CHECKLIST DATABASE MATCH ===');
-          console.log(`Card #${combinedResult.cardNumber} found in checklist database`);
-          console.log(`OCR detected: ${combinedResult.playerFirstName} ${combinedResult.playerLastName} | Checklist: ${checklistMatch.playerFirstName} ${checklistMatch.playerLastName}`);
-          console.log(`OCR brand: ${combinedResult.brand} | Checklist: ${checklistMatch.brand}`);
-          console.log(`OCR collection: ${combinedResult.collection} | Checklist: ${checklistMatch.collection}`);
-          console.log(`OCR variant: ${combinedResult.variant} | Checklist: ${checklistMatch.variant}`);
-          
-          if (checklistMatch.playerFirstName) {
-            combinedResult.playerFirstName = checklistMatch.playerFirstName;
-          }
-          if (checklistMatch.playerLastName) {
-            combinedResult.playerLastName = checklistMatch.playerLastName;
-          }
-          if (checklistMatch.brand) {
-            combinedResult.brand = checklistMatch.brand;
-          }
-          if (checklistMatch.collection) {
-            combinedResult.collection = checklistMatch.collection;
-          }
-          if (checklistMatch.variant) {
-            combinedResult.variant = checklistMatch.variant;
-          }
-          
-          (combinedResult as any).checklistSource = true;
-          (combinedResult as any).checklistTeam = checklistMatch.team;
-          
-          console.log('Card data updated from checklist database (sport, serial#, year, foil still from OCR)');
-        } else {
-          console.log(`Card #${combinedResult.cardNumber} not found in checklist database - using OCR data only`);
-        }
-      } catch (error: any) {
-        console.error('Error during checklist lookup:', error.message);
-      }
     }
     
     // Make sure we have all required fields with defaults if needed
