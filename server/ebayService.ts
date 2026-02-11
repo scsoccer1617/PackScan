@@ -782,7 +782,9 @@ export async function searchCardValues(
         const titleLower = title.toLowerCase();
         const numMatch = titleLower.match(new RegExp(`(\\d+)\\s*${collectionLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
         if (numMatch && numMatch[1]) {
-          const specific = `${numMatch[1]} ${collection}`;
+          const discoveredNum = numMatch[1];
+          if (year && discoveredNum === String(year)) continue;
+          const specific = `${discoveredNum} ${collection}`;
           moreSpecificCounts.set(specific, (moreSpecificCounts.get(specific) || 0) + 1);
         }
       }
