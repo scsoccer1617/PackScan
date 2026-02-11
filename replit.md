@@ -1,165 +1,44 @@
 # Sports Card Inventory Management System
 
 ## Overview
+This project provides a web application for sports card price lookup, leveraging eBay data and automated card detection. Its core purpose is to assist users in identifying sports cards and determining their current market value through real-time price analysis. The system uses Google Cloud Vision API for optical character recognition (OCR) to automatically identify card details from uploaded images.
 
-This is a streamlined web application focused on sports card price lookup using eBay data. The system features automated card detection using Google Cloud Vision API with OCR capabilities and real-time eBay price analysis to help users find current market values for their cards. Built with React frontend and Express.js backend.
+## User Preferences
+Preferred communication style: Simple, everyday language.
 
 ## System Architecture
 
-### Frontend Architecture
+### Frontend
 - **Framework**: React with TypeScript
-- **UI Library**: Radix UI components with shadcn/ui styling system
-- **Styling**: Tailwind CSS with custom design tokens
-- **State Management**: TanStack React Query for server state management
-- **Build Tool**: Vite for development and bundling
+- **UI/UX**: Radix UI components, shadcn/ui styling, Tailwind CSS
+- **State Management**: TanStack React Query
+- **Build Tool**: Vite
 - **Form Handling**: React Hook Form with Zod validation
 
-### Backend Architecture
-- **Runtime**: Node.js with Express.js framework
-- **Language**: TypeScript with ESM modules
-- **Database ORM**: Drizzle ORM with PostgreSQL
-- **File Upload**: Multer for handling multipart form data
-- **Image Processing**: Google Cloud Vision API for OCR text extraction
-- **External APIs**: eBay API integration for card value estimation
+### Backend
+- **Runtime**: Node.js with Express.js (TypeScript, ESM)
+- **Database ORM**: Drizzle ORM with PostgreSQL (Neon serverless)
+- **File Upload**: Multer
+- **Image Processing**: Google Cloud Vision API for OCR
+- **External APIs**: eBay API for price analysis
 
-### Database Schema
-- **Primary Tables**: 
-  - `cards` - Main card information with relationships
-  - `sports` - Sport categories (Baseball, Basketball, etc.)
-  - `brands` - Card manufacturer brands (Topps, Upper Deck, etc.)
-- **Storage**: PostgreSQL via Neon serverless
-- **Migrations**: Drizzle Kit for schema management
-- **Relationships**: Foreign key relationships between cards, sports, and brands
+### Database
+- **Schema**: `cards`, `sports`, `brands` tables with foreign key relationships.
+- **Technology**: PostgreSQL hosted on Neon.
+- **Migrations**: Drizzle Kit.
 
-## Key Components
-
-### Card Detection System
-- **OCR Engine**: Google Cloud Vision API for text extraction from card images
-- **Specialized Handlers**: Custom processors for specific card types (Score cards, Flagship Collection, Stars of MLB, etc.)
-- **Pattern Matching**: Advanced text analysis for player names, card numbers, brands, and years
-- **Direct Card Fixes**: Hard-coded handlers for problematic cards with known OCR issues
-
-### Image Management
-- **Upload System**: Supports front and back card images up to 20MB
-- **Storage Strategy**: Local file storage in `/uploads` directory with UUID-based naming
-- **Fallback System**: Multiple path resolution for serving card images
-- **MIME Type Handling**: Proper content-type headers for image serving
-
-### Card Information Processing
-- **Automatic Detection**: Player names, card numbers, brands, collections, years
-- **Special Cases**: Rookie card detection, autograph identification, serial number recognition
-- **Value Estimation**: Integration with eBay API for market value approximation
-- **Data Validation**: Zod schemas for type safety and input validation
-
-### Price Lookup Integration
-- **eBay API**: Real-time lookup of recent sold listings for card valuation
-- **Market Analysis**: Display of 5 most recent sold prices for accurate market assessment
-- **Search Optimization**: Smart query building for better eBay search results
-
-## Data Flow
-
-1. **Card Upload**: User uploads card image(s) via web interface
-2. **OCR Processing**: Google Vision API extracts text from images
-3. **Card Analysis**: Specialized handlers process OCR text to identify card details
-4. **Data Validation**: Extracted information validated against schema
-5. **Database Storage**: Card information persisted to PostgreSQL
-6. **Image Storage**: Images saved to local filesystem with database references
-7. **Optional Sync**: Data optionally synchronized to Google Sheets
+### Key Features
+- **Automated Card Detection**: Utilizes Google Cloud Vision API for OCR and advanced text analysis to identify player names, card numbers, brands, collections, and years, including special cases like rookie cards, autographs, and serial numbers.
+- **Image Management**: Supports uploading front and back card images, storing them locally, and proper MIME type handling.
+- **Price Lookup**: Integrates with the eBay API to fetch and display the 5 most recent sold listings for accurate market value estimation, with optimized search queries.
+- **Dynamic Variant Detection**: Systematically identifies card variants (e.g., foil types, parallels, textures) through visual analysis and eBay listing title analysis.
+- **Generic Detection Logic**: Card processing relies on dynamic, generic detection methods (line-based, regex-based, positional scoring) rather than hard-coded rules for specific cards.
+- **Editable Data**: Users can manually edit detected card fields and re-run eBay searches.
 
 ## External Dependencies
 
-### Google Cloud Services
-- **Vision API**: Text detection and OCR processing
-- **Authentication**: Service account credentials for API access
-- **Sheets API**: Optional integration for data synchronization
-
-### eBay API
-- **Finding Service**: Card value estimation through completed listings search
-- **Rate Limiting**: Respectful API usage with proper error handling
-
-### Neon Database
-- **PostgreSQL**: Serverless PostgreSQL hosting
-- **Connection Pooling**: Efficient database connection management
-- **WebSocket Support**: Required for Neon serverless architecture
-
-## Deployment Strategy
-
-### Development
-- **Hot Reload**: Vite development server with HMR
-- **Type Checking**: TypeScript compilation with strict mode
-- **Database**: Local PostgreSQL or Neon development instance
-
-### Production
-- **Build Process**: Vite frontend build + esbuild backend compilation
-- **Static Assets**: Frontend served from `/dist/public`
-- **Environment Variables**: Secure credential management
-- **Process Management**: Node.js production server with proper error handling
-
-### Configuration Requirements
-- `DATABASE_URL`: PostgreSQL connection string
-- `GOOGLE_CLIENT_EMAIL`: Service account email for Vision API
-- `GOOGLE_PRIVATE_KEY`: Service account private key
-- `GOOGLE_SHEET_ID`: Optional Google Sheets integration
-- `EBAY_APP_ID`: Optional eBay API integration
-
-## Changelog
-- June 27, 2025: Initial setup
-- June 27, 2025: Removed Tesseract OCR fallback, focused exclusively on Google Vision API
-- June 27, 2025: Added combined OCR + eBay price lookup endpoint for streamlined user experience
-- June 27, 2025: Updated frontend to show both card detection and price analysis in single workflow
-- June 28, 2025: Enhanced Series Two card detection - improved card number detection before/after "SERIES TWO" text
-- June 28, 2025: Enhanced eBay search strategy for Series Two cards with complete player name and collection details
-- June 28, 2025: Implemented enhanced serial number detection system for numbered cards (e.g., "010/399", "16/99")
-- June 28, 2025: Added dual-side OCR integration for serial number detection on both front and back images
-- June 28, 2025: Implemented comprehensive foil variant detection system for chrome, refractor, autograph, and special finish cards
-- June 28, 2025: Added foil-specific eBay search keywords to improve pricing accuracy for premium card variants
-- June 30, 2025: Fixed critical foil detection false positive issue - removed foilType from front analyzer priority to prevent "Foil" being set for non-foil cards
-- June 30, 2025: Implemented comprehensive visual foil detection system using Google Vision API for metallic surfaces, reflectivity, and prismatic effects analysis
-- June 30, 2025: Fixed foil detection false positives for white border reflections with strict rejection criteria and sport-specific text detection
-- June 30, 2025: Enhanced fallback logic to properly handle visual detection errors and use conservative text-based detection as backup
-- February 9, 2026: Fixed Google Vision API decoder error in visual foil detector by aligning private key formatting with working OCR client
-- February 9, 2026: Removed all hardcoded 'Aqua Foil' variant assumptions - variant is now purely dynamic based on visual color analysis and text detection
-- February 9, 2026: Added dynamic color classification for visual foil detection (Blue, Green, Red, Gold, Purple, Orange, Pink, Silver, Aqua)
-- February 9, 2026: Variant now passed to eBay search query for more accurate pricing when card is not base/standard
-- February 9, 2026: Fixed isNumbered not being set when serialNumber detected in combined result
-- February 9, 2026: Included alphanumeric card numbers (e.g., SMLB-2) in eBay search queries
-- February 9, 2026: Normalized collection names for eBay search (Series Two → Series 2) for better listing matches
-- February 9, 2026: Restructured eBay search query format to match eBay listing conventions (year-first, #cardNumber prefix)
-- February 9, 2026: Implemented eBay-assisted variant discovery - dynamically discovers specific variant names (e.g., "Aqua Crackle Foil") by parsing listing titles from broader searches
-- February 9, 2026: Improved visual foil detection for border foils - detects multiple similarly-tinted color regions indicating foil gradient patterns
-- February 9, 2026: Serial number suffix (/399) kept in eBay searches for accurate rarity-based pricing
-- February 9, 2026: Added visual texture pattern detection - distinguishes Crackle Foil (speckled prismatic spots) from standard smooth foil using color distribution analysis and Vision API labels
-- February 9, 2026: Texture detection uses confidence scoring with minimum threshold (0.3) to avoid false crackle classifications; excludes Silver/Gold/Rainbow/Chrome from texture refinement
-- February 10, 2026: Reverted regional image analysis - returned to full-image analysis for foil color detection (border-only crops lost too much signal)
-- February 10, 2026: Added blind eBay variant discovery - scans listing titles for variant keywords (Foil, Refractor, etc.) even when NO foil was visually detected, especially for numbered cards
-- February 10, 2026: eBay-discovered variants now update card data (foilType, variant, isFoil) in the dual-image analysis response
-- February 10, 2026: MAJOR REFACTOR - Removed ALL hardcoded card-specific logic (Anthony Volpe, Joey Bart, Jordan Wicks, George Frazier, Bobby Thigpen, Chris James, Andy Van Slyke, Ronald Acuna Jr handlers, directCardFixes, hardcoded NBA player lists)
-- February 10, 2026: All card processing now uses purely generic dynamic detection (line-based, regex-based, positional, scoring)
-- February 10, 2026: Added card-number-prefix player name detection (e.g., "89B2-32 ALEX BREGMAN" extracts "Alex Bregman")
-- February 10, 2026: Expanded bogus name filtering - catches stat abbreviations (SLG, BB, OBP), partial words (ANNIV, ERSARY), team names, city names
-- February 10, 2026: Added collection fragment reassembly for "35th Anniversary" from fragmented OCR text (ANNIV + ERSARY fragments)
-- February 10, 2026: Fixed 35th Anniversary card number regex to match "89B2-32" format (not just "89B-9")
-- February 10, 2026: Tightened visual foil detection thresholds - requires 3+ similar tints, or 2+ tints with 20%+ coverage, or 25%+ total tint coverage (was 6%)
-- February 10, 2026: Fixed Red Foil false positives - color-based foil detection now requires Vision API label support (metallic/chrome/reflective keywords) OR extremely strong color evidence (5+ tints, 40%+ coverage)
-- February 10, 2026: Chrome variant fix - "Chrome" is set as variant when another collection (e.g., Stars of MLB) already exists, skipping when collection already contains "Chrome" (e.g., Bowman Chrome)
-- February 10, 2026: Added OCR noise fragments (LOP, PPS, TANKY, LOPPS) to bogus name list; added generic short-word-pair rejection (both words ≤3 chars)
-- February 10, 2026: Fixed collection combine logic - when front collection matches back variant (e.g., front="Chrome", back collection="Stars of MLB" + variant="Chrome"), back's more specific collection is used
-- February 10, 2026: Added manual edit & re-lookup feature - users can edit any detected card field and re-run eBay price search with corrected data
-- February 10, 2026: Fixed foil detection regression for numbered cards - numbered cards (/399 etc.) now use relaxed visual thresholds (2+ similar tints with 8%+ coverage) since being numbered is itself evidence of a variant
-- February 10, 2026: Renamed "Foil Type" label to "Parallel" throughout UI to match collector terminology
-- February 10, 2026: Fixed Bowman Chrome false positive - collection detection now filters out legal/trademark text lines to prevent "BOWMAN CHROME ARE REGISTERED TRADEMARKS" from falsely setting collection
-- February 10, 2026: Expanded rookie card detection to recognize "1st Bowman" and "First Bowman" indicators (not just "RC")
-- February 10, 2026: Improved card number detection - hyphenated alphanumeric patterns (BD-7, HRC-42) now detected before standalone numbers in brand-adjacent lines
-- February 10, 2026: Fixed brand detection - brand mentions in legal/trademark/URL/code lines are deprioritized; non-legal mentions (e.g., "BOWMAN BRIEFING") take precedence over legal text (e.g., "TOPPS AND BOWMAN ARE REGISTERED TRADEMARKS")
-- February 10, 2026: Implemented automatic eBay OAuth token management - tokens auto-generated via Client Credentials flow using EBAY_APP_ID and EBAY_CERT_ID, cached in memory with 5-min-early refresh, auto-retry on 401 errors; EBAY_BROWSE_TOKEN no longer needs manual refresh
-- February 11, 2026: Enhanced player name detection for older cards - strips position abbreviations (OF, SS, DH, SP, RP, CF, LF, RF, 1B, 2B, 3B, QB, WR, RB), garbled brand prefixes (Toppe), handles formal names with suffixes (II, III, IV, JR, SR) and commas
-- February 11, 2026: Fixed Donruss brand detection - "DONRUSS OPTIC" detected as collection (with Panini brand), standalone "DONRUSS" correctly detected as brand only
-- February 11, 2026: Fixed multi-word name regex false positive - brand words (TOPPS, BOWMAN, DONRUSS, PRINTED, USA, etc.) checked per-token to prevent "DONRUSS PRINTED IN USA" from being parsed as a player name
-- February 11, 2026: Improved line-based name detection - strips commas from words, filters Roman numeral suffixes, expanded word count limit from 3 to 5 to handle full formal names like "JAMES GORMAN THOMAS, III"
-- February 11, 2026: Front card name now always preferred over back name when both are valid - older cards have birth/legal names on the back (e.g., "Leondaus Lacy" vs "Lee Lacy") which don't match eBay listings; removed back-text cross-reference override logic
-- February 11, 2026: Fixed brand detection for lines with company suffixes (INC, LTD, CORP, LLC) - "1991 SCORE INC" now recognized as legal/company text, not a non-legal brand mention; filter narrowly targets brand+suffix or year+suffix patterns to avoid over-filtering
-- February 11, 2026: Added "40 Years of Baseball" and generic "N Years of Baseball" collection patterns for anniversary/commemorative card sets
-
-## User Preferences
-
-Preferred communication style: Simple, everyday language.
+- **Google Cloud Services**:
+    - **Vision API**: For OCR and visual analysis.
+    - **Sheets API**: Optional for data synchronization.
+- **eBay API**: For real-time price lookup and market analysis, using the Finding Service and automated OAuth token management.
+- **Neon Database**: Serverless PostgreSQL for data persistence.

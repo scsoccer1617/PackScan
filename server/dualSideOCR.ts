@@ -391,9 +391,6 @@ async function combineCardResults(
     }
   }
   
-  if (combined.brand === 'Score' && combined.year && !combined.collection) {
-    combined.collection = `${combined.year} Score`;
-  }
   
   // Handle other fields with no specific priority
   const otherFields: (keyof CardFormValues)[] = [

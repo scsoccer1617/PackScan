@@ -924,8 +924,10 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>,
     for (const brand of brands) {
       let foundInNonLegal = false;
       let foundInLegal = false;
+      const escapedSearch = brand.search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const brandRegex = new RegExp(`\\b${escapedSearch}\\b`, 'i');
       for (const line of brandLines) {
-        if (line.includes(brand.search)) {
+        if (brandRegex.test(line)) {
           if (legalLinePattern.test(line)) {
             foundInLegal = true;
           } else {
@@ -969,6 +971,7 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>,
       { pattern: /35TH ANNIVERSARY/i, name: "35th Anniversary" },
       { pattern: /40\s*YEARS?\s+OF\s+BASEBALL/i, name: "40 Years of Baseball" },
       { pattern: /\d+\s*YEARS?\s+OF\s+BASEBALL/i, name: "Years of Baseball" },
+      { pattern: /YEARS?\s+OF\s+BASEBALL/i, name: "Years of Baseball" },
       { pattern: /COLLECTOR'?S?[\s-]*CHOICE/i, name: "Collector's Choice", brandOverride: "Upper Deck" },
       { pattern: /SERIES ONE|SERIES 1/i, name: "Series One" },
       { pattern: /SERIES TWO|SERIES 2/i, name: "Series Two" },
