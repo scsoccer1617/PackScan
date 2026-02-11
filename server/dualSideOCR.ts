@@ -332,17 +332,7 @@ async function combineCardResults(
       combined.playerFirstName.toUpperCase() !== backResult.playerFirstName.toUpperCase()) {
     const frontFirst = combined.playerFirstName!;
     const backFirst = backResult.playerFirstName!;
-    const backTextLower = backOCRText.toLowerCase();
-    const frontMentions = (backTextLower.match(new RegExp(`\\b${frontFirst.toLowerCase()}\\b`, 'g')) || []).length;
-    const backMentions = (backTextLower.match(new RegExp(`\\b${backFirst.toLowerCase()}\\b`, 'g')) || []).length;
-    console.log(`Player first name mismatch: front="${frontFirst}" (${frontMentions} mentions in back text) vs back="${backFirst}" (${backMentions} mentions in back text)`);
-    if (backMentions > frontMentions) {
-      console.log(`Correcting first name from "${frontFirst}" to "${backFirst}" based on back text cross-reference`);
-      combined.playerFirstName = backFirst;
-    } else if (frontMentions === 0 && backMentions === 0) {
-      console.log(`Neither name found in back text, preferring back image name "${backFirst}" (cleaner font)`);
-      combined.playerFirstName = backFirst;
-    }
+    console.log(`Player first name mismatch: front="${frontFirst}" vs back="${backFirst}" — keeping front name (preferred for eBay search, back often has birth/legal name on older cards)`);
   }
   
   if (frontNameBogus && backNameBogus) {

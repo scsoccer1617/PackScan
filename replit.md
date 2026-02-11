@@ -156,6 +156,7 @@ This is a streamlined web application focused on sports card price lookup using 
 - February 11, 2026: Fixed Donruss brand detection - "DONRUSS OPTIC" detected as collection (with Panini brand), standalone "DONRUSS" correctly detected as brand only
 - February 11, 2026: Fixed multi-word name regex false positive - brand words (TOPPS, BOWMAN, DONRUSS, PRINTED, USA, etc.) checked per-token to prevent "DONRUSS PRINTED IN USA" from being parsed as a player name
 - February 11, 2026: Improved line-based name detection - strips commas from words, filters Roman numeral suffixes, expanded word count limit from 3 to 5 to handle full formal names like "JAMES GORMAN THOMAS, III"
+- February 11, 2026: Front card name now always preferred over back name when both are valid - older cards have birth/legal names on the back (e.g., "Leondaus Lacy" vs "Lee Lacy") which don't match eBay listings; removed back-text cross-reference override logic
 
 ## User Preferences
 
