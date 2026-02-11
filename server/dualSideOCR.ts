@@ -263,6 +263,28 @@ async function combineCardResults(
     }
   });
   
+  // When collection came only from the back (front had no collection), verify it's not just a trademark mention.
+  // If the front OCR text doesn't contain the collection name, it's likely from legal text on the back.
+  if (!hasValue(frontResult.collection) && hasValue(backResult.collection) && hasValue(combined.collection)) {
+    const collectionName = String(combined.collection);
+    const frontTextUpper = frontOCRText.toUpperCase();
+    const collectionWords = collectionName.toUpperCase().split(/\s+/);
+    const frontHasCollection = collectionWords.every(w => frontTextUpper.includes(w));
+    if (!frontHasCollection) {
+      const backTextUpper = backOCRText.toUpperCase();
+      const legalContextPattern = /REGISTERED\s+TRADEMARK|ALL\s+RIGHTS\s+RESERVED|©|\(C\)|OFFICIALLY\s+LICENSED/i;
+      const backLines = backOCRText.split(/\r?\n/);
+      const collectionInLegalLine = backLines.some(line => {
+        const lineUpper = line.toUpperCase();
+        return collectionWords.every(w => lineUpper.includes(w)) && legalContextPattern.test(line);
+      });
+      if (collectionInLegalLine) {
+        console.log(`Clearing collection "${collectionName}" - only found in legal/trademark text on back, not visible on front card`);
+        combined.collection = '';
+      }
+    }
+  }
+  
   // Special case for collection/variant: when front has a generic collection (e.g., "Chrome")
   // but back has a more specific collection + variant matching front's collection, prefer back's data
   if (hasValue(combined.collection) && hasValue(backResult.collection) && hasValue(backResult.variant)) {
@@ -305,11 +327,13 @@ async function combineCardResults(
     'LOP', 'PPS', 'TANKY', 'LOPPS',
   ]);
   
+  const stripTrademarkSuffix = (w: string): string => w.replace(/(?:TM|™|®)$/i, '');
+  
   const isBogusFn = (firstName?: string, lastName?: string): boolean => {
     if (!firstName || !lastName) return true;
     const fullName = `${firstName} ${lastName}`.toUpperCase();
     const words = fullName.split(/\s+/);
-    if (words.some(w => bogusNameWords.has(w)) || words.length > 4) return true;
+    if (words.some(w => bogusNameWords.has(stripTrademarkSuffix(w))) || words.length > 4) return true;
     if (words.some(w => w.length <= 1)) return true;
     if (words.some(w => /^\d/.test(w))) return true;
     if (words.length === 2 && words.every(w => w.length <= 3)) return true;

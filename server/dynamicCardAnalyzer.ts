@@ -296,7 +296,8 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
     ]);
     
     const isNonNameWord = (word: string): boolean => {
-      return nonNameWords.has(word.toUpperCase()) || word.length <= 1 || /^\d/.test(word);
+      const cleaned = word.toUpperCase().replace(/(?:TM|™|®)$/i, '');
+      return nonNameWords.has(cleaned) || word.length <= 1 || /^\d/.test(word);
     };
     
     const potentialNames: Array<{firstName: string, lastName: string, source: string, priority: number}> = [];
