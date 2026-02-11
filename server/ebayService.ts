@@ -145,6 +145,7 @@ interface EbayResponse {
   errorMessage?: string;
   dataType?: 'sold' | 'current';
   discoveredVariant?: string;
+  discoveredCollection?: string;
 }
 
 /**
@@ -772,12 +773,38 @@ export async function searchCardValues(
     const displayedTotal = topResults.reduce((sum, item) => sum + item.price, 0);
     const averageValue = topResults.length > 0 ? Math.floor((displayedTotal / topResults.length) * 100) / 100 : 0;
 
+    let discoveredCollection: string | undefined;
+    if (collection && topResults.length >= 2) {
+      const titles = topResults.map(r => r.title);
+      const collectionLower = collection.toLowerCase();
+      const moreSpecificCounts = new Map<string, number>();
+      for (const title of titles) {
+        const titleLower = title.toLowerCase();
+        const numMatch = titleLower.match(new RegExp(`(\\d+)\\s*${collectionLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+        if (numMatch && numMatch[1]) {
+          const specific = `${numMatch[1]} ${collection}`;
+          moreSpecificCounts.set(specific, (moreSpecificCounts.get(specific) || 0) + 1);
+        }
+      }
+      const entries = Array.from(moreSpecificCounts.entries());
+      for (let i = 0; i < entries.length; i++) {
+        const specificName = entries[i][0];
+        const count = entries[i][1];
+        if (count >= 2 && specificName.toLowerCase() !== collectionLower) {
+          discoveredCollection = specificName;
+          console.log(`Discovered more specific collection from eBay titles: "${discoveredCollection}" (was "${collection}")`);
+          break;
+        }
+      }
+    }
+
     const result = {
       averageValue,
       results: topResults,
       searchUrl: getEbaySearchUrl(playerName, cardNumber, brand, year, collection, '', isNumbered, variantKeyword || foilType, serialNumber),
       dataType: dataType as 'sold' | 'current',
-      discoveredVariant: variantKeyword !== (variant || foilType || '') ? variantKeyword : undefined
+      discoveredVariant: variantKeyword !== (variant || foilType || '') ? variantKeyword : undefined,
+      discoveredCollection
     };
 
     // Cache the successful result

@@ -1090,6 +1090,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
             updatedCardData.variant = ebayResults.discoveredVariant;
             updatedCardData.isFoil = true;
           }
+          if (ebayResults.discoveredCollection) {
+            console.log(`eBay discovered more specific collection "${ebayResults.discoveredCollection}" - updating card data`);
+            updatedCardData.collection = ebayResults.discoveredCollection;
+          }
           
           return res.json({
             success: true,
