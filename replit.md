@@ -152,6 +152,10 @@ This is a streamlined web application focused on sports card price lookup using 
 - February 10, 2026: Improved card number detection - hyphenated alphanumeric patterns (BD-7, HRC-42) now detected before standalone numbers in brand-adjacent lines
 - February 10, 2026: Fixed brand detection - brand mentions in legal/trademark/URL/code lines are deprioritized; non-legal mentions (e.g., "BOWMAN BRIEFING") take precedence over legal text (e.g., "TOPPS AND BOWMAN ARE REGISTERED TRADEMARKS")
 - February 10, 2026: Implemented automatic eBay OAuth token management - tokens auto-generated via Client Credentials flow using EBAY_APP_ID and EBAY_CERT_ID, cached in memory with 5-min-early refresh, auto-retry on 401 errors; EBAY_BROWSE_TOKEN no longer needs manual refresh
+- February 11, 2026: Enhanced player name detection for older cards - strips position abbreviations (OF, SS, DH, SP, RP, CF, LF, RF, 1B, 2B, 3B, QB, WR, RB), garbled brand prefixes (Toppe), handles formal names with suffixes (II, III, IV, JR, SR) and commas
+- February 11, 2026: Fixed Donruss brand detection - "DONRUSS OPTIC" detected as collection (with Panini brand), standalone "DONRUSS" correctly detected as brand only
+- February 11, 2026: Fixed multi-word name regex false positive - brand words (TOPPS, BOWMAN, DONRUSS, PRINTED, USA, etc.) checked per-token to prevent "DONRUSS PRINTED IN USA" from being parsed as a player name
+- February 11, 2026: Improved line-based name detection - strips commas from words, filters Roman numeral suffixes, expanded word count limit from 3 to 5 to handle full formal names like "JAMES GORMAN THOMAS, III"
 
 ## User Preferences
 
