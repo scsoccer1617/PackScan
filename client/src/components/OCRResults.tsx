@@ -458,85 +458,78 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
           </div>
         )}
       </CardContent>
-      <CardFooter className="flex justify-between">
-        <Button 
-          variant="outline" 
-          type="button"
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            onCancel();
-          }}
-        >
-          Cancel
-        </Button>
-        {editMode ? (
-          <div className="flex gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                setEditMode(false);
-              }}
-            >
-              Back
-            </Button>
-            <Button
-              type="button"
-              onClick={async (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                setData(editedData);
-                setEditMode(false);
-                applyAndUseDirectly();
-              }}
-              className="bg-green-600 hover:bg-green-500 text-white"
-            >
+      <CardFooter className="flex flex-col gap-3">
+        <div className="flex items-center justify-between w-full">
+          <span className="text-sm font-medium text-slate-700">Correct info?</span>
+          {editMode ? (
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setEditMode(false);
+                }}
+              >
+                Back
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                onClick={async (e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  await handleConfirmCard();
+                  setData(editedData);
+                  setEditMode(false);
+                  applyAndUseDirectly();
+                }}
+                className="bg-green-600 hover:bg-green-500 text-white"
+              >
+                <Check className="h-4 w-4 mr-1" />
+                Save & Search eBay
+              </Button>
+            </div>
+          ) : confirmed ? (
+            <span className="inline-flex items-center text-green-600 font-medium text-sm">
               <Check className="h-4 w-4 mr-1" />
-              Save & Re-lookup
-            </Button>
-          </div>
-        ) : confirmed ? (
-          <span className="inline-flex items-center text-green-600 font-medium">
-            <Check className="h-4 w-4 mr-1" />
-            Confirmed & Saved
-          </span>
-        ) : (
-          <div className="flex gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                handleThumbsDown();
-              }}
-              className="border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700"
-            >
-              <ThumbsDown className="h-4 w-4 mr-1" />
-              Edit
-            </Button>
-            <Button
-              type="button"
-              disabled={confirmSaving}
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                handleConfirmCard();
-              }}
-              className="bg-green-600 hover:bg-green-500 text-white"
-            >
-              {confirmSaving ? (
-                <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-              ) : (
-                <ThumbsUp className="h-4 w-4 mr-1" />
-              )}
-              Confirm & Save
-            </Button>
-          </div>
-        )}
+              Confirmed & Saved
+            </span>
+          ) : (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  handleThumbsDown();
+                }}
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-md text-sm font-medium text-red-600 hover:bg-red-50 border border-red-200 transition-colors"
+              >
+                <ThumbsDown className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                disabled={confirmSaving}
+                onClick={async (e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  await handleConfirmCard();
+                  onApply(data);
+                }}
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-md text-sm font-medium text-green-600 hover:bg-green-50 border border-green-200 transition-colors"
+              >
+                {confirmSaving ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <ThumbsUp className="h-4 w-4" />
+                )}
+              </button>
+            </div>
+          )}
+        </div>
       </CardFooter>
     </Card>
   );
