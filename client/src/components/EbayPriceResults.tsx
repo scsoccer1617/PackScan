@@ -3,8 +3,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ExternalLink, TrendingUp, Pencil, RotateCcw } from "lucide-react";
+import { ExternalLink, TrendingUp, Pencil, RotateCcw, ThumbsUp, ThumbsDown, Check } from "lucide-react";
 import { CardFormValues } from "@shared/schema";
+import { apiRequest } from "@/lib/queryClient";
 
 interface EbaySearchResult {
   title: string;
@@ -40,6 +41,39 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
   const [dataType, setDataType] = useState<'sold' | 'current'>('sold');
   const [editMode, setEditMode] = useState(false);
   const [editData, setEditData] = useState<Partial<CardFormValues>>({});
+  const [confirmStatus, setConfirmStatus] = useState<'idle' | 'confirming' | 'confirmed' | 'error'>('idle');
+
+  const handleConfirmCard = async () => {
+    if (!cardData || confirmStatus === 'confirming' || confirmStatus === 'confirmed') return;
+    setConfirmStatus('confirming');
+    try {
+      await apiRequest('/api/confirmed-cards', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sport: cardData.sport,
+          playerFirstName: cardData.playerFirstName,
+          playerLastName: cardData.playerLastName,
+          brand: cardData.brand,
+          collection: cardData.collection || '',
+          cardNumber: cardData.cardNumber,
+          year: cardData.year,
+          variant: cardData.variant || '',
+          serialNumber: cardData.serialNumber || '',
+          isRookieCard: cardData.isRookieCard || false,
+          isAutographed: cardData.isAutographed || false,
+          isNumbered: cardData.isNumbered || false,
+          isFoil: cardData.isFoil || false,
+          foilType: cardData.foilType || null,
+        }),
+      });
+      setConfirmStatus('confirmed');
+    } catch (err) {
+      console.error('Error confirming card:', err);
+      setConfirmStatus('error');
+      setTimeout(() => setConfirmStatus('idle'), 3000);
+    }
+  };
 
   useEffect(() => {
     const fetchEbayData = async () => {
@@ -279,52 +313,85 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
               </div>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-              <div className="space-y-4">
-                <div className="text-base">
-                  <span className="font-semibold text-slate-800">Sport: </span>
-                  <span className="text-slate-700">{cardData.sport || 'Not detected'}</span>
+            <>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div className="space-y-4">
+                  <div className="text-base">
+                    <span className="font-semibold text-slate-800">Sport: </span>
+                    <span className="text-slate-700">{cardData.sport || 'Not detected'}</span>
+                  </div>
+                  <div className="text-base">
+                    <span className="font-semibold text-slate-800">Player: </span>
+                    <span className="text-slate-700">{cardData.playerFirstName || ''} {cardData.playerLastName || 'Not detected'}</span>
+                  </div>
+                  <div className="text-base">
+                    <span className="font-semibold text-slate-800">Brand: </span>
+                    <span className="text-slate-700">{cardData.brand || 'Not detected'}</span>
+                  </div>
+                  <div className="text-base">
+                    <span className="font-semibold text-slate-800">Card #: </span>
+                    <span className="text-slate-700">{cardData.cardNumber || 'Not detected'}</span>
+                  </div>
+                  <div className="text-base">
+                    <span className="font-semibold text-slate-800">Year: </span>
+                    <span className="text-slate-700">{cardData.year || 'Not detected'}</span>
+                  </div>
                 </div>
-                <div className="text-base">
-                  <span className="font-semibold text-slate-800">Player: </span>
-                  <span className="text-slate-700">{cardData.playerFirstName || ''} {cardData.playerLastName || 'Not detected'}</span>
-                </div>
-                <div className="text-base">
-                  <span className="font-semibold text-slate-800">Brand: </span>
-                  <span className="text-slate-700">{cardData.brand || 'Not detected'}</span>
-                </div>
-                <div className="text-base">
-                  <span className="font-semibold text-slate-800">Card #: </span>
-                  <span className="text-slate-700">{cardData.cardNumber || 'Not detected'}</span>
-                </div>
-                <div className="text-base">
-                  <span className="font-semibold text-slate-800">Year: </span>
-                  <span className="text-slate-700">{cardData.year || 'Not detected'}</span>
+                <div className="space-y-4">
+                  <div className="text-base">
+                    <span className="font-semibold text-slate-800">Collection: </span>
+                    <span className="text-slate-700">{cardData.collection || 'Not detected'}</span>
+                  </div>
+                  <div className="text-base">
+                    <span className="font-semibold text-slate-800">Variant: </span>
+                    <span className="text-slate-700">{cardData.variant || 'Base/Standard'}</span>
+                  </div>
+                  <div className="text-base">
+                    <span className="font-semibold text-slate-800">Serial #: </span>
+                    <span className="text-slate-700">{cardData.serialNumber || 'None'}</span>
+                  </div>
+                  <div className="text-base">
+                    <span className="font-semibold text-slate-800">Parallel: </span>
+                    <span className="text-slate-700">{cardData.foilType || 'None detected'}</span>
+                  </div>
+                  <div className="text-base">
+                    <span className="font-semibold text-slate-800">Rookie Card: </span>
+                    <span className="text-slate-700">{cardData.isRookieCard ? 'Yes' : 'No'}</span>
+                  </div>
                 </div>
               </div>
-              <div className="space-y-4">
-                <div className="text-base">
-                  <span className="font-semibold text-slate-800">Collection: </span>
-                  <span className="text-slate-700">{cardData.collection || 'Not detected'}</span>
-                </div>
-                <div className="text-base">
-                  <span className="font-semibold text-slate-800">Variant: </span>
-                  <span className="text-slate-700">{cardData.variant || 'Base/Standard'}</span>
-                </div>
-                <div className="text-base">
-                  <span className="font-semibold text-slate-800">Serial #: </span>
-                  <span className="text-slate-700">{cardData.serialNumber || 'None'}</span>
-                </div>
-                <div className="text-base">
-                  <span className="font-semibold text-slate-800">Parallel: </span>
-                  <span className="text-slate-700">{cardData.foilType || 'None detected'}</span>
-                </div>
-                <div className="text-base">
-                  <span className="font-semibold text-slate-800">Rookie Card: </span>
-                  <span className="text-slate-700">{cardData.isRookieCard ? 'Yes' : 'No'}</span>
-                </div>
+
+              <div className="flex items-center justify-end gap-2 mt-4 pt-3 border-t border-slate-100">
+                {confirmStatus === 'confirmed' ? (
+                  <span className="text-sm text-green-600 font-medium flex items-center gap-1">
+                    <Check className="h-4 w-4" /> Confirmed
+                  </span>
+                ) : confirmStatus === 'error' ? (
+                  <span className="text-sm text-red-500">Error saving</span>
+                ) : (
+                  <>
+                    <span className="text-sm text-slate-600 font-medium">Correct info?</span>
+                    <button
+                      type="button"
+                      onClick={handleConfirmCard}
+                      disabled={confirmStatus === 'confirming'}
+                      className="p-1.5 rounded-full hover:bg-green-50 transition-colors disabled:opacity-50"
+                      title="Yes, this is correct"
+                    >
+                      <ThumbsUp className={`h-5 w-5 ${confirmStatus === 'confirming' ? 'text-gray-400' : 'text-green-600 hover:text-green-700'}`} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleStartEdit}
+                      className="p-1.5 rounded-full hover:bg-red-50 transition-colors"
+                      title="No, let me fix it"
+                    >
+                      <ThumbsDown className="h-5 w-5 text-red-500 hover:text-red-600" />
+                    </button>
+                  </>
+                )}
               </div>
-            </div>
+            </>
           )}
         </CardContent>
       </Card>
