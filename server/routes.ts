@@ -7,6 +7,7 @@ import {
   cards,
   sports,
   brands,
+  confirmedCards,
   cardInsertSchema,
   cardSchema,
   type CardInsert,
@@ -1369,6 +1370,116 @@ export async function registerRoutes(app: Express): Promise<Server> {
       result,
       success: true
     });
+  });
+
+  // === CONFIRMED CARDS API ===
+
+  function normalizeSerialNumber(serialNumber: string | undefined): string | null {
+    if (!serialNumber) return null;
+    const match = serialNumber.match(/\/(\d+)/);
+    return match ? `/${match[1]}` : null;
+  }
+
+  app.post(`${apiPrefix}/confirmed-cards`, async (req: Request, res: Response) => {
+    try {
+      const { sport, playerFirstName, playerLastName, brand, collection, cardNumber, year, variant, serialNumber, team, isRookieCard, isAutographed, isNumbered } = req.body;
+
+      if (!playerFirstName || !playerLastName || !cardNumber || !year || !brand || !sport) {
+        return res.status(400).json({ error: 'Missing required fields: playerFirstName, playerLastName, cardNumber, year, brand, sport' });
+      }
+
+      const serialLimit = normalizeSerialNumber(serialNumber);
+
+      const existing = await db.query.confirmedCards.findFirst({
+        where: and(
+          eq(confirmedCards.year, Number(year)),
+          eq(confirmedCards.brand, brand),
+          eq(confirmedCards.collection, collection || ''),
+          eq(confirmedCards.cardNumber, String(cardNumber)),
+          eq(confirmedCards.variant, variant || '')
+        )
+      });
+
+      if (existing) {
+        const [updated] = await db.update(confirmedCards)
+          .set({
+            confirmCount: sql`${confirmedCards.confirmCount} + 1`,
+            updatedAt: new Date(),
+            playerFirstName,
+            playerLastName,
+            sport,
+            team: team || existing.team,
+            serialLimit: serialLimit || existing.serialLimit,
+            isRookieCard: isRookieCard ?? existing.isRookieCard,
+            isAutographed: isAutographed ?? existing.isAutographed,
+            isNumbered: isNumbered ?? existing.isNumbered,
+          })
+          .where(eq(confirmedCards.id, existing.id))
+          .returning();
+
+        console.log(`[Confirmed Cards] Updated existing entry for ${playerFirstName} ${playerLastName} #${cardNumber} (${year} ${brand}), confirm count: ${updated.confirmCount}`);
+        return res.json({ success: true, data: updated, action: 'updated' });
+      }
+
+      const [inserted] = await db.insert(confirmedCards)
+        .values({
+          sport,
+          playerFirstName,
+          playerLastName,
+          brand,
+          collection: collection || '',
+          cardNumber: String(cardNumber),
+          year: Number(year),
+          variant: variant || '',
+          serialLimit,
+          team: team || null,
+          isRookieCard: isRookieCard ?? false,
+          isAutographed: isAutographed ?? false,
+          isNumbered: isNumbered ?? false,
+        })
+        .returning();
+
+      console.log(`[Confirmed Cards] New entry saved: ${playerFirstName} ${playerLastName} #${cardNumber} (${year} ${brand} ${collection || 'Base'})`);
+      return res.json({ success: true, data: inserted, action: 'created' });
+
+    } catch (error: any) {
+      console.error('[Confirmed Cards] Error saving:', error.message);
+      return res.status(500).json({ error: 'Failed to save confirmed card' });
+    }
+  });
+
+  app.get(`${apiPrefix}/confirmed-cards/lookup`, async (req: Request, res: Response) => {
+    try {
+      const { cardNumber, year } = req.query;
+
+      if (!cardNumber) {
+        return res.status(400).json({ error: 'cardNumber is required' });
+      }
+
+      const conditions = [eq(confirmedCards.cardNumber, String(cardNumber))];
+      if (year) {
+        conditions.push(eq(confirmedCards.year, Number(year)));
+      }
+
+      const matches = await db.query.confirmedCards.findMany({
+        where: and(...conditions),
+        orderBy: desc(confirmedCards.confirmCount),
+      });
+
+      if (matches.length === 0) {
+        return res.json({ found: false, data: null });
+      }
+
+      return res.json({
+        found: true,
+        data: matches[0],
+        allVariants: matches,
+      });
+
+    } catch (error: any) {
+      console.error('[Confirmed Cards] Lookup error:', error.message);
+      return res.status(500).json({ error: 'Failed to lookup confirmed card' });
+    }
   });
 
   const httpServer = createServer(app);

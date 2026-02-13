@@ -5,14 +5,16 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
-import { Loader2, AlertCircle, Check, Pencil } from 'lucide-react';
+import { Loader2, AlertCircle, Check, ThumbsUp, ThumbsDown, Database } from 'lucide-react';
 import { CardFormValues } from "@shared/schema";
 import { UseFormReturn } from "react-hook-form";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest } from "@/lib/queryClient";
 
 interface OCRResultsProps {
   loading: boolean;
   error: string | null;
-  data: Partial<CardFormValues> | null;
+  data: Partial<CardFormValues> & { confirmedSource?: boolean };
   onApply: (data: Partial<CardFormValues>) => void;
   onCancel: () => void;
   form?: UseFormReturn<CardFormValues>;
@@ -20,18 +22,12 @@ interface OCRResultsProps {
 
 export default function OCRResults({ loading, error, data: initialData, onApply, onCancel, form }: OCRResultsProps) {
   const [editMode, setEditMode] = useState(false);
-  // Use state to manage our working copy of data that we can directly modify
-  const [data, setData] = useState<Partial<CardFormValues>>({});
+  const [data, setData] = useState<Partial<CardFormValues> & { confirmedSource?: boolean }>({});
   const [editedData, setEditedData] = useState<Partial<CardFormValues>>({});
-  
-  // Debug log to check if isRookieCard is properly set
-  useEffect(() => {
-    if (data) {
-      console.log("OCR Results rookie card status:", data.isRookieCard);
-    }
-  }, [data]);
+  const [confirmSaving, setConfirmSaving] = useState(false);
+  const [confirmed, setConfirmed] = useState(false);
+  const { toast } = useToast();
 
-  // When initial OCR data changes, update our local state
   useEffect(() => {
     if (initialData) {
       setData(initialData);
@@ -39,7 +35,6 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
     }
   }, [initialData]);
 
-  // Handle input changes
   const handleInputChange = (field: keyof CardFormValues, value: string | number | boolean) => {
     setEditedData(prev => ({
       ...prev,
@@ -110,10 +105,8 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
     return null;
   }
   
-  // Function to apply OCR data and maintain OCR results display
   const applyAndUseDirectly = async () => {
     if (form) {
-      // Apply all fields from edited data to the form
       const dataToApply = editMode ? editedData : data;
       Object.entries(dataToApply).forEach(([key, value]) => {
         if (value !== undefined && value !== null) {
@@ -121,30 +114,65 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
         }
       });
       
-      // Immediately submit the form to save changes to the database
-      console.log("Automatically submitting form to save OCR results to database...");
       try {
-        // Programmatically trigger form submission
         await form.handleSubmit((values) => {
           console.log("Form submitted with values:", values);
         })();
-        
-        console.log("OCR form data successfully saved to database");
       } catch (error) {
-        console.error("Error saving OCR results to database:", error);
+        console.error("Error saving OCR results:", error);
       }
       
-      // Update the data state with the edited data to show updated values
       setData(editedData);
-      // Exit edit mode but keep OCR results visible
       setEditMode(false);
     } else {
-      // If no form is provided, just call the regular onApply
       onApply(editMode ? editedData : data);
     }
   };
-  
-  // Handle edit mode toggle without closing the OCR results
+
+  const handleConfirmCard = async () => {
+    setConfirmSaving(true);
+    try {
+      const dataToConfirm = editMode ? editedData : data;
+      await apiRequest({
+        url: '/api/confirmed-cards',
+        method: 'POST',
+        body: {
+          sport: dataToConfirm.sport || 'Baseball',
+          playerFirstName: dataToConfirm.playerFirstName,
+          playerLastName: dataToConfirm.playerLastName,
+          brand: dataToConfirm.brand,
+          collection: dataToConfirm.collection || '',
+          cardNumber: dataToConfirm.cardNumber,
+          year: dataToConfirm.year,
+          variant: dataToConfirm.variant || '',
+          serialNumber: dataToConfirm.serialNumber || '',
+          isRookieCard: dataToConfirm.isRookieCard || false,
+          isAutographed: dataToConfirm.isAutographed || false,
+          isNumbered: dataToConfirm.isNumbered || false,
+        },
+      });
+
+      setConfirmed(true);
+      toast({
+        title: "Card Confirmed",
+        description: "This card's info has been saved to the database for future lookups.",
+      });
+    } catch (error) {
+      console.error('Error confirming card:', error);
+      toast({
+        title: "Error",
+        description: "Could not save confirmed card data. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setConfirmSaving(false);
+    }
+  };
+
+  const handleThumbsDown = () => {
+    setEditMode(true);
+  };
+
   const toggleEditMode = () => {
     setEditMode(!editMode);
   };
@@ -154,20 +182,30 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
       <CardHeader className="pb-2">
         <div className="flex justify-between items-center">
           <CardTitle className="text-lg flex items-center">
-            <Check className="h-5 w-5 mr-2 text-green-600" />
-            Card Information Found
+            {data.confirmedSource ? (
+              <>
+                <Database className="h-5 w-5 mr-2 text-blue-600" />
+                Card Found in Database
+              </>
+            ) : (
+              <>
+                <Check className="h-5 w-5 mr-2 text-green-600" />
+                Card Information Found
+              </>
+            )}
           </CardTitle>
         </div>
         <CardDescription>
           {editMode 
-            ? "Edit any incorrect details before applying" 
-            : "We identified the following details from your card image"}
+            ? "Edit any incorrect details, then confirm to save" 
+            : data.confirmedSource
+              ? "This card was identified from previously confirmed data"
+              : "Is this information correct?"}
         </CardDescription>
       </CardHeader>
       <CardContent>
         {editMode ? (
           <div className="form-grid">
-            {/* Sport Dropdown */}
             <div className="space-y-2 col-span-1 md:col-span-2">
               <Label htmlFor="sport">Sport</Label>
               <Select
@@ -187,7 +225,6 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
               </Select>
             </div>
 
-            {/* First row - Player Name */}
             <div className="space-y-2">
               <Label htmlFor="playerFirstName">First Name</Label>
               <Input
@@ -207,7 +244,6 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
               />
             </div>
 
-            {/* Second row - Brand and Collection */}
             <div className="space-y-2">
               <Label htmlFor="brand">Brand</Label>
               <Select
@@ -234,7 +270,6 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
               />
             </div>
 
-            {/* Third row - Card Number and Year */}
             <div className="space-y-2">
               <Label htmlFor="cardNumber">Card Number</Label>
               <Input
@@ -255,7 +290,6 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
               />
             </div>
 
-            {/* Fourth row - Variant and Serial Number */}
             <div className="space-y-2">
               <Label htmlFor="variant">Variant</Label>
               <Input
@@ -275,7 +309,6 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
               />
             </div>
 
-            {/* Fifth row - Condition */}
             <div className="space-y-2 col-span-1 md:col-span-2">
               <Label htmlFor="condition">Condition</Label>
               <Select
@@ -293,7 +326,6 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
               </Select>
             </div>
 
-            {/* Card Features */}
             <div className="col-span-2 space-y-2 mt-4">
               <Label>Card Features</Label>
               <div className="flex flex-wrap gap-6">
@@ -302,10 +334,7 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
                     type="checkbox" 
                     id="isRookieCard" 
                     checked={editedData.isRookieCard === true}
-                    onChange={(e) => {
-                      handleInputChange('isRookieCard', e.target.checked === true);
-                      console.log("OCR Rookie checkbox changed to:", e.target.checked);
-                    }}
+                    onChange={(e) => handleInputChange('isRookieCard', e.target.checked === true)}
                     className="h-4 w-4 rounded border-gray-300"
                   />
                   <Label htmlFor="isRookieCard" className="font-normal text-sm">Rookie Card</Label>
@@ -333,7 +362,6 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
               </div>
             </div>
 
-            {/* Notes field */}
             <div className="col-span-2 space-y-2 mt-2">
               <Label htmlFor="notes">Notes</Label>
               <Input
@@ -346,36 +374,29 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
           </div>
         ) : (
           <div className="space-y-6">
-            {/* Clean formatted display matching the user's preferred layout */}
             <div className="space-y-4">
-              {/* Sport */}
               <div className="text-lg">
                 <span className="font-semibold text-slate-800">Sport: </span>
                 <span className="text-slate-700">{data.sport || 'Not detected'}</span>
               </div>
 
-              {/* Player */}
               <div className="text-lg">
                 <span className="font-semibold text-slate-800">Player: </span>
                 <span className="text-slate-700">{data.playerFirstName || ''} {data.playerLastName || 'Not detected'}</span>
               </div>
 
-              {/* Two-column layout for card details */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
                 <div className="space-y-4">
-                  {/* Brand */}
                   <div className="text-lg">
                     <span className="font-semibold text-slate-800">Brand: </span>
                     <span className="text-slate-700">{data.brand || 'Not detected'}</span>
                   </div>
 
-                  {/* Card Number */}
                   <div className="text-lg">
                     <span className="font-semibold text-slate-800">Card #: </span>
                     <span className="text-slate-700">{data.cardNumber || 'Not detected'}</span>
                   </div>
 
-                  {/* Variant */}
                   <div className="text-lg">
                     <span className="font-semibold text-slate-800">Variant: </span>
                     <span className="text-slate-700">{data.variant || 'Not detected'}</span>
@@ -383,19 +404,16 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
                 </div>
 
                 <div className="space-y-4">
-                  {/* Collection */}
                   <div className="text-lg">
                     <span className="font-semibold text-slate-800">Collection: </span>
                     <span className="text-slate-700">{data.collection || 'Not detected'}</span>
                   </div>
 
-                  {/* Year */}
                   <div className="text-lg">
                     <span className="font-semibold text-slate-800">Year: </span>
                     <span className="text-slate-700">{data.year && data.year > 0 ? data.year : 'Not detected'}</span>
                   </div>
 
-                  {/* Serial Number */}
                   <div className="text-lg">
                     <span className="font-semibold text-slate-800">Serial #: </span>
                     <span className="text-slate-700">{data.serialNumber || 'None'}</span>
@@ -403,13 +421,11 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
                 </div>
               </div>
 
-              {/* Condition */}
               <div className="text-lg">
                 <span className="font-semibold text-slate-800">Condition: </span>
                 <span className="text-slate-700">{data.condition || 'Not detected'}</span>
               </div>
 
-              {/* Card Features */}
               <div className="mt-6">
                 <div className="text-lg mb-3">
                   <span className="font-semibold text-slate-800">Card Features:</span>
@@ -454,32 +470,72 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
         >
           Cancel
         </Button>
-        {!editMode ? (
-          <Button
-            type="button"
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              toggleEditMode();
-            }}
-            className="bg-blue-600 hover:bg-blue-500 text-white"
-          >
-            Edit Card Details
-          </Button>
+        {editMode ? (
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setEditMode(false);
+              }}
+            >
+              Back
+            </Button>
+            <Button
+              type="button"
+              onClick={async (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setData(editedData);
+                setEditMode(false);
+                applyAndUseDirectly();
+              }}
+              className="bg-green-600 hover:bg-green-500 text-white"
+            >
+              <Check className="h-4 w-4 mr-1" />
+              Save & Re-lookup
+            </Button>
+          </div>
+        ) : confirmed ? (
+          <span className="inline-flex items-center text-green-600 font-medium">
+            <Check className="h-4 w-4 mr-1" />
+            Confirmed & Saved
+          </span>
         ) : (
-          <Button
-            type="button"
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              // Apply changes to the form and proceed with saving
-              // This will use our edited data and apply it to the form
-              applyAndUseDirectly();
-            }}
-            className="bg-green-600 hover:bg-green-500 text-white"
-          >
-            Save Changes
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                handleThumbsDown();
+              }}
+              className="border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700"
+            >
+              <ThumbsDown className="h-4 w-4 mr-1" />
+              Edit
+            </Button>
+            <Button
+              type="button"
+              disabled={confirmSaving}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                handleConfirmCard();
+              }}
+              className="bg-green-600 hover:bg-green-500 text-white"
+            >
+              {confirmSaving ? (
+                <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+              ) : (
+                <ThumbsUp className="h-4 w-4 mr-1" />
+              )}
+              Confirm & Save
+            </Button>
+          </div>
         )}
       </CardFooter>
     </Card>

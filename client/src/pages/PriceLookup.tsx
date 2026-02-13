@@ -75,7 +75,7 @@ export default function PriceLookup() {
       if (result.success && result.data) {
         setCardData(result.data);
         setShowOCRResults(true);
-        setShowPriceResults(true); // Show both OCR and price results
+        setShowPriceResults(false);
       } else {
         throw new Error(result.message || 'Analysis failed');
       }
@@ -166,12 +166,12 @@ export default function PriceLookup() {
           </Card>
         </>
       )}
-      {/* OCR Results */}
-      {showOCRResults && ocrData && (
+      {/* OCR Results with Thumbs Up/Down */}
+      {showOCRResults && cardData && (
         <OCRResults 
-          loading={ocrLoading}
-          error={ocrError}
-          data={ocrData}
+          loading={analyzing}
+          error={null}
+          data={cardData}
           onApply={handleApplyOCRResults}
           onCancel={() => setShowOCRResults(false)}
         />

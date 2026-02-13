@@ -1,4 +1,4 @@
-import { pgTable, text, serial, integer, boolean, timestamp, jsonb, numeric } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, boolean, timestamp, jsonb, numeric, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { z } from "zod";
 import { relations } from "drizzle-orm";
@@ -118,3 +118,39 @@ export type CardWithRelations = Card & {
   user?: User;
 };
 export type CardFormValues = z.infer<typeof cardSchema>;
+
+export const confirmedCards = pgTable("confirmed_cards", {
+  id: serial("id").primaryKey(),
+  sport: text("sport").notNull(),
+  playerFirstName: text("player_first_name").notNull(),
+  playerLastName: text("player_last_name").notNull(),
+  brand: text("brand").notNull(),
+  collection: text("collection").default(''),
+  cardNumber: text("card_number").notNull(),
+  year: integer("year").notNull(),
+  variant: text("variant").default(''),
+  serialLimit: text("serial_limit"),
+  team: text("team"),
+  isRookieCard: boolean("is_rookie_card").default(false),
+  isAutographed: boolean("is_autographed").default(false),
+  isNumbered: boolean("is_numbered").default(false),
+  confirmCount: integer("confirm_count").default(1),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("confirmed_card_unique_idx").on(
+    table.year,
+    table.brand,
+    table.collection,
+    table.cardNumber,
+    table.variant
+  ),
+]);
+
+export const confirmedCardInsertSchema = createInsertSchema(confirmedCards, {
+  playerFirstName: (schema) => schema.min(1, "First name is required"),
+  playerLastName: (schema) => schema.min(1, "Last name is required"),
+  cardNumber: (schema) => schema.min(1, "Card number is required"),
+});
+export type ConfirmedCardInsert = z.infer<typeof confirmedCardInsertSchema>;
+export type ConfirmedCard = typeof confirmedCards.$inferSelect;
