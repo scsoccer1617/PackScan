@@ -5,9 +5,10 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
-import { Loader2, AlertCircle, Check, Pencil } from 'lucide-react';
+import { Loader2, AlertCircle, Check, Pencil, ThumbsUp, ThumbsDown } from 'lucide-react';
 import { CardFormValues } from "@shared/schema";
 import { UseFormReturn } from "react-hook-form";
+import { apiRequest } from "@/lib/queryClient";
 
 interface OCRResultsProps {
   loading: boolean;
@@ -20,6 +21,7 @@ interface OCRResultsProps {
 
 export default function OCRResults({ loading, error, data: initialData, onApply, onCancel, form }: OCRResultsProps) {
   const [editMode, setEditMode] = useState(false);
+  const [confirmStatus, setConfirmStatus] = useState<'idle' | 'confirming' | 'confirmed' | 'error'>('idle');
   // Use state to manage our working copy of data that we can directly modify
   const [data, setData] = useState<Partial<CardFormValues>>({});
   const [editedData, setEditedData] = useState<Partial<CardFormValues>>({});
@@ -36,6 +38,7 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
     if (initialData) {
       setData(initialData);
       setEditedData(initialData);
+      setConfirmStatus('idle');
     }
   }, [initialData]);
 
@@ -45,6 +48,42 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
       ...prev,
       [field]: value
     }));
+  };
+
+  const handleConfirmCard = async () => {
+    if (!data || confirmStatus === 'confirming' || confirmStatus === 'confirmed') return;
+    setConfirmStatus('confirming');
+    try {
+      await apiRequest('/api/confirmed-cards', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sport: data.sport,
+          playerFirstName: data.playerFirstName,
+          playerLastName: data.playerLastName,
+          brand: data.brand,
+          collection: data.collection || '',
+          cardNumber: data.cardNumber,
+          year: data.year,
+          variant: data.variant || '',
+          serialNumber: data.serialNumber || '',
+          isRookieCard: data.isRookieCard || false,
+          isAutographed: data.isAutographed || false,
+          isNumbered: data.isNumbered || false,
+          isFoil: data.isFoil || false,
+          foilType: data.foilType || null,
+        }),
+      });
+      setConfirmStatus('confirmed');
+    } catch (err) {
+      console.error('Error confirming card:', err);
+      setConfirmStatus('error');
+      setTimeout(() => setConfirmStatus('idle'), 3000);
+    }
+  };
+
+  const handleRejectCard = () => {
+    setEditMode(true);
   };
 
   if (loading) {
@@ -437,6 +476,38 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
                     <span className="text-slate-500 text-lg">None detected</span>
                   )}
                 </div>
+              </div>
+
+              {/* Correct info? feedback */}
+              <div className="flex items-center justify-end gap-2 mt-4">
+                {confirmStatus === 'confirmed' ? (
+                  <span className="text-sm text-green-600 font-medium flex items-center gap-1">
+                    <Check className="h-4 w-4" /> Confirmed
+                  </span>
+                ) : confirmStatus === 'error' ? (
+                  <span className="text-sm text-red-500">Error saving</span>
+                ) : (
+                  <>
+                    <span className="text-sm text-slate-600 font-medium">Correct info?</span>
+                    <button
+                      type="button"
+                      onClick={handleConfirmCard}
+                      disabled={confirmStatus === 'confirming'}
+                      className="p-1.5 rounded-full hover:bg-green-50 transition-colors disabled:opacity-50"
+                      title="Yes, this is correct"
+                    >
+                      <ThumbsUp className={`h-5 w-5 ${confirmStatus === 'confirming' ? 'text-gray-400' : 'text-green-600 hover:text-green-700'}`} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleRejectCard}
+                      className="p-1.5 rounded-full hover:bg-red-50 transition-colors"
+                      title="No, let me fix it"
+                    >
+                      <ThumbsDown className="h-5 w-5 text-red-500 hover:text-red-600" />
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           </div>

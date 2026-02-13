@@ -70,6 +70,34 @@ export const cardsRelations = relations(cards, ({ one }) => ({
   user: one(users, { fields: [cards.userId], references: [users.id] }),
 }));
 
+export const confirmedCards = pgTable("confirmed_cards", {
+  id: serial("id").primaryKey(),
+  sport: text("sport").notNull(),
+  playerFirstName: text("player_first_name").notNull(),
+  playerLastName: text("player_last_name").notNull(),
+  brand: text("brand").notNull(),
+  collection: text("collection"),
+  cardNumber: text("card_number").notNull(),
+  year: integer("year").notNull(),
+  variant: text("variant"),
+  serialLimit: text("serial_limit"),
+  team: text("team"),
+  isRookieCard: boolean("is_rookie_card").default(false),
+  isAutographed: boolean("is_autographed").default(false),
+  isNumbered: boolean("is_numbered").default(false),
+  confirmCount: integer("confirm_count").default(1),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const confirmedCardsInsertSchema = createInsertSchema(confirmedCards, {
+  playerFirstName: (schema) => schema.min(1, "First name is required"),
+  playerLastName: (schema) => schema.min(1, "Last name is required"),
+  cardNumber: (schema) => schema.min(1, "Card number is required"),
+});
+export type ConfirmedCardInsert = z.infer<typeof confirmedCardsInsertSchema>;
+export type ConfirmedCard = typeof confirmedCards.$inferSelect;
+
 // Validation schemas
 export const sportInsertSchema = createInsertSchema(sports);
 export type SportInsert = z.infer<typeof sportInsertSchema>;

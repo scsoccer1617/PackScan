@@ -7,6 +7,7 @@ import {
   cards,
   sports,
   brands,
+  confirmedCards,
   cardInsertSchema,
   cardSchema,
   type CardInsert,
@@ -1369,6 +1370,80 @@ export async function registerRoutes(app: Express): Promise<Server> {
       result,
       success: true
     });
+  });
+
+  app.post('/api/confirmed-cards', async (req: Request, res: Response) => {
+    try {
+      const { sport, playerFirstName, playerLastName, brand, collection, cardNumber, year, variant, serialNumber, isRookieCard, isAutographed, isNumbered } = req.body;
+
+      if (!playerFirstName || !playerLastName || !brand || !cardNumber || !year || !sport) {
+        return res.status(400).json({ error: 'Missing required fields: sport, playerFirstName, playerLastName, brand, cardNumber, and year are all required' });
+      }
+
+      const parsedYear = Number(year);
+      if (isNaN(parsedYear) || parsedYear < 1900 || parsedYear > new Date().getFullYear()) {
+        return res.status(400).json({ error: 'Year must be between 1900 and the current year' });
+      }
+
+      let serialLimit: string | null = null;
+      if (serialNumber && typeof serialNumber === 'string') {
+        const trimmed = serialNumber.trim();
+        const limitMatch = trimmed.match(/\/(\d+)\s*$/);
+        if (limitMatch) {
+          serialLimit = `/${limitMatch[1]}`;
+        }
+      }
+
+      const normalizedVariant = variant && variant.trim() ? variant.trim() : null;
+
+      const conditions = [
+        eq(confirmedCards.cardNumber, cardNumber),
+        eq(confirmedCards.year, parsedYear),
+        eq(confirmedCards.brand, brand),
+        eq(confirmedCards.playerLastName, playerLastName),
+      ];
+      if (normalizedVariant) {
+        conditions.push(eq(confirmedCards.variant, normalizedVariant));
+      } else {
+        conditions.push(isNull(confirmedCards.variant));
+      }
+
+      const existing = await db.select().from(confirmedCards).where(
+        and(...conditions)
+      ).limit(1);
+
+      if (existing.length > 0) {
+        const updated = await db.update(confirmedCards)
+          .set({
+            confirmCount: sql`${confirmedCards.confirmCount} + 1`,
+            updatedAt: new Date(),
+          })
+          .where(eq(confirmedCards.id, existing[0].id))
+          .returning();
+        return res.json({ success: true, data: updated[0], action: 'incremented' });
+      }
+
+      const [inserted] = await db.insert(confirmedCards).values({
+        sport,
+        playerFirstName,
+        playerLastName,
+        brand,
+        collection: collection && collection.trim() ? collection.trim() : null,
+        cardNumber,
+        year: parsedYear,
+        variant: normalizedVariant,
+        serialLimit,
+        isRookieCard: isRookieCard || false,
+        isAutographed: isAutographed || false,
+        isNumbered: isNumbered || false,
+        confirmCount: 1,
+      }).returning();
+
+      return res.status(201).json({ success: true, data: inserted, action: 'created' });
+    } catch (error: any) {
+      console.error('Error confirming card:', error);
+      return res.status(500).json({ error: 'Failed to confirm card data' });
+    }
   });
 
   const httpServer = createServer(app);

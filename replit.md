@@ -23,9 +23,10 @@ Preferred communication style: Simple, everyday language.
 - **External APIs**: eBay API for price analysis
 
 ### Database
-- **Schema**: `cards`, `sports`, `brands` tables with foreign key relationships.
+- **Schema**: `cards`, `sports`, `brands`, `confirmed_cards` tables with foreign key relationships.
 - **Technology**: PostgreSQL hosted on Neon.
 - **Migrations**: Drizzle Kit.
+- **confirmed_cards**: Stores user-verified card data for building a reference database. Serial numbers are stored as generic limits (e.g., "/399" instead of "010/399"). Duplicate detection uses cardNumber + year + brand + playerLastName + variant. Confirmation count increments on repeat confirmations.
 
 ### Key Features
 - **Automated Card Detection**: Utilizes Google Cloud Vision API for OCR and advanced text analysis to identify player names, card numbers, brands, collections, and years, including special cases like rookie cards, autographs, and serial numbers.
