@@ -1,4 +1,4 @@
-import scanDeckLogo from "@assets/ScanDeck_App_Icon_1024_1770993618194.png";
+import scanDeckLogo from "@assets/ScanDeck_Logo_Transparent_1024_1770993832380.png";
 
 export default function Header() {
   return (
