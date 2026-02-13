@@ -3,9 +3,6 @@ import { CardFormValues } from '@shared/schema';
 import { analyzeSportsCardImage } from './dynamicCardAnalyzer';
 import { analyzeScoreCard } from './scoreCardAnalyzer';
 import { detectFoilVariant } from './foilVariantDetector';
-import { db } from '../db';
-import { confirmedCards } from '@shared/schema';
-import { and, eq, desc } from 'drizzle-orm';
 
 // Define a standalone MulterFile interface that doesn't conflict with built-in types
 interface MulterFile {
@@ -159,60 +156,15 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
       });
     }
     
-    // === CONFIRMED CARD DATABASE LOOKUP ===
-    // OCR has extracted card number, year, serial number, rookie status, sport
-    // Check if we have confirmed data for this card to fill in player, brand, collection, variant
-    if (combinedResult.cardNumber && combinedResult.year) {
-      try {
-        const conditions = [
-          eq(confirmedCards.cardNumber, String(combinedResult.cardNumber)),
-          eq(confirmedCards.year, Number(combinedResult.year)),
-        ];
-        if (combinedResult.brand) {
-          conditions.push(eq(confirmedCards.brand, String(combinedResult.brand)));
-        }
-
-        const confirmedMatch = await db.query.confirmedCards.findFirst({
-          where: and(...conditions),
-          orderBy: desc(confirmedCards.confirmCount),
-        });
-
-        if (confirmedMatch) {
-          console.log('=== CONFIRMED CARD DATABASE MATCH ===');
-          console.log(`Card #${combinedResult.cardNumber} (${combinedResult.year}) found in confirmed database`);
-          console.log(`Database: ${confirmedMatch.playerFirstName} ${confirmedMatch.playerLastName} | ${confirmedMatch.brand} ${confirmedMatch.collection} ${confirmedMatch.variant}`);
-
-          combinedResult.playerFirstName = confirmedMatch.playerFirstName;
-          combinedResult.playerLastName = confirmedMatch.playerLastName;
-          combinedResult.brand = confirmedMatch.brand;
-          if (confirmedMatch.collection) combinedResult.collection = confirmedMatch.collection;
-          if (confirmedMatch.variant) combinedResult.variant = confirmedMatch.variant;
-          if (confirmedMatch.isRookieCard) combinedResult.isRookieCard = confirmedMatch.isRookieCard;
-          if (confirmedMatch.isAutographed) combinedResult.isAutographed = confirmedMatch.isAutographed;
-          if (confirmedMatch.isNumbered) combinedResult.isNumbered = confirmedMatch.isNumbered;
-
-          (combinedResult as any).confirmedSource = true;
-          console.log('Card data populated from confirmed database (sport, serial#, year still from OCR)');
-        } else {
-          console.log(`Card #${combinedResult.cardNumber} (${combinedResult.year}) not found in confirmed database - using OCR data`);
-        }
-      } catch (error: any) {
-        console.error('Error during confirmed card lookup:', error.message);
-      }
-    }
-
     // Make sure we have all required fields with defaults if needed
     const finalResult = ensureRequiredFields(combinedResult);
-
+    
     console.log('Combined card analysis result:', JSON.stringify(finalResult, null, 2));
     console.timeEnd('dual-card-analysis-total');
-
+    
     return res.json({
       success: true,
-      data: {
-        ...finalResult,
-        confirmedSource: (combinedResult as any).confirmedSource || false,
-      }
+      data: finalResult
     });
     
   } catch (error: any) {
