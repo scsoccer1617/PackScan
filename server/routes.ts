@@ -1057,10 +1057,55 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      console.log('OCR analysis successful, starting eBay price lookup...');
+      console.log('OCR analysis successful, checking confirmed cards database...');
       
-      // Continue with eBay price lookup using back image data
-      const cardData = backOcrResponse.data;
+      // Check confirmed_cards database for a previously verified match
+      let cardData = backOcrResponse.data;
+      const ocrCardNumber = cardData.cardNumber || '';
+      const ocrYear = cardData.year ? Number(cardData.year) : 0;
+      const ocrBrand = cardData.brand || '';
+      const ocrLastName = cardData.playerLastName || '';
+      
+      if (ocrCardNumber && ocrYear && ocrBrand && ocrLastName) {
+        try {
+          const confirmedMatch = await db.select().from(confirmedCards).where(
+            and(
+              eq(confirmedCards.cardNumber, ocrCardNumber),
+              eq(confirmedCards.year, ocrYear),
+              eq(confirmedCards.brand, ocrBrand),
+              eq(confirmedCards.playerLastName, ocrLastName)
+            )
+          ).limit(1);
+          
+          if (confirmedMatch.length > 0) {
+            const verified = confirmedMatch[0];
+            console.log(`Found confirmed card match (confirmed ${verified.confirmCount} time(s)): ${verified.playerFirstName} ${verified.playerLastName}`);
+            cardData = {
+              ...cardData,
+              playerFirstName: verified.playerFirstName || cardData.playerFirstName,
+              playerLastName: verified.playerLastName || cardData.playerLastName,
+              brand: verified.brand || cardData.brand,
+              collection: verified.collection || cardData.collection,
+              cardNumber: verified.cardNumber || cardData.cardNumber,
+              year: verified.year || cardData.year,
+              variant: verified.variant || cardData.variant || '',
+              sport: verified.sport || cardData.sport,
+              isRookieCard: verified.isRookieCard ?? cardData.isRookieCard,
+              isAutographed: verified.isAutographed ?? cardData.isAutographed,
+              isNumbered: verified.isNumbered ?? cardData.isNumbered,
+              serialNumber: verified.serialLimit || cardData.serialNumber || '',
+              confirmedMatch: true,
+              confirmCount: verified.confirmCount,
+            };
+          } else {
+            console.log('No confirmed card match found, using OCR results');
+          }
+        } catch (dbError) {
+          console.error('Error checking confirmed cards:', dbError);
+        }
+      }
+      
+      console.log('Starting eBay price lookup...');
       
       try {
         const searchQuery = `${cardData.playerFirstName || ''} ${cardData.playerLastName || ''} ${cardData.brand || ''} ${cardData.collection || ''} ${cardData.cardNumber || ''} ${cardData.year || ''}`.trim();
