@@ -1059,26 +1059,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       console.log('OCR analysis successful, checking confirmed cards database...');
       
-      // Check confirmed_cards database for a previously verified match
       let cardData = backOcrResponse.data;
       const ocrCardNumber = cardData.cardNumber || '';
       const ocrYear = cardData.year ? Number(cardData.year) : 0;
       const ocrBrand = cardData.brand || '';
       const ocrLastName = cardData.playerLastName || '';
       
-      if (ocrCardNumber && ocrYear && ocrBrand && ocrLastName) {
+      if (ocrCardNumber && ocrYear && ocrBrand) {
         try {
-          const confirmedMatch = await db.select().from(confirmedCards).where(
+          const confirmedMatches = await db.select().from(confirmedCards).where(
             and(
               eq(confirmedCards.cardNumber, ocrCardNumber),
               eq(confirmedCards.year, ocrYear),
-              eq(confirmedCards.brand, ocrBrand),
-              eq(confirmedCards.playerLastName, ocrLastName)
+              eq(confirmedCards.brand, ocrBrand)
             )
-          ).limit(1);
+          );
           
-          if (confirmedMatch.length > 0) {
-            const verified = confirmedMatch[0];
+          let verified = null;
+          if (confirmedMatches.length === 1) {
+            verified = confirmedMatches[0];
+            console.log(`Single confirmed match found for card #${ocrCardNumber}/${ocrYear}/${ocrBrand}`);
+          } else if (confirmedMatches.length > 1) {
+            if (ocrLastName) {
+              const lastNameMatch = confirmedMatches.find(
+                m => m.playerLastName?.toLowerCase() === ocrLastName.toLowerCase()
+              );
+              if (lastNameMatch) {
+                verified = lastNameMatch;
+                console.log(`Multiple confirmed matches, selected by lastName match: ${lastNameMatch.playerFirstName} ${lastNameMatch.playerLastName}`);
+              }
+            }
+            if (!verified) {
+              console.log(`Multiple confirmed matches (${confirmedMatches.length}) for card #${ocrCardNumber}/${ocrYear}/${ocrBrand}, no lastName match - skipping auto-override`);
+            }
+          }
+          
+          if (verified) {
             console.log(`Found confirmed card match (confirmed ${verified.confirmCount} time(s)): ${verified.playerFirstName} ${verified.playerLastName}`);
             cardData = {
               ...cardData,

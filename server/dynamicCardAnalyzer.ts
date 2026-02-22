@@ -299,7 +299,7 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
     ]);
     
     const isNonNameWord = (word: string): boolean => {
-      const cleaned = word.toUpperCase().replace(/(?:TM|™|®)$/i, '');
+      const cleaned = word.toUpperCase().replace(/(?:TM|™|®|\.+)$/gi, '');
       return nonNameWords.has(cleaned) || word.length <= 1 || /^\d/.test(word);
     };
     
@@ -450,8 +450,21 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
       // Special handling for Score cards where player names are on consecutive lines
       const isNonName = (text: string) => {
         const nonNames = ['TOPPS', 'SCORE', 'BOWMAN', 'FLEER', 'LEAF', 'DONRUSS', 'UPPER', 'DECK', 
-                          'SERIES', 'ONE', 'TWO', 'BASE', 'CARD', 'MLB', 'FRONT', 'BACK'];
-        return nonNames.includes(text) || text.length < 2 || /^\d+$/.test(text);
+                          'SERIES', 'ONE', 'TWO', 'BASE', 'CARD', 'MLB', 'FRONT', 'BACK',
+                          'SS', 'DH', 'SP', 'RP', 'CF', 'LF', 'RF', 'OF',
+                          'QB', 'WR', 'RB', 'TE', 'LB', 'CB', 'DE', 'DT', 'OL', 'OT', 'OG',
+                          'PG', 'SG', 'SF', 'PF',
+                          'KC', 'TB', 'LA', 'NY', 'SD', 'STL', 'CLE', 'DET', 'MIN', 'CHC', 'CHW',
+                          'MIL', 'PIT', 'CIN', 'ATL', 'MIA', 'PHI', 'NYM', 'NYY', 'BOS', 'BAL', 'TOR',
+                          'HOU', 'TEX', 'SEA', 'OAK', 'LAA', 'LAD', 'ARI', 'COL',
+                          'RC', 'ROOKIE', 'BASEBALL', 'FOOTBALL', 'BASKETBALL', 'HOCKEY',
+                          'ROYALS', 'METS', 'YANKEES', 'DODGERS', 'CUBS', 'PHILLIES', 'BRAVES',
+                          'ASTROS', 'RANGERS', 'PADRES', 'GIANTS', 'CARDINALS', 'NATIONALS',
+                          'ORIOLES', 'GUARDIANS', 'TWINS', 'RAYS', 'MARLINS', 'PIRATES',
+                          'REDS', 'BREWERS', 'TIGERS', 'ATHLETICS', 'MARINERS', 'ANGELS',
+                          'TOTALS', 'MAJ', 'LEA', 'RECORD', 'PITCHING', 'BATTING', 'FIELDING'];
+        const cleaned = text.replace(/\.+$/g, '').toUpperCase();
+        return nonNames.includes(cleaned) || cleaned.length < 2 || /^\d+$/.test(cleaned);
       };
       
       if (line1 && line2 && 

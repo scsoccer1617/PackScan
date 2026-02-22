@@ -330,7 +330,7 @@ async function combineCardResults(
     'HOU', 'TEX', 'SEA', 'OAK', 'LAA', 'LAD', 'ARI', 'COL',
   ]);
   
-  const stripTrademarkSuffix = (w: string): string => w.replace(/(?:TM|™|®)$/i, '');
+  const stripTrademarkSuffix = (w: string): string => w.replace(/(?:TM|™|®|\.+)$/gi, '');
   
   const isBogusFn = (firstName?: string, lastName?: string): boolean => {
     if (!firstName || !lastName) return true;
