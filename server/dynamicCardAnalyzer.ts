@@ -282,8 +282,9 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
       'ASTROS', 'RANGERS', 'PADRES', 'GIANTS', 'CARDINALS', 'NATIONALS', 'ORIOLES', 'GUARDIANS',
       'TWINS', 'RAYS', 'MARLINS', 'PIRATES', 'REDS', 'BREWERS', 'TIGERS', 'ROYALS', 'ATHLETICS',
       'MARINERS', 'ANGELS', 'ROCKIES', 'DIAMONDBACKS', 'WHITE', 'INDIANS',
-      'PHILADELPHIA', 'CHICAGO', 'BOSTON', 'FRANCISCO', 'ANGELES', 'YORK',
+      'PHILADELPHIA', 'CHICAGO', 'BOSTON', 'ANGELES', 'YORK',
       'NEW', 'SAN', 'LOS', 'SAINT', 'LOUIS', 'KANSAS', 'CITY',
+      'SLG', 'OPS', 'AVG', 'WHIP', 'IP', 'AB',
       'BATS', 'THROWS', 'DRAFTED', 'BORN', 'HOME', 'ACQ', 'FREE', 'AGENT',
       'HT', 'WT', 'HEIGHT', 'WEIGHT', 'PRINTED', 'USA',
       'ALL', 'STAR', 'COLLECTION', 'FLAGSHIP', 'HERITAGE', 'PRIZM', 'SELECT', 'MOSAIC',
@@ -514,13 +515,18 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
         continue;
       }
       
-      // Avoid lines that are clearly not names
       const nonNameWords = [
         'PITCHER','CATCHER','INFIELDER','OUTFIELDER','DESIGNATED','HITTER',
         'BATS','THROWS','THROW','LEFT','RIGHT','SWITCH',
         'HEIGHT','WEIGHT','BORN','BIRTH','DOB',
         'MAJOR','LEAGUE','CLUB','RECORD','COMPLETE','ERA',
-        'POSITION','TEAM','OF','THE'
+        'POSITION','TEAM','OF','THE',
+        'TOPPS','LOPPS','LAPPS','BOWMAN','DONRUSS','PANINI','FLEER','SCORE','LEAF',
+        'SERIES','CHROME','METS','YANKEES','DODGERS','CUBS','PHILLIES','BRAVES',
+        'ASTROS','RANGERS','PADRES','GIANTS','CARDINALS','NATIONALS','ORIOLES',
+        'GUARDIANS','TWINS','RAYS','ROYALS','BREWERS','TIGERS','REDS','PIRATES',
+        'BASEBALL','FOOTBALL','BASKETBALL','HOCKEY','MLB','STARS','ROOKIE',
+        'SLG','OPS','AVG','WHIP','RBI','WAR','TOTALS'
       ];
       let isNonNameLine = false;
       for (const word of nonNameWords) {
@@ -559,8 +565,14 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
       const firstName = topNameMatch[1].trim();
       const lastName = topNameMatch[2].trim();
       
-      // Verify these aren't likely to be positional labels or stats headers
-      const nonNameWords = ['PITCHER', 'CATCHER', 'COMPLETE', 'RECORD', 'MAJOR', 'LEAGUE', 'CLUB', 'ERA'];
+      const nonNameWords = ['PITCHER', 'CATCHER', 'COMPLETE', 'RECORD', 'MAJOR', 'LEAGUE', 'CLUB', 'ERA',
+        'TOPPS', 'LOPPS', 'LAPPS', 'BOWMAN', 'DONRUSS', 'PANINI', 'FLEER', 'SCORE', 'LEAF',
+        'SERIES', 'CHROME', 'METS', 'YANKEES', 'DODGERS', 'CUBS', 'PHILLIES', 'BRAVES',
+        'ASTROS', 'RANGERS', 'PADRES', 'GIANTS', 'CARDINALS', 'NATIONALS', 'ORIOLES',
+        'GUARDIANS', 'TWINS', 'RAYS', 'ROYALS', 'BREWERS', 'TIGERS', 'REDS', 'PIRATES',
+        'MARLINS', 'ATHLETICS', 'MARINERS', 'ANGELS', 'ROCKIES', 'DIAMONDBACKS',
+        'BASEBALL', 'FOOTBALL', 'BASKETBALL', 'HOCKEY', 'ROOKIE', 'STARS', 'MLB',
+        'SLG', 'OPS', 'AVG', 'WHIP', 'RBI', 'WAR', 'TOTALS', 'MAJ', 'LEA'];
       if (!nonNameWords.includes(firstName) && !nonNameWords.includes(lastName)) {
         cardDetails.playerFirstName = firstName.toLowerCase()
           .split(' ')

@@ -323,11 +323,14 @@ async function combineCardResults(
     'AVG', 'SLG', 'OBP', 'ERA', 'RBI', 'HR', 'BB', 'SO', 'AB',
     'TOTALS', 'MAJ', 'LEA', 'THIRD', 'FIRST', 'SECOND', 'BASE',
     'OUTFIELD', 'HOUSTON', 'MILWAUKEE', 'PHILADELPHIA', 'CHICAGO',
-    'EPPS', 'STROS', 'OXY',
+    'EPPS', 'STROS', 'OXY', 'LAPPS',
     'LOP', 'PPS', 'TANKY', 'LOPPS',
     'KC', 'TB', 'LA', 'NY', 'SF', 'SD', 'STL', 'CLE', 'DET', 'MIN', 'CHC', 'CHW', 'CWS',
     'MIL', 'PIT', 'CIN', 'ATL', 'MIA', 'PHI', 'NYM', 'NYY', 'BOS', 'BAL', 'TOR',
     'HOU', 'TEX', 'SEA', 'OAK', 'LAA', 'LAD', 'ARI', 'COL',
+    'SS', 'DH', 'SP', 'RP', 'CF', 'LF', 'RF', 'OF',
+    'QB', 'WR', 'RB', 'TE', 'LB', 'CB', 'DE', 'DT',
+    'SLG', 'OPS', 'AVG', 'WHIP', 'IP', 'AB',
   ]);
   
   const stripTrademarkSuffix = (w: string): string => w.replace(/(?:TM|™|®|\.+)$/gi, '');
