@@ -1096,6 +1096,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
           
           if (verified) {
             console.log(`Found confirmed card match (confirmed ${verified.confirmCount} time(s)): ${verified.playerFirstName} ${verified.playerLastName}`);
+            
+            const ocrHasSerial = !!(cardData.serialNumber && cardData.serialNumber.includes('/'));
+            const confirmedHasSerial = !!(verified.serialLimit && verified.serialLimit.includes('/'));
+            const ocrHasFoil = !!(cardData.variant && /foil|refractor|shimmer|prism|holo|chrome|wave|cracked ice|speckle|sparkle/i.test(cardData.variant));
+            const confirmedHasVariant = !!(verified.variant && verified.variant.trim());
+            
+            const ocrMatchesVariant = (
+              (ocrHasSerial && confirmedHasSerial) ||
+              (ocrHasFoil && confirmedHasVariant) ||
+              (!confirmedHasSerial && !confirmedHasVariant) ||
+              (!ocrHasSerial && !ocrHasFoil && !confirmedHasSerial && !confirmedHasVariant)
+            );
+            
             cardData = {
               ...cardData,
               playerFirstName: verified.playerFirstName || cardData.playerFirstName,
@@ -1104,15 +1117,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
               collection: verified.collection || cardData.collection,
               cardNumber: verified.cardNumber || cardData.cardNumber,
               year: verified.year || cardData.year,
-              variant: verified.variant || cardData.variant || '',
               sport: verified.sport || cardData.sport,
               isRookieCard: verified.isRookieCard ?? cardData.isRookieCard,
               isAutographed: verified.isAutographed ?? cardData.isAutographed,
-              isNumbered: verified.isNumbered ?? cardData.isNumbered,
-              serialNumber: verified.serialLimit || cardData.serialNumber || '',
               confirmedMatch: true,
               confirmCount: verified.confirmCount,
             };
+            
+            if (ocrMatchesVariant) {
+              cardData.variant = verified.variant || cardData.variant || '';
+              cardData.isNumbered = (verified.isNumbered || ocrHasSerial) ?? cardData.isNumbered;
+              cardData.serialNumber = verified.serialLimit || cardData.serialNumber || '';
+              console.log(`Applied variant data from confirmed card: variant="${cardData.variant}", serial="${cardData.serialNumber}"`);
+            } else {
+              console.log(`Skipping variant override - OCR scan differs from confirmed variant (confirmed: variant="${verified.variant}", serial="${verified.serialLimit}" | OCR: variant="${cardData.variant}", serial="${cardData.serialNumber}")`);
+            }
           } else {
             console.log('No confirmed card match found, using OCR results');
           }

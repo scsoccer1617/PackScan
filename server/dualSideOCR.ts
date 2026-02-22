@@ -474,11 +474,24 @@ async function combineCardResults(
       console.log(`Visual foil detection successful: ${visualFoilResult.foilType} (confidence: ${visualFoilResult.confidence})`);
       console.log(`Visual indicators: ${visualFoilResult.indicators.join('; ')}`);
     } else if (visualFoilResult && !visualFoilResult.indicators.some(indicator => indicator.includes('Error in visual analysis'))) {
-      // Visual detection ran successfully but found no foil - trust this result over text analysis
-      combined.foilType = null;
-      combined.isFoil = false;
-      console.log('Visual foil detection explicitly rejected foil characteristics');
-      console.log(`Visual rejection reason: ${visualFoilResult.indicators.join('; ')}`);
+      if (combined.isNumbered && combined.serialNumber) {
+        const serialMatch = combined.serialNumber.match(/\/(\d+)/);
+        const serialLimit = serialMatch ? parseInt(serialMatch[1]) : 0;
+        let inferredVariant = 'Parallel';
+        if (serialLimit > 0 && serialLimit <= 99) inferredVariant = 'Gold Foil';
+        else if (serialLimit > 0 && serialLimit <= 199) inferredVariant = 'Blue Foil';
+        else if (serialLimit > 0 && serialLimit <= 499) inferredVariant = 'Aqua Foil';
+        else if (serialLimit > 0 && serialLimit <= 999) inferredVariant = 'Foil';
+        
+        combined.foilType = inferredVariant;
+        combined.isFoil = true;
+        console.log(`Visual foil detection missed, but card is numbered ${combined.serialNumber} - inferring variant: ${inferredVariant}`);
+      } else {
+        combined.foilType = null;
+        combined.isFoil = false;
+        console.log('Visual foil detection explicitly rejected foil characteristics');
+        console.log(`Visual rejection reason: ${visualFoilResult.indicators.join('; ')}`);
+      }
     } else {
       // Visual detection couldn't run, fall back to text-based detection for explicit mentions
       console.log('Visual detection unavailable, falling back to text-based foil detection...');
