@@ -6,7 +6,7 @@ export default function Header() {
       <div className="flex justify-between items-center px-4 py-4">
         <div className="flex items-center space-x-2">
           <img src={scanDeckLogo} alt="ScanDeck" className="h-8 w-8 rounded" />
-          <h1 className="text-xl font-semibold text-primary-700">ScanDeck</h1>
+          <h1 className="text-xl font-semibold text-primary-700">PackScan</h1>
         </div>
       </div>
     </header>
