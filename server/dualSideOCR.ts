@@ -325,6 +325,9 @@ async function combineCardResults(
     'OUTFIELD', 'HOUSTON', 'MILWAUKEE', 'PHILADELPHIA', 'CHICAGO',
     'EPPS', 'STROS', 'OXY',
     'LOP', 'PPS', 'TANKY', 'LOPPS',
+    'KC', 'TB', 'LA', 'NY', 'SF', 'SD', 'STL', 'CLE', 'DET', 'MIN', 'CHC', 'CHW', 'CWS',
+    'MIL', 'PIT', 'CIN', 'ATL', 'MIA', 'PHI', 'NYM', 'NYY', 'BOS', 'BAL', 'TOR',
+    'HOU', 'TEX', 'SEA', 'OAK', 'LAA', 'LAD', 'ARI', 'COL',
   ]);
   
   const stripTrademarkSuffix = (w: string): string => w.replace(/(?:TM|™|®)$/i, '');
@@ -337,6 +340,9 @@ async function combineCardResults(
     if (words.some(w => w.length <= 1)) return true;
     if (words.some(w => /^\d/.test(w))) return true;
     if (words.length === 2 && words.every(w => w.length <= 3)) return true;
+    const uniqueWords = new Set(words);
+    if (uniqueWords.size === 1 && words.length > 1) return true;
+    if (words.every(w => w.length <= 3)) return true;
     return false;
   };
   
