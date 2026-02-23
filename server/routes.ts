@@ -3,6 +3,7 @@ import { Server, createServer } from 'http';
 import multer from 'multer';
 import { db } from '../db';
 import { and, desc, eq, isNull, sql } from 'drizzle-orm';
+import { syncConfirmedCard } from './syncDatabase';
 import {
   cards,
   sports,
@@ -1492,18 +1493,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         and(...conditions)
       ).limit(1);
 
-      if (existing.length > 0) {
-        const updated = await db.update(confirmedCards)
-          .set({
-            confirmCount: sql`${confirmedCards.confirmCount} + 1`,
-            updatedAt: new Date(),
-          })
-          .where(eq(confirmedCards.id, existing[0].id))
-          .returning();
-        return res.json({ success: true, data: updated[0], action: 'incremented' });
-      }
-
-      const [inserted] = await db.insert(confirmedCards).values({
+      const syncData = {
         sport,
         playerFirstName,
         playerLastName,
@@ -1516,8 +1506,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
         isRookieCard: isRookieCard || false,
         isAutographed: isAutographed || false,
         isNumbered: isNumbered || false,
+      };
+
+      if (existing.length > 0) {
+        const updated = await db.update(confirmedCards)
+          .set({
+            confirmCount: sql`${confirmedCards.confirmCount} + 1`,
+            updatedAt: new Date(),
+          })
+          .where(eq(confirmedCards.id, existing[0].id))
+          .returning();
+
+        syncConfirmedCard(syncData).catch(() => {});
+
+        return res.json({ success: true, data: updated[0], action: 'incremented' });
+      }
+
+      const [inserted] = await db.insert(confirmedCards).values({
+        ...syncData,
         confirmCount: 1,
       }).returning();
+
+      syncConfirmedCard(syncData).catch(() => {});
 
       return res.status(201).json({ success: true, data: inserted, action: 'created' });
     } catch (error: any) {
