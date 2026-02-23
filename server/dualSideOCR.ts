@@ -440,6 +440,11 @@ async function combineCardResults(
   
   console.log('Combined result sport:', combined.sport);
   
+  if (combined.serialNumber && /\d+\/\d+/.test(combined.serialNumber) && !combined.isNumbered) {
+    combined.isNumbered = true;
+    console.log(`Set isNumbered=true based on serial number: ${combined.serialNumber}`);
+  }
+
   // Visual foil detection pass - analyze the actual card images for foil characteristics
   console.log('=== VISUAL FOIL DETECTION PASS ===');
   console.log('Current foil type before visual detection:', combined.foilType);
@@ -520,12 +525,6 @@ async function combineCardResults(
   if (combined.isFoil && combined.foilType && !combined.variant) {
     combined.variant = combined.foilType;
     console.log(`Set variant to "${combined.foilType}" from foil detection`);
-  }
-  
-  // Fix isNumbered when serialNumber is detected
-  if (combined.serialNumber && /\d+\/\d+/.test(combined.serialNumber) && !combined.isNumbered) {
-    combined.isNumbered = true;
-    console.log(`Set isNumbered=true based on serial number: ${combined.serialNumber}`);
   }
   
   console.log('=== COMBINATION COMPLETE ===');
