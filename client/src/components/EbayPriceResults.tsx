@@ -310,6 +310,16 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
                   <Label htmlFor="edit-sport">Sport</Label>
                   <Input id="edit-sport" value={editData.sport || ''} onChange={e => updateEditField('sport', e.target.value)} />
                 </div>
+                <div className="flex items-center gap-2 pt-1">
+                  <input
+                    type="checkbox"
+                    id="edit-rookieCard"
+                    checked={!!editData.isRookieCard}
+                    onChange={e => updateEditField('isRookieCard', e.target.checked)}
+                    className="h-4 w-4 rounded border-slate-300 accent-blue-600"
+                  />
+                  <Label htmlFor="edit-rookieCard" className="cursor-pointer">Rookie Card</Label>
+                </div>
               </div>
             </div>
           ) : (
