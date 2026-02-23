@@ -1127,7 +1127,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             if (ocrMatchesVariant) {
               cardData.variant = verified.variant || cardData.variant || '';
               cardData.isNumbered = (verified.isNumbered || ocrHasSerial) ?? cardData.isNumbered;
-              cardData.serialNumber = verified.serialLimit || cardData.serialNumber || '';
+              cardData.serialNumber = cardData.serialNumber || verified.serialLimit || '';
               console.log(`Applied variant data from confirmed card: variant="${cardData.variant}", serial="${cardData.serialNumber}"`);
             } else {
               console.log(`Skipping variant override - OCR scan differs from confirmed variant (confirmed: variant="${verified.variant}", serial="${verified.serialLimit}" | OCR: variant="${cardData.variant}", serial="${cardData.serialNumber}")`);
