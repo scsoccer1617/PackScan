@@ -352,9 +352,13 @@ async function combineCardResults(
   
   const frontNameBogus = isBogusFn(combined.playerFirstName, combined.playerLastName);
   const backNameBogus = isBogusFn(backResult.playerFirstName, backResult.playerLastName);
+  // Very short front OCR (< 50 chars) means poor image quality / foil surface that OCR couldn't
+  // read reliably — prefer back name in that case even if front name passed the bogus check.
+  const frontOCRTooShort = frontOCRText.trim().length < 50;
   
-  if (frontNameBogus && !backNameBogus && backResult.playerFirstName && backResult.playerLastName) {
-    console.log(`Front player name "${combined.playerFirstName} ${combined.playerLastName}" looks unreliable, using back: "${backResult.playerFirstName} ${backResult.playerLastName}"`);
+  if ((frontNameBogus || frontOCRTooShort) && !backNameBogus && backResult.playerFirstName && backResult.playerLastName) {
+    const reason = frontNameBogus ? 'bogus name' : `very short front OCR (${frontOCRText.trim().length} chars)`;
+    console.log(`Front player name "${combined.playerFirstName} ${combined.playerLastName}" unreliable (${reason}), using back: "${backResult.playerFirstName} ${backResult.playerLastName}"`);
     combined.playerFirstName = backResult.playerFirstName;
     combined.playerLastName = backResult.playerLastName;
   }

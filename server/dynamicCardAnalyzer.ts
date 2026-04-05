@@ -394,7 +394,14 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
     }
     
     if (potentialNames.length > 0) {
-      potentialNames.sort((a, b) => a.priority - b.priority);
+      potentialNames.sort((a, b) => {
+        if (a.priority !== b.priority) return a.priority - b.priority;
+        // Tie-break: prefer 2-word names (firstName + lastName) over 3-word names.
+        // 3-word names are more likely to be partial OCR artifacts (e.g. "Apps Aats Ew")
+        const aWordCount = [a.firstName, ...a.lastName.split(/\s+/)].length;
+        const bWordCount = [b.firstName, ...b.lastName.split(/\s+/)].length;
+        return aWordCount - bWordCount;
+      });
       const selected = potentialNames[0];
       cardDetails.playerFirstName = selected.firstName;
       cardDetails.playerLastName = selected.lastName;
