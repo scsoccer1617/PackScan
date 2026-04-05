@@ -730,10 +730,17 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
       }
     }
     
-    // Look for standalone numbers at the very beginning of the card text
-    // This prioritizes the number that appears at the top of the card
-    
-    // HIGHEST PRIORITY: Look for a number near the brand name - most card numbers are physically near the brand
+    // HIGHEST PRIORITY (before brand search): If the very first line is a standalone number,
+    // that is the card number — Topps/Bowman cards often put #316 as the topmost line on the back.
+    // This must run before brand-near-number detection so it isn't overridden by a false match.
+    const firstLineEarly = lines[0]?.trim() ?? '';
+    if (/^\d+$/.test(firstLineEarly) && parseInt(firstLineEarly) > 0 && parseInt(firstLineEarly) < 10000) {
+      cardDetails.cardNumber = firstLineEarly;
+      console.log(`Detected standalone card number at very top of text (highest priority): ${firstLineEarly}`);
+      return;
+    }
+
+    // HIGH PRIORITY: Look for a number near the brand name - most card numbers are physically near the brand
     for (let i = 0; i < Math.min(10, lines.length); i++) {
       const line = lines[i].trim();
       
@@ -802,9 +809,20 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
         }
         
         for (const nearbyLine of surroundingLines) {
+          // Skip lines that are clearly biographical/acquisition context — not card numbers
+          if (/\b(SIGNED|DRAFTED|DRAFT|BORN|FREE AGENT|ACQ|ACQUIRED|TRADED|AGENT)\b/i.test(nearbyLine)) {
+            console.log(`Skipping nearby line with biography/acquisition context: "${nearbyLine.substring(0, 60)}"`);
+            continue;
+          }
           // Check for hyphenated alphanumeric card numbers first (BD-7, HRC-42)
           const nearbyHyphenMatch = nearbyLine.match(/\b([A-Z]{1,4})-(\d{1,4})\b/);
           if (nearbyHyphenMatch && nearbyHyphenMatch[0]) {
+            const nearbyHyphenDigits = parseInt(nearbyHyphenMatch[2]);
+            // Skip if the numeric part looks like a year (> 999) rather than a card number
+            if (nearbyHyphenDigits > 999) {
+              console.log(`Skipping hyphenated match "${nearbyHyphenMatch[0]}" near brand — digit value ${nearbyHyphenDigits} looks like a year`);
+              continue;
+            }
             cardDetails.cardNumber = nearbyHyphenMatch[0];
             console.log(`Detected hyphenated card number ${nearbyHyphenMatch[0]} near brand line - high confidence`);
             return;
