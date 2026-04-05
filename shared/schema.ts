@@ -146,3 +146,46 @@ export type CardWithRelations = Card & {
   user?: User;
 };
 export type CardFormValues = z.infer<typeof cardSchema>;
+
+// =============================================
+// Card Reference Database (imported from CSV)
+// =============================================
+
+export const cardDatabase = pgTable("card_database", {
+  id: serial("id").primaryKey(),
+  brandId: text("brand_id").notNull(),         // e.g. "bowman_baseball"
+  brand: text("brand").notNull(),               // e.g. "Bowman"
+  year: integer("year").notNull(),
+  collection: text("collection").notNull(),     // e.g. "Bowman Base"
+  cardNumberRaw: text("card_number_raw").notNull(), // e.g. "1", "TOG-20"
+  cmpNumber: text("cmp_number"),               // internal CMP reference
+  playerName: text("player_name").notNull(),   // full name, e.g. "Mike Trout"
+  team: text("team"),
+  rookieFlag: text("rookie_flag"),             // "Rookie Card" or empty
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const cardDatabaseInsertSchema = createInsertSchema(cardDatabase);
+export type CardDatabaseInsert = z.infer<typeof cardDatabaseInsertSchema>;
+export type CardDatabaseEntry = typeof cardDatabase.$inferSelect;
+
+export const cardVariations = pgTable("card_variations", {
+  id: serial("id").primaryKey(),
+  brandId: text("brand_id").notNull(),
+  brand: text("brand").notNull(),
+  year: integer("year").notNull(),
+  collection: text("collection").notNull(),
+  variationOrParallel: text("variation_or_parallel").notNull(), // e.g. "Sky Blue", "Gold Refractor"
+  serialNumber: text("serial_number"),         // e.g. "/499", "Not serialized", "None detected"
+  cmpNumber: text("cmp_number"),
+  hobbyOdds: text("hobby_odds"),
+  jumboOdds: text("jumbo_odds"),
+  breakerOdds: text("breaker_odds"),
+  valueOdds: text("value_odds"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const cardVariationsInsertSchema = createInsertSchema(cardVariations);
+export type CardVariationsInsert = z.infer<typeof cardVariationsInsertSchema>;
+export type CardVariation = typeof cardVariations.$inferSelect;

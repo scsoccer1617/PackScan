@@ -22,6 +22,8 @@ import { z } from 'zod';
 import { handleDualSideCardAnalysis } from './dualSideOCR';
 import { extractTextFromImage, analyzeSportsCardImage } from './googleVisionFetch';
 import { handleJordanWicksCard } from './jordanWicksRoute';
+import { importCardsCSV, importVariationsCSV } from './cardDatabaseService';
+import { cardDatabase, cardVariations } from '../shared/schema';
 import { join } from 'path';
 import fs from 'fs';
 
@@ -1533,6 +1535,81 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error('Error confirming card:', error);
       return res.status(500).json({ error: 'Failed to confirm card data' });
+    }
+  });
+
+  // ─── Card Database Routes ───────────────────────────────────────────────────
+
+  // GET /api/card-database/stats — how many cards/variations are loaded
+  app.get(`${apiPrefix}/card-database/stats`, async (_req, res) => {
+    try {
+      const [cardCount] = await db.select({ count: sql<number>`count(*)::int` }).from(cardDatabase);
+      const [varCount] = await db.select({ count: sql<number>`count(*)::int` }).from(cardVariations);
+      return res.json({
+        cards: cardCount?.count ?? 0,
+        variations: varCount?.count ?? 0,
+      });
+    } catch (error: any) {
+      console.error('Error fetching card database stats:', error);
+      return res.status(500).json({ error: 'Failed to fetch stats' });
+    }
+  });
+
+  // POST /api/card-database/import-cards — upload cards CSV
+  app.post(
+    `${apiPrefix}/card-database/import-cards`,
+    upload.single('file'),
+    async (req: MulterRequest, res) => {
+      try {
+        if (!req.file) {
+          return res.status(400).json({ error: 'No file provided' });
+        }
+        const result = await importCardsCSV(req.file.buffer);
+        return res.json({
+          success: true,
+          imported: result.imported,
+          errors: result.errors.slice(0, 20),
+          errorCount: result.errors.length,
+        });
+      } catch (error: any) {
+        console.error('Error importing cards CSV:', error);
+        return res.status(500).json({ error: error.message || 'Failed to import cards CSV' });
+      }
+    }
+  );
+
+  // POST /api/card-database/import-variations — upload variations CSV
+  app.post(
+    `${apiPrefix}/card-database/import-variations`,
+    upload.single('file'),
+    async (req: MulterRequest, res) => {
+      try {
+        if (!req.file) {
+          return res.status(400).json({ error: 'No file provided' });
+        }
+        const result = await importVariationsCSV(req.file.buffer);
+        return res.json({
+          success: true,
+          imported: result.imported,
+          errors: result.errors.slice(0, 20),
+          errorCount: result.errors.length,
+        });
+      } catch (error: any) {
+        console.error('Error importing variations CSV:', error);
+        return res.status(500).json({ error: error.message || 'Failed to import variations CSV' });
+      }
+    }
+  );
+
+  // DELETE /api/card-database/clear — wipe and re-import (admin utility)
+  app.delete(`${apiPrefix}/card-database/clear`, async (_req, res) => {
+    try {
+      await db.delete(cardVariations);
+      await db.delete(cardDatabase);
+      return res.json({ success: true, message: 'Card database cleared' });
+    } catch (error: any) {
+      console.error('Error clearing card database:', error);
+      return res.status(500).json({ error: 'Failed to clear card database' });
     }
   });
 

@@ -3,6 +3,7 @@ import { CardFormValues } from '@shared/schema';
 import { analyzeSportsCardImage } from './dynamicCardAnalyzer';
 import { analyzeScoreCard } from './scoreCardAnalyzer';
 import { detectFoilVariant } from './foilVariantDetector';
+import { lookupCard } from './cardDatabaseService';
 
 // Define a standalone MulterFile interface that doesn't conflict with built-in types
 interface MulterFile {
@@ -444,6 +445,57 @@ async function combineCardResults(
     combined.isNumbered = true;
     console.log(`Set isNumbered=true based on serial number: ${combined.serialNumber}`);
   }
+
+  // ─── Card Database Lookup ───────────────────────────────────────────────────
+  // Use authoritative DB data when OCR successfully detected brand + year + card number.
+  // DB provides: player name, team, rookie flag, collection, variation.
+  // OCR foil/serial/condition data is preserved and not overwritten.
+  if (combined.brand && combined.year && combined.cardNumber) {
+    console.log(`[CardDB] Attempting lookup: brand="${combined.brand}" year=${combined.year} cardNumber="${combined.cardNumber}" collection="${combined.collection}"`);
+    try {
+      const dbResult = await lookupCard({
+        brand: combined.brand,
+        year: combined.year,
+        cardNumber: combined.cardNumber,
+        collection: combined.collection,
+        serialNumber: combined.serialNumber,
+      });
+
+      if (dbResult.found) {
+        console.log(`[CardDB] DB hit — ${dbResult.playerFirstName} ${dbResult.playerLastName}, team: ${dbResult.team}, collection: ${dbResult.collection}`);
+
+        // Override player name with authoritative DB value
+        if (dbResult.playerFirstName) combined.playerFirstName = dbResult.playerFirstName;
+        if (dbResult.playerLastName)  combined.playerLastName  = dbResult.playerLastName;
+
+        // Override team from DB (often not in OCR)
+        // Store in notes so it's available for eBay searches
+        if (dbResult.team && !combined.notes) combined.notes = `Team: ${dbResult.team}`;
+
+        // Use DB collection if OCR missed it
+        if (dbResult.collection && !combined.collection) combined.collection = dbResult.collection;
+
+        // Rookie card from DB
+        if (dbResult.isRookieCard) combined.isRookieCard = true;
+
+        // Variation from DB (only if OCR didn't detect one from foil/text)
+        if (dbResult.variation && !combined.variant) combined.variant = dbResult.variation;
+
+        // Serial number from DB variation (only if OCR didn't find one)
+        if (dbResult.serialNumber && !combined.serialNumber) {
+          combined.serialNumber = dbResult.serialNumber;
+          if (/\/\d+/.test(dbResult.serialNumber)) combined.isNumbered = true;
+        }
+      } else {
+        console.log('[CardDB] No DB match — proceeding with OCR-only results');
+      }
+    } catch (err: any) {
+      console.error('[CardDB] Lookup failed (non-fatal):', err.message);
+    }
+  } else {
+    console.log(`[CardDB] Skipping lookup — insufficient OCR fields: brand="${combined.brand}" year=${combined.year} cardNumber="${combined.cardNumber}"`);
+  }
+  // ───────────────────────────────────────────────────────────────────────────
 
   // Visual foil detection pass - analyze the actual card images for foil characteristics
   console.log('=== VISUAL FOIL DETECTION PASS ===');

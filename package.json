@@ -54,6 +54,7 @@
     "clsx": "^2.1.1",
     "cmdk": "^1.0.0",
     "connect-pg-simple": "^10.0.0",
+    "csv-parse": "^6.2.1",
     "date-fns": "^3.6.0",
     "drizzle-orm": "^0.38.4",
     "drizzle-seed": "^0.3.1",
