@@ -15,6 +15,7 @@ interface DbStats {
 interface ImportResult {
   success: boolean;
   imported: number;
+  replaced: number;
   errors: string[];
   errorCount: number;
   error?: string;
@@ -67,7 +68,7 @@ export default function CardDatabaseAdmin() {
       setCardsResult(result);
       if (result.success) {
         queryClient.invalidateQueries({ queryKey: ["/api/card-database/stats"] });
-        toast({ title: "Cards imported", description: `${result.imported.toLocaleString()} cards loaded.` });
+        toast({ title: "Cards imported", description: result.replaced > 0 ? `${result.imported.toLocaleString()} cards loaded (${result.replaced.toLocaleString()} previous rows replaced).` : `${result.imported.toLocaleString()} cards loaded.` });
       } else {
         toast({ title: "Import failed", description: result.error, variant: "destructive" });
       }
@@ -85,7 +86,7 @@ export default function CardDatabaseAdmin() {
       setVariationsResult(result);
       if (result.success) {
         queryClient.invalidateQueries({ queryKey: ["/api/card-database/stats"] });
-        toast({ title: "Variations imported", description: `${result.imported.toLocaleString()} variations loaded.` });
+        toast({ title: "Variations imported", description: result.replaced > 0 ? `${result.imported.toLocaleString()} variations loaded (${result.replaced.toLocaleString()} previous rows replaced).` : `${result.imported.toLocaleString()} variations loaded.` });
       } else {
         toast({ title: "Import failed", description: result.error, variant: "destructive" });
       }
@@ -234,6 +235,11 @@ function ImportResultBadge({ result }: { result: ImportResult }) {
         <div className="flex items-center gap-1.5 text-green-700 text-xs">
           <CheckCircle className="w-3.5 h-3.5" />
           <span>{result.imported.toLocaleString()} rows imported</span>
+          {result.replaced > 0 && (
+            <Badge variant="outline" className="text-blue-700 border-blue-300 text-[10px]">
+              {result.replaced.toLocaleString()} replaced
+            </Badge>
+          )}
           {result.errorCount > 0 && (
             <Badge variant="outline" className="text-yellow-700 border-yellow-300 text-[10px]">
               {result.errorCount} skipped

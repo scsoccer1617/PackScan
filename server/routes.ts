@@ -1568,6 +1568,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json({
           success: true,
           imported: result.imported,
+          replaced: result.replaced,
           errors: result.errors.slice(0, 20),
           errorCount: result.errors.length,
         });
@@ -1591,6 +1592,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json({
           success: true,
           imported: result.imported,
+          replaced: result.replaced,
           errors: result.errors.slice(0, 20),
           errorCount: result.errors.length,
         });

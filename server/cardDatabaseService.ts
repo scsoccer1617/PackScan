@@ -60,9 +60,10 @@ export interface CsvImportResult {
  * Expected columns: brand_id, brand, year, collection, card_number_raw,
  *                   cmp_number, player_name, team, rookie_flag, notes
  */
-export async function importCardsCSV(csvBuffer: Buffer): Promise<{ imported: number; errors: string[] }> {
+export async function importCardsCSV(csvBuffer: Buffer): Promise<{ imported: number; replaced: number; errors: string[] }> {
   const errors: string[] = [];
   let imported = 0;
+  let replaced = 0;
 
   const records = parse(csvBuffer, {
     columns: true,
@@ -71,23 +72,13 @@ export async function importCardsCSV(csvBuffer: Buffer): Promise<{ imported: num
     relax_column_count: true,
   }) as Record<string, string>[];
 
-  const BATCH_SIZE = 500;
-  let batch: typeof cardDatabase.$inferInsert[] = [];
-
-  const flush = async () => {
-    if (batch.length === 0) return;
-    try {
-      await db.insert(cardDatabase).values(batch).onConflictDoNothing();
-      imported += batch.length;
-    } catch (err: any) {
-      errors.push(`Batch insert error: ${err.message}`);
-    }
-    batch = [];
-  };
+  // Pass 1: parse all valid rows and collect which brand+year combos are present
+  const rows: typeof cardDatabase.$inferInsert[] = [];
+  const brandYearCombos = new Set<string>();
 
   for (let i = 0; i < records.length; i++) {
     const row = records[i];
-    const lineNum = i + 2; // 1-indexed, +1 for header
+    const lineNum = i + 2;
 
     const brand = (row['brand'] || row['Brand'] || '').trim();
     const brandId = (row['brand_id'] || row['Brand_id'] || '').trim();
@@ -107,8 +98,10 @@ export async function importCardsCSV(csvBuffer: Buffer): Promise<{ imported: num
       continue;
     }
 
-    batch.push({
-      brandId: brandId || brand.toLowerCase().replace(/\s+/g, '_'),
+    const resolvedBrandId = brandId || brand.toLowerCase().replace(/\s+/g, '_');
+    brandYearCombos.add(`${resolvedBrandId}|${year}`);
+    rows.push({
+      brandId: resolvedBrandId,
       brand,
       year,
       collection,
@@ -119,12 +112,31 @@ export async function importCardsCSV(csvBuffer: Buffer): Promise<{ imported: num
       rookieFlag: (row['rookie_flag'] || row['Rookie_flag'] || '').trim() || null,
       notes: (row['notes'] || row['Notes'] || '').trim() || null,
     });
-
-    if (batch.length >= BATCH_SIZE) await flush();
   }
-  await flush();
 
-  return { imported, errors };
+  // Pass 2: delete existing rows for every brand+year found in the file so we never duplicate
+  for (const combo of brandYearCombos) {
+    const [bId, yr] = combo.split('|');
+    const deleted = await db.delete(cardDatabase)
+      .where(and(eq(cardDatabase.brandId, bId), eq(cardDatabase.year, parseInt(yr))))
+      .returning({ id: cardDatabase.id });
+    replaced += deleted.length;
+  }
+  if (replaced > 0) console.log(`[CardDB] Removed ${replaced} existing card rows before re-import`);
+
+  // Pass 3: insert all fresh rows in batches
+  const BATCH_SIZE = 500;
+  for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+    const batch = rows.slice(i, i + BATCH_SIZE);
+    try {
+      await db.insert(cardDatabase).values(batch);
+      imported += batch.length;
+    } catch (err: any) {
+      errors.push(`Batch insert error: ${err.message}`);
+    }
+  }
+
+  return { imported, replaced, errors };
 }
 
 /**
@@ -132,9 +144,10 @@ export async function importCardsCSV(csvBuffer: Buffer): Promise<{ imported: num
  * Expected columns: brand_id, brand, year, collection, variation_or_parallel,
  *                   serial_number, cmp_number, hobby_odds, jumbo_odds, breaker_odds, value_odds
  */
-export async function importVariationsCSV(csvBuffer: Buffer): Promise<{ imported: number; errors: string[] }> {
+export async function importVariationsCSV(csvBuffer: Buffer): Promise<{ imported: number; replaced: number; errors: string[] }> {
   const errors: string[] = [];
   let imported = 0;
+  let replaced = 0;
 
   const records = parse(csvBuffer, {
     columns: true,
@@ -143,19 +156,9 @@ export async function importVariationsCSV(csvBuffer: Buffer): Promise<{ imported
     relax_column_count: true,
   }) as Record<string, string>[];
 
-  const BATCH_SIZE = 500;
-  let batch: typeof cardVariations.$inferInsert[] = [];
-
-  const flush = async () => {
-    if (batch.length === 0) return;
-    try {
-      await db.insert(cardVariations).values(batch).onConflictDoNothing();
-      imported += batch.length;
-    } catch (err: any) {
-      errors.push(`Batch insert error: ${err.message}`);
-    }
-    batch = [];
-  };
+  // Pass 1: parse all valid rows and collect which brand+year combos are present
+  const rows: typeof cardVariations.$inferInsert[] = [];
+  const brandYearCombos = new Set<string>();
 
   for (let i = 0; i < records.length; i++) {
     const row = records[i];
@@ -181,8 +184,10 @@ export async function importVariationsCSV(csvBuffer: Buffer): Promise<{ imported
     const rawSerial = (row['serial_number'] || row['Serial_number'] || '').trim();
     const serialNumber = normalizeSerial(rawSerial);
 
-    batch.push({
-      brandId: brandId || brand.toLowerCase().replace(/\s+/g, '_'),
+    const resolvedBrandId = brandId || brand.toLowerCase().replace(/\s+/g, '_');
+    brandYearCombos.add(`${resolvedBrandId}|${year}`);
+    rows.push({
+      brandId: resolvedBrandId,
       brand,
       year,
       collection,
@@ -194,12 +199,31 @@ export async function importVariationsCSV(csvBuffer: Buffer): Promise<{ imported
       breakerOdds: (row['breaker_odds'] || '').trim() || null,
       valueOdds: (row['value_odds'] || '').trim() || null,
     });
-
-    if (batch.length >= BATCH_SIZE) await flush();
   }
-  await flush();
 
-  return { imported, errors };
+  // Pass 2: delete existing rows for every brand+year found in the file so we never duplicate
+  for (const combo of brandYearCombos) {
+    const [bId, yr] = combo.split('|');
+    const deleted = await db.delete(cardVariations)
+      .where(and(eq(cardVariations.brandId, bId), eq(cardVariations.year, parseInt(yr))))
+      .returning({ id: cardVariations.id });
+    replaced += deleted.length;
+  }
+  if (replaced > 0) console.log(`[CardDB] Removed ${replaced} existing variation rows before re-import`);
+
+  // Pass 3: insert all fresh rows in batches
+  const BATCH_SIZE = 500;
+  for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+    const batch = rows.slice(i, i + BATCH_SIZE);
+    try {
+      await db.insert(cardVariations).values(batch);
+      imported += batch.length;
+    } catch (err: any) {
+      errors.push(`Batch insert error: ${err.message}`);
+    }
+  }
+
+  return { imported, replaced, errors };
 }
 
 // ───────────────────────────────────────────────
