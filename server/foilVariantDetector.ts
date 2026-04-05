@@ -19,7 +19,7 @@ const FOIL_KEYWORDS = [
   'foil', 'chrome', 'refractor', 'prismatic', 'rainbow', 'holographic', 'hologram',
   'shimmer', 'metallic', 'platinum', 'mirror', 'prism',
   'superfractor', 'xfractor', 'sepia', 'negative',
-  'wave', 'atomic', 'crystal', 'diamond', 'emerald', 'ruby', 'sapphire',
+  'wave', 'atomic', 'crystal',
   'topps chrome', 'bowman chrome', 'chrome series', 'chrome variations',
   'certified autograph', 'jersey autograph', 'patch autograph',
   'aqua foil', 'blue foil', 'teal foil', 'green foil', 'silver foil', 'gold foil',
@@ -49,7 +49,6 @@ const FOIL_VARIANTS: Record<string, string> = {
   'teal foil': 'Teal Foil',
   'purple foil': 'Purple Foil',
   'orange foil': 'Orange Foil',
-  'green': 'Green Foil',
   'black foil': 'Black Foil',
   'pink foil': 'Pink Foil',
   'platinum': 'Platinum',
@@ -254,25 +253,9 @@ export function detectFoilVariant(fullText: string): FoilDetectionResult {
     confidence += 0.4;
   }
 
-  // Serial numbered cards with special finishes
-  const serialPattern = /\d{1,4}\/\d{1,4}/;
-  if (serialPattern.test(fullText) && textLower.includes('topps')) {
-    // Many numbered Topps cards are foil variants
-    indicators.push('Numbered card (often foil variant)');
-    confidence += 0.2;
-    
-    // If low numbered (under 100), likely premium foil
-    const serialMatch = fullText.match(/(\d{1,4})\/(\d{1,4})/);
-    if (serialMatch) {
-      const total = parseInt(serialMatch[2]);
-      if (total <= 99) {
-        indicators.push('Low-numbered card (premium foil likely)');
-        isFoil = true;
-        foilType = foilType || 'Numbered Foil';
-        confidence += 0.3;
-      }
-    }
-  }
+  // Serial numbered cards: do NOT infer foil type from serial number alone.
+  // The DB variation lookup handles /serial → parallel name mapping via CSV data.
+  // A serial number in OCR text just means the card is limited, not that it has a foil finish.
 
   // Prizm cards (always foil-like)
   if (textLower.includes('prizm')) {

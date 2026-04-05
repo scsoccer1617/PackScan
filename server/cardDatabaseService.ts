@@ -35,6 +35,7 @@ export interface CardLookupResult {
   playerLastName?: string;
   team?: string;
   collection?: string;
+  cardNumber?: string;      // authoritative card number from DB (e.g. "T91-13")
   variation?: string;
   serialNumber?: string;
   isRookieCard?: boolean;
@@ -264,6 +265,30 @@ export async function lookupCard(input: CardLookupInput): Promise<CardLookupResu
       });
     }
 
+    // ── Step 1b: Prefix-match fallback ──────────────────────────────────
+    // If OCR truncated the card number (e.g. "T91" instead of "T91-13"),
+    // try finding cards whose DB card number STARTS WITH the OCR number.
+    if (cardRows.length === 0 && cardNumNorm.length >= 2) {
+      const prefixRows = await db
+        .select()
+        .from(cardDatabase)
+        .where(
+          and(
+            sql`lower(${cardDatabase.brand}) = lower(${brandNorm})`,
+            eq(cardDatabase.year, year),
+            sql`lower(${cardDatabase.cardNumberRaw}) like lower(${cardNumNorm + '-%'})`
+          )
+        )
+        .limit(10);
+
+      if (prefixRows.length > 0) {
+        console.log(`[CardDB] Prefix match found ${prefixRows.length} candidate(s) for "${cardNumNorm}" (e.g. ${prefixRows[0].cardNumberRaw})`);
+        // Prefer shorter (simpler) card numbers
+        prefixRows.sort((a, b) => a.cardNumberRaw.length - b.cardNumberRaw.length);
+        cardRows = prefixRows;
+      }
+    }
+
     if (cardRows.length === 0) {
       console.log(`[CardDB] No match found for brand="${brandNorm}" year=${year} cardNumber="${cardNumNorm}"`);
       return { found: false, source: 'ocr_fallback' };
@@ -292,6 +317,7 @@ export async function lookupCard(input: CardLookupInput): Promise<CardLookupResu
       playerLastName: lastName,
       team: cardRow.team || undefined,
       collection: cardRow.collection,
+      cardNumber: cardRow.cardNumberRaw,
       variation: variationResult?.variationOrParallel,
       serialNumber: variationResult?.serialNumber || serialNumber,
       isRookieCard,

@@ -823,7 +823,7 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
     
     // Check for hyphenated alphanumeric card numbers (BD-7, BDC-15, HRC-42, etc.)
     // These are high-confidence and should be checked before standalone numbers
-    const nonCardCodePrefixes = new Set(['CMP', 'CODE', 'WWW', 'COM', 'INC', 'MLB', 'OBP', 'ERA', 'AVG', 'WAR', 'SLG', 'RBI', 'HT', 'WT', 'ACQ']);
+    const nonCardCodePrefixes = new Set(['CMP', 'CODE', 'WWW', 'COM', 'INC', 'MLB', 'OBP', 'ERA', 'AVG', 'WAR', 'SLG', 'RBI', 'HT', 'WT', 'ACQ', 'RD', 'RND', 'PK', 'OVR']);
     const hyphenAlphaNumPatternEarly = /\b([A-Z]{1,4})-(\d{1,4})\b/g;
     let hyphenMatchEarly;
     while ((hyphenMatchEarly = hyphenAlphaNumPatternEarly.exec(text)) !== null) {
@@ -851,12 +851,14 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
       if (nonCardCodePrefixes.has(prefix)) continue;
       if (text.includes('CODE ' + fullMatch)) continue;
       if (parseInt(digits) > 999) continue;
-      // Skip patterns that look like brand abbreviations, common words, or stat/bio prefixes
-      if (/^(OF|IN|AT|TO|BY|OR|ON|IS|IT|AS|IF|UP|NO|SO|DO|AN|AM|BE|HE|WE|MY|US|THE|AND|FOR|ARE|BUT|NOT|YOU|ALL|HAS|HIS|HOW|ITS|MAY|OUR|OUT|WAY|WHO|DID|GET|HIM|LET|SAY|SHE|TOO|USE|MLB|NFL|NBA|NHL|USA|NL|AL|FT|LB|LBS|HR|AB|BB|SO|IP|ER|GS|SV|WL|GP|GF|RS|BA)$/i.test(prefix)) continue;
-      // Skip if the match appears in a bio/stat line
-      const lineWithAlphaNum = lines.find(line => line.includes(fullMatch));
+      // Skip patterns that look like brand abbreviations, common words, stat/bio prefixes, or draft round (RD)
+      if (/^(OF|IN|AT|TO|BY|OR|ON|IS|IT|AS|IF|UP|NO|SO|DO|AN|AM|BE|HE|WE|MY|US|THE|AND|FOR|ARE|BUT|NOT|YOU|ALL|HAS|HIS|HOW|ITS|MAY|OUR|OUT|WAY|WHO|DID|GET|HIM|LET|SAY|SHE|TOO|USE|MLB|NFL|NBA|NHL|USA|NL|AL|FT|LB|LBS|HR|AB|BB|SO|IP|ER|GS|SV|WL|GP|GF|RS|BA|RD|RND|PK|OVR)$/i.test(prefix)) continue;
+      // Skip if the match appears in a bio/stat line (case-insensitive search for the line)
+      const lineWithAlphaNum = lines.find(line => line.toLowerCase().includes(fullMatch.toLowerCase()));
       if (lineWithAlphaNum && isDOBFormat(lineWithAlphaNum)) continue;
       if (lineWithAlphaNum && isPlayerBioNumber(digits, lineWithAlphaNum)) continue;
+      // Skip if match appears in a DRAFTED/DRAFT/BORN/SIGNED biographical line
+      if (lineWithAlphaNum && /\b(DRAFTED|DRAFT|BORN|SIGNED|OVERALL|ROUND|PICK|AGENT|FREE)\b/i.test(lineWithAlphaNum)) continue;
       
       cardDetails.cardNumber = fullMatch;
       console.log(`Detected Alphanumeric card number (early check): ${cardDetails.cardNumber}`);

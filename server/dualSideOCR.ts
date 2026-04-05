@@ -462,18 +462,30 @@ async function combineCardResults(
       });
 
       if (dbResult.found) {
-        console.log(`[CardDB] DB hit — ${dbResult.playerFirstName} ${dbResult.playerLastName}, team: ${dbResult.team}, collection: ${dbResult.collection}`);
+        console.log(`[CardDB] DB hit — ${dbResult.playerFirstName} ${dbResult.playerLastName}, team: ${dbResult.team}, collection: ${dbResult.collection}, cardNumber: ${dbResult.cardNumber}`);
 
         // Override player name with authoritative DB value
         if (dbResult.playerFirstName) combined.playerFirstName = dbResult.playerFirstName;
         if (dbResult.playerLastName)  combined.playerLastName  = dbResult.playerLastName;
 
         // Override team from DB (often not in OCR)
-        // Store in notes so it's available for eBay searches
         if (dbResult.team && !combined.notes) combined.notes = `Team: ${dbResult.team}`;
 
         // Use DB collection if OCR missed it
         if (dbResult.collection && !combined.collection) combined.collection = dbResult.collection;
+
+        // Use authoritative DB card number if it's more complete than what OCR detected.
+        // E.g. OCR reads "T91" but DB has "T91-13" — use the full DB value.
+        if (dbResult.cardNumber) {
+          const ocrNum = (combined.cardNumber || '').replace(/^#/, '').trim().toLowerCase();
+          const dbNum  = dbResult.cardNumber.replace(/^#/, '').trim().toLowerCase();
+          // Use DB number if OCR number is a prefix of DB number (i.e., OCR was truncated)
+          // or if they match exactly
+          if (ocrNum === dbNum || dbNum.startsWith(ocrNum)) {
+            combined.cardNumber = dbResult.cardNumber;
+            console.log(`[CardDB] Card number set from DB: ${dbResult.cardNumber} (OCR had: ${combined.cardNumber})`);
+          }
+        }
 
         // Rookie card from DB
         if (dbResult.isRookieCard) combined.isRookieCard = true;
@@ -531,24 +543,13 @@ async function combineCardResults(
       console.log(`Visual foil detection successful: ${visualFoilResult.foilType} (confidence: ${visualFoilResult.confidence})`);
       console.log(`Visual indicators: ${visualFoilResult.indicators.join('; ')}`);
     } else if (visualFoilResult && !visualFoilResult.indicators.some(indicator => indicator.includes('Error in visual analysis'))) {
-      if (combined.isNumbered && combined.serialNumber) {
-        const serialMatch = combined.serialNumber.match(/\/(\d+)/);
-        const serialLimit = serialMatch ? parseInt(serialMatch[1]) : 0;
-        let inferredVariant = 'Parallel';
-        if (serialLimit > 0 && serialLimit <= 99) inferredVariant = 'Gold Foil';
-        else if (serialLimit > 0 && serialLimit <= 199) inferredVariant = 'Blue Foil';
-        else if (serialLimit > 0 && serialLimit <= 499) inferredVariant = 'Aqua Foil';
-        else if (serialLimit > 0 && serialLimit <= 999) inferredVariant = 'Foil';
-        
-        combined.foilType = inferredVariant;
-        combined.isFoil = true;
-        console.log(`Visual foil detection missed, but card is numbered ${combined.serialNumber} - inferring variant: ${inferredVariant}`);
-      } else {
-        combined.foilType = null;
-        combined.isFoil = false;
-        console.log('Visual foil detection explicitly rejected foil characteristics');
-        console.log(`Visual rejection reason: ${visualFoilResult.indicators.join('; ')}`);
-      }
+      // Visual detection ran but did not find foil — trust it and clear any foil state.
+      // Serial number alone is not enough evidence; the DB variation lookup already handles
+      // mapping serial numbers to parallel names (e.g. /499 → Sky Blue).
+      combined.foilType = null;
+      combined.isFoil = false;
+      console.log('Visual foil detection rejected foil characteristics — clearing foil state');
+      console.log(`Visual rejection reason: ${visualFoilResult.indicators.join('; ')}`);
     } else {
       // Visual detection couldn't run, fall back to text-based detection for explicit mentions
       console.log('Visual detection unavailable, falling back to text-based foil detection...');
