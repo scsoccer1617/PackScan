@@ -659,30 +659,35 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
       return;
     }
     
-    // Format: 89B-2 (alphanumeric with dash)
-    // Make sure we don't match date formats like 7-17 or 7-17-63
-    const dashNumberPattern = /\b([A-Z0-9]+)-([0-9]+)\b/;
-    const dashNumberMatch = text.match(dashNumberPattern);
-    
-    if (dashNumberMatch && dashNumberMatch[0]) {
-      // Skip this match if it appears to be a date format
+    // Format: 89B-2, T91-13 (alphanumeric-with-digits prefix, dash, digits)
+    // Loop through ALL matches so a skipped date pattern doesn't block later valid card numbers.
+    const dashNumberPatternGlobal = /\b([A-Z][A-Z0-9]*\d[A-Z0-9]*|[A-Z]{1,4})-([0-9]{1,4})\b/g;
+    let dashNumberMatch;
+    let foundDashCardNumber = false;
+    while ((dashNumberMatch = dashNumberPatternGlobal.exec(text)) !== null) {
       const matchedText = dashNumberMatch[0];
-      const lineWithMatch = lines.find(line => line.includes(matchedText));
-      
+      const digits = dashNumberMatch[2];
+      if (parseInt(digits) > 999) continue;
+      const lineWithMatch = lines.find(line => line.toLowerCase().includes(matchedText.toLowerCase()));
       if (lineWithMatch && isDOBFormat(lineWithMatch)) {
         console.log(`Skipping date-like pattern "${matchedText}" that appears to be a birthdate/date`);
-      } else {
-        cardDetails.cardNumber = matchedText;
-        console.log(`Detected card number with dash: ${cardDetails.cardNumber}`);
-        
-        // 35th Anniversary cards have format like 89B-2
-        if (matchedText.match(/^\d+[A-Z]\d*-\d+$/)) {
-          cardDetails.collection = "35th Anniversary";
-          console.log(`Setting collection from card number pattern: 35th Anniversary`);
-        }
-        return;
+        continue;
       }
+      if (lineWithMatch && /\b(DRAFTED|DRAFT|BORN|SIGNED|OVERALL|ROUND|PICK|AGENT|FREE)\b/i.test(lineWithMatch)) {
+        console.log(`Skipping pattern "${matchedText}" in biographical context`);
+        continue;
+      }
+      cardDetails.cardNumber = matchedText;
+      console.log(`Detected card number with dash: ${cardDetails.cardNumber}`);
+      // 35th Anniversary cards have format like 89B-2
+      if (matchedText.match(/^\d+[A-Z]\d*-\d+$/)) {
+        cardDetails.collection = "35th Anniversary";
+        console.log(`Setting collection from card number pattern: 35th Anniversary`);
+      }
+      foundDashCardNumber = true;
+      break;
     }
+    if (foundDashCardNumber) return;
     
     // Format: 89-B (number-letter)
     const numberLetterPattern = /\b(\d+)-([A-Z])\b/;

@@ -280,13 +280,17 @@ export async function detectFoilFromImage(base64Image: string, options?: { isNum
           indicators.push(`White border detected: RGB(${c.r},${c.g},${c.b}) - ${(c.pixelFraction * 100).toFixed(1)}%`);
         }
         
-        if (c.brightness > 60 && c.saturation > 25 && c.pixelFraction > 0.02) {
+        // Metallic: standard threshold OR very-high-saturation foil-like colors at lower coverage
+        const isHighSatFoilColor = c.saturation > 150 && c.pixelFraction > 0.005 && c.brightness > 60;
+        if ((c.brightness > 60 && c.saturation > 25 && c.pixelFraction > 0.02) || isHighSatFoilColor) {
           hasMetallicColors = true;
           totalColorVariance += c.saturation * c.pixelFraction;
           indicators.push(`Metallic color: RGB(${c.r},${c.g},${c.b}) - saturation: ${c.saturation}, coverage: ${(c.pixelFraction * 100).toFixed(1)}%`);
         }
         
-        if (c.saturation > 20 && c.pixelFraction > 0.02 && Math.max(c.r, c.g, c.b) > 70) {
+        // Tinted: standard threshold OR very-high-saturation foil-like colors at lower coverage
+        const isFoilLikeColor = c.saturation > 150 && c.pixelFraction > 0.005;
+        if ((c.saturation > 20 && c.pixelFraction > 0.02 || isFoilLikeColor) && Math.max(c.r, c.g, c.b) > 70) {
           if (c.colorName) {
             tintedColorCount++;
             detectedTints.push({ name: c.colorName, coverage: c.pixelFraction });
@@ -306,6 +310,8 @@ export async function detectFoilFromImage(base64Image: string, options?: { isNum
 
       const similarTintCount = detectedTints.filter(t => t.name === detectedColorTint).length;
       const hasStrongSimilarTints = similarTintCount >= 3;
+      // Strong similar tints with meaningful coverage: characteristic of foil border parallels
+      const hasStrongColorEvidence = hasStrongSimilarTints && totalTintCoverage > 0.05;
       const hasModestSimilarTints = similarTintCount >= 2 && totalTintCoverage > 0.20;
       
       indicators.push(`Label support: strongFoil=${hasStrongFoilIndicators}, reflective=${hasReflectiveLabels}`);
@@ -317,7 +323,7 @@ export async function detectFoilFromImage(base64Image: string, options?: { isNum
       
       indicators.push(`Numbered card context: isNumbered=${isNumbered}, numberedEvidence=${hasNumberedCardEvidence}`);
       
-      if (hasMetallicColors && detectedColorTint && (hasLabelSupport || hasVeryStrongColorEvidence || hasNumberedCardEvidence) && (hasStrongSimilarTints || hasModestSimilarTints || totalTintCoverage > 0.25 || hasNumberedCardEvidence)) {
+      if (hasMetallicColors && detectedColorTint && (hasLabelSupport || hasVeryStrongColorEvidence || hasNumberedCardEvidence || hasStrongColorEvidence) && (hasStrongSimilarTints || hasModestSimilarTints || totalTintCoverage > 0.25 || hasNumberedCardEvidence || hasStrongColorEvidence)) {
         isFoil = true;
         confidence += Math.min(0.6, totalColorVariance * 2 + totalTintCoverage);
         

@@ -27,6 +27,7 @@ export interface CardLookupInput {
   collection?: string;
   cardNumber?: string;
   serialNumber?: string;
+  playerLastName?: string;  // used to disambiguate when prefix-matching finds multiple candidates
 }
 
 export interface CardLookupResult {
@@ -210,7 +211,7 @@ export async function importVariationsCSV(csvBuffer: Buffer): Promise<{ imported
  * Returns authoritative card data if found, or { found: false } to signal fallback.
  */
 export async function lookupCard(input: CardLookupInput): Promise<CardLookupResult> {
-  const { brand, year, collection, cardNumber, serialNumber } = input;
+  const { brand, year, collection, cardNumber, serialNumber, playerLastName } = input;
 
   if (!brand || !year || !cardNumber) {
     return { found: false, source: 'ocr_fallback' };
@@ -279,13 +280,26 @@ export async function lookupCard(input: CardLookupInput): Promise<CardLookupResu
             sql`lower(${cardDatabase.cardNumberRaw}) like lower(${cardNumNorm + '-%'})`
           )
         )
-        .limit(10);
+        .limit(50);
 
       if (prefixRows.length > 0) {
-        console.log(`[CardDB] Prefix match found ${prefixRows.length} candidate(s) for "${cardNumNorm}" (e.g. ${prefixRows[0].cardNumberRaw})`);
-        // Prefer shorter (simpler) card numbers
-        prefixRows.sort((a, b) => a.cardNumberRaw.length - b.cardNumberRaw.length);
-        cardRows = prefixRows;
+        console.log(`[CardDB] Prefix match found ${prefixRows.length} candidate(s) for "${cardNumNorm}"`);
+        // Score each candidate: boost rows whose player name contains the OCR player last name
+        const lastNameNorm = (playerLastName || '').trim().toLowerCase();
+        const scored = prefixRows.map(r => {
+          const dbName = r.playerName.toLowerCase();
+          const nameMatch = lastNameNorm && dbName.includes(lastNameNorm) ? 100 : 0;
+          return { row: r, score: nameMatch };
+        });
+        scored.sort((a, b) => {
+          if (b.score !== a.score) return b.score - a.score;
+          // Secondary: prefer shorter card numbers (more specific match)
+          return a.row.cardNumberRaw.length - b.row.cardNumberRaw.length;
+        });
+        if (scored[0].score > 0) {
+          console.log(`[CardDB] Prefix match winner: ${scored[0].row.cardNumberRaw} (${scored[0].row.playerName}) — name matched "${lastNameNorm}"`);
+        }
+        cardRows = scored.map(s => s.row);
       }
     }
 
@@ -357,7 +371,8 @@ async function lookupVariation(params: {
 
   if (rows.length === 0) return null;
 
-  // If we have a serial number from OCR, try to match it
+  // Only return a variation when we have a serial number from OCR that matches.
+  // Never assign a numbered parallel to a base card that has no serial number detected.
   if (serialNumber) {
     const ocrLimit = extractSerialLimit(serialNumber);
     if (ocrLimit) {
@@ -373,13 +388,10 @@ async function lookupVariation(params: {
     }
   }
 
-  // Return the base variation (first row without a specific serial, i.e. base parallel)
-  const base = rows.find(r =>
-    !r.serialNumber ||
-    r.serialNumber === 'Not serialized' ||
-    r.serialNumber === 'None detected'
-  );
-  return base || rows[0];
+  // No serial number detected — do not infer a parallel/variation from the DB.
+  // The card is a base card or we don't have enough information to assign a variant.
+  console.log('[CardDB] No serial number detected — skipping variation assignment');
+  return null;
 }
 
 // ───────────────────────────────────────────────

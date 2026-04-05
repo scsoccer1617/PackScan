@@ -459,6 +459,7 @@ async function combineCardResults(
         cardNumber: combined.cardNumber,
         collection: combined.collection,
         serialNumber: combined.serialNumber,
+        playerLastName: combined.playerLastName,
       });
 
       if (dbResult.found) {
@@ -482,8 +483,8 @@ async function combineCardResults(
           // Use DB number if OCR number is a prefix of DB number (i.e., OCR was truncated)
           // or if they match exactly
           if (ocrNum === dbNum || dbNum.startsWith(ocrNum)) {
-            combined.cardNumber = dbResult.cardNumber;
             console.log(`[CardDB] Card number set from DB: ${dbResult.cardNumber} (OCR had: ${combined.cardNumber})`);
+            combined.cardNumber = dbResult.cardNumber;
           }
         }
 
