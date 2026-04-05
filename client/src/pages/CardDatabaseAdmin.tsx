@@ -46,7 +46,7 @@ export default function CardDatabaseAdmin() {
 
   const clearMutation = useMutation({
     mutationFn: async () => {
-      return apiRequest("DELETE", "/api/card-database/clear");
+      return apiRequest({ url: "/api/card-database/clear", method: "DELETE" });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/card-database/stats"] });
