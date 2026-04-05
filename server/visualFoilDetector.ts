@@ -281,16 +281,18 @@ export async function detectFoilFromImage(base64Image: string, options?: { isNum
         }
         
         // Metallic: standard threshold OR very-high-saturation foil-like colors at lower coverage
-        const isHighSatFoilColor = c.saturation > 150 && c.pixelFraction > 0.005 && c.brightness > 60;
-        if ((c.brightness > 60 && c.saturation > 25 && c.pixelFraction > 0.02) || isHighSatFoilColor) {
+        // Use >= to avoid excluding borderline values that round to display thresholds
+        const isHighSatFoilColor = c.saturation > 150 && c.pixelFraction >= 0.005 && c.brightness > 60;
+        if ((c.brightness > 60 && c.saturation > 25 && c.pixelFraction >= 0.015) || isHighSatFoilColor) {
           hasMetallicColors = true;
           totalColorVariance += c.saturation * c.pixelFraction;
           indicators.push(`Metallic color: RGB(${c.r},${c.g},${c.b}) - saturation: ${c.saturation}, coverage: ${(c.pixelFraction * 100).toFixed(1)}%`);
         }
         
         // Tinted: standard threshold OR very-high-saturation foil-like colors at lower coverage
-        const isFoilLikeColor = c.saturation > 150 && c.pixelFraction > 0.005;
-        if ((c.saturation > 20 && c.pixelFraction > 0.02 || isFoilLikeColor) && Math.max(c.r, c.g, c.b) > 70) {
+        // Use >= to avoid excluding borderline values that round to display thresholds
+        const isFoilLikeColor = c.saturation > 150 && c.pixelFraction >= 0.005;
+        if ((c.saturation > 20 && c.pixelFraction >= 0.015 || isFoilLikeColor) && Math.max(c.r, c.g, c.b) > 70) {
           if (c.colorName) {
             tintedColorCount++;
             detectedTints.push({ name: c.colorName, coverage: c.pixelFraction });

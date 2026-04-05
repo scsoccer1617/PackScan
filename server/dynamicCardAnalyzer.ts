@@ -931,8 +931,8 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>,
   try {
     // BRAND DETECTION - Look for common card manufacturers with proper capitalization
     const brands = [
-      { search: 'TOPPS', display: 'Topps' },
       { search: 'BOWMAN', display: 'Bowman' },
+      { search: 'TOPPS', display: 'Topps' },
       { search: 'UPPER DECK', display: 'Upper Deck' },
       { search: 'PANINI', display: 'Panini' },
       { search: 'DONRUSS', display: 'Donruss' },
