@@ -9,8 +9,13 @@
 
 import { db } from '../db';
 import { cardDatabase, cardVariations } from '../shared/schema';
-import { and, eq, ilike, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { parse } from 'csv-parse/sync';
+import { readFileSync, existsSync } from 'fs';
+import { resolve } from 'path';
+
+const CARDS_CSV    = resolve('attached_assets/Baseball_Card_Database_-_baseball_cards_(5)_1775393864176.csv');
+const VARS_CSV     = resolve('attached_assets/Baseball_Card_Database_-_baseball_card_variations_(3)_1775393870208.csv');
 
 // ───────────────────────────────────────────────
 // Types
@@ -385,4 +390,58 @@ function splitPlayerName(fullName: string): { firstName: string; lastName: strin
   if (parts.length === 2) return { firstName: parts[0], lastName: parts[1] };
   // 3+ word name: first word is first name, rest is last name
   return { firstName: parts[0], lastName: parts.slice(1).join(' ') };
+}
+
+// ───────────────────────────────────────────────
+// Auto-seed on startup
+// ───────────────────────────────────────────────
+
+/**
+ * Called at server startup. If the card_database table is empty AND the
+ * bundled CSV files are present, imports them automatically.
+ * Runs in the background — never delays server readiness.
+ */
+export async function autoSeedCardDatabaseIfEmpty(): Promise<void> {
+  try {
+    const [{ count: cardCount }] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(cardDatabase);
+
+    if (cardCount > 0) {
+      console.log(`[CardDB] Auto-seed skipped — ${cardCount} cards already in database`);
+      return;
+    }
+
+    console.log('[CardDB] Database is empty — starting auto-seed from bundled CSV files...');
+
+    let cardsLoaded = 0;
+    let variationsLoaded = 0;
+
+    if (existsSync(CARDS_CSV)) {
+      const buf = readFileSync(CARDS_CSV);
+      const result = await importCardsCSV(buf);
+      cardsLoaded = result.imported;
+      if (result.errors.length > 0) {
+        console.warn(`[CardDB] Cards CSV had ${result.errors.length} skipped rows`);
+      }
+    } else {
+      console.warn('[CardDB] Cards CSV not found at:', CARDS_CSV);
+    }
+
+    if (existsSync(VARS_CSV)) {
+      const buf = readFileSync(VARS_CSV);
+      const result = await importVariationsCSV(buf);
+      variationsLoaded = result.imported;
+      if (result.errors.length > 0) {
+        console.warn(`[CardDB] Variations CSV had ${result.errors.length} skipped rows`);
+      }
+    } else {
+      console.warn('[CardDB] Variations CSV not found at:', VARS_CSV);
+    }
+
+    console.log(`[CardDB] Auto-seed complete: ${cardsLoaded} cards, ${variationsLoaded} variations`);
+  } catch (err: any) {
+    // Non-fatal — log and continue
+    console.error('[CardDB] Auto-seed error (non-fatal):', err.message);
+  }
 }

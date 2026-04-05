@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
+import { autoSeedCardDatabaseIfEmpty } from "./cardDatabaseService";
 
 const app = express();
 app.use(express.json({ limit: '20mb' }));
@@ -101,6 +102,11 @@ app.use((req, res, next) => {
 
 (async () => {
   const server = await registerRoutes(app);
+
+  // Seed the card database from bundled CSVs if it's empty (runs in background)
+  autoSeedCardDatabaseIfEmpty().catch(err =>
+    console.error('[CardDB] Background seed error:', err)
+  );
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
