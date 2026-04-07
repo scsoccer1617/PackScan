@@ -10,6 +10,7 @@ import { CardFormValues } from "@shared/schema";
 import { UseFormReturn } from "react-hook-form";
 import { apiRequest } from "@/lib/queryClient";
 import VariantCombobox from "@/components/VariantCombobox";
+import FoilTypeSelect from "@/components/FoilTypeSelect";
 
 interface OCRResultsProps {
   loading: boolean;
@@ -325,18 +326,15 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
             {/* Fifth row - Foil Type */}
             <div className="space-y-2 col-span-1 md:col-span-2">
               <Label>Foil Type / Finish</Label>
-              <VariantCombobox
+              <FoilTypeSelect
                 brand={editedData.brand}
                 year={editedData.year}
                 collection={editedData.collection}
                 value={editedData.foilType || ''}
                 onChange={(foilType) => {
                   handleInputChange('foilType', foilType);
-                  handleInputChange('isFoil', foilType ? true : false);
+                  handleInputChange('isFoil', !!foilType);
                 }}
-                placeholder="Select foil type or type custom..."
-                showNoneOption={true}
-                noneLabel="None detected"
               />
             </div>
 
