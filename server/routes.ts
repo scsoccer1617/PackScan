@@ -1565,11 +1565,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return res.status(400).json({ error: 'No file provided' });
         }
         const result = await importCardsCSV(req.file.buffer);
+        if (result.errors.length > 0) {
+          console.log(`[CardDB] Import skipped ${result.errors.length} row(s):`);
+          result.errors.forEach(e => console.log(`  • ${e}`));
+        }
         return res.json({
           success: true,
           imported: result.imported,
           replaced: result.replaced,
-          errors: result.errors.slice(0, 20),
+          errors: result.errors,
           errorCount: result.errors.length,
         });
       } catch (error: any) {
@@ -1589,11 +1593,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return res.status(400).json({ error: 'No file provided' });
         }
         const result = await importVariationsCSV(req.file.buffer);
+        if (result.errors.length > 0) {
+          console.log(`[CardDB] Variations import skipped ${result.errors.length} row(s):`);
+          result.errors.forEach(e => console.log(`  • ${e}`));
+        }
         return res.json({
           success: true,
           imported: result.imported,
           replaced: result.replaced,
-          errors: result.errors.slice(0, 20),
+          errors: result.errors,
           errorCount: result.errors.length,
         });
       } catch (error: any) {

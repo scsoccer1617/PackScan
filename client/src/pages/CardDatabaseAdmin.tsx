@@ -160,7 +160,7 @@ export default function CardDatabaseAdmin() {
             )}
           </Button>
           {cardsResult && (
-            <ImportResultBadge result={cardsResult} />
+            <ImportResultBadge result={cardsResult} label="cards" />
           )}
         </CardContent>
       </Card>
@@ -194,7 +194,7 @@ export default function CardDatabaseAdmin() {
             )}
           </Button>
           {variationsResult && (
-            <ImportResultBadge result={variationsResult} />
+            <ImportResultBadge result={variationsResult} label="variations" />
           )}
         </CardContent>
       </Card>
@@ -228,11 +228,26 @@ export default function CardDatabaseAdmin() {
   );
 }
 
-function ImportResultBadge({ result }: { result: ImportResult }) {
+function ImportResultBadge({ result, label }: { result: ImportResult; label: string }) {
+  const [showAll, setShowAll] = useState(false);
+  const hasErrors = result.errors && result.errors.length > 0;
+  const displayed = showAll ? result.errors : result.errors?.slice(0, 5);
+
+  const downloadErrors = () => {
+    const text = result.errors.join('\n');
+    const blob = new Blob([text], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${label.toLowerCase().replace(/\s+/g, '_')}_skipped_rows.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-2">
       {result.success ? (
-        <div className="flex items-center gap-1.5 text-green-700 text-xs">
+        <div className="flex flex-wrap items-center gap-1.5 text-green-700 text-xs">
           <CheckCircle className="w-3.5 h-3.5" />
           <span>{result.imported.toLocaleString()} rows imported</span>
           {result.replaced > 0 && (
@@ -252,11 +267,36 @@ function ImportResultBadge({ result }: { result: ImportResult }) {
           <span>{result.error || "Import failed"}</span>
         </div>
       )}
-      {result.errors && result.errors.length > 0 && (
-        <ul className="text-[10px] text-muted-foreground space-y-0.5 pl-2">
-          {result.errors.slice(0, 5).map((e, i) => <li key={i}>{e}</li>)}
-          {result.errors.length > 5 && <li>…and {result.errors.length - 5} more</li>}
-        </ul>
+      {hasErrors && (
+        <div className="space-y-1">
+          <div className="flex items-center justify-between">
+            <p className="text-[10px] font-medium text-yellow-700">{result.errors.length} skipped row{result.errors.length !== 1 ? 's' : ''}:</p>
+            <div className="flex gap-1.5">
+              {result.errors.length > 5 && (
+                <button
+                  type="button"
+                  onClick={() => setShowAll(v => !v)}
+                  className="text-[10px] text-blue-600 hover:underline"
+                >
+                  {showAll ? 'Show less' : `Show all ${result.errors.length}`}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={downloadErrors}
+                className="text-[10px] text-blue-600 hover:underline"
+              >
+                Download
+              </button>
+            </div>
+          </div>
+          <ul className={`text-[10px] text-muted-foreground space-y-0.5 pl-2 ${showAll ? 'max-h-48 overflow-y-auto' : ''}`}>
+            {displayed?.map((e, i) => <li key={i} className="truncate">{e}</li>)}
+            {!showAll && result.errors.length > 5 && (
+              <li className="text-muted-foreground italic">…and {result.errors.length - 5} more</li>
+            )}
+          </ul>
+        </div>
       )}
     </div>
   );
