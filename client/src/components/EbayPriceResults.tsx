@@ -3,10 +3,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ExternalLink, TrendingUp, Pencil, RotateCcw, ThumbsUp, ThumbsDown, Check } from "lucide-react";
 import { CardFormValues } from "@shared/schema";
 import { apiRequest } from "@/lib/queryClient";
+import VariantCombobox from "@/components/VariantCombobox";
 
 interface EbaySearchResult {
   title: string;
@@ -26,20 +26,12 @@ interface EbayResponse {
   dataType?: 'sold' | 'current';
 }
 
-interface VariantOption {
-  variationOrParallel: string;
-  serialNumber: string | null;
-  cmpNumber: string | null;
-}
-
 interface EbayPriceResultsProps {
   cardData: Partial<CardFormValues>;
   frontImage?: string;
   backImage?: string;
   onCardDataUpdate?: (updatedData: Partial<CardFormValues>) => void;
 }
-
-const CUSTOM_VARIANT_VALUE = '__custom__';
 
 export default function EbayPriceResults({ cardData, frontImage, backImage, onCardDataUpdate }: EbayPriceResultsProps) {
   const [loading, setLoading] = useState(true);
@@ -51,11 +43,6 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
   const [editMode, setEditMode] = useState(false);
   const [editData, setEditData] = useState<Partial<CardFormValues>>({});
   const [confirmStatus, setConfirmStatus] = useState<'idle' | 'confirming' | 'confirmed' | 'error'>('idle');
-
-  // Variant dropdown state
-  const [variantOptions, setVariantOptions] = useState<VariantOption[]>([]);
-  const [variantMode, setVariantMode] = useState<'select' | 'custom'>('select');
-  const [loadingVariants, setLoadingVariants] = useState(false);
 
   const handleConfirmCard = async () => {
     if (!cardData || confirmStatus === 'confirming' || confirmStatus === 'confirmed') return;
@@ -145,46 +132,6 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
     fetchEbayData();
   }, [cardData]);
 
-  // Fetch variant options whenever edit mode opens or brand/year/collection changes
-  useEffect(() => {
-    if (!editMode) return;
-    const brand = editData.brand;
-    const year = editData.year;
-    if (!brand || !year) {
-      setVariantOptions([]);
-      setVariantMode('custom');
-      return;
-    }
-
-    const fetchVariants = async () => {
-      setLoadingVariants(true);
-      try {
-        const params = new URLSearchParams({
-          brand,
-          year: year.toString(),
-        });
-        if (editData.collection) params.set('collection', editData.collection);
-        const resp = await fetch(`/api/card-variations/options?${params}`);
-        if (resp.ok) {
-          const data = await resp.json();
-          const opts: VariantOption[] = data.options || [];
-          setVariantOptions(opts);
-          // Determine initial mode: if current variant matches a DB option → select mode; else custom
-          const currentVariant = editData.variant || '';
-          const matchesOption = opts.some(o => o.variationOrParallel === currentVariant);
-          setVariantMode(matchesOption || !currentVariant ? 'select' : 'custom');
-        }
-      } catch {
-        setVariantOptions([]);
-        setVariantMode('custom');
-      } finally {
-        setLoadingVariants(false);
-      }
-    };
-
-    fetchVariants();
-  }, [editMode, editData.brand, editData.year, editData.collection]);
-
   const formatPrice = (price: number, currency: string = 'USD') => {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
@@ -260,74 +207,6 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
 
   const updateEditField = (field: keyof CardFormValues, value: any) => {
     setEditData(prev => ({ ...prev, [field]: value }));
-  };
-
-  const handleVariantSelectChange = (value: string) => {
-    if (value === CUSTOM_VARIANT_VALUE) {
-      setVariantMode('custom');
-      updateEditField('variant', '');
-      return;
-    }
-    // Find the matching option to auto-fill serial number
-    const matched = variantOptions.find(o => o.variationOrParallel === value);
-    updateEditField('variant', value);
-    if (matched?.serialNumber) {
-      updateEditField('serialNumber', matched.serialNumber);
-      updateEditField('isNumbered', true);
-    }
-  };
-
-  const renderVariantField = () => {
-    if (loadingVariants) {
-      return <div className="h-9 bg-gray-100 rounded animate-pulse" />;
-    }
-
-    if (variantOptions.length === 0 || variantMode === 'custom') {
-      return (
-        <div className="space-y-1">
-          <Input
-            id="edit-variant"
-            value={editData.variant || ''}
-            onChange={e => updateEditField('variant', e.target.value)}
-            placeholder="e.g. Sky Blue, Gold Refractor"
-          />
-          {variantOptions.length > 0 && (
-            <button
-              type="button"
-              className="text-xs text-blue-600 hover:underline"
-              onClick={() => setVariantMode('select')}
-            >
-              ← Pick from list
-            </button>
-          )}
-        </div>
-      );
-    }
-
-    const currentVal = editData.variant || '';
-    const matchesOption = variantOptions.some(o => o.variationOrParallel === currentVal);
-    const selectValue = matchesOption ? currentVal : (currentVal ? CUSTOM_VARIANT_VALUE : '');
-
-    return (
-      <Select value={selectValue} onValueChange={handleVariantSelectChange}>
-        <SelectTrigger id="edit-variant">
-          <SelectValue placeholder="Select a variant..." />
-        </SelectTrigger>
-        <SelectContent>
-          {variantOptions.map((opt, idx) => {
-            const label = opt.serialNumber
-              ? `${opt.variationOrParallel} (${opt.serialNumber})`
-              : opt.variationOrParallel;
-            return (
-              <SelectItem key={idx} value={opt.variationOrParallel}>
-                {label}
-              </SelectItem>
-            );
-          })}
-          <SelectItem value={CUSTOM_VARIANT_VALUE}>Other (type manually)...</SelectItem>
-        </SelectContent>
-      </Select>
-    );
   };
 
   const renderCardInfoSection = () => (
@@ -421,8 +300,20 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
                   <Input id="edit-collection" value={editData.collection || ''} onChange={e => updateEditField('collection', e.target.value)} />
                 </div>
                 <div>
-                  <Label htmlFor="edit-variant">Variant / Parallel</Label>
-                  {renderVariantField()}
+                  <Label>Variant / Parallel</Label>
+                  <VariantCombobox
+                    brand={editData.brand}
+                    year={editData.year}
+                    collection={editData.collection}
+                    value={editData.variant || ''}
+                    onChange={(variant, serialNumber) => {
+                      updateEditField('variant', variant);
+                      if (serialNumber) {
+                        updateEditField('serialNumber', serialNumber);
+                        updateEditField('isNumbered', true);
+                      }
+                    }}
+                  />
                 </div>
                 <div>
                   <Label htmlFor="edit-serialNumber">Serial #</Label>

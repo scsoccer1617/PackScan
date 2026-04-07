@@ -1763,14 +1763,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: 'Invalid year' });
       }
 
-      const conditions: any[] = [
-        sql`lower(${cardVariations.brand}) = lower(${brand.trim()})`,
-        eq(cardVariations.year, year),
-      ];
-      if (collection && collection.trim()) {
-        conditions.push(sql`lower(${cardVariations.collection}) = lower(${collection.trim()})`);
-      }
-
       const rows = await db
         .select({
           variationOrParallel: cardVariations.variationOrParallel,
@@ -1778,7 +1770,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
           cmpNumber: cardVariations.cmpNumber,
         })
         .from(cardVariations)
-        .where(and(...conditions))
+        .where(
+          and(
+            sql`lower(${cardVariations.brand}) = lower(${brand.trim()})`,
+            eq(cardVariations.year, year),
+            collection?.trim()
+              ? sql`lower(${cardVariations.collection}) = lower(${collection.trim()})`
+              : undefined
+          )
+        )
         .orderBy(cardVariations.variationOrParallel)
         .limit(300);
 

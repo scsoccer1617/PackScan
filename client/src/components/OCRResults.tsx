@@ -9,6 +9,7 @@ import { Loader2, AlertCircle, Check, Pencil, ThumbsUp, ThumbsDown } from 'lucid
 import { CardFormValues } from "@shared/schema";
 import { UseFormReturn } from "react-hook-form";
 import { apiRequest } from "@/lib/queryClient";
+import VariantCombobox from "@/components/VariantCombobox";
 
 interface OCRResultsProps {
   loading: boolean;
@@ -296,12 +297,19 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
 
             {/* Fourth row - Variant and Serial Number */}
             <div className="space-y-2">
-              <Label htmlFor="variant">Variant</Label>
-              <Input
-                id="variant"
+              <Label>Variant / Parallel</Label>
+              <VariantCombobox
+                brand={editedData.brand}
+                year={editedData.year}
+                collection={editedData.collection}
                 value={editedData.variant || ''}
-                onChange={(e) => handleInputChange('variant', e.target.value)}
-                placeholder="Card Variant"
+                onChange={(variant, serialNumber) => {
+                  handleInputChange('variant', variant);
+                  if (serialNumber) {
+                    handleInputChange('serialNumber', serialNumber);
+                    handleInputChange('isNumbered', true);
+                  }
+                }}
               />
             </div>
             <div className="space-y-2">
@@ -419,6 +427,14 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
                     <span className="font-semibold text-slate-800">Variant: </span>
                     <span className="text-slate-700">{data.variant || 'Not detected'}</span>
                   </div>
+
+                  {/* CMP Code */}
+                  {data.cmpNumber && (
+                    <div className="text-lg">
+                      <span className="font-semibold text-slate-800">CMP Code: </span>
+                      <span className="text-slate-500 font-mono text-sm">{data.cmpNumber}</span>
+                    </div>
+                  )}
                 </div>
 
                 <div className="space-y-4">
