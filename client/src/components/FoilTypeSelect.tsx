@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Input } from "@/components/ui/input";
 
 interface FoilTypeSelectProps {
   brand?: string;
@@ -10,28 +9,22 @@ interface FoilTypeSelectProps {
   onChange: (value: string) => void;
 }
 
-const CUSTOM_VALUE = "__custom__";
-const NONE_VALUE   = "__none__";
+const NONE_VALUE = "__none__";
 
-export default function FoilTypeSelect({ brand, year, collection, value, onChange }: FoilTypeSelectProps) {
+export default function FoilTypeSelect({ brand, year, value, onChange }: FoilTypeSelectProps) {
   const [options, setOptions] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
-  const [fetched, setFetched] = useState(false);
-  const [customMode, setCustomMode] = useState(false);
-  const [customText, setCustomText] = useState("");
 
   useEffect(() => {
     if (!brand || !year) {
       setOptions([]);
-      setFetched(true);
       return;
     }
     const fetchOptions = async () => {
       setLoading(true);
-      setFetched(false);
       try {
+        // Query by brand+year only (no collection) to surface all parallels for that set year
         const params = new URLSearchParams({ brand, year: year.toString() });
-        if (collection) params.set("collection", collection);
         const resp = await fetch(`/api/card-variations/options?${params}`);
         if (resp.ok) {
           const data = await resp.json();
@@ -45,74 +38,36 @@ export default function FoilTypeSelect({ brand, year, collection, value, onChang
         setOptions([]);
       } finally {
         setLoading(false);
-        setFetched(true);
       }
     };
     fetchOptions();
-  }, [brand, year, collection]);
-
-  // Determine if current value is in the list or is custom
-  const isInList = !value || options.includes(value);
-
-  // When value changes externally, check if it needs custom mode
-  useEffect(() => {
-    if (fetched && value && !options.includes(value)) {
-      setCustomMode(true);
-      setCustomText(value);
-    } else {
-      setCustomMode(false);
-    }
-  }, [value, options, fetched]);
+  }, [brand, year]);
 
   if (loading) {
     return <div className="h-9 w-full animate-pulse rounded-md border border-input bg-muted" />;
   }
 
-  // Always show a Select dropdown (even when no DB options — "None detected" + "Custom..." are always available)
-  const selectValue = customMode ? CUSTOM_VALUE : (value || NONE_VALUE);
+  // If there's a current value not in the list, include it so the Select doesn't show blank
+  const allOptions = value && value !== "" && !options.includes(value)
+    ? [value, ...options]
+    : options;
+
+  const selectValue = value || NONE_VALUE;
 
   return (
-    <div className="space-y-2">
-      <Select
-        value={selectValue}
-        onValueChange={(v) => {
-          if (v === CUSTOM_VALUE) {
-            setCustomMode(true);
-            setCustomText("");
-            onChange("");
-          } else if (v === NONE_VALUE) {
-            setCustomMode(false);
-            setCustomText("");
-            onChange("");
-          } else {
-            setCustomMode(false);
-            setCustomText("");
-            onChange(v);
-          }
-        }}
-      >
-        <SelectTrigger>
-          <SelectValue placeholder="Select foil type..." />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value={NONE_VALUE}>None detected</SelectItem>
-          {options.map((opt) => (
-            <SelectItem key={opt} value={opt}>{opt}</SelectItem>
-          ))}
-          <SelectItem value={CUSTOM_VALUE}>Other / Custom...</SelectItem>
-        </SelectContent>
-      </Select>
-      {customMode && (
-        <Input
-          value={customText}
-          onChange={(e) => {
-            setCustomText(e.target.value);
-            onChange(e.target.value);
-          }}
-          placeholder="Type custom foil type..."
-          autoFocus
-        />
-      )}
-    </div>
+    <Select
+      value={selectValue}
+      onValueChange={(v) => onChange(v === NONE_VALUE ? "" : v)}
+    >
+      <SelectTrigger>
+        <SelectValue placeholder="Select foil type..." />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value={NONE_VALUE}>None detected</SelectItem>
+        {allOptions.map((opt) => (
+          <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }
