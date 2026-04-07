@@ -322,7 +322,25 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
               />
             </div>
 
-            {/* Fifth row - Condition */}
+            {/* Fifth row - Foil Type */}
+            <div className="space-y-2 col-span-1 md:col-span-2">
+              <Label>Foil Type / Finish</Label>
+              <VariantCombobox
+                brand={editedData.brand}
+                year={editedData.year}
+                collection={editedData.collection}
+                value={editedData.foilType || ''}
+                onChange={(foilType) => {
+                  handleInputChange('foilType', foilType);
+                  handleInputChange('isFoil', foilType ? true : false);
+                }}
+                placeholder="Select foil type or type custom..."
+                showNoneOption={true}
+                noneLabel="None detected"
+              />
+            </div>
+
+            {/* Sixth row - Condition */}
             <div className="space-y-2 col-span-1 md:col-span-2">
               <Label htmlFor="condition">Condition</Label>
               <Select

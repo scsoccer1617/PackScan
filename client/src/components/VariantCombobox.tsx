@@ -20,6 +20,8 @@ interface VariantComboboxProps {
   onChange: (variant: string, serialNumber?: string) => void;
   placeholder?: string;
   disabled?: boolean;
+  showNoneOption?: boolean;
+  noneLabel?: string;
 }
 
 export default function VariantCombobox({
@@ -30,6 +32,8 @@ export default function VariantCombobox({
   onChange,
   placeholder = "Search or type a variant...",
   disabled,
+  showNoneOption = false,
+  noneLabel = "None",
 }: VariantComboboxProps) {
   const [open, setOpen] = useState(false);
   const [options, setOptions] = useState<VariantOption[]>([]);
@@ -124,8 +128,8 @@ export default function VariantCombobox({
     );
   }
 
-  // No DB options available — fall back to plain text input
-  if (fetched && options.length === 0) {
+  // No DB options — fall back to plain text input UNLESS we have a "None" option to show
+  if (fetched && options.length === 0 && !showNoneOption) {
     return (
       <Input
         value={inputValue}
@@ -188,8 +192,20 @@ export default function VariantCombobox({
                 )}
               </div>
             </CommandEmpty>
+            {showNoneOption && (
+              <CommandGroup>
+                <CommandItem
+                  value="__none__"
+                  onSelect={() => { onChange(''); setInputValue(''); setOpen(false); }}
+                  className="cursor-pointer text-muted-foreground italic"
+                >
+                  <Check className={cn("mr-2 h-4 w-4 shrink-0", !value ? "opacity-100" : "opacity-0")} />
+                  {noneLabel}
+                </CommandItem>
+              </CommandGroup>
+            )}
             {options.length > 0 && (
-              <CommandGroup heading={`${options.length} variant${options.length !== 1 ? 's' : ''}`}>
+              <CommandGroup heading={`${options.length} option${options.length !== 1 ? 's' : ''}`}>
                 {options.map((opt, idx) => (
                   <CommandItem
                     key={idx}
