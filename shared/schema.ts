@@ -136,6 +136,7 @@ export const cardSchema = z.object({
   frontImage: z.string().optional(),
   backImage: z.string().optional(),
   googleSheetId: z.string().optional(),
+  cmpNumber: z.string().optional(),
 });
 
 export type CardInsert = z.infer<typeof cardInsertSchema>;

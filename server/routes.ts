@@ -1719,6 +1719,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               isNumbered: !!(dbResult.serialNumber),
               isFoil: false,
               sport: 'Baseball',
+              cmpNumber: dbResult.cmpNumber || undefined,
             },
           });
         }
@@ -1746,6 +1747,54 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error('Error in card-search:', error);
       return res.status(500).json({ error: 'Search failed' });
+    }
+  });
+
+  // GET /api/card-variations/options — return distinct variation options for a given brand/year/collection
+  // Used by the variant dropdown in the card edit form.
+  app.get(`${apiPrefix}/card-variations/options`, async (req, res) => {
+    try {
+      const { brand, year: yearStr, collection } = req.query as Record<string, string | undefined>;
+      if (!brand || !yearStr) {
+        return res.status(400).json({ error: 'brand and year are required' });
+      }
+      const year = parseInt(yearStr, 10);
+      if (isNaN(year)) {
+        return res.status(400).json({ error: 'Invalid year' });
+      }
+
+      const conditions: any[] = [
+        sql`lower(${cardVariations.brand}) = lower(${brand.trim()})`,
+        eq(cardVariations.year, year),
+      ];
+      if (collection && collection.trim()) {
+        conditions.push(sql`lower(${cardVariations.collection}) = lower(${collection.trim()})`);
+      }
+
+      const rows = await db
+        .select({
+          variationOrParallel: cardVariations.variationOrParallel,
+          serialNumber: cardVariations.serialNumber,
+          cmpNumber: cardVariations.cmpNumber,
+        })
+        .from(cardVariations)
+        .where(and(...conditions))
+        .orderBy(cardVariations.variationOrParallel)
+        .limit(300);
+
+      // Deduplicate: keep one row per (variationOrParallel, serialNumber) pair
+      const seen = new Set<string>();
+      const options = rows.filter(r => {
+        const key = `${r.variationOrParallel}|${r.serialNumber ?? ''}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+
+      return res.json({ options });
+    } catch (err: any) {
+      console.error('Error fetching variation options:', err.message);
+      return res.status(500).json({ error: 'Failed to fetch variation options' });
     }
   });
 

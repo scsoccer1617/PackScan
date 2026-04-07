@@ -492,6 +492,9 @@ async function combineCardResults(
           }
         }
 
+        // CMP code from DB
+        if (dbResult.cmpNumber) combined.cmpNumber = dbResult.cmpNumber;
+
         // Rookie card from DB
         if (dbResult.isRookieCard) combined.isRookieCard = true;
 

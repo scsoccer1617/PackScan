@@ -42,6 +42,7 @@ export interface CardLookupResult {
   isRookieCard?: boolean;
   brand?: string;
   year?: number;
+  cmpNumber?: string;       // internal CMP reference code from card_database
   source: 'card_database' | 'ocr_fallback';
 }
 
@@ -361,6 +362,7 @@ export async function lookupCard(input: CardLookupInput): Promise<CardLookupResu
       isRookieCard,
       brand: cardRow.brand,
       year: cardRow.year,
+      cmpNumber: cardRow.cmpNumber || undefined,
       source: 'card_database',
     };
 
