@@ -159,10 +159,10 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <TrendingUp className="h-5 w-5" />
-            Finding Recent Sold Prices...
+            Finding Active Listings...
           </CardTitle>
           <p className="text-sm text-gray-600">
-            Searching for authentic sold prices to get real market values
+            Searching eBay for active listings to get current market prices
           </p>
         </CardHeader>
         <CardContent>
@@ -449,10 +449,11 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
 
   if (error) {
     const isRateLimit = error.includes('rate limit');
-    // "Sold price data currently unavailable" means the search ran fine but found 0 listings —
+    // "Price data currently unavailable" or "No active listings" means the search ran fine but found 0 listings —
     // treat as "no results" rather than a hard error, since we still have a valid searchUrl.
     const isNoResults = !isRateLimit && searchUrl && (
       error.toLowerCase().includes('unavailable') ||
+      error.toLowerCase().includes('no active') ||
       error.toLowerCase().includes('no sold') ||
       error.toLowerCase().includes('not found')
     );
@@ -463,11 +464,11 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
           {renderCardInfoSection()}
           <Card className="border-slate-200">
             <CardHeader>
-              <CardTitle className="text-slate-600 text-base">No Sold Listings Found</CardTitle>
+              <CardTitle className="text-slate-600 text-base">No Active Listings Found</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
               <p className="text-slate-500 text-sm">
-                No recent sold listings were found for this card. It may be a newer release, low-volume card, or spelled differently on eBay.
+                No active listings were found for this card. It may be a newer release, low-volume card, or spelled differently on eBay.
               </p>
               {searchUrl && (
                 <Button
@@ -476,7 +477,7 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
                   variant="outline"
                 >
                   <ExternalLink className="h-4 w-4" />
-                  Search eBay Sold Listings
+                  Search eBay Active Listings
                 </Button>
               )}
             </CardContent>
@@ -502,7 +503,7 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
                   The eBay API has daily usage limits. This will reset within 24 hours.
                 </p>
                 <p className="text-sm text-yellow-600">
-                  When available, this shows the 5 most recent <strong>sold prices</strong> (not asking prices) for accurate market values.
+                  When available, this shows up to 5 <strong>active eBay listings</strong> to give you a sense of current asking prices.
                 </p>
               </div>
             ) : (
@@ -517,10 +518,10 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
                   variant={isRateLimit ? "default" : "secondary"}
                 >
                   <ExternalLink className="h-4 w-4" />
-                  Search eBay Sold Listings Manually
+                  Browse eBay Active Listings
                 </Button>
                 <p className="text-xs text-gray-500 mt-2">
-                  Opens eBay with your card details and sold listings filter
+                  Opens eBay with your card details pre-filled
                 </p>
               </div>
             )}
@@ -541,7 +542,7 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
               <div className="text-2xl font-bold text-green-800">
                 {formatPrice(averageValue)}
               </div>
-              <p className="text-green-600">Average Recent Sold Price</p>
+              <p className="text-green-600">Average Asking Price</p>
             </div>
           </CardContent>
         </Card>
@@ -551,14 +552,14 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <TrendingUp className="h-5 w-5" />
-            Recently Sold ({results.length})
+            Active Listings ({results.length})
           </CardTitle>
         </CardHeader>
         <CardContent>
           {results.length === 0 ? (
             <div className="text-center py-6 space-y-3">
               <p className="text-gray-600">
-                No recent sold listings found — prices may be rare or the search may need refinement.
+                No active listings found — the card may be rare or the search may need refinement.
               </p>
               {searchUrl && (
                 <Button
@@ -566,7 +567,7 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
                   className="flex items-center gap-2 mx-auto"
                 >
                   <ExternalLink className="h-4 w-4" />
-                  See Sold Listings on eBay →
+                  View on eBay →
                 </Button>
               )}
             </div>
@@ -595,7 +596,7 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
                     )}
                     {result.endTime && (
                       <p className="text-xs text-gray-400">
-                        Sold: {formatDate(result.endTime)}
+                        Listed: {formatDate(result.endTime)}
                       </p>
                     )}
                   </div>

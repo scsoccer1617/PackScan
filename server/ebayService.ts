@@ -357,14 +357,14 @@ export async function searchCardValues(
     }
     
     let keywords = buildKeywords();
-    console.log('Searching eBay sold listings with keywords:', keywords);
+    console.log('Searching eBay active listings with keywords:', keywords);
 
     const safePlayerName = playerName || '';
     let results: EbaySearchResult[] = [];
-    const dataType = 'sold';
+    const dataType = 'current';
     const fallbackSearchUrl = getEbaySearchUrl(safePlayerName, cardNumber, brand, year, collection, '', isNumbered, foilType, serialNumber);
 
-    // Use the eBay Finding API (findCompletedItems) — searches sold/completed listings
+    // Use the eBay Finding API (findItemsAdvanced) — searches active listings
     // Uses EBAY_APP_ID directly; no OAuth token required
     const findingApiUrl = 'https://svcs.ebay.com/services/search/FindingService/v1';
 
@@ -381,20 +381,18 @@ export async function searchCardValues(
     const callFindingApi = async (query: string): Promise<EbaySearchResult[]> => {
       const resp = await axios.get(findingApiUrl, {
         params: {
-          'OPERATION-NAME': 'findCompletedItems',
+          'OPERATION-NAME': 'findItemsAdvanced',
           'SERVICE-VERSION': '1.0.0',
           'SECURITY-APPNAME': ebayAppId,
           'RESPONSE-DATA-FORMAT': 'JSON',
           'keywords': query,
-          'itemFilter(0).name': 'SoldItemsOnly',
-          'itemFilter(0).value': 'true',
           'paginationInput.entriesPerPage': '10',
-          'sortOrder': 'EndTimeSoonest',
+          'sortOrder': 'BestMatch',
           'categoryId': '213'
         },
         timeout: 15000
       });
-      const items: any[] = resp.data?.findCompletedItemsResponse?.[0]?.searchResult?.[0]?.item || [];
+      const items: any[] = resp.data?.findItemsAdvancedResponse?.[0]?.searchResult?.[0]?.item || [];
       return items
         .map(mapFindingItem)
         .filter(r => r.price > 0);
@@ -402,14 +400,14 @@ export async function searchCardValues(
 
     try {
       results = await callFindingApi(keywords);
-      console.log(`Finding API (specific query) returned ${results.length} sold listings`);
+      console.log(`Finding API (specific query) returned ${results.length} active listings`);
 
       if (results.length === 0) {
         // Try a broader query without card number, variant, or serial suffix
         const broaderKeywords = buildKeywords({ includeCardNumber: false, includeVariant: false, includeSerial: false });
         if (broaderKeywords && broaderKeywords !== keywords) {
           results = await callFindingApi(broaderKeywords);
-          console.log(`Finding API (broader query) returned ${results.length} sold listings`);
+          console.log(`Finding API (broader query) returned ${results.length} active listings`);
         }
       }
     } catch (findingError: any) {
@@ -421,8 +419,8 @@ export async function searchCardValues(
         averageValue: 0,
         results: [],
         searchUrl: fallbackSearchUrl,
-        errorMessage: 'Sold price data currently unavailable',
-        dataType: 'sold' as const
+        errorMessage: 'Price data currently unavailable',
+        dataType: 'current' as const
       };
       searchCache.set(cacheKey, { data: errorResp, timestamp: Date.now(), isError: true });
       return errorResp;
@@ -433,8 +431,8 @@ export async function searchCardValues(
         averageValue: 0,
         results: [],
         searchUrl: fallbackSearchUrl,
-        errorMessage: 'Sold price data currently unavailable',
-        dataType: 'sold' as const
+        errorMessage: 'No active listings found',
+        dataType: 'current' as const
       };
       searchCache.set(cacheKey, { data: emptyResp, timestamp: Date.now(), isError: true });
       return emptyResp;
@@ -488,7 +486,7 @@ export async function searchCardValues(
       averageValue,
       results: topResults,
       searchUrl: fallbackSearchUrl,
-      dataType: 'sold' as const,
+      dataType: 'current' as const,
       discoveredCollection
     };
 
@@ -549,6 +547,6 @@ export function getEbaySearchUrl(
     keywords += ` ${foilSearchTerm || foilType}`;
   }
   
-  // Encode for URL
-  return `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(keywords)}&_sacat=0&LH_Complete=1&LH_Sold=1`;
+  // Encode for URL — active listings (no LH_Complete/LH_Sold filters)
+  return `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(keywords)}&_sacat=213`;
 }
