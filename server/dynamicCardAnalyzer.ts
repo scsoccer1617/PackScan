@@ -674,6 +674,21 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
       return;
     }
     
+    // Format: 89B2-32, 89B-2 (year-digit prefix then letters then dash then digits)
+    // These are year-prefixed inserts like "2024 Topps 89B2-32" style card numbers.
+    // Must run BEFORE dashNumberPatternGlobal since that only matches letter-leading prefixes.
+    const yearPrefixedCardPattern = /\b(\d{2}[A-Z][A-Z0-9]*)-(\d{1,4})\b/g;
+    let yearPrefixedMatch;
+    while ((yearPrefixedMatch = yearPrefixedCardPattern.exec(text)) !== null) {
+      const fullMatch = yearPrefixedMatch[0];
+      const lineWithMatch = lines.find(line => line.toLowerCase().includes(fullMatch.toLowerCase()));
+      if (lineWithMatch && isDOBFormat(lineWithMatch)) continue;
+      if (lineWithMatch && /\b(DRAFTED|DRAFT|BORN|SIGNED|OVERALL|ROUND|PICK|AGENT|FREE)\b/i.test(lineWithMatch)) continue;
+      cardDetails.cardNumber = fullMatch;
+      console.log(`Detected year-prefixed card number: ${cardDetails.cardNumber}`);
+      return;
+    }
+
     // Format: 89B-2, T91-13 (alphanumeric-with-digits prefix, dash, digits)
     // Loop through ALL matches so a skipped date pattern doesn't block later valid card numbers.
     const dashNumberPatternGlobal = /\b([A-Z][A-Z0-9]*\d[A-Z0-9]*|[A-Z]{1,4})-([0-9]{1,4})\b/g;

@@ -469,6 +469,15 @@ async function combineCardResults(
       if (dbResult.found) {
         console.log(`[CardDB] DB hit — ${dbResult.playerFirstName} ${dbResult.playerLastName}, team: ${dbResult.team}, collection: ${dbResult.collection}, cardNumber: ${dbResult.cardNumber}`);
 
+        // Guard: if OCR clearly identified a player name and the DB result has a DIFFERENT player,
+        // the DB matched the wrong card (same card number, wrong set/player). Reject the DB result.
+        const ocrLastName = (combined.playerLastName || '').trim().toLowerCase();
+        const dbLastName  = (dbResult.playerLastName  || '').trim().toLowerCase();
+        const hasReliableOcrName = ocrLastName.length > 1 &&
+          !['ersary', 'ersary', 'anniv', 'stros', 'epps'].includes(ocrLastName); // filter garbled fragments
+        if (hasReliableOcrName && dbLastName && ocrLastName !== dbLastName) {
+          console.log(`[CardDB] Player mismatch — OCR: "${combined.playerFirstName} ${combined.playerLastName}", DB: "${dbResult.playerFirstName} ${dbResult.playerLastName}" — rejecting DB result to protect OCR player name`);
+        } else {
         // Override player name with authoritative DB value
         if (dbResult.playerFirstName) combined.playerFirstName = dbResult.playerFirstName;
         if (dbResult.playerLastName)  combined.playerLastName  = dbResult.playerLastName;
@@ -509,6 +518,7 @@ async function combineCardResults(
           combined.serialNumber = dbResult.serialNumber;
           if (/\/\d+/.test(dbResult.serialNumber)) combined.isNumbered = true;
         }
+        } // end else (player names matched or OCR name was unreliable)
       } else {
         console.log('[CardDB] No DB match — proceeding with OCR-only results');
       }

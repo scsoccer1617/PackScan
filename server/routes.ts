@@ -1169,10 +1169,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           
           const updatedCardData = { ...cardData };
           if (ebayResults.discoveredVariant && !cardData.foilType) {
-            console.log(`eBay discovered variant "${ebayResults.discoveredVariant}" - updating card data`);
+            console.log(`eBay discovered foil type "${ebayResults.discoveredVariant}" - updating card data`);
             updatedCardData.foilType = ebayResults.discoveredVariant;
-            updatedCardData.variant = ebayResults.discoveredVariant;
             updatedCardData.isFoil = true;
+            // Note: variant is NOT set from eBay-discovered foil types; variant is for printed card variations only
           }
           if (ebayResults.discoveredCollection) {
             console.log(`eBay discovered more specific collection "${ebayResults.discoveredCollection}" - updating card data`);

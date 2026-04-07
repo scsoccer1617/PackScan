@@ -153,8 +153,9 @@ interface EbayResponse {
  * Search eBay for completed/sold items matching card criteria
  */
 // Simple cache to reduce API calls
-const searchCache = new Map<string, { data: any; timestamp: number }>();
-const CACHE_DURATION = 30000; // 30 second cache to allow fresh searches
+const searchCache = new Map<string, { data: any; timestamp: number; isError?: boolean }>();
+const CACHE_DURATION = 30000;       // 30 second cache for successful results
+const ERROR_CACHE_DURATION = 120000; // 2 minute cache for errors/empty results (prevents rate-limit hammering)
 
 // Clear cache function for debugging
 export function clearEbayCache() {
@@ -305,10 +306,13 @@ export async function searchCardValues(
     const cacheKey = `${playerName}-${cardNumber}-${brand}-${year}-${collection || ''}-${isNumbered || ''}-${foilType || ''}-${serialNumber || ''}-${variant || ''}`;
     const cached = searchCache.get(cacheKey);
     
-    // Return cached result if still valid and not an error
-    if (cached && (Date.now() - cached.timestamp) < CACHE_DURATION && cached.data.results?.length > 0) {
-      console.log('Returning cached eBay Browse API results for:', cacheKey);
-      return cached.data;
+    // Return cached result if still valid
+    if (cached) {
+      const maxAge = cached.isError ? ERROR_CACHE_DURATION : CACHE_DURATION;
+      if ((Date.now() - cached.timestamp) < maxAge) {
+        console.log(`Returning cached eBay results for: ${cacheKey} (isError=${cached.isError})`);
+        return cached.data;
+      }
     }
 
     const searchCollection = collection ? normalizeCollectionForSearch(collection) : '';
@@ -413,23 +417,27 @@ export async function searchCardValues(
       const errBody = findingError.response?.data;
       console.log(`Finding API unavailable (HTTP ${status ?? 'no-response'}): ${findingError.message}`);
       if (errBody) console.log('API error details:', JSON.stringify(errBody));
-      return {
+      const errorResp = {
         averageValue: 0,
         results: [],
         searchUrl: fallbackSearchUrl,
         errorMessage: 'Sold price data currently unavailable',
         dataType: 'sold' as const
       };
+      searchCache.set(cacheKey, { data: errorResp, timestamp: Date.now(), isError: true });
+      return errorResp;
     }
 
     if (results.length === 0) {
-      return {
+      const emptyResp = {
         averageValue: 0,
         results: [],
         searchUrl: fallbackSearchUrl,
         errorMessage: 'Sold price data currently unavailable',
         dataType: 'sold' as const
       };
+      searchCache.set(cacheKey, { data: emptyResp, timestamp: Date.now(), isError: true });
+      return emptyResp;
     }
 
     const prioritizedResults = prioritizeListingsByCardMatch(
