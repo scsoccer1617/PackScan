@@ -501,7 +501,7 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
                   className="flex items-center gap-2 mx-auto"
                 >
                   <ExternalLink className="h-4 w-4" />
-                  See Sold Listings on eBay
+                  See Sold Listings on eBay →
                 </Button>
               )}
             </div>
