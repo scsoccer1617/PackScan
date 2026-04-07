@@ -65,17 +65,21 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       foilType: null
     };
     
+    // Pre-process: join split card numbers where OCR breaks them across lines
+    // e.g., "T91-\n13" becomes "T91-13" before whitespace collapse
+    const joinedText = fullText.replace(/\b([A-Z]{1,4}\d*)-\s*\n\s*(\d{1,4})\b/gm, '$1-$2');
+
     // Parse all extracted text
-    const cleanText = fullText.toUpperCase().replace(/\s+/g, ' ').trim();
+    const cleanText = joinedText.toUpperCase().replace(/\s+/g, ' ').trim();
     
     // PLAYER NAME DETECTION - Extract player name using positional and context analysis
-    extractPlayerName(cleanText, cardDetails, fullText);
+    extractPlayerName(cleanText, cardDetails, joinedText);
     
     // CARD NUMBER DETECTION - Extract card number using regex patterns
-    extractCardNumber(cleanText, cardDetails, fullText);
+    extractCardNumber(cleanText, cardDetails, joinedText);
     
     // COLLECTION, BRAND & YEAR DETECTION - Extract using pattern recognition
-    extractCardMetadata(cleanText, cardDetails, fullText);
+    extractCardMetadata(cleanText, cardDetails, joinedText);
     
     // SERIAL NUMBER DETECTION - Look for serial numbering with enhanced detection
     await extractSerialNumber(cleanText, cardDetails, textAnnotations);

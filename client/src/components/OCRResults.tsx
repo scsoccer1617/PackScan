@@ -432,7 +432,7 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
                   {data.cmpNumber && (
                     <div className="text-lg">
                       <span className="font-semibold text-slate-800">CMP Code: </span>
-                      <span className="text-slate-500 font-mono text-sm">{data.cmpNumber}</span>
+                      <span className="text-slate-700">{data.cmpNumber}</span>
                     </div>
                   )}
                 </div>

@@ -366,7 +366,7 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
                   {cardData.cmpNumber && (
                     <div className="text-base">
                       <span className="font-semibold text-slate-800">CMP Code: </span>
-                      <span className="text-slate-500 font-mono text-sm">{cardData.cmpNumber}</span>
+                      <span className="text-slate-700">{cardData.cmpNumber}</span>
                     </div>
                   )}
                 </div>
@@ -439,7 +439,42 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
 
   if (error) {
     const isRateLimit = error.includes('rate limit');
+    // "Sold price data currently unavailable" means the search ran fine but found 0 listings —
+    // treat as "no results" rather than a hard error, since we still have a valid searchUrl.
+    const isNoResults = !isRateLimit && searchUrl && (
+      error.toLowerCase().includes('unavailable') ||
+      error.toLowerCase().includes('no sold') ||
+      error.toLowerCase().includes('not found')
+    );
     
+    if (isNoResults) {
+      return (
+        <div className="space-y-4">
+          {renderCardInfoSection()}
+          <Card className="border-slate-200">
+            <CardHeader>
+              <CardTitle className="text-slate-600 text-base">No Sold Listings Found</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-slate-500 text-sm">
+                No recent sold listings were found for this card. It may be a newer release, low-volume card, or spelled differently on eBay.
+              </p>
+              {searchUrl && (
+                <Button
+                  onClick={() => window.open(searchUrl, '_blank')}
+                  className="flex items-center gap-2"
+                  variant="outline"
+                >
+                  <ExternalLink className="h-4 w-4" />
+                  Search eBay Sold Listings
+                </Button>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      );
+    }
+
     return (
       <div className="space-y-4">
         {renderCardInfoSection()}
