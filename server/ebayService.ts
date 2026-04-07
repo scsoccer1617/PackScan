@@ -296,9 +296,12 @@ export async function searchCardValues(
   _isRetry?: boolean
 ): Promise<EbayResponse> {
   try {
-    const ebayAppId = getEbayAppId();
-    if (!ebayAppId) {
-      console.warn('eBay APP ID not set. Cannot fetch card values.');
+    // Require at least one auth credential
+    const hasCredentials = process.env.EBAY_OAUTH_TOKEN ||
+      process.env.EBAY_BROWSE_TOKEN ||
+      (process.env.EBAY_APP_ID && process.env.EBAY_CERT_ID);
+    if (!hasCredentials) {
+      console.warn('No eBay credentials found (EBAY_OAUTH_TOKEN, EBAY_BROWSE_TOKEN, or APP_ID+CERT_ID required).');
       return { averageValue: 0, results: [] };
     }
 
@@ -364,57 +367,67 @@ export async function searchCardValues(
     const dataType = 'current';
     const fallbackSearchUrl = getEbaySearchUrl(safePlayerName, cardNumber, brand, year, collection, '', isNumbered, foilType, serialNumber);
 
-    // Use the eBay Finding API (findItemsAdvanced) — searches active listings
-    // Uses EBAY_APP_ID directly; no OAuth token required
-    const findingApiUrl = 'https://svcs.ebay.com/services/search/FindingService/v1';
+    // eBay Browse API — requires OAuth Bearer token
+    // Token priority: EBAY_OAUTH_TOKEN (user token) → client credentials flow → EBAY_BROWSE_TOKEN (static)
+    const BROWSE_API = 'https://api.ebay.com/buy/browse/v1/item_summary/search';
 
-    const mapFindingItem = (item: any): EbaySearchResult => ({
-      title: item.title?.[0] || '',
-      price: parseFloat(item.sellingStatus?.[0]?.convertedCurrentPrice?.[0]?.['__value__'] || '0'),
-      currency: item.sellingStatus?.[0]?.convertedCurrentPrice?.[0]?.['@currencyId'] || 'USD',
-      url: item.viewItemURL?.[0] || '',
-      imageUrl: item.galleryURL?.[0] || '',
-      condition: item.condition?.[0]?.conditionDisplayName?.[0] || '',
-      endTime: item.listingInfo?.[0]?.endTime?.[0] || ''
+    const getBrowseToken = async (): Promise<string> => {
+      // getEbayAccessToken: tries client credentials (APP_ID + CERT_ID) first,
+      // then falls back to EBAY_BROWSE_TOKEN static value.
+      // Skip EBAY_OAUTH_TOKEN — it requires user-level auth which may expire.
+      return getEbayAccessToken();
+    };
+
+    const mapBrowseItem = (item: any): EbaySearchResult => ({
+      title: item.title || '',
+      price: parseFloat(item.price?.value || item.buyingOptions?.[0]?.price?.value || '0'),
+      currency: item.price?.currency || 'USD',
+      url: item.itemWebUrl || '',
+      imageUrl: item.thumbnailImages?.[0]?.imageUrl || item.image?.imageUrl || '',
+      condition: item.condition || '',
+      endTime: item.itemEndDate || ''
     });
 
-    const callFindingApi = async (query: string): Promise<EbaySearchResult[]> => {
-      const resp = await axios.get(findingApiUrl, {
+    const callBrowseApi = async (query: string): Promise<EbaySearchResult[]> => {
+      const token = await getBrowseToken();
+      const resp = await axios.get(BROWSE_API, {
         params: {
-          'OPERATION-NAME': 'findItemsAdvanced',
-          'SERVICE-VERSION': '1.0.0',
-          'SECURITY-APPNAME': ebayAppId,
-          'RESPONSE-DATA-FORMAT': 'JSON',
-          'keywords': query,
-          'paginationInput.entriesPerPage': '10',
-          'sortOrder': 'BestMatch',
-          'categoryId': '213'
+          q: query,
+          category_ids: '213',
+          limit: '10',
+          sort: 'bestMatch'
+        },
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'X-EBAY-C-MARKETPLACE-ID': 'EBAY_US',
+          'Content-Type': 'application/json'
         },
         timeout: 15000
       });
-      const items: any[] = resp.data?.findItemsAdvancedResponse?.[0]?.searchResult?.[0]?.item || [];
+      const items: any[] = resp.data?.itemSummaries || [];
+      console.log(`Browse API raw response: total=${resp.data?.total ?? 'unknown'}, items=${items.length}`);
       return items
-        .map(mapFindingItem)
+        .map(mapBrowseItem)
         .filter(r => r.price > 0);
     };
 
     try {
-      results = await callFindingApi(keywords);
-      console.log(`Finding API (specific query) returned ${results.length} active listings`);
+      results = await callBrowseApi(keywords);
+      console.log(`Browse API (specific query) returned ${results.length} active listings`);
 
       if (results.length === 0) {
         // Try a broader query without card number, variant, or serial suffix
         const broaderKeywords = buildKeywords({ includeCardNumber: false, includeVariant: false, includeSerial: false });
         if (broaderKeywords && broaderKeywords !== keywords) {
-          results = await callFindingApi(broaderKeywords);
-          console.log(`Finding API (broader query) returned ${results.length} active listings`);
+          results = await callBrowseApi(broaderKeywords);
+          console.log(`Browse API (broader query) returned ${results.length} active listings`);
         }
       }
-    } catch (findingError: any) {
-      const status = findingError.response?.status;
-      const errBody = findingError.response?.data;
-      console.log(`Finding API unavailable (HTTP ${status ?? 'no-response'}): ${findingError.message}`);
-      if (errBody) console.log('API error details:', JSON.stringify(errBody));
+    } catch (browseError: any) {
+      const status = browseError.response?.status;
+      const errBody = browseError.response?.data;
+      console.log(`Browse API unavailable (HTTP ${status ?? 'no-response'}): ${browseError.message}`);
+      if (errBody) console.log('Browse API error details:', JSON.stringify(errBody));
       const errorResp = {
         averageValue: 0,
         results: [],
