@@ -7,6 +7,7 @@ import { ExternalLink, TrendingUp, Pencil, RotateCcw, ThumbsUp, ThumbsDown, Chec
 import { CardFormValues } from "@shared/schema";
 import { apiRequest } from "@/lib/queryClient";
 import VariantCombobox from "@/components/VariantCombobox";
+import FoilTypeSelect from "@/components/FoilTypeSelect";
 
 interface EbaySearchResult {
   title: string;
@@ -320,8 +321,17 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
                   <Input id="edit-serialNumber" value={editData.serialNumber || ''} onChange={e => updateEditField('serialNumber', e.target.value)} />
                 </div>
                 <div>
-                  <Label htmlFor="edit-foilType">Foil Type</Label>
-                  <Input id="edit-foilType" value={editData.foilType || ''} onChange={e => updateEditField('foilType', e.target.value || null)} />
+                  <Label>Foil Type</Label>
+                  <FoilTypeSelect
+                    brand={editData.brand}
+                    year={editData.year}
+                    collection={editData.collection}
+                    value={editData.foilType || ''}
+                    onChange={(foilType) => {
+                      updateEditField('foilType', foilType || null);
+                      updateEditField('isFoil', !!foilType);
+                    }}
+                  />
                 </div>
                 <div>
                   <Label htmlFor="edit-sport">Sport</Label>

@@ -67,18 +67,7 @@ export default function FoilTypeSelect({ brand, year, collection, value, onChang
     return <div className="h-9 w-full animate-pulse rounded-md border border-input bg-muted" />;
   }
 
-  // No DB options — just show a plain text input
-  if (fetched && options.length === 0) {
-    return (
-      <Input
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder="Type foil type (e.g. Gold Foil, Aqua Foil)..."
-      />
-    );
-  }
-
-  // Has DB options — show a Select dropdown
+  // Always show a Select dropdown (even when no DB options — "None detected" + "Custom..." are always available)
   const selectValue = customMode ? CUSTOM_VALUE : (value || "");
 
   return (
