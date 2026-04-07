@@ -28,8 +28,8 @@ Preferred communication style: Simple, everyday language.
 - **Technology**: Replit built-in PostgreSQL (Neon-backed).
 - **Migrations**: Drizzle Kit. Run `npm run db:push` after schema changes.
 - **confirmed_cards**: Stores user-verified card data for building a reference database. Serial numbers are stored as generic limits (e.g., "/399" instead of "010/399"). Duplicate detection uses cardNumber + year + brand + playerLastName + variant. Confirmation count increments on repeat confirmations.
-- **card_database**: Reference catalog imported from CSV. Contains brand, year, collection, card number, player name, team, rookie flag. Currently holds 12,892 cards.
-- **card_variations**: Parallel/variation catalog imported from CSV. Contains brand, year, collection, variation name, serial number limit, pack odds. Currently holds 95,138 entries.
+- **card_database**: Reference catalog imported from CSV. Contains brand, year, collection, set, card number, player name, team, rookie flag. Currently holds 12,892 cards. The `set` column is populated from the CSV `set` column and represents the product set name (e.g. "Topps Series 1").
+- **card_variations**: Parallel/variation catalog imported from CSV. Contains brand, year, collection, set, variation name, serial number limit, pack odds. Currently holds 95,138 entries. The `set` column mirrors the card_database set value.
 
 ### Key Features
 - **Automated Card Detection**: Utilizes Google Cloud Vision API for OCR and advanced text analysis to identify player names, card numbers, brands, collections, and years, including special cases like rookie cards, autographs, and serial numbers.

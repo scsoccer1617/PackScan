@@ -137,6 +137,7 @@ export const cardSchema = z.object({
   backImage: z.string().optional(),
   googleSheetId: z.string().optional(),
   cmpNumber: z.string().optional(),
+  set: z.string().optional(),
 });
 
 export type CardInsert = z.infer<typeof cardInsertSchema>;
@@ -158,6 +159,7 @@ export const cardDatabase = pgTable("card_database", {
   brand: text("brand").notNull(),               // e.g. "Bowman"
   year: integer("year").notNull(),
   collection: text("collection").notNull(),     // e.g. "Bowman Base"
+  set: text("set"),                            // e.g. "Topps Series 1" — the product set name
   cardNumberRaw: text("card_number_raw").notNull(), // e.g. "1", "TOG-20"
   cmpNumber: text("cmp_number"),               // internal CMP reference
   playerName: text("player_name").notNull(),   // full name, e.g. "Mike Trout"
@@ -177,6 +179,7 @@ export const cardVariations = pgTable("card_variations", {
   brand: text("brand").notNull(),
   year: integer("year").notNull(),
   collection: text("collection").notNull(),
+  set: text("set"),                            // product set name, mirrors card_database.set
   variationOrParallel: text("variation_or_parallel").notNull(), // e.g. "Sky Blue", "Gold Refractor"
   serialNumber: text("serial_number"),         // e.g. "/499", "Not serialized", "None detected"
   cmpNumber: text("cmp_number"),

@@ -444,6 +444,14 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
                     <span className="text-slate-700">{data.collection || 'Not detected'}</span>
                   </div>
 
+                  {/* Set */}
+                  {data.set && (
+                    <div className="text-lg">
+                      <span className="font-semibold text-slate-800">Set: </span>
+                      <span className="text-slate-700">{data.set}</span>
+                    </div>
+                  )}
+
                   {/* Year */}
                   <div className="text-lg">
                     <span className="font-semibold text-slate-800">Year: </span>

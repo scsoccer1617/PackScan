@@ -36,6 +36,7 @@ export interface CardLookupResult {
   playerLastName?: string;
   team?: string;
   collection?: string;
+  set?: string;             // product set name from card_database or card_variations
   cardNumber?: string;      // authoritative card number from DB (e.g. "T91-13")
   variation?: string;
   serialNumber?: string;
@@ -106,6 +107,7 @@ export async function importCardsCSV(csvBuffer: Buffer): Promise<{ imported: num
       brand,
       year,
       collection,
+      set: (row['set'] || row['Set'] || '').trim() || null,
       cardNumberRaw,
       cmpNumber: (row['cmp_number'] || row['Cmp_number'] || '').trim() || null,
       playerName,
@@ -192,6 +194,7 @@ export async function importVariationsCSV(csvBuffer: Buffer): Promise<{ imported
       brand,
       year,
       collection,
+      set: (row['set'] || row['Set'] || '').trim() || null,
       variationOrParallel: variation,
       serialNumber: serialNumber || null,
       cmpNumber: (row['cmp_number'] || row['Cmp_number'] || '').trim() || null,
@@ -350,12 +353,16 @@ export async function lookupCard(input: CardLookupInput): Promise<CardLookupResu
       serialNumber,
     });
 
+    // Resolve set: prefer card_database.set, fall back to variation row's set
+    const resolvedSet = cardRow.set || variationResult?.set || undefined;
+
     return {
       found: true,
       playerFirstName: firstName,
       playerLastName: lastName,
       team: cardRow.team || undefined,
       collection: cardRow.collection,
+      set: resolvedSet || undefined,
       cardNumber: cardRow.cardNumberRaw,
       variation: variationResult?.variationOrParallel,
       serialNumber: variationResult?.serialNumber || serialNumber,

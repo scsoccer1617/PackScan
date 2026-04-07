@@ -1711,6 +1711,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               brand: dbResult.brand || brand,
               year: dbResult.year || year,
               collection: dbResult.collection || collection || '',
+              set: dbResult.set || undefined,
               cardNumber: dbResult.cardNumber || cardNumber,
               variant: variant || dbResult.variation || '',
               serialNumber: dbResult.serialNumber || '',
