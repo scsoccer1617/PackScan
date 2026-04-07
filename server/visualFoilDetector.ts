@@ -268,7 +268,7 @@ export async function detectFoilFromImage(base64Image: string, options?: { isNum
       const parsedColors = parseVisionColors(imageProps.dominantColors.colors);
       let detectedColorTint: string | null = null;
       let tintedColorCount = 0;
-      const detectedTints: { name: string; coverage: number }[] = [];
+      const detectedTints: { name: string; coverage: number; saturation: number }[] = [];
       let hasMetallicColors = false;
       let totalColorVariance = 0;
       
@@ -295,7 +295,7 @@ export async function detectFoilFromImage(base64Image: string, options?: { isNum
         if ((c.saturation > 20 && c.pixelFraction >= 0.015 || isFoilLikeColor) && Math.max(c.r, c.g, c.b) > 70) {
           if (c.colorName) {
             tintedColorCount++;
-            detectedTints.push({ name: c.colorName, coverage: c.pixelFraction });
+            detectedTints.push({ name: c.colorName, coverage: c.pixelFraction, saturation: c.saturation });
             if (!detectedColorTint) {
               detectedColorTint = c.colorName;
             }
@@ -317,11 +317,22 @@ export async function detectFoilFromImage(base64Image: string, options?: { isNum
       
       indicators.push(`Color summary: ${tintedColorCount} tinted regions, similar=${hasSimilarTints}, tint coverage=${(totalTintCoverage * 100).toFixed(1)}%, same-color coverage=${(sameTintCoverage * 100).toFixed(1)}%`);
 
-      const similarTintCount = detectedTints.filter(t => t.name === detectedColorTint).length;
+      const sameTintItems = detectedTints.filter(t => t.name === detectedColorTint);
+      const similarTintCount = sameTintItems.length;
       const hasStrongSimilarTints = similarTintCount >= 3;
-      // Strong color evidence: requires 3+ same-color regions AND that specific color covers ≥10% of the image.
-      // This prevents sports card photos (blue jersey scattered across small regions) from triggering.
-      const hasStrongColorEvidence = hasStrongSimilarTints && sameTintCoverage > 0.10;
+      // Average saturation of the dominant same-color tint regions.
+      // Foil border colors are vivid/pure (avg sat >100); natural photo colors (jerseys, backgrounds) are muted (~60-85).
+      const sameTintAvgSaturation = sameTintItems.length > 0
+        ? sameTintItems.reduce((sum, t) => sum + t.saturation, 0) / sameTintItems.length
+        : 0;
+      indicators.push(`Same-color avg saturation: ${sameTintAvgSaturation.toFixed(0)} (${sameTintItems.length} regions)`);
+
+      // Two evidence paths to confirm foil:
+      // 1. High coverage (≥10%): definitive foil border
+      // 2. Moderate coverage (≥5%) + vivid saturation (avg >100): genuine foil color, not muted jersey/background
+      const hasHighCoverageEvidence = hasStrongSimilarTints && sameTintCoverage > 0.10;
+      const hasVividColorEvidence   = hasStrongSimilarTints && sameTintCoverage > 0.05 && sameTintAvgSaturation > 100;
+      const hasStrongColorEvidence  = hasHighCoverageEvidence || hasVividColorEvidence;
       const hasModestSimilarTints = similarTintCount >= 2 && totalTintCoverage > 0.20;
       
       indicators.push(`Label support: strongFoil=${hasStrongFoilIndicators}, reflective=${hasReflectiveLabels}`);
