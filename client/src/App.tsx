@@ -3,6 +3,7 @@ import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import NotFound from "@/pages/not-found";
 import PriceLookup from "@/pages/PriceLookup";
+import CardSearch from "@/pages/CardSearch";
 import CardDatabaseAdmin from "@/pages/CardDatabaseAdmin";
 import Header from "@/components/Header";
 
@@ -15,6 +16,7 @@ function App() {
         <main className="flex-1 overflow-y-auto">
           <Switch>
             <Route path="/" component={() => <PriceLookup />} />
+            <Route path="/search" component={() => <CardSearch />} />
             <Route path="/admin/card-database" component={() => <CardDatabaseAdmin />} />
             <Route component={NotFound} />
           </Switch>

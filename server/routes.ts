@@ -22,7 +22,7 @@ import { z } from 'zod';
 import { handleDualSideCardAnalysis } from './dualSideOCR';
 import { extractTextFromImage, analyzeSportsCardImage } from './googleVisionFetch';
 import { handleJordanWicksCard } from './jordanWicksRoute';
-import { importCardsCSV, importVariationsCSV } from './cardDatabaseService';
+import { importCardsCSV, importVariationsCSV, lookupCard } from './cardDatabaseService';
 import { cardDatabase, cardVariations } from '../shared/schema';
 import { join } from 'path';
 import fs from 'fs';
@@ -1612,6 +1612,140 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error('Error clearing card database:', error);
       return res.status(500).json({ error: 'Failed to clear card database' });
+    }
+  });
+
+  // ─── Card Search & Autocomplete Routes ─────────────────────────────────────
+
+  // Simple in-memory cache for autocomplete lists (refreshed every 5 minutes)
+  let brandsCache: { data: string[]; timestamp: number } | null = null;
+  const collectionsCache = new Map<string, { data: string[]; timestamp: number }>();
+  const AUTOCOMPLETE_CACHE_TTL = 5 * 60 * 1000;
+
+  // GET /api/card-database/brands — distinct brand names for autocomplete
+  app.get(`${apiPrefix}/card-database/brands`, async (_req, res) => {
+    try {
+      const now = Date.now();
+      if (brandsCache && (now - brandsCache.timestamp) < AUTOCOMPLETE_CACHE_TTL) {
+        return res.json(brandsCache.data);
+      }
+      const rows = await db
+        .select({ brand: cardDatabase.brand })
+        .from(cardDatabase)
+        .groupBy(cardDatabase.brand)
+        .orderBy(cardDatabase.brand);
+      const data = rows.map(r => r.brand);
+      brandsCache = { data, timestamp: now };
+      return res.json(data);
+    } catch (error: any) {
+      console.error('Error fetching brands for autocomplete:', error);
+      return res.status(500).json({ error: 'Failed to fetch brands' });
+    }
+  });
+
+  // GET /api/card-database/collections — distinct collections, optionally filtered by brand
+  app.get(`${apiPrefix}/card-database/collections`, async (req, res) => {
+    try {
+      const brand = req.query.brand ? String(req.query.brand) : '';
+      const cacheKey = brand.toLowerCase();
+      const now = Date.now();
+      const cached = collectionsCache.get(cacheKey);
+      if (cached && (now - cached.timestamp) < AUTOCOMPLETE_CACHE_TTL) {
+        return res.json(cached.data);
+      }
+      let rows;
+      if (brand) {
+        rows = await db
+          .select({ collection: cardDatabase.collection })
+          .from(cardDatabase)
+          .where(sql`lower(${cardDatabase.brand}) = lower(${brand})`)
+          .groupBy(cardDatabase.collection)
+          .orderBy(cardDatabase.collection);
+      } else {
+        rows = await db
+          .select({ collection: cardDatabase.collection })
+          .from(cardDatabase)
+          .groupBy(cardDatabase.collection)
+          .orderBy(cardDatabase.collection);
+      }
+      const data = rows.map(r => r.collection);
+      collectionsCache.set(cacheKey, { data, timestamp: now });
+      return res.json(data);
+    } catch (error: any) {
+      console.error('Error fetching collections for autocomplete:', error);
+      return res.status(500).json({ error: 'Failed to fetch collections' });
+    }
+  });
+
+  // GET /api/card-search — look up a card by structured fields, return resolved card info
+  app.get(`${apiPrefix}/card-search`, async (req, res) => {
+    try {
+      const {
+        year: yearStr,
+        brand,
+        collection,
+        cardNumber,
+        variant,
+        playerFirstName,
+        playerLastName,
+      } = req.query as Record<string, string | undefined>;
+
+      const year = yearStr ? parseInt(yearStr, 10) : 0;
+
+      // Try DB lookup when we have enough structured fields
+      if (brand && year && cardNumber) {
+        const dbResult = await lookupCard({
+          brand,
+          year,
+          collection: collection || undefined,
+          cardNumber,
+        });
+
+        if (dbResult.found) {
+          return res.json({
+            found: true,
+            source: 'card_database',
+            cardData: {
+              playerFirstName: dbResult.playerFirstName || '',
+              playerLastName: dbResult.playerLastName || '',
+              brand: dbResult.brand || brand,
+              year: dbResult.year || year,
+              collection: dbResult.collection || collection || '',
+              cardNumber: dbResult.cardNumber || cardNumber,
+              variant: variant || dbResult.variation || '',
+              serialNumber: dbResult.serialNumber || '',
+              isRookieCard: dbResult.isRookieCard || false,
+              isAutographed: false,
+              isNumbered: !!(dbResult.serialNumber),
+              isFoil: false,
+              sport: 'Baseball',
+            },
+          });
+        }
+      }
+
+      // No DB match — fall back to exactly what the user typed
+      return res.json({
+        found: false,
+        source: 'user_input',
+        cardData: {
+          playerFirstName: playerFirstName || '',
+          playerLastName: playerLastName || '',
+          brand: brand || '',
+          year: year || 0,
+          collection: collection || '',
+          cardNumber: cardNumber || '',
+          variant: variant || '',
+          isRookieCard: false,
+          isAutographed: false,
+          isNumbered: false,
+          isFoil: false,
+          sport: 'Baseball',
+        },
+      });
+    } catch (error: any) {
+      console.error('Error in card-search:', error);
+      return res.status(500).json({ error: 'Search failed' });
     }
   });
 
