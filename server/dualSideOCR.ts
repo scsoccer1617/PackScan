@@ -585,11 +585,9 @@ async function combineCardResults(
     combined.isFoil = false;
   }
   
-  // Set variant from foilType if foil was detected and no variant was set
-  if (combined.isFoil && combined.foilType && !combined.variant) {
-    combined.variant = combined.foilType;
-    console.log(`Set variant to "${combined.foilType}" from foil detection`);
-  }
+  // Note: variant is NOT set from foilType. The variant field is reserved for
+  // printed card variations (short print, image variation, etc.), not foil colors.
+  // foilType carries the foil/parallel color information separately.
   
   console.log('=== COMBINATION COMPLETE ===');
   

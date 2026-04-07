@@ -1321,8 +1321,7 @@ function detectCardFeatures(text: string, cardDetails: Partial<CardFormValues>):
           const total = parseInt(serialMatch[2]);
           if (total <= 999) { // Most aqua foils are /399 or similar
             cardDetails.foilType = 'Aqua Foil';
-            cardDetails.variant = 'Aqua Foil';
-            console.log(`Updated to Aqua Foil variant based on serial number: ${cardDetails.serialNumber}`);
+            console.log(`Updated to Aqua Foil foilType based on serial number: ${cardDetails.serialNumber}`);
           }
         }
       }
@@ -1333,8 +1332,7 @@ function detectCardFeatures(text: string, cardDetails: Partial<CardFormValues>):
         // Short OCR text + numbered card often indicates foil
         cardDetails.isFoil = true;
         cardDetails.foilType = 'Aqua Foil';
-        cardDetails.variant = 'Aqua Foil';
-        console.log('✅ Detected Aqua Foil variant based on limited OCR text and numbered status');
+        console.log('✅ Detected Aqua Foil foilType based on limited OCR text and numbered status');
       } else {
         // Special case for Topps Series Two numbered cards
         // Looking at the OCR pattern: "LOPPS\nEW YORK\nSEAN\nMANAEA P"

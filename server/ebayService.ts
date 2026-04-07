@@ -296,13 +296,6 @@ export async function searchCardValues(
 ): Promise<EbayResponse> {
   try {
     const ebayAppId = getEbayAppId();
-    let ebayBrowseToken: string;
-    try {
-      ebayBrowseToken = await getEbayAccessToken();
-    } catch (tokenError: any) {
-      console.warn('Failed to get eBay access token:', tokenError.message);
-      return { averageValue: 0, results: [] };
-    }
     if (!ebayAppId) {
       console.warn('eBay APP ID not set. Cannot fetch card values.');
       return { averageValue: 0, results: [] };
@@ -363,57 +356,73 @@ export async function searchCardValues(
     console.log('Searching eBay sold listings with keywords:', keywords);
 
     const safePlayerName = playerName || '';
-    const insightsUrl = 'https://api.ebay.com/buy/marketplace_insights/v1_beta/item_summary/search';
-    const insightsHeaders = {
-      'Authorization': `Bearer ${ebayBrowseToken}`,
-      'Accept': 'application/json',
-    };
-
-    const mapInsightsItem = (item: any): EbaySearchResult => ({
-      title: item.title || '',
-      price: parseFloat(item.lastSoldPrice?.value || item.price?.value || '0'),
-      currency: item.lastSoldPrice?.currency || item.price?.currency || 'USD',
-      url: item.itemWebUrl || '',
-      imageUrl: item.image?.imageUrl || item.thumbnailImages?.[0]?.imageUrl || '',
-      condition: item.condition || '',
-      endTime: item.lastSoldDate || item.itemEndDate || ''
-    });
-
     let results: EbaySearchResult[] = [];
     const dataType = 'sold';
     const fallbackSearchUrl = getEbaySearchUrl(safePlayerName, cardNumber, brand, year, collection, '', isNumbered, foilType, serialNumber);
 
-    try {
-      // Use eBay Marketplace Insights API — the correct source for sold-item data
-      const insightsResponse = await axios.get(insightsUrl, {
-        params: { q: keywords, limit: 5, sort: 'soldDate', category_ids: '213' },
-        headers: insightsHeaders,
+    // Use the eBay Finding API (findCompletedItems) — searches sold/completed listings
+    // Uses EBAY_APP_ID directly; no OAuth token required
+    const findingApiUrl = 'https://svcs.ebay.com/services/search/FindingService/v1';
+
+    const mapFindingItem = (item: any): EbaySearchResult => ({
+      title: item.title?.[0] || '',
+      price: parseFloat(item.sellingStatus?.[0]?.convertedCurrentPrice?.[0]?.['__value__'] || '0'),
+      currency: item.sellingStatus?.[0]?.convertedCurrentPrice?.[0]?.['@currencyId'] || 'USD',
+      url: item.viewItemURL?.[0] || '',
+      imageUrl: item.galleryURL?.[0] || '',
+      condition: item.condition?.[0]?.conditionDisplayName?.[0] || '',
+      endTime: item.listingInfo?.[0]?.endTime?.[0] || ''
+    });
+
+    const callFindingApi = async (query: string): Promise<EbaySearchResult[]> => {
+      const resp = await axios.get(findingApiUrl, {
+        params: {
+          'OPERATION-NAME': 'findCompletedItems',
+          'SERVICE-VERSION': '1.0.0',
+          'SECURITY-APPNAME': ebayAppId,
+          'RESPONSE-DATA-FORMAT': 'JSON',
+          'keywords': query,
+          'itemFilter(0).name': 'SoldItemsOnly',
+          'itemFilter(0).value': 'true',
+          'paginationInput.entriesPerPage': '10',
+          'sortOrder': 'EndTimeSoonest',
+          'categoryId': '213'
+        },
         timeout: 15000
       });
+      const items: any[] = resp.data?.findCompletedItemsResponse?.[0]?.searchResult?.[0]?.item || [];
+      return items
+        .map(mapFindingItem)
+        .filter(r => r.price > 0);
+    };
 
-      if (insightsResponse.data?.itemSummaries?.length) {
-        results = insightsResponse.data.itemSummaries.map(mapInsightsItem);
-        console.log(`Marketplace Insights returned ${results.length} sold listings`);
-      } else {
-        console.log('Marketplace Insights returned 0 results for specific query, trying broader search...');
+    try {
+      results = await callFindingApi(keywords);
+      console.log(`Finding API (specific query) returned ${results.length} sold listings`);
+
+      if (results.length === 0) {
+        // Try a broader query without card number, variant, or serial suffix
         const broaderKeywords = buildKeywords({ includeCardNumber: false, includeVariant: false, includeSerial: false });
         if (broaderKeywords && broaderKeywords !== keywords) {
-          const broaderResponse = await axios.get(insightsUrl, {
-            params: { q: broaderKeywords, limit: 5, sort: 'soldDate', category_ids: '213' },
-            headers: insightsHeaders,
-            timeout: 15000
-          });
-          if (broaderResponse.data?.itemSummaries?.length) {
-            results = broaderResponse.data.itemSummaries.map(mapInsightsItem);
-            console.log(`Broader Marketplace Insights search returned ${results.length} sold listings`);
-          }
+          results = await callFindingApi(broaderKeywords);
+          console.log(`Finding API (broader query) returned ${results.length} sold listings`);
         }
       }
-    } catch (insightsError: any) {
-      const status = insightsError.response?.status;
-      const errBody = insightsError.response?.data;
-      console.log(`Marketplace Insights API unavailable (HTTP ${status ?? 'no-response'}): ${insightsError.message}`);
+    } catch (findingError: any) {
+      const status = findingError.response?.status;
+      const errBody = findingError.response?.data;
+      console.log(`Finding API unavailable (HTTP ${status ?? 'no-response'}): ${findingError.message}`);
       if (errBody) console.log('API error details:', JSON.stringify(errBody));
+      return {
+        averageValue: 0,
+        results: [],
+        searchUrl: fallbackSearchUrl,
+        errorMessage: 'Sold price data currently unavailable',
+        dataType: 'sold' as const
+      };
+    }
+
+    if (results.length === 0) {
       return {
         averageValue: 0,
         results: [],
@@ -511,13 +520,11 @@ export function getEbaySearchUrl(
   if (searchCollection) parts.push(searchCollection);
   parts.push(playerName);
   if (cardNumber) parts.push(/^\d+$/.test(cardNumber) ? `#${cardNumber}` : cardNumber);
-  if (foilType) parts.push(foilType);
   
   let keywords = parts.filter(Boolean).join(' ');
   
   // Add serial number suffix for serialized cards (e.g., "/399" instead of "numbered")
   if (isNumbered && serialNumber && serialNumber.includes('/')) {
-    // Extract serial number suffix from serialNumber parameter
     const serialMatch = serialNumber.match(/\/(\d+)$/);
     if (serialMatch) {
       keywords += ` /${serialMatch[1]}`;
@@ -528,12 +535,10 @@ export function getEbaySearchUrl(
     keywords += ' numbered';
   }
   
-  // Add foil variant for special finishes to get accurate pricing
+  // Add foil variant once using normalized search term
   if (foilType) {
     const foilSearchTerm = getFoilSearchTerm(foilType);
-    if (foilSearchTerm) {
-      keywords += ` ${foilSearchTerm}`;
-    }
+    keywords += ` ${foilSearchTerm || foilType}`;
   }
   
   // Encode for URL
