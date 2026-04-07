@@ -308,12 +308,20 @@ export async function detectFoilFromImage(base64Image: string, options?: { isNum
         detectedTints.some(t => t.name === detectedColorTint && t !== detectedTints[0]);
       const totalTintCoverage = detectedTints.reduce((sum, t) => sum + t.coverage, 0);
       
-      indicators.push(`Color summary: ${tintedColorCount} tinted regions, similar=${hasSimilarTints}, tint coverage=${(totalTintCoverage * 100).toFixed(1)}%`);
+      // Coverage of ONLY the dominant tint color (not all tints combined).
+      // A genuine foil border parallel will have its specific color covering ≥10% of the card.
+      // A sports card photo with a blue jersey will have blue in scattered small regions (<10%).
+      const sameTintCoverage = detectedTints
+        .filter(t => t.name === detectedColorTint)
+        .reduce((sum, t) => sum + t.coverage, 0);
+      
+      indicators.push(`Color summary: ${tintedColorCount} tinted regions, similar=${hasSimilarTints}, tint coverage=${(totalTintCoverage * 100).toFixed(1)}%, same-color coverage=${(sameTintCoverage * 100).toFixed(1)}%`);
 
       const similarTintCount = detectedTints.filter(t => t.name === detectedColorTint).length;
       const hasStrongSimilarTints = similarTintCount >= 3;
-      // Strong similar tints with meaningful coverage: characteristic of foil border parallels
-      const hasStrongColorEvidence = hasStrongSimilarTints && totalTintCoverage > 0.05;
+      // Strong color evidence: requires 3+ same-color regions AND that specific color covers ≥10% of the image.
+      // This prevents sports card photos (blue jersey scattered across small regions) from triggering.
+      const hasStrongColorEvidence = hasStrongSimilarTints && sameTintCoverage > 0.10;
       const hasModestSimilarTints = similarTintCount >= 2 && totalTintCoverage > 0.20;
       
       indicators.push(`Label support: strongFoil=${hasStrongFoilIndicators}, reflective=${hasReflectiveLabels}`);
