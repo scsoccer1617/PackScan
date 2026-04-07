@@ -42,10 +42,10 @@ export default function CardSearch() {
   }, [brand]);
 
   const handleSearch = async () => {
-    if (!brand && !playerLastName && !cardNumber) {
+    if (!(brand && year)) {
       toast({
         title: "More info needed",
-        description: "Enter at least a brand, card number, or player name.",
+        description: "Brand and year are required to look up pricing.",
         variant: "destructive",
       });
       return;
@@ -98,7 +98,7 @@ export default function CardSearch() {
     setSearchSource("");
   };
 
-  const canSearch = !!(brand || playerLastName || cardNumber);
+  const canSearch = !!(brand && year);
 
   return (
     <div className="p-4 space-y-6">
@@ -109,7 +109,7 @@ export default function CardSearch() {
             Find Card Value
           </CardTitle>
           <p className="text-sm text-gray-500">
-            Enter what you know — brand, year, card number, or player name — to look up market value.
+            Brand and year are required. Add card number or player name for a more precise result.
           </p>
         </CardHeader>
         <CardContent className="space-y-4">
