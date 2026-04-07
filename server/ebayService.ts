@@ -61,7 +61,8 @@ function discoverVariantFromListings(titles: string[], detectedColor: string | n
 }
 
 function discoverVariantFromTitlesBlind(titles: string[], playerName: string): string | null {
-  const playerLast = playerName.split(' ').slice(-1)[0].toLowerCase();
+  const nameParts = (playerName || '').trim().split(' ').filter(Boolean);
+  const playerLast = nameParts[nameParts.length - 1]?.toLowerCase() || '';
   
   const variantPatterns = [
     /\b(aqua\s+crackle\s+foil)\b/i,
@@ -183,16 +184,17 @@ function prioritizeListingsByCardMatch(
     const matchedElements: string[] = [];
     
     // Player name match (highest priority - 100 points)
-    const playerFirstName = playerName.split(' ')[0].toLowerCase();
-    const playerLastName = playerName.split(' ').slice(1).join(' ').toLowerCase();
-    
-    if (title.includes(playerFirstName) && title.includes(playerLastName)) {
+    const nameParts = (playerName || '').trim().split(' ').filter(Boolean);
+    const playerFirstName = nameParts[0]?.toLowerCase() || '';
+    const playerLastName = nameParts.slice(1).join(' ').toLowerCase();
+
+    if (playerFirstName && playerLastName && title.includes(playerFirstName) && title.includes(playerLastName)) {
       score += 100;
       matchedElements.push('full name');
-    } else if (title.includes(playerLastName)) {
+    } else if (playerLastName && title.includes(playerLastName)) {
       score += 75;
       matchedElements.push('last name');
-    } else if (title.includes(playerFirstName)) {
+    } else if (playerFirstName && title.includes(playerFirstName)) {
       score += 50;
       matchedElements.push('first name');
     }
@@ -358,411 +360,76 @@ export async function searchCardValues(
     }
     
     let keywords = buildKeywords();
-    console.log('Searching eBay for SOLD listings with keywords:', keywords);
+    console.log('Searching eBay sold listings with keywords:', keywords);
 
-    // Try Finding API first for sold listings (most valuable data)
-    let response;
-    let usingFindingAPI = true;
-    
+    const safePlayerName = playerName || '';
+    const insightsUrl = 'https://api.ebay.com/buy/marketplace_insights/v1_beta/item_summary/search';
+    const insightsHeaders = {
+      'Authorization': `Bearer ${ebayBrowseToken}`,
+      'Accept': 'application/json',
+    };
+
+    const mapInsightsItem = (item: any): EbaySearchResult => ({
+      title: item.title || '',
+      price: parseFloat(item.lastSoldPrice?.value || item.price?.value || '0'),
+      currency: item.lastSoldPrice?.currency || item.price?.currency || 'USD',
+      url: item.itemWebUrl || '',
+      imageUrl: item.image?.imageUrl || item.thumbnailImages?.[0]?.imageUrl || '',
+      condition: item.condition || '',
+      endTime: item.lastSoldDate || item.itemEndDate || ''
+    });
+
+    let results: EbaySearchResult[] = [];
+    const dataType = 'sold';
+    const fallbackSearchUrl = getEbaySearchUrl(safePlayerName, cardNumber, brand, year, collection, '', isNumbered, foilType, serialNumber);
+
     try {
-      const findingUrl = 'https://svcs.ebay.com/services/search/FindingService/v1';
-      const findingParams = {
-        'OPERATION-NAME': 'findCompletedItems',
-        'SERVICE-VERSION': '1.0.0',
-        'SECURITY-APPNAME': ebayAppId,
-        'GLOBAL-ID': 'EBAY-US',
-        'RESPONSE-DATA-FORMAT': 'JSON',
-        'keywords': keywords,
-        'paginationInput.entriesPerPage': '5',
-        'itemFilter(0).name': 'SoldItemsOnly',
-        'itemFilter(0).value': 'true',
-        'sortOrder': 'EndTimeSoonest'
-      };
-
-      response = await axios.get(findingUrl, { 
-        params: findingParams,
-        timeout: 10000
-      });
-      
-      console.log('Successfully using Finding API for sold listings');
-      
-    } catch (findingError: any) {
-      console.log('Finding API failed, falling back to Browse API for current listings');
-      usingFindingAPI = false;
-      
-      // Fallback to Browse API for current marketplace data
-      const browseUrl = `${EBAY_BROWSE_API_URL}/item_summary/search`;
-      const browseParams = {
-        q: keywords,
-        limit: 10,
-        filter: 'buyingOptions:{AUCTION|FIXED_PRICE},deliveryCountry:US,conditionIds:{1000|1500|2000|2500|3000|4000|5000|6000}',
-        sort: 'price',
-        fieldgroups: 'EXTENDED',
-        category_ids: '213'
-      };
-
-      response = await axios.get(browseUrl, { 
-        params: browseParams,
-        headers: {
-          'Authorization': `Bearer ${ebayBrowseToken}`,
-          'Accept': 'application/json',
-          'Content-Type': 'application/json'
-        },
+      // Use eBay Marketplace Insights API — the correct source for sold-item data
+      const insightsResponse = await axios.get(insightsUrl, {
+        params: { q: keywords, limit: 5, sort: 'soldDate', category_ids: '213' },
+        headers: insightsHeaders,
         timeout: 15000
       });
-    }
-    const data = response.data;
-    let results: EbaySearchResult[] = [];
-    let totalValue = 0;
-    let itemCount = 0;
-    let dataType = usingFindingAPI ? 'sold' : 'current';
 
-    if (usingFindingAPI) {
-      console.log('Processing Finding API sold listings data');
-      
-      // Check for Finding API errors
-      if (data && data.errorMessage) {
-        console.log('Finding API Error details:', JSON.stringify(data.errorMessage, null, 2));
-        const error = data.errorMessage[0]?.error?.[0];
-        const errorMessage = `eBay API error: ${error?.message?.[0] || 'Unknown error'}`;
-        
-        const searchUrl = getEbaySearchUrl(playerName, cardNumber, brand, year, collection, '', isNumbered, foilType, serialNumber);
-        return { 
-          averageValue: 0, 
-          results: [],
-          searchUrl,
-          errorMessage,
-          dataType: 'sold' as const
-        };
-      }
-
-      // Process Finding API sold listings
-      if (
-        data && 
-        data.findCompletedItemsResponse && 
-        data.findCompletedItemsResponse[0] && 
-        data.findCompletedItemsResponse[0].searchResult && 
-        data.findCompletedItemsResponse[0].searchResult[0] && 
-        data.findCompletedItemsResponse[0].searchResult[0].item
-      ) {
-        const items = data.findCompletedItemsResponse[0].searchResult[0].item;
-        
-        results = items.map((item: any) => {
-          let price = 0;
-          if (item.sellingStatus && item.sellingStatus[0] && item.sellingStatus[0].currentPrice && item.sellingStatus[0].currentPrice[0]) {
-            price = parseFloat(item.sellingStatus[0].currentPrice[0].__value__);
-            totalValue += price;
-            itemCount++;
-          }
-          
-          let imageUrl = '';
-          if (item.galleryURL && item.galleryURL[0]) {
-            imageUrl = item.galleryURL[0];
-          }
-          
-          let condition = '';
-          if (item.condition && item.condition[0] && item.condition[0].conditionDisplayName) {
-            condition = item.condition[0].conditionDisplayName[0];
-          }
-          
-          return {
-            title: item.title ? item.title[0] : '',
-            price: price,
-            currency: item.sellingStatus && item.sellingStatus[0] && item.sellingStatus[0].currentPrice && item.sellingStatus[0].currentPrice[0]['@currencyId'] ? 
-              item.sellingStatus[0].currentPrice[0]['@currencyId'] : 'USD',
-            url: item.viewItemURL ? item.viewItemURL[0] : '',
-            imageUrl: imageUrl,
-            condition: condition,
-            endTime: item.listingInfo && item.listingInfo[0] && item.listingInfo[0].endTime ? 
-              item.listingInfo[0].endTime[0] : ''
-          };
-        });
-      }
-    } else {
-      console.log('Processing Browse API current listings data');
-      
-      // Check for Browse API errors
-      if (data.errors && data.errors.length > 0) {
-        console.log('Browse API Error details:', JSON.stringify(data.errors, null, 2));
-        const error = data.errors[0];
-        const errorMessage = `eBay API error: ${error.message || 'Unknown error'}`;
-        
-        const searchUrl = getEbaySearchUrl(playerName, cardNumber, brand, year, collection, '', isNumbered, foilType, serialNumber);
-        return { 
-          averageValue: 0, 
-          results: [],
-          searchUrl,
-          errorMessage,
-          dataType: 'current' as const
-        };
-      }
-
-      // Process Browse API current listings
-      if (data && data.itemSummaries && Array.isArray(data.itemSummaries)) {
-        const items = data.itemSummaries;
-        
-        results = items.map((item: any) => {
-          let price = 0;
-          if (item.price && item.price.value) {
-            price = parseFloat(item.price.value);
-            totalValue += price;
-            itemCount++;
-          }
-          
-          let imageUrl = '';
-          if (item.image && item.image.imageUrl) {
-            imageUrl = item.image.imageUrl;
-          } else if (item.thumbnailImages && item.thumbnailImages.length > 0) {
-            imageUrl = item.thumbnailImages[0].imageUrl;
-          }
-          
-          let condition = '';
-          if (item.condition) {
-            condition = item.condition;
-          } else if (item.conditionId) {
-            const conditionMap: { [key: string]: string } = {
-              '1000': 'New',
-              '1500': 'New other',
-              '1750': 'New with defects',
-              '2000': 'Manufacturer refurbished',
-              '2500': 'Seller refurbished',
-              '3000': 'Used',
-              '4000': 'Very good',
-              '5000': 'Good',
-              '6000': 'Acceptable',
-              '7000': 'For parts or not working'
-            };
-            condition = conditionMap[item.conditionId] || 'Unknown';
-          }
-          
-          return {
-            title: item.title || '',
-            price: price,
-            currency: item.price?.currency || 'USD',
-            url: item.itemWebUrl || '',
-            imageUrl: imageUrl,
-            condition: condition,
-            endTime: item.itemEndDate || ''
-          };
-        });
-      }
-    }
-
-    const detectedColor = extractColorFromVariant(variantKeyword || undefined);
-    const shouldDiscoverVariant = detectedColor && variantKeyword && !variantKeyword.toLowerCase().includes('crackle') && !variantKeyword.toLowerCase().includes('shimmer') && !variantKeyword.toLowerCase().includes('ice');
-    
-    if (results.length > 0 && shouldDiscoverVariant) {
-      console.log('=== ALWAYS-ON VARIANT DISCOVERY (have results, checking for more specific variant) ===');
-      const titles = results.map(r => r.title);
-      const discoveredVariant = discoverVariantFromListings(titles, detectedColor);
-      
-      if (discoveredVariant && discoveredVariant !== variantKeyword) {
-        console.log(`Discovered more specific variant from existing results: "${discoveredVariant}" (was "${variantKeyword}")`);
-        variantKeyword = discoveredVariant;
-        
-        const refinedKeywords = buildKeywords();
-        console.log('Refined search with discovered variant:', refinedKeywords);
-        
-        try {
-          const browseUrl = `${EBAY_BROWSE_API_URL}/item_summary/search`;
-          const refinedParams = {
-            q: refinedKeywords,
-            limit: 10,
-            filter: 'buyingOptions:{AUCTION|FIXED_PRICE},deliveryCountry:US',
-            sort: 'price',
-            fieldgroups: 'EXTENDED',
-            category_ids: '213'
-          };
-          
-          const refinedResponse = await axios.get(browseUrl, {
-            params: refinedParams,
-            headers: {
-              'Authorization': `Bearer ${ebayBrowseToken}`,
-              'Accept': 'application/json',
-            },
+      if (insightsResponse.data?.itemSummaries?.length) {
+        results = insightsResponse.data.itemSummaries.map(mapInsightsItem);
+        console.log(`Marketplace Insights returned ${results.length} sold listings`);
+      } else {
+        console.log('Marketplace Insights returned 0 results for specific query, trying broader search...');
+        const broaderKeywords = buildKeywords({ includeCardNumber: false, includeVariant: false, includeSerial: false });
+        if (broaderKeywords && broaderKeywords !== keywords) {
+          const broaderResponse = await axios.get(insightsUrl, {
+            params: { q: broaderKeywords, limit: 5, sort: 'soldDate', category_ids: '213' },
+            headers: insightsHeaders,
             timeout: 15000
           });
-          
-          if (refinedResponse.data?.itemSummaries && refinedResponse.data.itemSummaries.length > 0) {
-            results = refinedResponse.data.itemSummaries.map((item: any) => ({
-              title: item.title || '',
-              price: parseFloat(item.price?.value || '0'),
-              currency: item.price?.currency || 'USD',
-              url: item.itemWebUrl || '',
-              imageUrl: item.image?.imageUrl || item.thumbnailImages?.[0]?.imageUrl || '',
-              condition: item.condition || '',
-              endTime: item.itemEndDate || ''
-            }));
-            dataType = 'current';
-            console.log(`Refined search with discovered variant returned ${results.length} results`);
-          }
-        } catch (refinedError: any) {
-          console.log('Refined variant search failed:', refinedError.message);
-        }
-      } else {
-        console.log(`No more specific variant found in listing titles (current: "${variantKeyword}")`);
-      }
-    }
-    
-    if (results.length > 0 && !variantKeyword && isNumbered) {
-      console.log('=== BLIND VARIANT DISCOVERY (numbered card, no variant detected, scanning listing titles) ===');
-      const titles = results.map(r => r.title);
-      const blindVariant = discoverVariantFromTitlesBlind(titles, playerName);
-      
-      if (blindVariant) {
-        console.log(`Blind discovery found variant: "${blindVariant}" from eBay listing titles`);
-        variantKeyword = blindVariant;
-        
-        const refinedKeywords = buildKeywords();
-        console.log('Refined search with blind-discovered variant:', refinedKeywords);
-        
-        try {
-          const browseUrl = `${EBAY_BROWSE_API_URL}/item_summary/search`;
-          const refinedParams = {
-            q: refinedKeywords,
-            limit: 10,
-            filter: 'buyingOptions:{AUCTION|FIXED_PRICE},deliveryCountry:US',
-            sort: 'price',
-            fieldgroups: 'EXTENDED',
-            category_ids: '213'
-          };
-          
-          const refinedResponse = await axios.get(browseUrl, {
-            params: refinedParams,
-            headers: {
-              'Authorization': `Bearer ${ebayBrowseToken}`,
-              'Accept': 'application/json',
-            },
-            timeout: 15000
-          });
-          
-          if (refinedResponse.data?.itemSummaries && refinedResponse.data.itemSummaries.length > 0) {
-            results = refinedResponse.data.itemSummaries.map((item: any) => ({
-              title: item.title || '',
-              price: parseFloat(item.price?.value || '0'),
-              currency: item.price?.currency || 'USD',
-              url: item.itemWebUrl || '',
-              imageUrl: item.image?.imageUrl || item.thumbnailImages?.[0]?.imageUrl || '',
-              condition: item.condition || '',
-              endTime: item.itemEndDate || ''
-            }));
-            dataType = 'current';
-            console.log(`Blind variant refined search returned ${results.length} results`);
-          }
-        } catch (refinedError: any) {
-          console.log('Blind variant refined search failed:', refinedError.message);
-        }
-      } else {
-        console.log('No variant keywords found in listing titles');
-      }
-    }
-
-    if (results.length === 0) {
-      console.log('No results with initial query, trying broader discovery search...');
-      
-      const discoveryKeywords = buildKeywords({ includeVariant: false, includeCardNumber: false });
-      console.log('Discovery search keywords:', discoveryKeywords);
-      
-      let discoveryResults: EbaySearchResult[] = [];
-      try {
-        const browseUrl = `${EBAY_BROWSE_API_URL}/item_summary/search`;
-        const discoveryParams = {
-          q: discoveryKeywords,
-          limit: 20,
-          filter: 'buyingOptions:{AUCTION|FIXED_PRICE},deliveryCountry:US',
-          sort: 'price',
-          fieldgroups: 'EXTENDED',
-          category_ids: '213'
-        };
-        
-        const discoveryResponse = await axios.get(browseUrl, {
-          params: discoveryParams,
-          headers: {
-            'Authorization': `Bearer ${ebayBrowseToken}`,
-            'Accept': 'application/json',
-          },
-          timeout: 15000
-        });
-        
-        if (discoveryResponse.data?.itemSummaries) {
-          discoveryResults = discoveryResponse.data.itemSummaries.map((item: any) => ({
-            title: item.title || '',
-            price: parseFloat(item.price?.value || '0'),
-            currency: item.price?.currency || 'USD',
-            url: item.itemWebUrl || '',
-            imageUrl: item.image?.imageUrl || item.thumbnailImages?.[0]?.imageUrl || '',
-            condition: item.condition || '',
-            endTime: item.itemEndDate || ''
-          }));
-        }
-      } catch (discoveryError: any) {
-        console.log('Discovery search failed:', discoveryError.message);
-      }
-      
-      if (discoveryResults.length > 0) {
-        const titles = discoveryResults.map(r => r.title);
-        const discoveredVariant = discoverVariantFromListings(titles, detectedColor);
-        
-        if (discoveredVariant && discoveredVariant !== variantKeyword) {
-          console.log(`Discovered more specific variant: "${discoveredVariant}" (was "${variantKeyword}")`);
-          variantKeyword = discoveredVariant;
-          
-          const refinedKeywords = buildKeywords();
-          console.log('Refined search with discovered variant:', refinedKeywords);
-          
-          try {
-            const browseUrl = `${EBAY_BROWSE_API_URL}/item_summary/search`;
-            const refinedParams = {
-              q: refinedKeywords,
-              limit: 10,
-              filter: 'buyingOptions:{AUCTION|FIXED_PRICE},deliveryCountry:US',
-              sort: 'price',
-              fieldgroups: 'EXTENDED',
-              category_ids: '213'
-            };
-            
-            const refinedResponse = await axios.get(browseUrl, {
-              params: refinedParams,
-              headers: {
-                'Authorization': `Bearer ${ebayBrowseToken}`,
-                'Accept': 'application/json',
-              },
-              timeout: 15000
-            });
-            
-            if (refinedResponse.data?.itemSummaries && refinedResponse.data.itemSummaries.length > 0) {
-              results = refinedResponse.data.itemSummaries.map((item: any) => ({
-                title: item.title || '',
-                price: parseFloat(item.price?.value || '0'),
-                currency: item.price?.currency || 'USD',
-                url: item.itemWebUrl || '',
-                imageUrl: item.image?.imageUrl || item.thumbnailImages?.[0]?.imageUrl || '',
-                condition: item.condition || '',
-                endTime: item.itemEndDate || ''
-              }));
-              dataType = 'current';
-              console.log(`Refined search returned ${results.length} results`);
-            }
-          } catch (refinedError: any) {
-            console.log('Refined search failed:', refinedError.message);
+          if (broaderResponse.data?.itemSummaries?.length) {
+            results = broaderResponse.data.itemSummaries.map(mapInsightsItem);
+            console.log(`Broader Marketplace Insights search returned ${results.length} sold listings`);
           }
         }
-        
-        if (results.length === 0) {
-          results = discoveryResults;
-          dataType = 'current';
-          console.log(`Using discovery results: ${results.length} listings found`);
-        }
       }
+    } catch (insightsError: any) {
+      const status = insightsError.response?.status;
+      const errBody = insightsError.response?.data;
+      console.log(`Marketplace Insights API unavailable (HTTP ${status ?? 'no-response'}): ${insightsError.message}`);
+      if (errBody) console.log('API error details:', JSON.stringify(errBody));
+      return {
+        averageValue: 0,
+        results: [],
+        searchUrl: fallbackSearchUrl,
+        errorMessage: 'Sold price data currently unavailable',
+        dataType: 'sold' as const
+      };
     }
 
     const prioritizedResults = prioritizeListingsByCardMatch(
-      results, 
-      playerName, 
-      cardNumber, 
-      brand, 
-      year, 
-      collection, 
+      results,
+      safePlayerName,
+      cardNumber,
+      brand,
+      year,
+      collection,
       foilType
     );
     
@@ -803,49 +470,20 @@ export async function searchCardValues(
     const result = {
       averageValue,
       results: topResults,
-      searchUrl: getEbaySearchUrl(playerName, cardNumber, brand, year, collection, '', isNumbered, variantKeyword || foilType, serialNumber),
-      dataType: dataType as 'sold' | 'current',
-      discoveredVariant: variantKeyword !== (variant || foilType || '') ? variantKeyword : undefined,
+      searchUrl: fallbackSearchUrl,
+      dataType: 'sold' as const,
       discoveredCollection
     };
 
-    // Cache the successful result
     searchCache.set(cacheKey, { data: result, timestamp: Date.now() });
-
     return result;
   } catch (error: any) {
-    console.error('Error searching eBay Browse API:', error.message);
-    console.error('Error response status:', error.response?.status);
-    console.error('Error response data:', JSON.stringify(error.response?.data, null, 2));
-    
-    // Check for specific eBay Browse API error messages
-    let errorMessage = 'eBay Browse API error - check credentials';
-    
-    if (error.response?.status === 401 || (error.response?.data?.errors && error.response.data.errors[0]?.errorId === 1001)) {
-      clearCachedToken();
-      if (!_isRetry) {
-        console.log('eBay token expired, refreshing and retrying...');
-        return searchCardValues(playerName, cardNumber, brand, year, collection, condition, isNumbered, foilType, serialNumber, variant, true);
-      }
-      errorMessage = 'eBay OAuth token refresh failed. Please check your EBAY_APP_ID and EBAY_CERT_ID credentials.';
-    } else if (error.response?.data?.errors && Array.isArray(error.response.data.errors)) {
-      const ebayError = error.response.data.errors[0];
-      if (ebayError?.message) {
-        errorMessage = `eBay API error: ${ebayError.message}`;
-      }
-    } else if (error.response?.status === 403) {
-      errorMessage = 'eBay API access forbidden - OAuth token may lack Browse API permissions';
-    } else if (error.response?.status === 429) {
-      errorMessage = 'eBay API rate limit exceeded - please try again later';
-    }
-    
-    // Return search URL as fallback when API fails
-    const searchUrl = getEbaySearchUrl(playerName, cardNumber, brand, year, collection, '', isNumbered, foilType, serialNumber);
-    return { 
-      averageValue: 0, 
+    console.error('eBay search error:', error.message);
+    return {
+      averageValue: 0,
       results: [],
-      searchUrl,
-      errorMessage,
+      searchUrl: getEbaySearchUrl(playerName || '', cardNumber, brand, year, collection, '', isNumbered, foilType, serialNumber),
+      errorMessage: 'eBay search failed',
       dataType: 'sold' as const
     };
   }

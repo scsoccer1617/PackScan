@@ -957,7 +957,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
       
       const results = await searchCardValues(
-        playerName as string,
+        String(playerName || ''),
         cardNumber as string || '',
         brand as string,
         parseInt(year as string, 10),

@@ -38,7 +38,7 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
   const [averageValue, setAverageValue] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [searchUrl, setSearchUrl] = useState<string | null>(null);
-  const [dataType, setDataType] = useState<'sold' | 'current'>('sold');
+  const [dataType, setDataType] = useState<'sold' | 'current'>('sold'); // always 'sold' — no active listing fallback
   const [editMode, setEditMode] = useState(false);
   const [editData, setEditData] = useState<Partial<CardFormValues>>({});
   const [confirmStatus, setConfirmStatus] = useState<'idle' | 'confirming' | 'confirmed' | 'error'>('idle');
@@ -469,43 +469,42 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
 
       {/* Average Price */}
       {averageValue > 0 && (
-        <Card className={dataType === 'sold' ? "bg-green-50 border-green-200" : "bg-blue-50 border-blue-200"}>
+        <Card className="bg-green-50 border-green-200">
           <CardContent className="pt-6">
             <div className="text-center">
-              <div className={`text-2xl font-bold ${dataType === 'sold' ? 'text-green-800' : 'text-blue-800'}`}>
+              <div className="text-2xl font-bold text-green-800">
                 {formatPrice(averageValue)}
               </div>
-              <p className={dataType === 'sold' ? 'text-green-600' : 'text-blue-600'}>
-                {dataType === 'sold' ? 'Average Recent Sold Price' : 'Average Current Asking Price'}
-              </p>
-              {dataType === 'current' && (
-                <p className="text-xs text-blue-500 mt-1">
-                  Note: These are asking prices, not actual sale prices
-                </p>
-              )}
+              <p className="text-green-600">Average Recent Sold Price</p>
             </div>
           </CardContent>
         </Card>
       )}
 
-      {/* Recent Listings */}
+      {/* Recent Sold Listings */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <TrendingUp className="h-5 w-5" />
-            {dataType === 'sold' ? 'Recent Sold Listings' : 'Current Market Listings'} ({results.length})
+            Recently Sold ({results.length})
           </CardTitle>
-          {dataType === 'current' && (
-            <p className="text-sm text-blue-600">
-              Showing current eBay listings and asking prices
-            </p>
-          )}
         </CardHeader>
         <CardContent>
           {results.length === 0 ? (
-            <p className="text-gray-600 text-center py-4">
-              No recent sold listings found for this card.
-            </p>
+            <div className="text-center py-6 space-y-3">
+              <p className="text-gray-600">
+                No recent sold listings found — prices may be rare or the search may need refinement.
+              </p>
+              {searchUrl && (
+                <Button
+                  onClick={() => window.open(searchUrl, '_blank')}
+                  className="flex items-center gap-2 mx-auto"
+                >
+                  <ExternalLink className="h-4 w-4" />
+                  See Sold Listings on eBay
+                </Button>
+              )}
+            </div>
           ) : (
             <div className="space-y-4">
               {results.map((result, index) => (
@@ -529,9 +528,11 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
                         Condition: {result.condition}
                       </p>
                     )}
-                    <p className="text-xs text-gray-400">
-                      {dataType === 'sold' ? `Sold: ${formatDate(result.endTime)}` : 'Active Listing'}
-                    </p>
+                    {result.endTime && (
+                      <p className="text-xs text-gray-400">
+                        Sold: {formatDate(result.endTime)}
+                      </p>
+                    )}
                   </div>
                   <div className="text-right flex-shrink-0">
                     <div className="font-bold text-lg text-green-600">
