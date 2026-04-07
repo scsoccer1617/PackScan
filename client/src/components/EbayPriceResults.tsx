@@ -83,19 +83,23 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
       setAverageValue(0);
       setSearchUrl(null);
       
-      if (!cardData.playerFirstName || !cardData.playerLastName || !cardData.brand || !cardData.year) {
+      const hasEnoughForSearch = (cardData.brand && (cardData.year ?? 0) > 0) ||
+        (cardData.playerFirstName && cardData.playerLastName);
+      if (!hasEnoughForSearch) {
         setError("Missing required card information for price lookup");
         setLoading(false);
         return;
       }
 
       try {
-        const playerName = `${cardData.playerFirstName} ${cardData.playerLastName}`;
+        const playerName = cardData.playerFirstName && cardData.playerLastName
+          ? `${cardData.playerFirstName} ${cardData.playerLastName}`
+          : (cardData.playerLastName || cardData.playerFirstName || '');
         const searchParams = new URLSearchParams({
           playerName,
           cardNumber: cardData.cardNumber || "",
-          brand: cardData.brand,
-          year: cardData.year.toString(),
+          brand: cardData.brand || "",
+          year: (cardData.year ?? 0).toString(),
           collection: cardData.collection || "",
           condition: cardData.condition || "",
           isNumbered: cardData.isNumbered ? "true" : "false",

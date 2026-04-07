@@ -940,8 +940,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { playerName, cardNumber, brand, year, collection, condition, isNumbered, foilType, serialNumber, variant } = req.query;
       
-      if (!playerName || !brand || !year) {
-        return res.status(400).json({ error: 'Missing required parameters' });
+      if (!brand || !year) {
+        return res.status(400).json({ error: 'Missing required parameters: brand and year are required' });
       }
       
       console.log('eBay search request:', { 
