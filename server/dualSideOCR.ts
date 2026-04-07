@@ -4,6 +4,54 @@ import { analyzeSportsCardImage } from './dynamicCardAnalyzer';
 import { analyzeScoreCard } from './scoreCardAnalyzer';
 import { detectFoilVariant } from './foilVariantDetector';
 import { lookupCard } from './cardDatabaseService';
+import { db } from '@db';
+import { cardVariations } from '@shared/schema';
+import { and, eq, sql } from 'drizzle-orm';
+
+// Words that describe texture/finish but are NOT color identifiers.
+// Stripped when extracting the color keyword(s) from a detected foil type name.
+const GENERIC_FOIL_WORDS = new Set([
+  'foil', 'shimmer', 'sparkle', 'glitter', 'pattern', 'crackle', 'wave',
+  'burst', 'prizm', 'refractor', 'holo', 'holographic', 'parallel', 'chrome',
+  'ice', 'frost', 'metallic', 'lava', 'flux', 'galaxy', 'scope'
+]);
+
+/**
+ * Extract the color keyword(s) from a detected foil type string.
+ * e.g. "Blue Crackle Foil" → ["blue"]
+ *      "Gold Foil"         → ["gold"]
+ *      "Rainbow Holographic" → ["rainbow"]
+ */
+function extractFoilColorKeywords(foilType: string): string[] {
+  return foilType
+    .split(/\s+/)
+    .map(w => w.toLowerCase().replace(/[^a-z]/g, ''))
+    .filter(w => w.length > 2 && !GENERIC_FOIL_WORDS.has(w));
+}
+
+/**
+ * Query the card_variations table for the given brand/year/collection.
+ * Returns an array of unique variation/parallel names, or [] if none found.
+ */
+async function getSetVariationNames(brand: string, year: number, collection?: string): Promise<string[]> {
+  try {
+    const conditions = [
+      sql`lower(${cardVariations.brand}) = lower(${brand})`,
+      eq(cardVariations.year, year),
+    ];
+    if (collection?.trim()) {
+      conditions.push(sql`lower(${cardVariations.collection}) = lower(${collection.trim()})`);
+    }
+    const rows = await db
+      .selectDistinct({ name: cardVariations.variationOrParallel })
+      .from(cardVariations)
+      .where(and(...conditions))
+      .limit(200);
+    return rows.map(r => r.name?.toLowerCase() ?? '').filter(Boolean);
+  } catch {
+    return [];
+  }
+}
 
 // Define a standalone MulterFile interface that doesn't conflict with built-in types
 interface MulterFile {
@@ -559,9 +607,42 @@ async function combineCardResults(
     }
     
     if (visualFoilResult?.isFoil && visualFoilResult.foilType) {
-      combined.foilType = visualFoilResult.foilType;
-      combined.isFoil = true;
-      console.log(`Visual foil detection successful: ${visualFoilResult.foilType} (confidence: ${visualFoilResult.confidence})`);
+      // Cross-check the detected foil color against known variations for this set.
+      // If the set HAS variations in the DB but none reference the detected color,
+      // it's almost certainly a false positive (e.g. blue jersey detected as Blue Foil).
+      const brand = combined.brand || '';
+      const year  = combined.year  || 0;
+      const collection = combined.collection || '';
+
+      if (brand && year) {
+        const setVariations = await getSetVariationNames(brand, year, collection);
+        if (setVariations.length > 0) {
+          // DB has known parallels for this set — validate the detected color against them
+          const colorKeywords = extractFoilColorKeywords(visualFoilResult.foilType);
+          const colorMatchFound = colorKeywords.length > 0 && setVariations.some(varName =>
+            colorKeywords.some(kw => varName.includes(kw))
+          );
+          if (colorMatchFound) {
+            combined.foilType = visualFoilResult.foilType;
+            combined.isFoil = true;
+            console.log(`[FoilDB] Visual foil "${visualFoilResult.foilType}" validated against set variations (keywords: ${colorKeywords.join(', ')})`);
+          } else {
+            combined.foilType = null;
+            combined.isFoil = false;
+            console.log(`[FoilDB] Visual foil "${visualFoilResult.foilType}" rejected — color keywords [${colorKeywords.join(', ')}] not found in ${setVariations.length} known variations for ${brand} ${year} "${collection}"`);
+          }
+        } else {
+          // No variations in DB for this set — cannot validate, accept the visual detection
+          combined.foilType = visualFoilResult.foilType;
+          combined.isFoil = true;
+          console.log(`[FoilDB] No DB variations for ${brand} ${year} "${collection}" — accepting visual foil: ${visualFoilResult.foilType}`);
+        }
+      } else {
+        // No brand/year to query — accept as-is
+        combined.foilType = visualFoilResult.foilType;
+        combined.isFoil = true;
+        console.log(`Visual foil detection successful: ${visualFoilResult.foilType} (confidence: ${visualFoilResult.confidence})`);
+      }
       console.log(`Visual indicators: ${visualFoilResult.indicators.join('; ')}`);
     } else if (visualFoilResult && !visualFoilResult.indicators.some(indicator => indicator.includes('Error in visual analysis'))) {
       // Visual detection ran but did not find foil — trust it and clear any foil state.
