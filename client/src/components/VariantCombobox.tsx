@@ -3,6 +3,7 @@ import { Check, ChevronsUpDown, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
 interface VariantOption {
@@ -33,6 +34,7 @@ export default function VariantCombobox({
   const [open, setOpen] = useState(false);
   const [options, setOptions] = useState<VariantOption[]>([]);
   const [loading, setLoading] = useState(false);
+  const [fetched, setFetched] = useState(false);
   const [inputValue, setInputValue] = useState(value);
   const prevBrandYearRef = useRef<string>('');
 
@@ -49,11 +51,13 @@ export default function VariantCombobox({
 
     if (!brand || !year) {
       setOptions([]);
+      setFetched(true);
       return;
     }
 
     const fetchOptions = async () => {
       setLoading(true);
+      setFetched(false);
       try {
         const params = new URLSearchParams({ brand, year: year.toString() });
         if (collection) params.set('collection', collection);
@@ -61,11 +65,14 @@ export default function VariantCombobox({
         if (resp.ok) {
           const data = await resp.json();
           setOptions(data.options || []);
+        } else {
+          setOptions([]);
         }
       } catch {
         setOptions([]);
       } finally {
         setLoading(false);
+        setFetched(true);
       }
     };
     fetchOptions();
@@ -93,7 +100,6 @@ export default function VariantCombobox({
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && inputValue.trim()) {
-      // If there's exactly one match, select it; otherwise commit the typed text
       const matches = options.filter(o =>
         o.variationOrParallel.toLowerCase().includes(inputValue.trim().toLowerCase())
       );
@@ -105,12 +111,33 @@ export default function VariantCombobox({
     }
   };
 
-  // Filter options based on what's typed in CommandInput (cmdk handles this automatically via the value prop)
   const displayLabel = value
     ? (options.find(o => o.variationOrParallel === value)?.serialNumber
         ? `${value} (${options.find(o => o.variationOrParallel === value)?.serialNumber})`
         : value)
     : '';
+
+  // Loading skeleton
+  if (loading) {
+    return (
+      <div className="h-9 w-full animate-pulse rounded-md border border-input bg-muted" />
+    );
+  }
+
+  // No DB options available — fall back to plain text input
+  if (fetched && options.length === 0) {
+    return (
+      <Input
+        value={inputValue}
+        onChange={(e) => {
+          setInputValue(e.target.value);
+          onChange(e.target.value);
+        }}
+        placeholder={placeholder}
+        disabled={disabled}
+      />
+    );
+  }
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -147,64 +174,53 @@ export default function VariantCombobox({
             onKeyDown={handleKeyDown}
           />
           <CommandList>
-            {loading ? (
-              <div className="py-4 text-center text-sm text-muted-foreground">Loading...</div>
-            ) : (
-              <>
-                <CommandEmpty>
-                  <div className="px-3 py-2 text-sm text-muted-foreground space-y-2">
-                    <p>No match found.</p>
-                    {inputValue.trim() && (
-                      <button
-                        type="button"
-                        onClick={handleCustomEntry}
-                        className="text-blue-600 hover:underline text-xs"
-                      >
-                        Use &quot;{inputValue.trim()}&quot; as custom value
-                      </button>
+            <CommandEmpty>
+              <div className="px-3 py-2 text-sm text-muted-foreground space-y-2">
+                <p>No match found.</p>
+                {inputValue.trim() && (
+                  <button
+                    type="button"
+                    onClick={handleCustomEntry}
+                    className="text-blue-600 hover:underline text-xs"
+                  >
+                    Use &quot;{inputValue.trim()}&quot; as custom value
+                  </button>
+                )}
+              </div>
+            </CommandEmpty>
+            {options.length > 0 && (
+              <CommandGroup heading={`${options.length} variant${options.length !== 1 ? 's' : ''}`}>
+                {options.map((opt, idx) => (
+                  <CommandItem
+                    key={idx}
+                    value={opt.variationOrParallel}
+                    onSelect={() => handleSelect(opt)}
+                    className="cursor-pointer"
+                  >
+                    <Check
+                      className={cn(
+                        "mr-2 h-4 w-4 shrink-0",
+                        value === opt.variationOrParallel ? "opacity-100" : "opacity-0"
+                      )}
+                    />
+                    <span className="flex-1">{opt.variationOrParallel}</span>
+                    {opt.serialNumber && (
+                      <span className="ml-2 text-xs text-muted-foreground">{opt.serialNumber}</span>
                     )}
-                  </div>
-                </CommandEmpty>
-                {options.length > 0 && (
-                  <CommandGroup heading={`${options.length} variant${options.length !== 1 ? 's' : ''}`}>
-                    {options.map((opt, idx) => {
-                      const label = opt.serialNumber
-                        ? `${opt.variationOrParallel} (${opt.serialNumber})`
-                        : opt.variationOrParallel;
-                      return (
-                        <CommandItem
-                          key={idx}
-                          value={opt.variationOrParallel}
-                          onSelect={() => handleSelect(opt)}
-                          className="cursor-pointer"
-                        >
-                          <Check
-                            className={cn(
-                              "mr-2 h-4 w-4 shrink-0",
-                              value === opt.variationOrParallel ? "opacity-100" : "opacity-0"
-                            )}
-                          />
-                          <span className="flex-1">{opt.variationOrParallel}</span>
-                          {opt.serialNumber && (
-                            <span className="ml-2 text-xs text-muted-foreground">{opt.serialNumber}</span>
-                          )}
-                        </CommandItem>
-                      );
-                    })}
-                  </CommandGroup>
-                )}
-                {inputValue.trim() && !options.some(o => o.variationOrParallel.toLowerCase() === inputValue.trim().toLowerCase()) && (
-                  <CommandGroup heading="Custom">
-                    <CommandItem
-                      value={`__use_custom__${inputValue.trim()}`}
-                      onSelect={handleCustomEntry}
-                      className="cursor-pointer"
-                    >
-                      <span className="text-blue-600">Use &quot;{inputValue.trim()}&quot;</span>
-                    </CommandItem>
-                  </CommandGroup>
-                )}
-              </>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            )}
+            {inputValue.trim() && !options.some(o => o.variationOrParallel.toLowerCase() === inputValue.trim().toLowerCase()) && (
+              <CommandGroup heading="Custom">
+                <CommandItem
+                  value={`__use_custom__${inputValue.trim()}`}
+                  onSelect={handleCustomEntry}
+                  className="cursor-pointer"
+                >
+                  <span className="text-blue-600">Use &quot;{inputValue.trim()}&quot;</span>
+                </CommandItem>
+              </CommandGroup>
             )}
           </CommandList>
         </Command>

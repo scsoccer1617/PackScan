@@ -2,7 +2,7 @@ import express, { Express, Request, Response, NextFunction } from 'express';
 import { Server, createServer } from 'http';
 import multer from 'multer';
 import { db } from '../db';
-import { and, desc, eq, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, isNull, sql, max } from 'drizzle-orm';
 import { syncConfirmedCard } from './syncDatabase';
 import {
   cards,
@@ -1763,11 +1763,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: 'Invalid year' });
       }
 
-      const rows = await db
+      // GROUP BY at SQL level so limit(300) applies to distinct pairs only
+      const options = await db
         .select({
           variationOrParallel: cardVariations.variationOrParallel,
           serialNumber: cardVariations.serialNumber,
-          cmpNumber: cardVariations.cmpNumber,
+          cmpNumber: max(cardVariations.cmpNumber),
         })
         .from(cardVariations)
         .where(
@@ -1779,17 +1780,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
               : undefined
           )
         )
+        .groupBy(cardVariations.variationOrParallel, cardVariations.serialNumber)
         .orderBy(cardVariations.variationOrParallel)
         .limit(300);
-
-      // Deduplicate: keep one row per (variationOrParallel, serialNumber) pair
-      const seen = new Set<string>();
-      const options = rows.filter(r => {
-        const key = `${r.variationOrParallel}|${r.serialNumber ?? ''}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
 
       return res.json({ options });
     } catch (err: any) {
