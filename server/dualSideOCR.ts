@@ -234,9 +234,9 @@ async function combineCardResults(
     'isRookieCard', 'brand', 'collection', 'variant'
   ];
   
-  // Fields where back image has priority (card numbers are most reliably found on the back)
+  // Fields where back image has priority (card numbers, CMP codes are most reliably found on the back)
   const backPriorityFields: (keyof CardFormValues)[] = [
-    'cardNumber', 'year', 'sport', 'serialNumber'
+    'cardNumber', 'year', 'sport', 'serialNumber', 'cmpNumber'
   ];
   
   // Helper: check if a field value is meaningfully set (not empty, null, undefined, or 0 for numeric fields)

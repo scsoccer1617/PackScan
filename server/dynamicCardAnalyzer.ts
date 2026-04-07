@@ -112,6 +112,10 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     }
     */
     console.log('=== FOIL DETECTION END ===');
+
+    // CMP CODE DETECTION - Look for CMP reference codes in the fine print on the back of a card
+    // These appear as "CMP" followed by 4–10 digits (e.g. "CMP100358") in the copyright/legal text.
+    extractCmpNumber(fullText, cardDetails);
     
     console.log('Extracted card details:', cardDetails);
     return cardDetails;
@@ -1205,6 +1209,25 @@ async function extractSerialNumber(text: string, cardDetails: Partial<CardFormVa
       cardDetails.isNumbered = true;
       console.log(`Fallback detection found serial number: ${match[1]}`);
     }
+  }
+}
+
+/**
+ * Detect CMP reference codes printed in the fine print on the back of sports cards.
+ * CMP codes follow the pattern: "CMP" followed by 4–10 digits (e.g. "CMP100358").
+ * They appear in copyright/legal text such as:
+ *   "© 2025 Topps, LLC. All rights reserved. CMP100358"
+ * The full OCR text (not uppercased) is used to handle mixed-case prints.
+ */
+function extractCmpNumber(fullText: string, cardDetails: Partial<CardFormValues>): void {
+  // Match "CMP" (case-insensitive) followed immediately by 4–10 digits.
+  // Not preceded by another letter (to avoid matching things like "ACMP123").
+  const cmpPattern = /(?<![A-Za-z])CMP(\d{4,10})/i;
+  const match = fullText.match(cmpPattern);
+  if (match) {
+    const code = `CMP${match[1]}`;
+    cardDetails.cmpNumber = code;
+    console.log(`[OCR] Detected CMP code in fine print: ${code}`);
   }
 }
 
