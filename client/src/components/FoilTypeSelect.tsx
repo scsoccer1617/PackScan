@@ -11,6 +11,7 @@ interface FoilTypeSelectProps {
 }
 
 const CUSTOM_VALUE = "__custom__";
+const NONE_VALUE   = "__none__";
 
 export default function FoilTypeSelect({ brand, year, collection, value, onChange }: FoilTypeSelectProps) {
   const [options, setOptions] = useState<string[]>([]);
@@ -68,7 +69,7 @@ export default function FoilTypeSelect({ brand, year, collection, value, onChang
   }
 
   // Always show a Select dropdown (even when no DB options — "None detected" + "Custom..." are always available)
-  const selectValue = customMode ? CUSTOM_VALUE : (value || "");
+  const selectValue = customMode ? CUSTOM_VALUE : (value || NONE_VALUE);
 
   return (
     <div className="space-y-2">
@@ -79,7 +80,7 @@ export default function FoilTypeSelect({ brand, year, collection, value, onChang
             setCustomMode(true);
             setCustomText("");
             onChange("");
-          } else if (v === "") {
+          } else if (v === NONE_VALUE) {
             setCustomMode(false);
             setCustomText("");
             onChange("");
@@ -94,7 +95,7 @@ export default function FoilTypeSelect({ brand, year, collection, value, onChang
           <SelectValue placeholder="Select foil type..." />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="">None detected</SelectItem>
+          <SelectItem value={NONE_VALUE}>None detected</SelectItem>
           {options.map((opt) => (
             <SelectItem key={opt} value={opt}>{opt}</SelectItem>
           ))}
