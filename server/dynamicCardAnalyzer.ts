@@ -305,6 +305,9 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
       'HUGE', 'PART', 'LEADOFF', 'MAN', 'OBP', 'ERA', 'AVG', 'RBI', 'WAR',
       'CHOICE', 'WEB', 'PLAYERA', 'TAPPS', 'XTOPPS', 'ITALICS', 'LEADER', 'TIE',
       'TOTALS', 'MAJ', 'LEA', 'CUBS', 'NATIONALS',
+      // Common birthplace/hometown abbreviations that look like names
+      'VENEZ', 'VENEZUELA', 'DOMINICAN', 'REPUBLIC', 'MEXICO', 'CUBA', 'PANAMA', 'COLOMBIA',
+      'CANADA', 'JAPAN', 'KOREA', 'AUSTRALIA', 'PUERTO', 'RICO',
     ]);
     
     const isNonNameWord = (word: string): boolean => {
@@ -312,20 +315,31 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
       return nonNameWords.has(cleaned) || word.length <= 1 || /^\d/.test(word);
     };
     
+    // Unicode-aware letter check: matches A-Z plus common accented/diacritical characters
+    // Used so names like "JOSÉ BUTTÓ", "HERNÁNDEZ", "PEÑA" are not filtered out
+    const isValidNameChar = /^[A-ZÀ-ÖØ-Ý][A-Za-zÀ-ÖØ-öø-ÿ'\-\.]+$|^[A-ZÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖØÙÚÛÜÝÞ]{2,}$/;
+
     const potentialNames: Array<{firstName: string, lastName: string, source: string, priority: number}> = [];
     
     const rawLines = (originalText || text).split('\n');
     
+    // Bio-info line prefixes — these lines contain biographical data, never player names
+    const bioPrefixPattern = /^(BORN|HOME|ACQ|SIGNED|DRAFTED|HT|WT|HEIGHT|WEIGHT|BATS|THROWS)[\s:]/i;
+
     for (let i = 0; i < rawLines.length; i++) {
       const line = rawLines[i].trim();
       if (!line) continue;
       
+      // Skip biographical info lines entirely — they contain birthplace/hometown that can
+      // look like player names (e.g. "HOME: CUMANA, VENEZ." → "Cumana Venez.")
+      if (bioPrefixPattern.test(line)) continue;
+
       const words = line.split(/\s+/).filter(w => w.length > 0);
       
       if (words.length >= 2 && words.length <= 5) {
         let nameWords = words
           .map(w => w.replace(/[,;]+$/, ''))
-          .filter(w => /^[A-Z][A-Za-z'\-\.]+$/.test(w) || /^[A-Z]{2,}$/.test(w))
+          .filter(w => isValidNameChar.test(w))
           .filter(w => !/^(II|III|IV|JR|SR)$/i.test(w));
         
         while (nameWords.length > 0 && isNonNameWord(nameWords[nameWords.length - 1])) {
@@ -359,7 +373,7 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
       if (/^[A-Z0-9]+-\d+$/.test(cardNumberPrefix) || /^\d+$/.test(cardNumberPrefix)) {
         const remainingWords = words.slice(1);
         if (remainingWords.length >= 2 && remainingWords.length <= 3) {
-          const allAlphaRemaining = remainingWords.every(w => /^[A-Z][A-Za-z'\-\.]+$/.test(w) || /^[A-Z]{2,}$/.test(w));
+          const allAlphaRemaining = remainingWords.every(w => isValidNameChar.test(w));
           const noNonNameWordsRemaining = remainingWords.every(w => !isNonNameWord(w));
           const noNumbersRemaining = remainingWords.every(w => !/\d/.test(w));
           const eachWordLenRemaining = remainingWords.every(w => w.length >= 2);
@@ -753,13 +767,22 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
       }
     }
     
-    // HIGHEST PRIORITY (before brand search): If the very first line is a standalone number,
-    // that is the card number — Topps/Bowman cards often put #316 as the topmost line on the back.
+    // HIGHEST PRIORITY (before brand search): If the very first line is a standalone number
+    // or alphanumeric card number (e.g. US56, RC12, BDP5), that is the card number.
+    // Topps/Bowman cards often put the card number as the topmost line on the back.
     // This must run before brand-near-number detection so it isn't overridden by a false match.
     const firstLineEarly = lines[0]?.trim() ?? '';
+    const earlyCodePrefixSkip = new Set(['CMP', 'CODE', 'WWW', 'INC', 'MLB', 'NFL', 'NBA', 'NHL']);
     if (/^\d+$/.test(firstLineEarly) && parseInt(firstLineEarly) > 0 && parseInt(firstLineEarly) < 10000) {
       cardDetails.cardNumber = firstLineEarly;
       console.log(`Detected standalone card number at very top of text (highest priority): ${firstLineEarly}`);
+      return;
+    }
+    // Alphanumeric first-line check: e.g. "US56", "RC12", "BDP42" — common Topps insert/update prefixes
+    const alphaNumFirstLine = firstLineEarly.match(/^([A-Z]{1,4})(\d{1,4})$/);
+    if (alphaNumFirstLine && !earlyCodePrefixSkip.has(alphaNumFirstLine[1]) && parseInt(alphaNumFirstLine[2]) > 0 && parseInt(alphaNumFirstLine[2]) < 10000) {
+      cardDetails.cardNumber = firstLineEarly;
+      console.log(`Detected alphanumeric card number at very top of text (highest priority): ${firstLineEarly}`);
       return;
     }
 
