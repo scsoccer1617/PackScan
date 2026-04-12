@@ -395,8 +395,32 @@ export async function searchCardValues(
       variantKeyword = foilType;
     }
     
-    const buildKeywords = (opts: { includeVariant?: boolean; includeCardNumber?: boolean; includeSerial?: boolean } = {}): string => {
-      const { includeVariant = true, includeCardNumber = true, includeSerial = true } = opts;
+    const isBaseCard = !foilType || foilType.trim() === '';
+    const isAuto     = !!isAutographed;
+
+    // Build eBay negative-keyword exclusions.
+    // These are prefixed with "-" and appended to the query so eBay filters them
+    // at the API level, well before our scoring step.
+    const buildNegativeKeywords = (): string => {
+      const excludes: string[] = [];
+
+      // Always exclude autograph/signed listings for non-auto cards
+      if (!isAuto) {
+        excludes.push('-autograph', '-signed');
+      }
+
+      // Exclude parallel-indicator terms for base cards.
+      // We deliberately skip standalone colours (blue, gold, etc.) to avoid
+      // accidentally excluding team-colour references in listing titles.
+      if (isBaseCard) {
+        excludes.push('-parallel', '-refractor', '-xfractor', '-rainbow', '-mojo', '-holo');
+      }
+
+      return excludes.join(' ');
+    };
+
+    const buildKeywords = (opts: { includeVariant?: boolean; includeCardNumber?: boolean; includeSerial?: boolean; includeNegatives?: boolean } = {}): string => {
+      const { includeVariant = true, includeCardNumber = true, includeSerial = true, includeNegatives = true } = opts;
       const parts: string[] = [];
       
       if (year > 0) parts.push(String(year));
@@ -414,6 +438,11 @@ export async function searchCardValues(
       
       if (includeSerial && serialSuffix) {
         parts.push(serialSuffix);
+      }
+
+      if (includeNegatives) {
+        const neg = buildNegativeKeywords();
+        if (neg) parts.push(neg);
       }
       
       return parts.filter(Boolean).join(' ');
@@ -476,11 +505,20 @@ export async function searchCardValues(
       console.log(`Browse API (specific query) returned ${results.length} active listings`);
 
       if (results.length === 0) {
-        // Try a broader query without card number, variant, or serial suffix
+        // Pass 2: broader query — drop card number, variant, serial (keep negatives)
         const broaderKeywords = buildKeywords({ includeCardNumber: false, includeVariant: false, includeSerial: false });
         if (broaderKeywords && broaderKeywords !== keywords) {
           results = await callBrowseApi(broaderKeywords);
           console.log(`Browse API (broader query) returned ${results.length} active listings`);
+        }
+      }
+
+      if (results.length === 0) {
+        // Pass 3: last resort — same as pass 2 but drop negative keywords too
+        const broadestKeywords = buildKeywords({ includeCardNumber: false, includeVariant: false, includeSerial: false, includeNegatives: false });
+        if (broadestKeywords) {
+          results = await callBrowseApi(broadestKeywords);
+          console.log(`Browse API (broadest query, no negatives) returned ${results.length} active listings`);
         }
       }
     } catch (browseError: any) {
