@@ -7,6 +7,7 @@ import { useOCR } from "@/hooks/use-ocr";
 import { useToast } from "@/hooks/use-toast";
 import OCRResults from "@/components/OCRResults";
 import EbayPriceResults from "@/components/EbayPriceResults";
+import ParallelPickerSheet from "@/components/ParallelPickerSheet";
 import { CardFormValues } from "@shared/schema";
 
 export default function PriceLookup() {
@@ -15,6 +16,7 @@ export default function PriceLookup() {
   const [showOCRResults, setShowOCRResults] = useState<boolean>(false);
   const [cardData, setCardData] = useState<Partial<CardFormValues> | null>(null);
   const [showPriceResults, setShowPriceResults] = useState<boolean>(false);
+  const [showParallelPicker, setShowParallelPicker] = useState<boolean>(false);
   const [analyzing, setAnalyzing] = useState<boolean>(false);
   const { toast } = useToast();
   
@@ -34,13 +36,11 @@ export default function PriceLookup() {
     
     setAnalyzing(true);
     try {
-      // Use the new combined endpoint for OCR + price lookup with both images
       const response = await fetch('/api/analyze-card-dual-images', {
         method: 'POST',
         body: (() => {
           const formData = new FormData();
           
-          // Convert back image (required for card details)
           const backByteCharacters = atob(backImage.split(',')[1]);
           const backByteNumbers = new Array(backByteCharacters.length);
           for (let i = 0; i < backByteCharacters.length; i++) {
@@ -50,7 +50,6 @@ export default function PriceLookup() {
           const backBlob = new Blob([backByteArray], { type: 'image/jpeg' });
           formData.append('backImage', backBlob, 'back.jpg');
           
-          // Convert front image (optional, for RC detection only)
           if (frontImage) {
             const frontByteCharacters = atob(frontImage.split(',')[1]);
             const frontByteNumbers = new Array(frontByteCharacters.length);
@@ -74,8 +73,8 @@ export default function PriceLookup() {
       
       if (result.success && result.data) {
         setCardData(result.data);
-        setShowOCRResults(true);
-        setShowPriceResults(true); // Show both OCR and price results
+        // Show parallel picker before running eBay search
+        setShowParallelPicker(true);
       } else {
         throw new Error(result.message || 'Analysis failed');
       }
@@ -89,6 +88,23 @@ export default function PriceLookup() {
     } finally {
       setAnalyzing(false);
     }
+  };
+
+  // Called when user confirms their parallel selection in the sheet
+  const handleParallelConfirm = (foilType: string, serialNumber?: string) => {
+    setCardData(prev => {
+      if (!prev) return prev;
+      const updated: Partial<CardFormValues> = { ...prev, foilType: foilType || "" };
+      // If the user picked a numbered parallel and no serial was detected yet, apply the serial limit
+      if (serialNumber) {
+        const limit = serialNumber.replace(/\//g, "");
+        updated.serialNumber = `/${limit}`;
+        updated.isNumbered = true;
+      }
+      return updated;
+    });
+    setShowParallelPicker(false);
+    setShowPriceResults(true);
   };
   
   // Apply OCR results and show price lookup
@@ -109,12 +125,13 @@ export default function PriceLookup() {
     setBackImage("");
     setShowOCRResults(false);
     setShowPriceResults(false);
+    setShowParallelPicker(false);
     setCardData(null);
   };
 
   return (
     <div className="p-4 space-y-6">
-      {!showOCRResults && !showPriceResults && (
+      {!showOCRResults && !showPriceResults && !showParallelPicker && (
         <>
           {/* Image Upload Section */}
           <Card>
@@ -153,7 +170,7 @@ export default function PriceLookup() {
                 {analyzing ? (
                   <>
                     <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                    Analyzing Card & Getting Prices...
+                    Analyzing Card...
                   </>
                 ) : (
                   <>
@@ -166,7 +183,8 @@ export default function PriceLookup() {
           </Card>
         </>
       )}
-      {/* OCR Results */}
+
+      {/* OCR Results (when triggered via OCR hook — legacy path) */}
       {showOCRResults && ocrData && (
         <OCRResults 
           loading={ocrLoading}
@@ -176,6 +194,16 @@ export default function PriceLookup() {
           onCancel={() => setShowOCRResults(false)}
         />
       )}
+
+      {/* Parallel picker sheet — appears after scan, before eBay search */}
+      {cardData && (
+        <ParallelPickerSheet
+          open={showParallelPicker}
+          cardData={cardData}
+          onConfirm={handleParallelConfirm}
+        />
+      )}
+
       {showPriceResults && cardData && (
         <div className="space-y-4">
           <EbayPriceResults 
