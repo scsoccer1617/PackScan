@@ -532,6 +532,8 @@ async function combineCardResults(
   // Use authoritative DB data when OCR successfully detected brand + year + card number.
   // DB provides: player name, team, rookie flag, collection, variation.
   // OCR foil/serial/condition data is preserved and not overwritten.
+  // dbVariation is stashed here and applied AFTER visual/text foil detection as a fallback.
+  let dbVariation: string | null = null;
   if (combined.brand && combined.year && combined.cardNumber) {
     console.log(`[CardDB] Attempting lookup: brand="${combined.brand}" year=${combined.year} cardNumber="${combined.cardNumber}" collection="${combined.collection}"`);
     try {
@@ -598,6 +600,14 @@ async function combineCardResults(
         if (dbResult.serialNumber && !combined.serialNumber) {
           combined.serialNumber = dbResult.serialNumber;
           if (/\/\d+/.test(dbResult.serialNumber)) combined.isNumbered = true;
+        }
+
+        // Stash the DB-resolved parallel/variation name (e.g. "Aqua", "Yellow Rainbow Foil").
+        // We apply it AFTER visual/text foil detection so visual detection can still override;
+        // but when detection fails, this becomes the authoritative foilType source.
+        if (dbResult.variation) {
+          dbVariation = dbResult.variation;
+          console.log(`[CardDB] Stashed DB variation for foil fallback: "${dbResult.variation}"`);
         }
         } // end else (player names matched or OCR name was unreliable)
       } else {
@@ -713,7 +723,17 @@ async function combineCardResults(
   // Note: variant is NOT set from foilType. The variant field is reserved for
   // printed card variations (short print, image variation, etc.), not foil colors.
   // foilType carries the foil/parallel color information separately.
-  
+
+  // ─── DB Variation Fallback ──────────────────────────────────────────────────
+  // If visual/text foil detection found nothing, use the DB-resolved parallel name.
+  // This handles cases like "Aqua" (/399) where the foil color isn't visually obvious
+  // or not present in the card's OCR text, but the serial number uniquely identifies it.
+  if (!combined.foilType && dbVariation) {
+    combined.foilType = dbVariation;
+    combined.isFoil = true;
+    console.log(`[CardDB] Applied DB variation as foilType fallback: "${dbVariation}"`);
+  }
+
   console.log('=== COMBINATION COMPLETE ===');
   
   return combined;
