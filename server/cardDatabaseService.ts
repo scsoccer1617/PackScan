@@ -489,8 +489,17 @@ function extractSerialLimit(serial: string): number | null {
   return null;
 }
 
+// Strip trailing jersey/uniform numbers that sometimes appear in OCR or CSV data
+// e.g. "José Buttó 6" → "José Buttó", "Trout (6)" → "Trout"
+function stripTrailingNumber(s: string): string {
+  return s
+    .replace(/\s*\(#?\d+\)\s*$/, '') // "(6)" or "(#6)"
+    .replace(/\s+#?\d+\s*$/, '')      // " 6" or " #6"
+    .trim();
+}
+
 function splitPlayerName(fullName: string): { firstName: string; lastName: string } {
-  const parts = fullName.trim().split(/\s+/);
+  const parts = stripTrailingNumber(fullName.trim()).split(/\s+/);
   if (parts.length === 1) return { firstName: '', lastName: parts[0] };
   if (parts.length === 2) return { firstName: parts[0], lastName: parts[1] };
   // 3+ word name: first word is first name, rest is last name

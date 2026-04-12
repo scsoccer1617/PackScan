@@ -722,7 +722,20 @@ async function combineCardResults(
 /**
  * Ensure all required fields have values
  */
+// Strip trailing jersey/uniform numbers from a player name.
+// e.g. "Buttó 6" → "Buttó", "Trout (6)" → "Trout", "Ortiz #34" → "Ortiz"
+function stripTrailingNumberFromName(name: string): string {
+  return name
+    .replace(/\s*\(#?\d+\)\s*$/, '') // "(6)" or "(#6)"
+    .replace(/\s+#?\d+\s*$/, '')      // " 6" or " #6"
+    .trim();
+}
+
 function ensureRequiredFields(result: Partial<CardFormValues>): Partial<CardFormValues> {
+  // Clean any trailing jersey/uniform numbers that slipped into player name fields
+  if (result.playerFirstName) result.playerFirstName = stripTrailingNumberFromName(result.playerFirstName);
+  if (result.playerLastName)  result.playerLastName  = stripTrailingNumberFromName(result.playerLastName);
+
   const defaultsIfMissing = {
     condition: 'PSA 8',
     sport: 'Not detected',
