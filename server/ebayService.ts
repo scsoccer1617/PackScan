@@ -598,6 +598,24 @@ export async function searchCardValues(
           return re.test(t);
         });
         if (hasParallel) return false;
+
+        // Filter serially-numbered listings (e.g. /150, /75, /250) —
+        // a non-numbered base card should never match a /NNN print run.
+        // Use a minimum threshold of /5000 to avoid false positives on
+        // things like card years written as "2022/2022".
+        const serialInTitle = t.match(/\/(\d+)/g);
+        if (serialInTitle) {
+          const hasSmallSerial = serialInTitle.some(s => {
+            const n = parseInt(s.slice(1), 10);
+            return n <= 5000;
+          });
+          if (hasSmallSerial) return false;
+        }
+
+        // Filter Bowman/Topps color-border parallels (e.g. "Blue Border", "Purple Border")
+        // These are named parallels that don't use "parallel" or "refractor" in their titles.
+        const COLOR_BORDER = /\b(blue|purple|orange|green|gold|red|yellow|pink|aqua|teal|black|white|silver|copper|burgundy)\s+border\b/i;
+        if (COLOR_BORDER.test(t)) return false;
       }
 
       return true;
