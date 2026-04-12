@@ -321,7 +321,7 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
                   <Input id="edit-serialNumber" value={editData.serialNumber || ''} onChange={e => updateEditField('serialNumber', e.target.value)} />
                 </div>
                 <div>
-                  <Label>Foil Type</Label>
+                  <Label>Parallel</Label>
                   <FoilTypeSelect
                     brand={editData.brand}
                     year={editData.year}
@@ -400,7 +400,7 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
                     <span className="text-slate-700">{cardData.serialNumber || 'None'}</span>
                   </div>
                   <div className="text-base">
-                    <span className="font-semibold text-slate-800">Foil Type: </span>
+                    <span className="font-semibold text-slate-800">Parallel: </span>
                     <span className="text-slate-700">{cardData.foilType || 'None detected'}</span>
                   </div>
                   <div className="text-base">

@@ -323,9 +323,9 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
               />
             </div>
 
-            {/* Fifth row - Foil Type */}
+            {/* Fifth row - Parallel */}
             <div className="space-y-2 col-span-1 md:col-span-2">
-              <Label>Foil Type / Finish</Label>
+              <Label>Parallel</Label>
               <FoilTypeSelect
                 brand={editedData.brand}
                 year={editedData.year}

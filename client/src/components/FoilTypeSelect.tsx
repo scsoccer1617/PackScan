@@ -88,7 +88,7 @@ export default function FoilTypeSelect({ brand, year, collection, value, onChang
         }}
       >
         <SelectTrigger>
-          <SelectValue placeholder="Select foil type..." />
+          <SelectValue placeholder="Select parallel..." />
         </SelectTrigger>
         <SelectContent>
           <SelectItem value={NONE_VALUE}>None detected</SelectItem>
@@ -105,7 +105,7 @@ export default function FoilTypeSelect({ brand, year, collection, value, onChang
             setCustomText(e.target.value);
             onChange(e.target.value);
           }}
-          placeholder="Type custom foil type..."
+          placeholder="Type custom parallel..."
           autoFocus
         />
       )}
