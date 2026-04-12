@@ -1767,11 +1767,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // GET /api/card-variations/options — return distinct variation options for a given brand/year/collection
-  // Used by the variant dropdown in the card edit form.
+  // GET /api/card-variations/options — return distinct variation options for a given brand/year/collection/set
+  // Used by the variant dropdown and parallel picker. Accepts optional collection and set params.
+  // Queries with decreasing specificity so the most targeted match wins.
   app.get(`${apiPrefix}/card-variations/options`, async (req, res) => {
     try {
-      const { brand, year: yearStr, collection } = req.query as Record<string, string | undefined>;
+      const { brand, year: yearStr, collection, set } = req.query as Record<string, string | undefined>;
       if (!brand || !yearStr) {
         return res.status(400).json({ error: 'brand and year are required' });
       }
@@ -1780,12 +1781,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: 'Invalid year' });
       }
 
-      const brandYearCond = and(
+      const base = and(
         sql`lower(${cardVariations.brand}) = lower(${brand.trim()})`,
         eq(cardVariations.year, year)
       );
 
-      const queryOptions = async (withCollection: boolean) =>
+      const runQuery = (extra?: any) =>
         db
           .select({
             variationOrParallel: cardVariations.variationOrParallel,
@@ -1793,24 +1794,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
             cmpNumber: max(cardVariations.cmpNumber),
           })
           .from(cardVariations)
-          .where(
-            withCollection && collection?.trim()
-              ? and(brandYearCond, sql`lower(${cardVariations.collection}) = lower(${collection.trim()})`)
-              : brandYearCond
-          )
+          .where(extra ? and(base, extra) : base)
           .groupBy(cardVariations.variationOrParallel, cardVariations.serialNumber)
           .orderBy(cardVariations.variationOrParallel)
           .limit(300);
 
-      // First try with collection filter for precision
-      let options = collection?.trim() ? await queryOptions(true) : await queryOptions(false);
-
-      // If exact collection match returns nothing, fall back to brand+year only.
-      // The caller filters client-side by detected keyword so a broader set is fine.
-      if (options.length === 0 && collection?.trim()) {
-        options = await queryOptions(false);
+      // Pass 1: collection + set (most precise)
+      if (collection?.trim() && set?.trim()) {
+        const options = await runQuery(and(
+          sql`lower(${cardVariations.collection}) = lower(${collection.trim()})`,
+          sql`lower(${cardVariations.set}) = lower(${set.trim()})`
+        ));
+        if (options.length > 0) return res.json({ options });
       }
 
+      // Pass 2: set only (handles cases where DB collection ≠ OCR collection)
+      if (set?.trim()) {
+        const options = await runQuery(sql`lower(${cardVariations.set}) = lower(${set.trim()})`);
+        if (options.length > 0) return res.json({ options });
+      }
+
+      // Pass 3: collection only
+      if (collection?.trim()) {
+        const options = await runQuery(sql`lower(${cardVariations.collection}) = lower(${collection.trim()})`);
+        if (options.length > 0) return res.json({ options });
+      }
+
+      // Pass 4: brand+year only (broadest fallback; caller filters client-side by keyword)
+      const options = await runQuery();
       return res.json({ options });
     } catch (err: any) {
       console.error('Error fetching variation options:', err.message);

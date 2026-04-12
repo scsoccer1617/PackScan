@@ -330,6 +330,7 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
                 brand={editedData.brand}
                 year={editedData.year}
                 collection={editedData.collection}
+                set={editedData.set}
                 value={editedData.foilType || ''}
                 onChange={(foilType) => {
                   handleInputChange('foilType', foilType);

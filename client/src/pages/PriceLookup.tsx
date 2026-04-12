@@ -30,10 +30,12 @@ function filterByKeyword(options: ParallelOption[], foilType: string): ParallelO
 async function fetchParallels(
   brand: string,
   year: number,
-  collection?: string
+  collection?: string,
+  set?: string
 ): Promise<ParallelOption[]> {
   const params = new URLSearchParams({ brand, year: year.toString() });
   if (collection) params.set("collection", collection);
+  if (set) params.set("set", set);
   const resp = await fetch(`/api/card-variations/options?${params}`);
   if (!resp.ok) return [];
   const data = await resp.json();
@@ -78,7 +80,7 @@ export default function PriceLookup() {
 
     // Fetch DB parallels and filter to matching variants
     if (data.brand && data.year) {
-      const allOptions = await fetchParallels(data.brand, data.year as number, data.collection);
+      const allOptions = await fetchParallels(data.brand, data.year as number, data.collection, data.set);
       const filtered = filterByKeyword(allOptions, detected);
 
       if (filtered.length >= 2) {

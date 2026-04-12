@@ -327,6 +327,7 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
                     brand={editData.brand}
                     year={editData.year}
                     collection={editData.collection}
+                    set={editData.set}
                     value={editData.foilType || ''}
                     onChange={(foilType) => {
                       updateEditField('foilType', foilType || null);

@@ -30,24 +30,54 @@ function extractFoilColorKeywords(foilType: string): string[] {
 }
 
 /**
- * Query the card_variations table for the given brand/year/collection.
+ * Query the card_variations table for the given brand/year/collection/set.
  * Returns an array of unique variation/parallel names, or [] if none found.
+ * Tries collection+set first for precision, falls back to collection-only,
+ * then brand+year only.
  */
-async function getSetVariationNames(brand: string, year: number, collection?: string): Promise<string[]> {
+async function getSetVariationNames(brand: string, year: number, collection?: string, set?: string): Promise<string[]> {
   try {
-    const conditions = [
+    const base = [
       sql`lower(${cardVariations.brand}) = lower(${brand})`,
       eq(cardVariations.year, year),
     ];
-    if (collection?.trim()) {
-      conditions.push(sql`lower(${cardVariations.collection}) = lower(${collection.trim()})`);
+
+    const query = async (extra: any[]) => {
+      const rows = await db
+        .selectDistinct({ name: cardVariations.variationOrParallel })
+        .from(cardVariations)
+        .where(and(...base, ...extra))
+        .limit(200);
+      return rows.map(r => r.name?.toLowerCase() ?? '').filter(Boolean);
+    };
+
+    // Pass 1: collection + set (most specific)
+    if (collection?.trim() && set?.trim()) {
+      const result = await query([
+        sql`lower(${cardVariations.collection}) = lower(${collection.trim()})`,
+        sql`lower(${cardVariations.set}) = lower(${set.trim()})`,
+      ]);
+      if (result.length > 0) return result;
     }
-    const rows = await db
-      .selectDistinct({ name: cardVariations.variationOrParallel })
-      .from(cardVariations)
-      .where(and(...conditions))
-      .limit(200);
-    return rows.map(r => r.name?.toLowerCase() ?? '').filter(Boolean);
+
+    // Pass 2: collection only
+    if (collection?.trim()) {
+      const result = await query([
+        sql`lower(${cardVariations.collection}) = lower(${collection.trim()})`,
+      ]);
+      if (result.length > 0) return result;
+    }
+
+    // Pass 3: set only
+    if (set?.trim()) {
+      const result = await query([
+        sql`lower(${cardVariations.set}) = lower(${set.trim()})`,
+      ]);
+      if (result.length > 0) return result;
+    }
+
+    // Pass 4: brand+year only
+    return await query([]);
   } catch {
     return [];
   }
@@ -533,8 +563,10 @@ async function combineCardResults(
         // Override team from DB (often not in OCR)
         if (dbResult.team && !combined.notes) combined.notes = `Team: ${dbResult.team}`;
 
-        // Use DB collection if OCR missed it
-        if (dbResult.collection && !combined.collection) combined.collection = dbResult.collection;
+        // DB collection is authoritative — always override OCR collection.
+        // OCR often reads the product set name ("Series One") as the collection,
+        // but the DB knows the correct subset name ("Base Set").
+        if (dbResult.collection) combined.collection = dbResult.collection;
 
         // Use authoritative DB card number if it's more complete than what OCR detected.
         // E.g. OCR reads "T91" but DB has "T91-13" — use the full DB value.
@@ -614,9 +646,10 @@ async function combineCardResults(
       const brand = combined.brand || '';
       const year  = combined.year  || 0;
       const collection = combined.collection || '';
+      const set = combined.set || '';
 
       if (brand && year) {
-        const setVariations = await getSetVariationNames(brand, year, collection);
+        const setVariations = await getSetVariationNames(brand, year, collection, set);
         if (setVariations.length > 0) {
           // DB has known parallels for this set — validate the detected color against them
           const colorKeywords = extractFoilColorKeywords(visualFoilResult.foilType);

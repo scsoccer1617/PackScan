@@ -6,6 +6,7 @@ interface FoilTypeSelectProps {
   brand?: string;
   year?: number | string;
   collection?: string;
+  set?: string;
   value: string;
   onChange: (value: string) => void;
 }
@@ -13,7 +14,7 @@ interface FoilTypeSelectProps {
 const CUSTOM_VALUE = "__custom__";
 const NONE_VALUE   = "__none__";
 
-export default function FoilTypeSelect({ brand, year, collection, value, onChange }: FoilTypeSelectProps) {
+export default function FoilTypeSelect({ brand, year, collection, set, value, onChange }: FoilTypeSelectProps) {
   const [options, setOptions] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [fetched, setFetched] = useState(false);
@@ -32,6 +33,7 @@ export default function FoilTypeSelect({ brand, year, collection, value, onChang
       try {
         const params = new URLSearchParams({ brand, year: year.toString() });
         if (collection) params.set("collection", collection);
+        if (set) params.set("set", set);
         const resp = await fetch(`/api/card-variations/options?${params}`);
         if (resp.ok) {
           const data = await resp.json();
@@ -49,7 +51,7 @@ export default function FoilTypeSelect({ brand, year, collection, value, onChang
       }
     };
     fetchOptions();
-  }, [brand, year, collection]);
+  }, [brand, year, collection, set]);
 
   // When value changes externally, check if it needs custom mode
   useEffect(() => {
