@@ -1128,10 +1128,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
             };
             
             if (ocrMatchesVariant) {
-              cardData.variant = verified.variant || cardData.variant || '';
+              // Do NOT apply variant from confirmed cards. Variant is reserved for short prints /
+              // image variations driven by CMP code mappings (not yet built). Parallel names like
+              // "Magenta Refractors" belong in foilType, not variant.
+              cardData.variant = '';
               cardData.isNumbered = (verified.isNumbered || ocrHasSerial) ?? cardData.isNumbered;
               cardData.serialNumber = cardData.serialNumber || verified.serialLimit || '';
-              console.log(`Applied variant data from confirmed card: variant="${cardData.variant}", serial="${cardData.serialNumber}"`);
+              console.log(`Applied serial data from confirmed card: serial="${cardData.serialNumber}" (variant cleared — awaiting CMP mapping)`);
             } else {
               console.log(`Skipping variant override - OCR scan differs from confirmed variant (confirmed: variant="${verified.variant}", serial="${verified.serialLimit}" | OCR: variant="${cardData.variant}", serial="${cardData.serialNumber}")`);
             }

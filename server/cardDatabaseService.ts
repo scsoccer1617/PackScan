@@ -375,6 +375,7 @@ export async function lookupCard(input: CardLookupInput): Promise<CardLookupResu
       brandId: cardRow.brandId,
       year: cardRow.year,
       collection: cardRow.collection,
+      set: cardRow.set || undefined,
       serialNumber,
     });
 
@@ -411,20 +412,28 @@ async function lookupVariation(params: {
   brandId: string;
   year: number;
   collection: string;
+  set?: string;
   serialNumber?: string;
 }): Promise<typeof cardVariations.$inferSelect | null> {
-  const { brandId, year, collection, serialNumber } = params;
+  const { brandId, year, collection, set, serialNumber } = params;
+
+  // Build WHERE conditions — always filter by brand + year + collection.
+  // Also filter by set when available to prevent cross-product contamination
+  // (e.g. "Base Set /399" matching Chrome Update Magenta Refractors instead of
+  // Series Two Yellow Rainbow Foil when both share the same collection name).
+  const conditions = [
+    eq(cardVariations.brandId, brandId),
+    eq(cardVariations.year, year),
+    sql`lower(${cardVariations.collection}) = lower(${collection})`,
+  ];
+  if (set) {
+    conditions.push(sql`lower(${cardVariations.set}) = lower(${set})`);
+  }
 
   let rows = await db
     .select()
     .from(cardVariations)
-    .where(
-      and(
-        eq(cardVariations.brandId, brandId),
-        eq(cardVariations.year, year),
-        sql`lower(${cardVariations.collection}) = lower(${collection})`
-      )
-    )
+    .where(and(...conditions))
     .limit(100);
 
   if (rows.length === 0) return null;

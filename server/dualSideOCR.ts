@@ -558,8 +558,9 @@ async function combineCardResults(
         // Rookie card from DB
         if (dbResult.isRookieCard) combined.isRookieCard = true;
 
-        // Variation from DB (only if OCR didn't detect one from foil/text)
-        if (dbResult.variation && !combined.variant) combined.variant = dbResult.variation;
+        // NOTE: DB variation names (e.g. "Magenta Refractors", "Yellow Rainbow Foil") are parallels,
+        // not card variants. Variant is reserved for short prints / image variations driven by
+        // CMP code mappings. Until CMP mappings are built, variant stays blank (Base/Standard).
 
         // Serial number from DB variation (only if OCR didn't find one)
         if (dbResult.serialNumber && !combined.serialNumber) {
