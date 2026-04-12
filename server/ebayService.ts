@@ -560,9 +560,57 @@ export async function searchCardValues(
       isAutographed,
       serialNumber
     );
-    
+
+    // ── Hard post-filter ─────────────────────────────────────────────────────
+    // Remove listings that clearly don't match the card type BEFORE picking top 5.
+    // This is more reliable than scoring alone because if every eBay result is a
+    // parallel, scoring penalties still leave parallels in the top 5.
+    const isBaseCardSearch = !foilType || foilType.trim() === '';
+
+    // Terms that definitively indicate a parallel/special version (word-boundary matched)
+    const HARD_PARALLEL_TERMS = [
+      'parallel', 'refractor', 'xfractor', 'rainbow', 'mojo', 'holo', 'holographic',
+      'foilboard', 'sparkle', 'glitter', 'prizm', 'laser', 'atomic', 'crackle', 'shimmer',
+      'aqua foil', 'blue foil', 'red foil', 'green foil', 'gold foil',
+      'purple foil', 'orange foil', 'pink foil', 'silver foil', 'rainbow foil',
+      'gold refractor', 'black refractor', 'blue refractor', 'red refractor'
+    ];
+
+    // Terms that definitively indicate an autograph
+    const HARD_AUTO_TERMS = ['autograph', 'autographed', 'on-card auto', 'signed'];
+
+    const hardFilter = (r: EbaySearchResult): boolean => {
+      const t = r.title.toLowerCase();
+
+      // Filter autographs when card is not autographed
+      if (!isAutographed) {
+        const hasAuto = HARD_AUTO_TERMS.some(kw => {
+          const re = new RegExp(`\\b${kw.replace(/[-]/g, '\\s*')}\\b`, 'i');
+          return re.test(t);
+        });
+        if (hasAuto) return false;
+      }
+
+      // Filter parallels when card is a base card
+      if (isBaseCardSearch) {
+        const hasParallel = HARD_PARALLEL_TERMS.some(kw => {
+          const re = new RegExp(`\\b${kw.replace(/\s+/g, '\\s+')}\\b`, 'i');
+          return re.test(t);
+        });
+        if (hasParallel) return false;
+      }
+
+      return true;
+    };
+
+    const filtered = prioritizedResults.filter(hardFilter);
+    console.log(`Hard filter: ${results.length} → ${filtered.length} results (removed ${results.length - filtered.length} parallel/auto listings)`);
+
+    // Use filtered results if we have enough; otherwise fall back to full scored set
+    const candidateResults = filtered.length >= 3 ? filtered : prioritizedResults;
+
     // Only use top 5 results for display and calculation
-    const topResults = prioritizedResults.slice(0, 5);
+    const topResults = candidateResults.slice(0, 5);
     
     // Calculate average value based on the top 5 displayed results only
     const displayedTotal = topResults.reduce((sum, item) => sum + item.price, 0);
