@@ -116,8 +116,13 @@ function discoverVariantFromTitlesBlind(titles: string[], playerName: string): s
 function extractColorFromVariant(variant: string | undefined): string | null {
   if (!variant) return null;
   const colors = ['Aqua', 'Blue', 'Green', 'Red', 'Gold', 'Silver', 'Purple', 'Orange', 'Pink'];
+  // Prefer the color at the start (e.g. "Green Foil")
   for (const color of colors) {
     if (variant.toLowerCase().startsWith(color.toLowerCase())) return color;
+  }
+  // Fall back to color anywhere in the name (e.g. "Holiday Green Leaf" → "Green")
+  for (const color of colors) {
+    if (new RegExp(`\\b${color}\\b`, 'i').test(variant)) return color;
   }
   return null;
 }
@@ -419,8 +424,12 @@ export async function searchCardValues(
       return excludes.join(' ');
     };
 
-    const buildKeywords = (opts: { includeVariant?: boolean; includeCardNumber?: boolean; includeSerial?: boolean; includeNegatives?: boolean } = {}): string => {
-      const { includeVariant = true, includeCardNumber = true, includeSerial = true, includeNegatives = true } = opts;
+    // Color keyword extracted from the foilType for use in intermediate fallback searches.
+    // e.g. "Holiday Green Leaf" → "Green", "Blue Crackle Foil" → "Blue"
+    const foilColorKeyword = extractColorFromVariant(foilType || undefined) ?? '';
+
+    const buildKeywords = (opts: { includeVariant?: boolean; variantOverride?: string; includeCardNumber?: boolean; includeSerial?: boolean; includeNegatives?: boolean } = {}): string => {
+      const { includeVariant = true, variantOverride, includeCardNumber = true, includeSerial = true, includeNegatives = true } = opts;
       const parts: string[] = [];
       
       if (year > 0) parts.push(String(year));
@@ -432,8 +441,9 @@ export async function searchCardValues(
         parts.push(/^\d+$/.test(cardNumber) ? `#${cardNumber}` : cardNumber);
       }
       
-      if (includeVariant && variantKeyword) {
-        parts.push(variantKeyword);
+      const effectiveVariant = variantOverride !== undefined ? variantOverride : (includeVariant ? variantKeyword : '');
+      if (effectiveVariant) {
+        parts.push(effectiveVariant);
       }
       
       if (includeSerial && serialSuffix) {
@@ -504,8 +514,18 @@ export async function searchCardValues(
       results = await callBrowseApi(keywords);
       console.log(`Browse API (specific query) returned ${results.length} active listings`);
 
+      if (results.length === 0 && !isBaseCard && foilColorKeyword && foilColorKeyword.toLowerCase() !== variantKeyword.toLowerCase()) {
+        // Pass 2a (parallel only): full foil name had no results → try just the color keyword
+        // e.g. "Holiday Green Leaf" → search with "Green" so eBay returns "Green Foil /99" listings
+        const colorKeywords = buildKeywords({ variantOverride: foilColorKeyword });
+        if (colorKeywords && colorKeywords !== keywords) {
+          results = await callBrowseApi(colorKeywords);
+          console.log(`Browse API (color keyword "${foilColorKeyword}" fallback) returned ${results.length} active listings`);
+        }
+      }
+
       if (results.length === 0) {
-        // Pass 2: broader query — drop card number, variant, serial (keep negatives)
+        // Pass 2b: broader query — drop card number, variant, serial (keep negatives)
         const broaderKeywords = buildKeywords({ includeCardNumber: false, includeVariant: false, includeSerial: false });
         if (broaderKeywords && broaderKeywords !== keywords) {
           results = await callBrowseApi(broaderKeywords);
@@ -514,7 +534,7 @@ export async function searchCardValues(
       }
 
       if (results.length === 0) {
-        // Pass 3: last resort — same as pass 2 but drop negative keywords too
+        // Pass 3: last resort — same as pass 2b but drop negative keywords too
         const broadestKeywords = buildKeywords({ includeCardNumber: false, includeVariant: false, includeSerial: false, includeNegatives: false });
         if (broadestKeywords) {
           results = await callBrowseApi(broadestKeywords);
