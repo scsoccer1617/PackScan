@@ -26,6 +26,16 @@ function filterByKeyword(options: ParallelOption[], foilType: string): ParallelO
   return options.filter(o => o.variationOrParallel.toLowerCase().includes(keyword));
 }
 
+// Filter parallel options by serialization status.
+// Non-numbered card → only show non-serialized parallels (no /NNN limit).
+// Numbered card → only show serialized parallels.
+function filterBySerialStatus(options: ParallelOption[], isNumbered: boolean): ParallelOption[] {
+  if (isNumbered) {
+    return options.filter(o => o.serialNumber && o.serialNumber.trim() !== "");
+  }
+  return options.filter(o => !o.serialNumber || o.serialNumber.trim() === "");
+}
+
 // Fetch parallel options from the DB for a given card
 async function fetchParallels(
   brand: string,
@@ -81,7 +91,10 @@ export default function PriceLookup() {
     // Fetch DB parallels and filter to matching variants
     if (data.brand && data.year) {
       const allOptions = await fetchParallels(data.brand, data.year as number, data.collection, data.set);
-      const filtered = filterByKeyword(allOptions, detected);
+      const byKeyword = filterByKeyword(allOptions, detected);
+      // Only show parallels whose serialization status matches the card:
+      // non-numbered card → non-serialized parallels; numbered card → serialized ones.
+      const filtered = filterBySerialStatus(byKeyword, !!data.isNumbered);
 
       if (filtered.length >= 2) {
         // Multiple variants of the same parallel type detected — ask the user
