@@ -475,7 +475,9 @@ export async function searchCardValues(
       const moreSpecificCounts = new Map<string, number>();
       for (const title of titles) {
         const titleLower = title.toLowerCase();
-        const numMatch = titleLower.match(new RegExp(`(\\d+)\\s*${collectionLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+        // Require the leading digit NOT be preceded by a word char or dash (prevents
+        // card numbers like "#89B-9" from donating their trailing "9" as a collection prefix)
+        const numMatch = titleLower.match(new RegExp(`(?<![\\w-])(\\d+)\\s*${collectionLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
         if (numMatch && numMatch[1]) {
           const discoveredNum = numMatch[1];
           if (year && discoveredNum === String(year)) continue;
