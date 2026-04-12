@@ -940,7 +940,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get(`${apiPrefix}/ebay-search`, async (req, res) => {
     try {
-      const { playerName, cardNumber, brand, year, collection, condition, isNumbered, foilType, serialNumber, variant, isAutographed } = req.query;
+      const { playerName, cardNumber, brand, year, collection, set, condition, isNumbered, foilType, serialNumber, variant, isAutographed } = req.query;
       
       if (!brand || !year) {
         return res.status(400).json({ error: 'Missing required parameters: brand and year are required' });
@@ -951,7 +951,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         cardNumber, 
         brand, 
         year, 
-        collection, 
+        collection,
+        set,
         isNumbered, 
         foilType: foilType || 'UNDEFINED', 
         serialNumber,
@@ -969,7 +970,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         foilType as string || undefined,
         serialNumber as string || undefined,
         variant as string || undefined,
-        isAutographed === 'true'
+        isAutographed === 'true',
+        undefined,
+        set as string || undefined
       );
       
       console.log('eBay search results:', results);
@@ -1169,7 +1172,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
             cardData.foilType,
             cardData.serialNumber,
             cardData.variant,
-            cardData.isAutographed || false
+            cardData.isAutographed || false,
+            undefined,
+            cardData.set
           );
           
           console.log('eBay search results:', ebayResults);
@@ -1297,7 +1302,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
             cardData.foilType || undefined,
             cardData.serialNumber || undefined,
             cardData.variant || undefined,
-            cardData.isAutographed || false
+            cardData.isAutographed || false,
+            undefined,
+            cardData.set || undefined
           );
           
           ebayResults = ebayData.results || [];

@@ -103,6 +103,7 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
           brand: cardData.brand || "",
           year: (cardData.year ?? 0).toString(),
           collection: cardData.collection || "",
+          set: (cardData as any).set || "",
           condition: cardData.condition || "",
           isNumbered: cardData.isNumbered ? "true" : "false",
           foilType: cardData.foilType || "",

@@ -11,6 +11,20 @@ function normalizeCollectionForSearch(collection: string): string {
     .replace(/\bSeries Three\b/gi, 'Series 3');
 }
 
+// Generic collection names that eBay sellers never write in listing titles
+// — including them in search queries only hurts results.
+const GENERIC_COLLECTION_NAMES = new Set(['base set', 'base', 'base cards']);
+
+// Normalize the product "set" name for eBay search.
+// Strips brand prefix if redundant (e.g. "Topps Series One" + brand "Topps" → "Series 1").
+function normalizeSetForSearch(set: string, brand: string): string {
+  let s = set.trim();
+  if (brand && s.toLowerCase().startsWith(brand.toLowerCase())) {
+    s = s.slice(brand.length).trim();
+  }
+  return normalizeCollectionForSearch(s);
+}
+
 function discoverVariantFromListings(titles: string[], detectedColor: string | null): string | null {
   if (!detectedColor) return null;
   
@@ -358,7 +372,8 @@ export async function searchCardValues(
   serialNumber?: string,
   variant?: string,
   isAutographed?: boolean,
-  _isRetry?: boolean
+  _isRetry?: boolean,
+  set?: string
 ): Promise<EbayResponse> {
   try {
     // Require at least one auth credential
@@ -383,7 +398,16 @@ export async function searchCardValues(
       }
     }
 
-    const searchCollection = collection ? normalizeCollectionForSearch(collection) : '';
+    const rawCollection = collection || '';
+    // Use the product set name ("Series 1") for eBay searches when available,
+    // because that's what sellers actually write in listing titles.
+    // Fall back to collection only if it's not a generic placeholder like "Base Set".
+    const searchSet = set ? normalizeSetForSearch(set, brand) : '';
+    const collectionForSearch = !GENERIC_COLLECTION_NAMES.has(rawCollection.toLowerCase())
+      ? normalizeCollectionForSearch(rawCollection)
+      : '';
+    // Prefer set (product name) over collection (subset name) in queries
+    const searchCollection = searchSet || collectionForSearch;
     
     let serialSuffix = '';
     if (isNumbered && serialNumber) {
