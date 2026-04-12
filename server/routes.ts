@@ -1780,26 +1780,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: 'Invalid year' });
       }
 
-      // GROUP BY at SQL level so limit(300) applies to distinct pairs only
-      const options = await db
-        .select({
-          variationOrParallel: cardVariations.variationOrParallel,
-          serialNumber: cardVariations.serialNumber,
-          cmpNumber: max(cardVariations.cmpNumber),
-        })
-        .from(cardVariations)
-        .where(
-          and(
-            sql`lower(${cardVariations.brand}) = lower(${brand.trim()})`,
-            eq(cardVariations.year, year),
-            collection?.trim()
-              ? sql`lower(${cardVariations.collection}) = lower(${collection.trim()})`
-              : undefined
+      const brandYearCond = and(
+        sql`lower(${cardVariations.brand}) = lower(${brand.trim()})`,
+        eq(cardVariations.year, year)
+      );
+
+      const queryOptions = async (withCollection: boolean) =>
+        db
+          .select({
+            variationOrParallel: cardVariations.variationOrParallel,
+            serialNumber: cardVariations.serialNumber,
+            cmpNumber: max(cardVariations.cmpNumber),
+          })
+          .from(cardVariations)
+          .where(
+            withCollection && collection?.trim()
+              ? and(brandYearCond, sql`lower(${cardVariations.collection}) = lower(${collection.trim()})`)
+              : brandYearCond
           )
-        )
-        .groupBy(cardVariations.variationOrParallel, cardVariations.serialNumber)
-        .orderBy(cardVariations.variationOrParallel)
-        .limit(300);
+          .groupBy(cardVariations.variationOrParallel, cardVariations.serialNumber)
+          .orderBy(cardVariations.variationOrParallel)
+          .limit(300);
+
+      // First try with collection filter for precision
+      let options = collection?.trim() ? await queryOptions(true) : await queryOptions(false);
+
+      // If exact collection match returns nothing, fall back to brand+year only.
+      // The caller filters client-side by detected keyword so a broader set is fine.
+      if (options.length === 0 && collection?.trim()) {
+        options = await queryOptions(false);
+      }
 
       return res.json({ options });
     } catch (err: any) {

@@ -7,8 +7,48 @@ import { useOCR } from "@/hooks/use-ocr";
 import { useToast } from "@/hooks/use-toast";
 import OCRResults from "@/components/OCRResults";
 import EbayPriceResults from "@/components/EbayPriceResults";
-import ParallelPickerSheet from "@/components/ParallelPickerSheet";
+import ParallelPickerSheet, { ParallelOption } from "@/components/ParallelPickerSheet";
 import { CardFormValues } from "@shared/schema";
+
+// Extract the primary search keyword from a detected parallel string.
+// e.g. "Green Foil" → "Green",  "Gold Prizm" → "Gold",  "Rainbow" → "Rainbow"
+function extractKeyword(foilType: string): string {
+  const words = foilType.trim().split(/\s+/);
+  // Return the first meaningful word (3+ chars)
+  return words.find(w => w.length >= 3) ?? words[0] ?? "";
+}
+
+// Filter a list of DB parallel options to those matching the detected keyword
+function filterByKeyword(options: ParallelOption[], foilType: string): ParallelOption[] {
+  if (!foilType.trim()) return [];
+  const keyword = extractKeyword(foilType).toLowerCase();
+  if (!keyword) return [];
+  return options.filter(o => o.variationOrParallel.toLowerCase().includes(keyword));
+}
+
+// Fetch parallel options from the DB for a given card
+async function fetchParallels(
+  brand: string,
+  year: number,
+  collection?: string
+): Promise<ParallelOption[]> {
+  const params = new URLSearchParams({ brand, year: year.toString() });
+  if (collection) params.set("collection", collection);
+  const resp = await fetch(`/api/card-variations/options?${params}`);
+  if (!resp.ok) return [];
+  const data = await resp.json();
+  const raw: { variationOrParallel: string; serialNumber: string | null }[] = data.options || [];
+  // Deduplicate by name
+  const seen = new Set<string>();
+  const unique: ParallelOption[] = [];
+  for (const o of raw) {
+    if (!seen.has(o.variationOrParallel)) {
+      seen.add(o.variationOrParallel);
+      unique.push({ variationOrParallel: o.variationOrParallel, serialNumber: o.serialNumber });
+    }
+  }
+  return unique;
+}
 
 export default function PriceLookup() {
   const [frontImage, setFrontImage] = useState<string>("");
@@ -17,13 +57,57 @@ export default function PriceLookup() {
   const [cardData, setCardData] = useState<Partial<CardFormValues> | null>(null);
   const [showPriceResults, setShowPriceResults] = useState<boolean>(false);
   const [showParallelPicker, setShowParallelPicker] = useState<boolean>(false);
+  const [parallelOptions, setParallelOptions] = useState<ParallelOption[]>([]);
+  const [detectedKeyword, setDetectedKeyword] = useState<string>("");
   const [analyzing, setAnalyzing] = useState<boolean>(false);
   const { toast } = useToast();
   
-  // OCR hook for analyzing card images
-  const { loading: ocrLoading, error: ocrError, data: ocrData, analyzeImage } = useOCR();
-  
-  // Handle combined OCR + eBay price analysis
+  const { loading: ocrLoading, error: ocrError, data: ocrData } = useOCR();
+
+  // Called after scan completes — decides whether to show picker or go straight to eBay
+  const processCardData = async (data: Partial<CardFormValues>) => {
+    setCardData(data);
+
+    const detected = data.foilType?.trim() || "";
+
+    // No parallel detected — go straight to eBay as a base card
+    if (!detected) {
+      setShowPriceResults(true);
+      return;
+    }
+
+    // Fetch DB parallels and filter to matching variants
+    if (data.brand && data.year) {
+      const allOptions = await fetchParallels(data.brand, data.year as number, data.collection);
+      const filtered = filterByKeyword(allOptions, detected);
+
+      if (filtered.length >= 2) {
+        // Multiple variants of the same parallel type detected — ask the user
+        setParallelOptions(filtered);
+        setDetectedKeyword(extractKeyword(detected));
+        setShowParallelPicker(true);
+        return;
+      }
+
+      if (filtered.length === 1) {
+        // Exactly one DB match — silently use it
+        const match = filtered[0];
+        const updated: Partial<CardFormValues> = { ...data, foilType: match.variationOrParallel };
+        if (match.serialNumber) {
+          const limit = match.serialNumber.replace(/\//g, "");
+          updated.serialNumber = `/${limit}`;
+          updated.isNumbered = true;
+        }
+        setCardData(updated);
+        setShowPriceResults(true);
+        return;
+      }
+    }
+
+    // 0 DB matches — use the OCR-detected value as-is and go straight to eBay
+    setShowPriceResults(true);
+  };
+
   const handleAnalyzeRequest = async () => {
     if (!backImage) {
       toast({
@@ -65,16 +149,12 @@ export default function PriceLookup() {
         })()
       });
       
-      if (!response.ok) {
-        throw new Error('Analysis failed');
-      }
+      if (!response.ok) throw new Error('Analysis failed');
       
       const result = await response.json();
       
       if (result.success && result.data) {
-        setCardData(result.data);
-        // Show parallel picker before running eBay search
-        setShowParallelPicker(true);
+        await processCardData(result.data);
       } else {
         throw new Error(result.message || 'Analysis failed');
       }
@@ -90,12 +170,10 @@ export default function PriceLookup() {
     }
   };
 
-  // Called when user confirms their parallel selection in the sheet
   const handleParallelConfirm = (foilType: string, serialNumber?: string) => {
     setCardData(prev => {
       if (!prev) return prev;
-      const updated: Partial<CardFormValues> = { ...prev, foilType: foilType || "" };
-      // If the user picked a numbered parallel and no serial was detected yet, apply the serial limit
+      const updated: Partial<CardFormValues> = { ...prev, foilType };
       if (serialNumber) {
         const limit = serialNumber.replace(/\//g, "");
         updated.serialNumber = `/${limit}`;
@@ -107,84 +185,88 @@ export default function PriceLookup() {
     setShowPriceResults(true);
   };
   
-  // Apply OCR results and show price lookup
+  // Legacy path: OCR hook results (not used by main scan flow)
   const handleApplyOCRResults = (data: Partial<CardFormValues>) => {
     setCardData(data);
     setShowOCRResults(false);
     setShowPriceResults(true);
-    
-    toast({
-      title: "Card Analyzed",
-      description: "Searching eBay for recent sold prices...",
-    });
   };
   
-  // Reset to start over
   const handleReset = () => {
     setFrontImage("");
     setBackImage("");
     setShowOCRResults(false);
     setShowPriceResults(false);
     setShowParallelPicker(false);
+    setParallelOptions([]);
     setCardData(null);
   };
+
+  const cardDescription = cardData
+    ? [
+        cardData.year,
+        cardData.brand,
+        cardData.collection,
+        cardData.cardNumber ? `#${cardData.cardNumber}` : undefined,
+        [cardData.playerFirstName, cardData.playerLastName].filter(Boolean).join(" "),
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : "";
 
   return (
     <div className="p-4 space-y-6">
       {!showOCRResults && !showPriceResults && !showParallelPicker && (
-        <>
-          {/* Image Upload Section */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <ScanSearch className="h-5 w-5" />
-                Upload Card Images
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <h3 className="font-medium mb-2">Front of Card</h3>
-                  <SimpleImageUploader
-                    onImageCaptured={setFrontImage}
-                    label="Upload front image"
-                    existingImage={frontImage}
-                  />
-                </div>
-                <div>
-                  <h3 className="font-medium mb-2">Back of Card</h3>
-                  <SimpleImageUploader
-                    onImageCaptured={setBackImage}
-                    label="Upload back image"
-                    existingImage={backImage}
-                  />
-                </div>
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <ScanSearch className="h-5 w-5" />
+              Upload Card Images
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <h3 className="font-medium mb-2">Front of Card</h3>
+                <SimpleImageUploader
+                  onImageCaptured={setFrontImage}
+                  label="Upload front image"
+                  existingImage={frontImage}
+                />
               </div>
-              
-              <Button 
-                onClick={handleAnalyzeRequest}
-                disabled={analyzing || !backImage}
-                className="w-full"
-                size="lg"
-              >
-                {analyzing ? (
-                  <>
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                    Analyzing Card...
-                  </>
-                ) : (
-                  <>
-                    <ScanSearch className="h-4 w-4 mr-2" />
-                    Analyze Card & Get Prices
-                  </>
-                )}
-              </Button>
-            </CardContent>
-          </Card>
-        </>
+              <div>
+                <h3 className="font-medium mb-2">Back of Card</h3>
+                <SimpleImageUploader
+                  onImageCaptured={setBackImage}
+                  label="Upload back image"
+                  existingImage={backImage}
+                />
+              </div>
+            </div>
+            
+            <Button 
+              onClick={handleAnalyzeRequest}
+              disabled={analyzing || !backImage}
+              className="w-full"
+              size="lg"
+            >
+              {analyzing ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                  Analyzing Card...
+                </>
+              ) : (
+                <>
+                  <ScanSearch className="h-4 w-4 mr-2" />
+                  Analyze Card & Get Prices
+                </>
+              )}
+            </Button>
+          </CardContent>
+        </Card>
       )}
 
-      {/* OCR Results (when triggered via OCR hook — legacy path) */}
+      {/* Legacy OCR hook path */}
       {showOCRResults && ocrData && (
         <OCRResults 
           loading={ocrLoading}
@@ -195,11 +277,13 @@ export default function PriceLookup() {
         />
       )}
 
-      {/* Parallel picker sheet — appears after scan, before eBay search */}
+      {/* Parallel picker — only shown when 2+ matching variants exist */}
       {cardData && (
         <ParallelPickerSheet
           open={showParallelPicker}
-          cardData={cardData}
+          detectedLabel={detectedKeyword}
+          cardDescription={cardDescription}
+          options={parallelOptions}
           onConfirm={handleParallelConfirm}
         />
       )}
