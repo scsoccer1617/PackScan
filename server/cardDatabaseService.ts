@@ -266,20 +266,45 @@ export async function lookupCard(input: CardLookupInput): Promise<CardLookupResu
       )
       .limit(10);
 
-    // If collection provided, score and filter by collection similarity
+    // If collection provided, score and filter by collection + set similarity.
+    // The OCR text from the back of a card (e.g. "SERIES TWO", "SAPPHIRE") often
+    // maps directly to the DB `set` column rather than `collection`. Scoring both
+    // columns and taking the max ensures e.g. "SERIES TWO" correctly prefers
+    // "Series Two" over "Topps Chrome Sapphire" rows.
     if (cardRows.length > 1 && collection) {
-      const collectionNorm = collection.trim().toLowerCase();
+      // Normalize ordinal words to digits so "Series Two" == "Series 2" etc.
+      const normalizeOrdinals = (s: string) =>
+        s.replace(/\bone\b/gi, '1')
+         .replace(/\btwo\b/gi, '2')
+         .replace(/\bthree\b/gi, '3')
+         .replace(/\bfour\b/gi, '4')
+         .replace(/\bfive\b/gi, '5')
+         .replace(/\bsix\b/gi, '6')
+         .replace(/\bseven\b/gi, '7')
+         .replace(/\beight\b/gi, '8')
+         .replace(/\bnine\b/gi, '9');
+
+      const collectionNorm = normalizeOrdinals(collection.trim().toLowerCase());
+
+      const matchScore = (dbStr: string): number => {
+        const norm = normalizeOrdinals(dbStr.toLowerCase());
+        if (norm === collectionNorm) return 100;
+        if (norm.includes(collectionNorm) || collectionNorm.includes(norm)) return 50;
+        return 0;
+      };
+
       const scored = cardRows.map(r => {
-        const dbCol = r.collection.toLowerCase();
-        let score = 0;
-        if (dbCol === collectionNorm) score = 100;
-        else if (dbCol.includes(collectionNorm) || collectionNorm.includes(dbCol)) score = 50;
+        const colScore = matchScore(r.collection);
+        const setScore = r.set ? matchScore(r.set) : 0;
+        const score = Math.max(colScore, setScore);
         return { row: r, score };
       });
+
       const best = scored.filter(s => s.score > 0);
       if (best.length > 0) {
         best.sort((a, b) => b.score - a.score);
         cardRows = best.map(s => s.row);
+        console.log(`[CardDB] Set/collection scoring: top pick "${cardRows[0].set || cardRows[0].collection}" (score ${best[0].score})`);
       }
     }
 
