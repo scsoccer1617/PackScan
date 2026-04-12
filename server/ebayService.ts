@@ -166,6 +166,24 @@ export function clearEbayCache() {
 // Clear cache immediately on module load to start fresh
 clearEbayCache();
 
+// Keywords that signal a parallel/special version — used to penalise base-card searches.
+// Deliberately excludes product-line names that appear in BASE card titles too
+// (e.g. "chrome" in "Bowman Chrome", "prizm" in "Panini Prizm", "optic"/"mosaic" as set names).
+const PARALLEL_KEYWORDS = [
+  'refractor', 'xfractor', 'foilboard',
+  'holo', 'holographic', 'rainbow', 'parallel',
+  'mojo', 'sparkle', 'glitter', 'laser',
+  'fractal', 'pulsar', 'atomic', 'silk',
+  'crackle', 'shimmer',
+  'aqua foil', 'blue foil', 'red foil', 'green foil', 'gold foil',
+  'purple foil', 'orange foil', 'pink foil', 'silver foil', 'rainbow foil'
+];
+
+// Keywords that signal an autograph — used to penalise non-auto searches
+const AUTO_KEYWORDS = [
+  'auto', 'autograph', 'autographed', 'signed', 'signature', 'on-card'
+];
+
 /**
  * Prioritize eBay listings based on how well they match the card information
  * Higher scores = better matches = higher priority
@@ -177,7 +195,9 @@ function prioritizeListingsByCardMatch(
   brand: string,
   year: number,
   collection?: string,
-  foilType?: string
+  foilType?: string,
+  isAutographed?: boolean,
+  serialNumber?: string
 ): EbaySearchResult[] {
   return results.map(result => {
     const title = result.title.toLowerCase();
@@ -275,7 +295,46 @@ function prioritizeListingsByCardMatch(
         }
       }
     }
-    
+
+    // Penalize autograph/signed listings when the card is not an autograph
+    if (!isAutographed) {
+      const hasAuto = AUTO_KEYWORDS.some(kw => {
+        // Use word-boundary check: "auto" in "automatic" should not trigger
+        const re = new RegExp(`\\b${kw}\\b`, 'i');
+        return re.test(title);
+      });
+      if (hasAuto) {
+        score -= 80;
+        console.log(`  ↳ Auto penalty (-80): title contains autograph keyword`);
+      }
+    }
+
+    // For base cards (no foilType), penalize listings that mention any parallel/foil keyword
+    const isBaseCard = !foilType || foilType.trim() === '';
+    if (isBaseCard) {
+      const hasParallel = PARALLEL_KEYWORDS.some(kw => {
+        const re = new RegExp(`\\b${kw}\\b`, 'i');
+        return re.test(title);
+      });
+      if (hasParallel) {
+        score -= 60;
+        console.log(`  ↳ Parallel penalty (-60): base card but title contains parallel/foil keyword`);
+      }
+    }
+
+    // For numbered cards, penalize listings with a different serial limit in the title
+    if (serialNumber) {
+      const ownSerial = serialNumber.match(/\/(\d+)/)?.[1];
+      if (ownSerial) {
+        // Find all /NNN patterns in the listing title
+        const titleSerials = [...title.matchAll(/\/(\d+)/g)].map(m => m[1]);
+        if (titleSerials.length > 0 && !titleSerials.includes(ownSerial)) {
+          score -= 40;
+          console.log(`  ↳ Serial mismatch penalty (-40): card is /${ownSerial} but listing shows /${titleSerials.join(', /')}`);
+        }
+      }
+    }
+
     console.log(`Listing "${result.title}" scored ${score} points (matched: ${matchedElements.join(', ') || 'none'})`);
     
     return { ...result, matchScore: score };
@@ -293,6 +352,7 @@ export async function searchCardValues(
   foilType?: string,
   serialNumber?: string,
   variant?: string,
+  isAutographed?: boolean,
   _isRetry?: boolean
 ): Promise<EbayResponse> {
   try {
@@ -458,7 +518,9 @@ export async function searchCardValues(
       brand,
       year,
       collection,
-      foilType
+      foilType,
+      isAutographed,
+      serialNumber
     );
     
     // Only use top 5 results for display and calculation

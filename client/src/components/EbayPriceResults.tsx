@@ -107,7 +107,8 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
           isNumbered: cardData.isNumbered ? "true" : "false",
           foilType: cardData.foilType || "",
           serialNumber: cardData.serialNumber || "",
-          variant: cardData.variant || ""
+          variant: cardData.variant || "",
+          isAutographed: cardData.isAutographed ? "true" : "false"
         });
 
         const response = await fetch(`/api/ebay-search?${searchParams}`);

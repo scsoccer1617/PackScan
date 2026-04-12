@@ -892,7 +892,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // eBay search endpoint
   app.get(`${apiPrefix}/search-ebay-values`, async (req, res) => {
     try {
-      const { playerName, cardNumber, brand, year, collection, condition, isNumbered, foilType, serialNumber } = req.query;
+      const { playerName, cardNumber, brand, year, collection, condition, isNumbered, foilType, serialNumber, isAutographed } = req.query;
       
       if (!playerName || !brand || !year) {
         return res.status(400).json({ error: 'Missing required parameters' });
@@ -907,7 +907,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         condition as string || '',
         isNumbered === 'true',
         foilType as string || undefined,
-        serialNumber as string || undefined
+        serialNumber as string || undefined,
+        undefined,
+        isAutographed === 'true'
       );
       
       return res.json(results);
@@ -938,7 +940,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get(`${apiPrefix}/ebay-search`, async (req, res) => {
     try {
-      const { playerName, cardNumber, brand, year, collection, condition, isNumbered, foilType, serialNumber, variant } = req.query;
+      const { playerName, cardNumber, brand, year, collection, condition, isNumbered, foilType, serialNumber, variant, isAutographed } = req.query;
       
       if (!brand || !year) {
         return res.status(400).json({ error: 'Missing required parameters: brand and year are required' });
@@ -966,7 +968,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         isNumbered === 'true',
         foilType as string || undefined,
         serialNumber as string || undefined,
-        variant as string || undefined
+        variant as string || undefined,
+        isAutographed === 'true'
       );
       
       console.log('eBay search results:', results);
@@ -1165,7 +1168,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             cardData.isNumbered || false,
             cardData.foilType,
             cardData.serialNumber,
-            cardData.variant
+            cardData.variant,
+            cardData.isAutographed || false
           );
           
           console.log('eBay search results:', ebayResults);
@@ -1292,7 +1296,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             cardData.isNumbered || false,
             cardData.foilType || undefined,
             cardData.serialNumber || undefined,
-            cardData.variant || undefined
+            cardData.variant || undefined,
+            cardData.isAutographed || false
           );
           
           ebayResults = ebayData.results || [];
