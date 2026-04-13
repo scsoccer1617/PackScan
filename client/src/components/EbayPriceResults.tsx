@@ -452,10 +452,11 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
 
   if (error) {
     const isRateLimit = error.includes('rate limit');
-    // "Price data currently unavailable" or "No active listings" means the search ran fine but found 0 listings —
-    // treat as "no results" rather than a hard error, since we still have a valid searchUrl.
+    // "No sold listings found" means the search ran fine but genuinely returned 0 results —
+    // show the friendly "No Sold Listings Found" card with a search link.
+    // "Unavailable" means the scrape itself failed (blocked, network error, etc.) —
+    // show the actual server error message instead so the user knows what happened.
     const isNoResults = !isRateLimit && searchUrl && (
-      error.toLowerCase().includes('unavailable') ||
       error.toLowerCase().includes('no active') ||
       error.toLowerCase().includes('no sold') ||
       error.toLowerCase().includes('not found')
