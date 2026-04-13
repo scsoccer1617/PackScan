@@ -1,5 +1,4 @@
 import axios from 'axios';
-import * as cheerio from 'cheerio';
 import { getFoilSearchTerm } from './foilVariantDetector';
 
 function normalizeCollectionForSearch(collection: string): string {
@@ -476,69 +475,135 @@ export async function searchCardValues(
 
     const safePlayerName = playerName || '';
     let results: EbaySearchResult[] = [];
-    const dataType = 'sold';
+    let dataType: 'sold' | 'current' = 'sold';
     const fallbackSearchUrl = getEbaySearchUrl(safePlayerName, cardNumber, brand, year, collection, '', isNumbered, foilType, serialNumber);
 
-    // Scrape eBay's public sold-search page (LH_Sold=1&LH_Complete=1).
-    // The Finding API is deprecated; Marketplace Insights API requires special vetting.
-    // eBay's search results page is server-side rendered, so we can parse it with cheerio.
+    // Use eBay Finding API (findCompletedItems) to get sold listings.
+    // This API is accessible from Replit servers (unlike the web UI which hits Akamai bot protection).
+    // The Finding API is "legacy" but still functional for this use case.
     const callEbaySoldSearch = async (query: string): Promise<EbaySearchResult[]> => {
-      const url = `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(query)}&_sacat=213&LH_Sold=1&LH_Complete=1&_sop=13`;
-      const resp = await axios.get(url, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.9',
-          'Accept-Encoding': 'gzip, deflate, br',
-          'Cache-Control': 'no-cache',
-          'Pragma': 'no-cache'
-        },
-        timeout: 20000,
-        maxRedirects: 5
+      const appId = getEbayAppId();
+      if (!appId) {
+        console.log('[eBay Finding API] No APP_ID configured');
+        return [];
+      }
+
+      // Strip negative keyword tokens (e.g. "-autograph") — the Finding API
+      // doesn't support them, and our scoring/hard-filter handles this filtering.
+      const cleanQuery = query.replace(/-\S+/g, '').replace(/\s{2,}/g, ' ').trim();
+
+      const params: Record<string, string> = {
+        'OPERATION-NAME': 'findCompletedItems',
+        'SERVICE-VERSION': '1.0.0',
+        'SECURITY-APPNAME': appId,
+        'RESPONSE-DATA-FORMAT': 'JSON',
+        'REST-PAYLOAD': '',
+        'keywords': cleanQuery,
+        'categoryId': '213',
+        'itemFilter(0).name': 'SoldItemsOnly',
+        'itemFilter(0).value': 'true',
+        'paginationInput.entriesPerPage': '20',
+        'sortOrder': 'EndTimeSoonest'
+      };
+
+      const resp = await axios.get('https://svcs.ebay.com/services/search/FindingService/v1', {
+        params,
+        timeout: 20000
       });
 
-      const $ = cheerio.load(resp.data);
-      const items: EbaySearchResult[] = [];
+      const data = resp.data;
+      const ack = data?.findCompletedItemsResponse?.[0]?.ack?.[0];
+      const rawItems: any[] = data?.findCompletedItemsResponse?.[0]?.searchResult?.[0]?.item || [];
 
-      $('.s-item').each((_i, el) => {
-        const title = $(el).find('.s-item__title').first().text().trim();
+      if (ack && ack !== 'Success' && ack !== 'Warning') {
+        const errorMsg = data?.findCompletedItemsResponse?.[0]?.errorMessage?.[0]?.error?.[0]?.message?.[0] || ack;
+        console.log(`[eBay Finding API] Non-success ACK: ${ack} — ${errorMsg}`);
+        return [];
+      }
 
-        // eBay always injects a dummy first item titled "Shop on eBay" — skip it
-        if (!title || title === 'Shop on eBay') return;
+      const items: EbaySearchResult[] = rawItems.map((item: any) => {
+        const title = item.title?.[0] || '';
+        const priceVal = item.sellingStatus?.[0]?.currentPrice?.[0]?.__value__;
+        const price = priceVal ? parseFloat(priceVal) : 0;
+        const currency = item.sellingStatus?.[0]?.currentPrice?.[0]?.['@currencyId'] || 'USD';
+        const url = item.viewItemURL?.[0] || '';
+        const imageUrl = item.galleryURL?.[0] || '';
+        const condition = item.condition?.[0]?.conditionDisplayName?.[0] || '';
+        const endTime = item.listingInfo?.[0]?.endTime?.[0] || '';
+        return { title, price, currency, url, imageUrl, condition, endTime };
+      }).filter(i => i.price > 0 && i.title);
 
-        // Price: may be "$12.99" or "$5.00 to $15.00" — take the first dollar value
-        const priceText = $(el).find('.s-item__price').first().text().trim();
-        const priceMatch = priceText.match(/\$?([\d,]+\.?\d*)/);
-        const price = priceMatch ? parseFloat(priceMatch[1].replace(/,/g, '')) : 0;
-        if (price <= 0) return;
-
-        const itemUrl = $(el).find('.s-item__link').first().attr('href') || '';
-        const imageUrl = $(el).find('.s-item__image-img').first().attr('src') ||
-                         $(el).find('.s-item__image img').first().attr('src') || '';
-
-        // Sold date: appears as "Sold  Oct 15, 2024" in the POSITIVE-colored span
-        const soldDateText = $(el).find('.s-item__title--tagblock .POSITIVE').first().text().trim() ||
-                             $(el).find('.s-item__caption--signal.POSITIVE').first().text().trim() ||
-                             $(el).find('[class*="s-item__ended"]').first().text().trim();
-        const endTime = soldDateText.replace(/^Sold\s+/i, '').trim();
-
-        items.push({ title, price, currency: 'USD', url: itemUrl, imageUrl, condition: '', endTime });
-      });
-
-      console.log(`eBay sold search returned ${items.length} results for: "${query}"`);
+      console.log(`[eBay Finding API] ACK: ${ack}, returned ${rawItems.length} items, ${items.length} valid for: "${cleanQuery}"`);
       return items;
     };
 
+    // eBay Browse API fallback: returns active listings when the Finding API is rate-limited.
+    // Uses OAuth Client Credentials (EBAY_APP_ID + EBAY_CERT_ID).
+    const callEbayBrowseSearch = async (query: string): Promise<EbaySearchResult[]> => {
+      const { getEbayAccessToken } = await import('./ebayTokenManager.js');
+      const token = await getEbayAccessToken();
+      const cleanQuery = query.replace(/-\S+/g, '').replace(/\s{2,}/g, ' ').trim();
+
+      const resp = await axios.get('https://api.ebay.com/buy/browse/v1/item_summary/search', {
+        params: {
+          q: cleanQuery,
+          category_ids: '213',
+          limit: 20,
+          sort: 'newlyListed'
+        },
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'X-EBAY-C-MARKETPLACE-ID': 'EBAY_US'
+        },
+        timeout: 20000
+      });
+
+      const rawItems: any[] = resp.data?.itemSummaries || [];
+      const items: EbaySearchResult[] = rawItems.map((item: any) => ({
+        title: item.title || '',
+        price: parseFloat(item.price?.value || '0'),
+        currency: item.price?.currency || 'USD',
+        url: item.itemWebUrl || '',
+        imageUrl: item.image?.imageUrl || item.thumbnailImages?.[0]?.imageUrl || '',
+        condition: item.condition || '',
+        endTime: item.itemEndDate || ''
+      })).filter(i => i.price > 0 && i.title);
+
+      console.log(`[eBay Browse API] returned ${rawItems.length} items, ${items.length} valid for: "${cleanQuery}"`);
+      return items;
+    };
+
+    // Returns true if the error is a rate-limit from the Finding API
+    const isFindingApiRateLimit = (err: any): boolean => {
+      const body = err?.response?.data;
+      const errorId = body?.errorMessage?.[0]?.error?.[0]?.errorId?.[0];
+      return errorId === '10001' || err?.response?.status === 500;
+    };
+
+    // Wraps callEbaySoldSearch with a Browse API fallback on rate-limit
+    const callSearchWithFallback = async (query: string): Promise<EbaySearchResult[]> => {
+      try {
+        return await callEbaySoldSearch(query);
+      } catch (findingErr: any) {
+        if (isFindingApiRateLimit(findingErr)) {
+          console.log('[eBay] Finding API rate-limited — falling back to Browse API (active listings)');
+          dataType = 'current';
+          return await callEbayBrowseSearch(query);
+        }
+        throw findingErr;
+      }
+    };
+
     try {
-      results = await callEbaySoldSearch(keywords);
+      results = await callSearchWithFallback(keywords);
 
       if (results.length === 0 && !isBaseCard && foilColorKeyword && foilColorKeyword.toLowerCase() !== variantKeyword.toLowerCase()) {
         // Pass 2a (parallel only): full foil name had no results → try just the color keyword
         // e.g. "Holiday Green Leaf" → search with "Green" so eBay returns "Green Foil /99" listings
         const colorKeywords = buildKeywords({ variantOverride: foilColorKeyword });
         if (colorKeywords && colorKeywords !== keywords) {
-          results = await callEbaySoldSearch(colorKeywords);
-          console.log(`Sold search (color keyword "${foilColorKeyword}" fallback) returned ${results.length} results`);
+          results = await callSearchWithFallback(colorKeywords);
+          console.log(`Search (color keyword "${foilColorKeyword}" fallback) returned ${results.length} results`);
         }
       }
 
@@ -546,8 +611,8 @@ export async function searchCardValues(
         // Pass 2b: broader query — drop card number, variant, serial (keep negatives)
         const broaderKeywords = buildKeywords({ includeCardNumber: false, includeVariant: false, includeSerial: false });
         if (broaderKeywords && broaderKeywords !== keywords) {
-          results = await callEbaySoldSearch(broaderKeywords);
-          console.log(`Sold search (broader query) returned ${results.length} results`);
+          results = await callSearchWithFallback(broaderKeywords);
+          console.log(`Search (broader query) returned ${results.length} results`);
         }
       }
 
@@ -555,18 +620,18 @@ export async function searchCardValues(
         // Pass 3: last resort — same as pass 2b but drop negative keywords too
         const broadestKeywords = buildKeywords({ includeCardNumber: false, includeVariant: false, includeSerial: false, includeNegatives: false });
         if (broadestKeywords) {
-          results = await callEbaySoldSearch(broadestKeywords);
-          console.log(`Sold search (broadest query, no negatives) returned ${results.length} results`);
+          results = await callSearchWithFallback(broadestKeywords);
+          console.log(`Search (broadest query, no negatives) returned ${results.length} results`);
         }
       }
-    } catch (scrapeError: any) {
-      const status = scrapeError.response?.status;
-      console.log(`eBay sold search unavailable (HTTP ${status ?? 'no-response'}): ${scrapeError.message}`);
+    } catch (searchError: any) {
+      const status = searchError.response?.status;
+      console.log(`eBay search unavailable (HTTP ${status ?? 'no-response'}): ${searchError.message}`);
       const errorResp = {
         averageValue: 0,
         results: [],
         searchUrl: fallbackSearchUrl,
-        errorMessage: 'Sold price data currently unavailable',
+        errorMessage: 'Price data currently unavailable',
         dataType: 'sold' as const
       };
       searchCache.set(cacheKey, { data: errorResp, timestamp: Date.now(), isError: true });
@@ -578,8 +643,8 @@ export async function searchCardValues(
         averageValue: 0,
         results: [],
         searchUrl: fallbackSearchUrl,
-        errorMessage: 'No sold listings found',
-        dataType: 'sold' as const
+        errorMessage: dataType === 'sold' ? 'No sold listings found' : 'No active listings found',
+        dataType
       };
       searchCache.set(cacheKey, { data: emptyResp, timestamp: Date.now(), isError: true });
       return emptyResp;
@@ -703,7 +768,7 @@ export async function searchCardValues(
       averageValue,
       results: topResults,
       searchUrl: fallbackSearchUrl,
-      dataType: 'sold' as const,
+      dataType,
       discoveredCollection
     };
 

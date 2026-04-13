@@ -35,7 +35,7 @@ Preferred communication style: Simple, everyday language.
 - **Automated Card Detection**: Utilizes Google Cloud Vision API for OCR and advanced text analysis to identify player names, card numbers, brands, collections, and years, including special cases like rookie cards, autographs, and serial numbers.
 - **DB-Driven Card Lookup**: After OCR extracts brand + year + card number, the system looks these up in the card_database table for authoritative player name, team, collection, and rookie status. If no DB match, falls back to OCR-only results. Variation lookup (by serial number) identifies the specific parallel (e.g., /499 → Sky Blue).
 - **Image Management**: Supports uploading front and back card images, storing them locally, and proper MIME type handling.
-- **Price Lookup**: Integrates with the eBay API to fetch and display the 5 most recent sold listings for accurate market value estimation, with optimized search queries.
+- **Price Lookup**: Integrates with the eBay API (Finding API `findCompletedItems` for sold listings; Browse API OAuth fallback for active listings when rate-limited) to display up to 5 relevant eBay results for market value estimation. UI clearly distinguishes sold vs active listing mode.
 - **Dynamic Variant Detection**: Systematically identifies card variants (e.g., foil types, parallels, textures) through visual analysis and eBay listing title analysis.
 - **Generic Detection Logic**: Card processing relies on dynamic, generic detection methods (line-based, regex-based, positional scoring) rather than hard-coded rules for specific cards.
 - **Editable Data**: Users can manually edit detected card fields and re-run eBay searches.

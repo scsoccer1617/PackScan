@@ -546,7 +546,12 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
               <div className="text-2xl font-bold text-green-800">
                 {formatPrice(averageValue)}
               </div>
-              <p className="text-green-600">Average Sold Price</p>
+              <p className="text-green-600">
+                {dataType === 'current' ? 'Average Listed Price' : 'Average Sold Price'}
+              </p>
+              {dataType === 'current' && (
+                <p className="text-xs text-amber-600 mt-1">Showing active listings — sold data temporarily unavailable</p>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -556,7 +561,7 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <TrendingUp className="h-5 w-5" />
-            Recently Sold ({results.length})
+            {dataType === 'current' ? `Active Listings (${results.length})` : `Recently Sold (${results.length})`}
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -600,7 +605,7 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
                     )}
                     {result.endTime && (
                       <p className="text-xs text-gray-400">
-                        Sold: {formatDate(result.endTime)}
+                        {dataType === 'current' ? 'Listed' : 'Sold'}: {formatDate(result.endTime)}
                       </p>
                     )}
                   </div>
