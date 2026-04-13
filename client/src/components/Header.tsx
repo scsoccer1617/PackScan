@@ -1,4 +1,4 @@
-import packScanLogo from "@assets/ScanDeck_Logo_Transparent_1024_1770993832380.png";
+import packScanLogo from "@assets/ScanDeck_Final_Header_1776091120026.png";
 import { Link, useLocation } from "wouter";
 import { Database, Search } from "lucide-react";
 
