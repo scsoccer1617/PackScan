@@ -521,7 +521,7 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
                   variant={isRateLimit ? "default" : "secondary"}
                 >
                   <ExternalLink className="h-4 w-4" />
-                  Browse eBay Active Listings
+                  Browse eBay Sold Listings
                 </Button>
                 <p className="text-xs text-gray-500 mt-2">
                   Opens eBay with your card details pre-filled

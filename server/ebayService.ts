@@ -171,8 +171,8 @@ interface EbayResponse {
  */
 // Simple cache to reduce API calls
 const searchCache = new Map<string, { data: any; timestamp: number; isError?: boolean }>();
-const CACHE_DURATION = 30000;       // 30 second cache for successful results
-const ERROR_CACHE_DURATION = 120000; // 2 minute cache for errors/empty results (prevents rate-limit hammering)
+const CACHE_DURATION = 300000;       // 5 minute cache for successful results
+const ERROR_CACHE_DURATION = 300000; // 5 minute cache for errors/empty results (prevents hammering)
 
 // Clear cache function for debugging
 export function clearEbayCache() {
