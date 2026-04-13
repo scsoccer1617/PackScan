@@ -4,8 +4,11 @@ import { apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
-import { Database, Upload, Trash2, RefreshCw, CheckCircle, AlertCircle } from "lucide-react";
+import { Database, Upload, Trash2, RefreshCw, CheckCircle, AlertCircle, Lock, LogOut } from "lucide-react";
+
+const SESSION_KEY = "admin_session_password";
 
 interface DbStats {
   cards: number;
@@ -21,7 +24,79 @@ interface ImportResult {
   error?: string;
 }
 
-export default function CardDatabaseAdmin() {
+// ── Password Gate ────────────────────────────────────────────────────────────
+
+function PasswordGate({ onUnlock }: { onUnlock: (password: string) => void }) {
+  const [input, setInput] = useState("");
+  const [error, setError] = useState("");
+  const [checking, setChecking] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!input.trim()) return;
+    setError("");
+    setChecking(true);
+    try {
+      const res = await fetch("/api/card-database/check-auth", {
+        headers: { "x-admin-password": input },
+      });
+      if (res.ok) {
+        sessionStorage.setItem(SESSION_KEY, input);
+        onUnlock(input);
+      } else {
+        setError("Incorrect password. Try again.");
+      }
+    } catch {
+      setError("Connection error. Please try again.");
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  return (
+    <div className="flex items-center justify-center min-h-[60vh] p-4">
+      <Card className="w-full max-w-sm">
+        <CardHeader className="text-center pb-4">
+          <div className="flex justify-center mb-3">
+            <div className="bg-slate-100 rounded-full p-3">
+              <Lock className="w-6 h-6 text-slate-600" />
+            </div>
+          </div>
+          <CardTitle className="text-lg">Admin Access</CardTitle>
+          <p className="text-sm text-muted-foreground mt-1">Enter the admin password to continue</p>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleSubmit} className="space-y-3">
+            <Input
+              type="password"
+              placeholder="Admin password"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              autoFocus
+              disabled={checking}
+            />
+            {error && (
+              <p className="text-xs text-red-600 flex items-center gap-1">
+                <AlertCircle className="w-3.5 h-3.5" /> {error}
+              </p>
+            )}
+            <Button type="submit" className="w-full" disabled={checking || !input.trim()}>
+              {checking ? (
+                <><RefreshCw className="w-3.5 h-3.5 mr-1.5 animate-spin" /> Checking…</>
+              ) : (
+                "Unlock"
+              )}
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// ── Admin Panel ──────────────────────────────────────────────────────────────
+
+function AdminPanel({ password, onLock }: { password: string; onLock: () => void }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
@@ -31,6 +106,8 @@ export default function CardDatabaseAdmin() {
   const [cardsResult, setCardsResult] = useState<ImportResult | null>(null);
   const [variationsResult, setVariationsResult] = useState<ImportResult | null>(null);
 
+  const authHeader = { "x-admin-password": password };
+
   const { data: stats, isLoading: statsLoading, refetch: refetchStats } = useQuery<DbStats>({
     queryKey: ["/api/card-database/stats"],
   });
@@ -39,14 +116,30 @@ export default function CardDatabaseAdmin() {
     mutationFn: async ({ file, endpoint }: { file: File; endpoint: string }) => {
       const formData = new FormData();
       formData.append("file", file);
-      const res = await fetch(endpoint, { method: "POST", body: formData });
+      const res = await fetch(endpoint, {
+        method: "POST",
+        body: formData,
+        headers: authHeader,
+      });
+      if (res.status === 401) throw new Error("Unauthorized");
       return res.json() as Promise<ImportResult>;
+    },
+    onError: (err: Error) => {
+      if (err.message === "Unauthorized") {
+        toast({ title: "Session expired", description: "Please re-enter your password.", variant: "destructive" });
+        onLock();
+      }
     },
   });
 
   const clearMutation = useMutation({
     mutationFn: async () => {
-      return apiRequest({ url: "/api/card-database/clear", method: "DELETE" });
+      const res = await fetch("/api/card-database/clear", {
+        method: "DELETE",
+        headers: authHeader,
+      });
+      if (res.status === 401) throw new Error("Unauthorized");
+      return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/card-database/stats"] });
@@ -54,8 +147,13 @@ export default function CardDatabaseAdmin() {
       setVariationsResult(null);
       toast({ title: "Database cleared", description: "All card database entries removed." });
     },
-    onError: () => {
-      toast({ title: "Clear failed", variant: "destructive" });
+    onError: (err: Error) => {
+      if (err.message === "Unauthorized") {
+        toast({ title: "Session expired", description: "Please re-enter your password.", variant: "destructive" });
+        onLock();
+      } else {
+        toast({ title: "Clear failed", variant: "destructive" });
+      }
     },
   });
 
@@ -99,9 +197,15 @@ export default function CardDatabaseAdmin() {
 
   return (
     <div className="p-4 space-y-5">
-      <div className="flex items-center gap-2">
-        <Database className="w-5 h-5 text-blue-600" />
-        <h2 className="text-lg font-semibold">Card Database</h2>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Database className="w-5 h-5 text-blue-600" />
+          <h2 className="text-lg font-semibold">Card Database</h2>
+        </div>
+        <Button variant="ghost" size="sm" onClick={onLock} className="text-slate-500 hover:text-slate-700 gap-1.5">
+          <LogOut className="w-3.5 h-3.5" />
+          Lock
+        </Button>
       </div>
 
       {/* Stats */}
@@ -147,21 +251,14 @@ export default function CardDatabaseAdmin() {
             accept=".csv"
             className="block w-full text-sm text-slate-500 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-xs file:font-medium file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
           />
-          <Button
-            onClick={handleCardsImport}
-            disabled={isPending}
-            size="sm"
-            className="w-full"
-          >
+          <Button onClick={handleCardsImport} disabled={isPending} size="sm" className="w-full">
             {isPending ? (
               <><RefreshCw className="w-3.5 h-3.5 mr-1.5 animate-spin" /> Importing…</>
             ) : (
               <><Upload className="w-3.5 h-3.5 mr-1.5" /> Import Cards</>
             )}
           </Button>
-          {cardsResult && (
-            <ImportResultBadge result={cardsResult} label="cards" />
-          )}
+          {cardsResult && <ImportResultBadge result={cardsResult} label="cards" />}
         </CardContent>
       </Card>
 
@@ -193,9 +290,7 @@ export default function CardDatabaseAdmin() {
               <><Upload className="w-3.5 h-3.5 mr-1.5" /> Import Variations</>
             )}
           </Button>
-          {variationsResult && (
-            <ImportResultBadge result={variationsResult} label="variations" />
-          )}
+          {variationsResult && <ImportResultBadge result={variationsResult} label="variations" />}
         </CardContent>
       </Card>
 
@@ -228,18 +323,41 @@ export default function CardDatabaseAdmin() {
   );
 }
 
+// ── Root export: gate wrapper ────────────────────────────────────────────────
+
+export default function CardDatabaseAdmin() {
+  const [password, setPassword] = useState<string | null>(
+    () => sessionStorage.getItem(SESSION_KEY)
+  );
+
+  const handleUnlock = (pw: string) => setPassword(pw);
+
+  const handleLock = () => {
+    sessionStorage.removeItem(SESSION_KEY);
+    setPassword(null);
+  };
+
+  if (!password) {
+    return <PasswordGate onUnlock={handleUnlock} />;
+  }
+
+  return <AdminPanel password={password} onLock={handleLock} />;
+}
+
+// ── Shared helpers ───────────────────────────────────────────────────────────
+
 function ImportResultBadge({ result, label }: { result: ImportResult; label: string }) {
   const [showAll, setShowAll] = useState(false);
   const hasErrors = result.errors && result.errors.length > 0;
   const displayed = showAll ? result.errors : result.errors?.slice(0, 5);
 
   const downloadErrors = () => {
-    const text = result.errors.join('\n');
-    const blob = new Blob([text], { type: 'text/plain' });
+    const text = result.errors.join("\n");
+    const blob = new Blob([text], { type: "text/plain" });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
+    const a = document.createElement("a");
     a.href = url;
-    a.download = `${label.toLowerCase().replace(/\s+/g, '_')}_skipped_rows.txt`;
+    a.download = `${label.toLowerCase().replace(/\s+/g, "_")}_skipped_rows.txt`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -270,15 +388,17 @@ function ImportResultBadge({ result, label }: { result: ImportResult; label: str
       {hasErrors && (
         <div className="space-y-1">
           <div className="flex items-center justify-between">
-            <p className="text-[10px] font-medium text-yellow-700">{result.errors.length} skipped row{result.errors.length !== 1 ? 's' : ''}:</p>
+            <p className="text-[10px] font-medium text-yellow-700">
+              {result.errors.length} skipped row{result.errors.length !== 1 ? "s" : ""}:
+            </p>
             <div className="flex gap-1.5">
               {result.errors.length > 5 && (
                 <button
                   type="button"
-                  onClick={() => setShowAll(v => !v)}
+                  onClick={() => setShowAll((v) => !v)}
                   className="text-[10px] text-blue-600 hover:underline"
                 >
-                  {showAll ? 'Show less' : `Show all ${result.errors.length}`}
+                  {showAll ? "Show less" : `Show all ${result.errors.length}`}
                 </button>
               )}
               <button
@@ -290,8 +410,10 @@ function ImportResultBadge({ result, label }: { result: ImportResult; label: str
               </button>
             </div>
           </div>
-          <ul className={`text-[10px] text-muted-foreground space-y-0.5 pl-2 ${showAll ? 'max-h-48 overflow-y-auto' : ''}`}>
-            {displayed?.map((e, i) => <li key={i} className="truncate">{e}</li>)}
+          <ul className={`text-[10px] text-muted-foreground space-y-0.5 pl-2 ${showAll ? "max-h-48 overflow-y-auto" : ""}`}>
+            {displayed?.map((e, i) => (
+              <li key={i} className="truncate">{e}</li>
+            ))}
             {!showAll && result.errors.length > 5 && (
               <li className="text-muted-foreground italic">…and {result.errors.length - 5} more</li>
             )}

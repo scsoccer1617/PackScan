@@ -1555,6 +1555,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ─── Card Database Routes ───────────────────────────────────────────────────
 
+  // ── Admin password middleware ───────────────────────────────────────────────
+  // Protects destructive card-database routes.  Reads ADMIN_PASSWORD from the
+  // environment; if the secret is not set the middleware is a no-op so local
+  // development still works without configuration.
+  function requireAdminPassword(req: Request, res: Response, next: NextFunction) {
+    const adminPassword = process.env.ADMIN_PASSWORD;
+    if (!adminPassword) return next(); // no password configured → open
+    const provided = req.headers['x-admin-password'];
+    if (!provided || provided !== adminPassword) {
+      return res.status(401).json({ error: 'Unauthorized: invalid admin password' });
+    }
+    return next();
+  }
+
+  // GET /api/card-database/check-auth — lightweight password validation used by the
+  // frontend gate so users get immediate feedback before attempting a real import.
+  app.get(`${apiPrefix}/card-database/check-auth`, requireAdminPassword, (_req, res) => {
+    return res.json({ ok: true });
+  });
+
   // GET /api/card-database/stats — how many cards/variations are loaded
   app.get(`${apiPrefix}/card-database/stats`, async (_req, res) => {
     try {
@@ -1573,6 +1593,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // POST /api/card-database/import-cards — upload cards CSV
   app.post(
     `${apiPrefix}/card-database/import-cards`,
+    requireAdminPassword,
     upload.single('file'),
     async (req: MulterRequest, res) => {
       try {
@@ -1601,6 +1622,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // POST /api/card-database/import-variations — upload variations CSV
   app.post(
     `${apiPrefix}/card-database/import-variations`,
+    requireAdminPassword,
     upload.single('file'),
     async (req: MulterRequest, res) => {
       try {
@@ -1627,7 +1649,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   );
 
   // DELETE /api/card-database/clear — wipe and re-import (admin utility)
-  app.delete(`${apiPrefix}/card-database/clear`, async (_req, res) => {
+  app.delete(`${apiPrefix}/card-database/clear`, requireAdminPassword, async (_req, res) => {
     try {
       await db.delete(cardVariations);
       await db.delete(cardDatabase);
