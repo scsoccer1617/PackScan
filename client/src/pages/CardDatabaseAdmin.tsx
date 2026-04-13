@@ -1,6 +1,5 @@
 import { useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -172,8 +171,10 @@ function AdminPanel({ password, onLock }: { password: string; onLock: () => void
       } else {
         toast({ title: "Import failed", description: result.error, variant: "destructive" });
       }
-    } catch {
-      toast({ title: "Import failed", variant: "destructive" });
+    } catch (err: any) {
+      if (err?.message !== "Unauthorized") {
+        toast({ title: "Import failed", variant: "destructive" });
+      }
     }
   };
 
@@ -190,8 +191,10 @@ function AdminPanel({ password, onLock }: { password: string; onLock: () => void
       } else {
         toast({ title: "Import failed", description: result.error, variant: "destructive" });
       }
-    } catch {
-      toast({ title: "Import failed", variant: "destructive" });
+    } catch (err: any) {
+      if (err?.message !== "Unauthorized") {
+        toast({ title: "Import failed", variant: "destructive" });
+      }
     }
   };
 
