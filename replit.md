@@ -1,7 +1,7 @@
-# ScanDeck - Sports Card Price Lookup
+# PackScan - Sports Card Price Lookup
 
 ## Overview
-ScanDeck (scandeck.io) is a web application for sports card price lookup, leveraging eBay data and automated card detection. Its core purpose is to assist users in identifying sports cards and determining their current market value through real-time price analysis. The system uses Google Cloud Vision API for optical character recognition (OCR) to automatically identify card details from uploaded images.
+PackScan (packscan.io) is a web application for sports card price lookup, leveraging eBay data and automated card detection. Its core purpose is to assist users in identifying sports cards and determining their current market value through real-time price analysis. The system uses Google Cloud Vision API for optical character recognition (OCR) to automatically identify card details from uploaded images.
 
 ## User Preferences
 Preferred communication style: Simple, everyday language.
