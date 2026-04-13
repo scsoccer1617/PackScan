@@ -43,6 +43,8 @@ function PasswordGate({ onUnlock }: { onUnlock: (password: string) => void }) {
       if (res.ok) {
         sessionStorage.setItem(SESSION_KEY, input);
         onUnlock(input);
+      } else if (res.status === 500) {
+        setError("Admin password is not configured on this server.");
       } else {
         setError("Incorrect password. Try again.");
       }

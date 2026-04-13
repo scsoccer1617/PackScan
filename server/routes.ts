@@ -1557,11 +1557,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ── Admin password middleware ───────────────────────────────────────────────
   // Protects destructive card-database routes.  Reads ADMIN_PASSWORD from the
-  // environment; if the secret is not set the middleware is a no-op so local
-  // development still works without configuration.
+  // environment; fails closed (500) when the secret is not configured so admin
+  // routes are never accidentally accessible in a misconfigured deployment.
   function requireAdminPassword(req: Request, res: Response, next: NextFunction) {
     const adminPassword = process.env.ADMIN_PASSWORD;
-    if (!adminPassword) return next(); // no password configured → open
+    if (!adminPassword) {
+      // Secret not configured — fail closed so admin routes are never accidentally open.
+      return res.status(500).json({ error: 'Admin password not configured on this server' });
+    }
     const provided = req.headers['x-admin-password'];
     if (!provided || provided !== adminPassword) {
       return res.status(401).json({ error: 'Unauthorized: invalid admin password' });
