@@ -200,7 +200,7 @@ export type CardVariation = typeof cardVariations.$inferSelect;
 
 export const importHistory = pgTable("import_history", {
   id: serial("id").primaryKey(),
-  type: text("type").notNull(),            // 'cards' | 'variations'
+  type: text("type", { enum: ["cards", "variations"] }).notNull(),
   countBefore: integer("count_before").notNull(),
   countAfter: integer("count_after").notNull(),
   delta: integer("delta").notNull(),
