@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { Camera, Search, TrendingUp, Layers } from "lucide-react";
+import { Camera, Search, User, Layers } from "lucide-react";
 
 interface DbStats {
   cards: number;
@@ -48,7 +48,7 @@ export default function Home() {
         <div className="bg-white rounded-xl shadow-md p-4 border border-gray-100">
           <div className="flex items-center gap-2 mb-2">
             <div className="p-1.5 bg-blue-50 rounded-lg">
-              <TrendingUp className="w-4 h-4 text-blue-600" />
+              <User className="w-4 h-4 text-blue-600" />
             </div>
             <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Cards</span>
           </div>
