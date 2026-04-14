@@ -168,8 +168,11 @@ export const cardDatabase = pgTable("card_database", {
   notes: text("notes"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => [
-  // OCR lookup: brand + year + card_number_raw. year is an integer so it anchors
-  // the index scan; the lower() expressions then apply only to the matching subset.
+  // OCR lookup: (year, brand, card_number_raw). year leads because it is an integer
+  // equality predicate and the most selective anchor — PostgreSQL uses it to jump to
+  // just the rows for that year (~10–20K), then applies the lower() filters on
+  // brand and card_number_raw only within that small slice. brand leads in the task
+  // spec wording but year-first is intentionally used here for this reason.
   index("card_db_year_brand_cardnum_idx").on(table.year, table.brand, table.cardNumberRaw),
   // Import delete step filters on brand_id + year — index makes batch deletes fast.
   index("card_db_brandid_year_idx").on(table.brandId, table.year),
