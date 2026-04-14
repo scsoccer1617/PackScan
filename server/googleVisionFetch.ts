@@ -6,6 +6,21 @@ import { ImageAnnotatorClient } from '@google-cloud/vision';
 // the ~100-200ms credential-parsing + gRPC channel setup overhead per call.
 let _visionClient: ImageAnnotatorClient | null = null;
 
+// ── Per-request OCR result cache ─────────────────────────────────────────────
+// batchExtractTextFromImages() populates this before the downstream analysers
+// run. extractTextFromImage() checks it first so that a batch call eliminates
+// all redundant Vision API round-trips within the same scan request.
+// Key = first 100 chars of base64 (unique fingerprint; full key wastes memory).
+const _ocrCache = new Map<string, { fullText: string; textAnnotations: any[] }>();
+
+function _cacheKey(base64: string): string {
+  return base64.substring(0, 100);
+}
+
+export function clearOcrCache(): void {
+  _ocrCache.clear();
+}
+
 function getVisionClient(): ImageAnnotatorClient {
   if (_visionClient) return _visionClient;
 
@@ -217,59 +232,118 @@ function isRCLogoPresent(textAnnotations: any[]): boolean {
 }
 
 /**
- * Extract text from image using Google Cloud Vision API via direct fetch
- * @param base64Image Base64 encoded image
- * @returns Extracted text
+ * Extract text from a single image using Google Cloud Vision API.
+ *
+ * Uses DOCUMENT_TEXT_DETECTION (designed for dense, structured text such as
+ * printed cards, documents, and receipts — far superior to TEXT_DETECTION for
+ * sports cards which have multiple fonts, sizes, and foil backgrounds).
+ *
+ * Checks the per-request OCR cache first; if batchExtractTextFromImages() was
+ * called upfront the Vision round-trip is skipped entirely for this image.
  */
 export async function extractTextFromImage(base64Image: string): Promise<{ fullText: string, textAnnotations: any[] }> {
   try {
+    // ── Cache check ──────────────────────────────────────────────────────────
+    const cacheKey = _cacheKey(base64Image);
+    const cached = _ocrCache.get(cacheKey);
+    if (cached) {
+      console.log('OCR cache hit — skipping Vision API call');
+      return cached;
+    }
+
     console.log('Attempting Google Cloud Vision API...');
-    
-    // Check for required service account credentials
-    const clientEmail = process.env.GOOGLE_CLIENT_EMAIL;
-    const privateKey = process.env.GOOGLE_PRIVATE_KEY;
-    
-    if (!clientEmail || !privateKey) {
-      throw new Error('Missing Google Cloud service account credentials');
-    }
-    
-    try {
-      const client = getVisionClient();
-    
-    // Prepare the image for analysis
+
+    const client = getVisionClient();
+
+    // DOCUMENT_TEXT_DETECTION produces a richer structured result than
+    // TEXT_DETECTION for printed/typeset text. It returns:
+    //   • fullTextAnnotation  — full page hierarchy with per-word confidence
+    //   • textAnnotations     — same flat list as TEXT_DETECTION (backwards
+    //                           compatible with all existing bounding-box code)
+    // languageHints: ['en'] reduces character-level misreads (e.g. "Lapps"
+    // instead of "Topps") by biasing the recogniser toward English.
     const request = {
-      image: {
-        content: base64Image,
-      },
-      features: [
-        {
-          type: 'TEXT_DETECTION' as const,
-          maxResults: 100,
-        },
-      ],
+      image: { content: base64Image },
+      features: [{ type: 'DOCUMENT_TEXT_DETECTION' as const }],
+      imageContext: { languageHints: ['en'] },
     };
-    
+
     console.log('Sending request to Vision API...');
-    
-    // Call the Vision API
     const [result] = await client.annotateImage(request);
-    
     console.log('Vision API Response received');
-    
+
     const fullText = result.fullTextAnnotation?.text || '';
-    const textAnnotations = result.textAnnotations || [];
-    
-    console.log(`Extracted ${textAnnotations.length} text annotations`);
-    
-      return { fullText, textAnnotations };
-    } catch (visionError: any) {
-      console.error('Google Vision API failed:', visionError.message);
-      throw visionError;
-    }
+    const rawAnnotations = result.textAnnotations || [];
+
+    // Filter out noise: drop single-character fragments that Vision occasionally
+    // returns as artefacts of foil/holographic backgrounds, while keeping all
+    // multi-character annotations unchanged.
+    const textAnnotations = rawAnnotations.filter((a: any) => {
+      const t = (a.description || '').trim();
+      // Always keep the first annotation (index 0) — it is the full-page text block
+      if (rawAnnotations.indexOf(a) === 0) return true;
+      // Drop pure noise: single chars, blank strings, pure punctuation runs
+      if (t.length === 0) return false;
+      if (t.length === 1 && /[^A-Za-z0-9]/.test(t)) return false;
+      return true;
+    });
+
+    console.log(`Extracted ${textAnnotations.length} text annotations (${rawAnnotations.length} raw)`);
+
+    const ocrResult = { fullText, textAnnotations };
+    _ocrCache.set(cacheKey, ocrResult);
+    return ocrResult;
   } catch (error: any) {
     console.error('Error in OCR processing:', error);
     throw new Error(`Failed to analyze image with Google Vision: ${error.message || 'Unknown error'}`);
   }
+}
+
+/**
+ * Batch-extract text from multiple images in a SINGLE Vision API call.
+ *
+ * Call this at the start of a scan request with all image buffers. Results are
+ * stored in the per-request OCR cache so that every subsequent call to
+ * extractTextFromImage() for the same image is a free cache hit.
+ *
+ * This reduces Vision API calls from 4 (2 per image × 2 images) down to 1
+ * for a typical front+back dual-image scan, saving 200-400 ms.
+ */
+export async function batchExtractTextFromImages(
+  images: { base64: string; label: string }[]
+): Promise<void> {
+  if (images.length === 0) return;
+
+  const client = getVisionClient();
+
+  const requests = images.map(({ base64 }) => ({
+    image: { content: base64 },
+    features: [{ type: 'DOCUMENT_TEXT_DETECTION' as const }],
+    imageContext: { languageHints: ['en'] },
+  }));
+
+  console.log(`Batch Vision API call: ${images.length} image(s) in one request...`);
+  const [batchResult] = await client.batchAnnotateImages({ requests });
+  console.log('Batch Vision API response received');
+
+  const responses = batchResult.responses || [];
+  responses.forEach((result: any, i: number) => {
+    const img = images[i];
+    if (!img) return;
+
+    const fullText = result.fullTextAnnotation?.text || '';
+    const rawAnnotations = result.textAnnotations || [];
+    const textAnnotations = rawAnnotations.filter((a: any, idx: number) => {
+      const t = (a.description || '').trim();
+      if (idx === 0) return true;
+      if (t.length === 0) return false;
+      if (t.length === 1 && /[^A-Za-z0-9]/.test(t)) return false;
+      return true;
+    });
+
+    console.log(`  [${img.label}] ${textAnnotations.length} annotations extracted`);
+    _ocrCache.set(_cacheKey(img.base64), { fullText, textAnnotations });
+  });
 }
 
 /**
@@ -711,229 +785,33 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       }
     }
     
-    if (fullText.includes('GERRIT') && fullText.includes('COLE')) {
-      // Special handling for Gerrit Cole cards
-      result.playerFirstName = 'Gerrit';
-      result.playerLastName = 'Cole';
-      result.sport = 'Baseball';
-      
-      // Gerrit Cole plays for the Yankees
-      console.log('Detected player: Gerrit Cole (Yankees)');
-      
-      // If this is a Heritage card, we'll detect the year from copyright notice
-      if (fullText.includes('HERITAGE') || lowerText.includes('heritage')) {
-        // Set Topps Heritage collection
-        result.collection = 'Heritage';
-        result.brand = 'Topps';
-        
-        // If we can find a copyright year in the text
-        const yearMatch = fullText.match(/©\s*(\d{4})\s*(?:THE\s*)?TOPPS/i) || 
-                          fullText.match(/\bTM\s+&\s+©\s+(\d{4})\s+THE\s+TOPPS/i);
-        if (yearMatch && yearMatch[1]) {
-          result.year = parseInt(yearMatch[1], 10);
-          console.log('Extracted year from copyright text for Gerrit Cole Heritage card:', result.year);
-        }
-      }
-    } else if (fullText.includes('ALEX') && fullText.includes('BREGMAN')) {
-      // Sometimes OCR identifies these separately
-      result.playerFirstName = 'Alex';
-      result.playerLastName = 'Bregman';
-      console.log('Detected player components: Alex + Bregman');
-    } else if (fullText.includes('SAL') && fullText.includes('FRELICK')) {
-      // Special handling for Sal Frelick card when detected separately
-      result.playerFirstName = 'Sal';
-      result.playerLastName = 'Frelick';
-      result.sport = 'Baseball';
-      result.brand = 'Topps';
-      
-      // For Sal Frelick's card, we know the exact card number from the baseball notation on the back
-      // It's "89B-9" in a baseball icon in the top left corner
-      // The "35" is just part of the 35th Anniversary logo
-      result.cardNumber = '89B-9';
-      
-      result.collection = '35th Anniversary';
-      result.year = 2024;
-      result.variant = 'Rookie';
-      result.condition = 'PSA 8';
-      console.log('Detected player components: Sal + Frelick with special card handling');
-    } else {
-      // Look for player name in text annotations - potentially more accurate
-      const firstNameAnnotation = textAnnotations.find(a => 
-        a.description === 'ALEX' || a.description === 'SAL' || a.description === 'SEAN' || 
-        a.description === 'GERRIT' || a.description === 'FREDDIE' || a.description === 'CARLOS');
-      
-      const lastNameAnnotation = textAnnotations.find(a => 
-        a.description === 'BREGMAN' || a.description === 'FRELICK' || a.description === 'MANAEA' || 
-        a.description === 'COLE' || a.description === 'FREEMAN' || a.description === 'CORREA');
-      
+    // Dynamic name extraction: the player name lines and generic regex patterns above
+    // already handle all card types. No player-specific overrides needed here.
+    {
+      // Look for adjacent all-caps word pairs in text annotations that could be first+last name.
+      // This handles cases where Vision returns first and last name as separate annotation blocks
+      // (common with larger fonts that Vision splits at word boundaries).
+      const firstNameAnnotation = textAnnotations.find((a: any) => {
+        const t = (a.description || '').trim().toUpperCase();
+        return /^[A-Z]{2,}$/.test(t) &&
+               !nonPlayerNamePatterns.some(p => t === p || t.includes(p));
+      });
+      const lastNameAnnotation = firstNameAnnotation
+        ? textAnnotations.find((a: any, idx: number) => {
+            if (a === firstNameAnnotation) return false;
+            const t = (a.description || '').trim().toUpperCase();
+            return /^[A-Z]{2,}$/.test(t) &&
+                   !nonPlayerNamePatterns.some(p => t === p || t.includes(p));
+          })
+        : null;
+
       if (firstNameAnnotation && lastNameAnnotation) {
-        result.playerFirstName = firstNameAnnotation.description.charAt(0) + 
+        result.playerFirstName = firstNameAnnotation.description.charAt(0) +
                                firstNameAnnotation.description.slice(1).toLowerCase();
-        result.playerLastName = lastNameAnnotation.description.charAt(0) + 
-                              lastNameAnnotation.description.slice(1).toLowerCase();
-                              
-        // Special handling for specific players found in text annotations
-        if (firstNameAnnotation.description === 'SEAN' && lastNameAnnotation.description === 'MANAEA') {
-          result.sport = 'Baseball';
-          result.year = 2025;
-          console.log('Detected Sean Manaea from separate name components (2025 card)');
-        } else if (firstNameAnnotation.description === 'GERRIT' && lastNameAnnotation.description === 'COLE') {
-          result.sport = 'Baseball';
-          
-          // If this is a Heritage card
-          if (fullText.includes('HERITAGE') || lowerText.includes('heritage')) {
-            result.collection = 'Heritage';
-            result.brand = 'Topps';
-            
-            // Try to extract year from copyright text
-            const yearMatch = fullText.match(/©\s*(\d{4})\s*(?:THE\s*)?TOPPS/i) || 
-                              fullText.match(/\bTM\s+&\s+©\s+(\d{4})\s+THE\s+TOPPS/i);
-            if (yearMatch && yearMatch[1]) {
-              result.year = parseInt(yearMatch[1], 10);
-            }
-            
-            // Set the card number if found at top left
-            const cardNumberAnnotation = textAnnotations.find(a => 
-              /^\d{1,3}$/.test(a.description) && 
-              a.boundingPoly?.vertices && 
-              a.boundingPoly.vertices.every((v: any) => v.y < 200)
-            );
-            
-            if (cardNumberAnnotation) {
-              result.cardNumber = cardNumberAnnotation.description;
-              console.log('Found Gerrit Cole Heritage card number:', result.cardNumber);
-            }
-            
-            console.log('Detected Gerrit Cole Topps Heritage card');
-          }
-        } else if (fullText.includes('CARLOS') && fullText.includes('CORREA')) {
-          // Generic pattern recognition for player
-          result.sport = 'Baseball';
-          result.brand = 'Topps';
-          result.playerFirstName = 'Carlos';
-          result.playerLastName = 'Correa';
-          console.log('DETECTED: Carlos Correa');
-        } else if ((firstNameAnnotation?.description && lastNameAnnotation?.description) &&
-                 !(nonPlayerNamePatterns.some(p => 
-                   firstNameAnnotation.description.includes(p) || 
-                   lastNameAnnotation.description.includes(p)))) {
-          // Generic player detection from annotation components
-          result.sport = 'Baseball';
-          result.brand = 'Topps';
-          result.playerFirstName = firstNameAnnotation.description.charAt(0) + 
-                                  firstNameAnnotation.description.slice(1).toLowerCase();
-          result.playerLastName = lastNameAnnotation.description.charAt(0) + 
-                                 lastNameAnnotation.description.slice(1).toLowerCase();
-          console.log(`DETECTED: Generic player ${result.playerFirstName} ${result.playerLastName} from annotation components`);
-          
-          // Advanced detection for Chrome Stars of MLB vs regular Stars of MLB
-          const chromeIndicators = [
-            fullText.includes('CHROME'),
-            fullText.toLowerCase().includes('chrome'),
-            fullText.includes('CSMLB'),
-            fullText.includes('REFRACTOR'),
-            // Check for any special formatting or shiny text effects
-            fullText.includes('DIE-CUT'),
-            fullText.includes('FOIL'),
-            textAnnotations.some(a => a.description === 'CHROME' || a.description === 'CSMLB')
-          ];
-          
-          if (chromeIndicators.some(indicator => indicator === true)) {
-            result.collection = 'Chrome Stars of MLB';
-            console.log('DETECTED: Chrome Stars of MLB card based on multiple indicators');
-            
-            // Look for CSMLB card number pattern with various formats
-            const csmlbMatch = fullText.match(/C?S(?:MLB)?[-]?(\d+)/i);
-            const numberMatch = fullText.match(/C?SMLB[-]?(\d+)/i) || 
-                              fullText.match(/CSMLB[-.\s]?(\d+)/i) ||
-                              // Match standalone numbers in card corners
-                              textAnnotations.find(a => 
-                                /^4?4$/.test(a.description) && 
-                                a.boundingPoly?.vertices && 
-                                // Top part of the card
-                                (a.boundingPoly.vertices[0].y < 500)
-                              );
-            
-            // Find the card number
-            if (csmlbMatch && csmlbMatch[1]) {
-              result.cardNumber = `CSMLB-${csmlbMatch[1]}`;
-              console.log(`Detected Chrome Stars of MLB card number: ${result.cardNumber}`);
-            } else if (numberMatch && typeof numberMatch === 'object' && numberMatch.description) {
-              // Extract just the number
-              const num = numberMatch.description.match(/\d+/);
-              if (num && num[0]) {
-                result.cardNumber = `CSMLB-${num[0]}`;
-                console.log(`Detected Chrome Stars of MLB card number from standalone number: ${result.cardNumber}`);
-              }
-            } else {
-              // Look for any number in the top part of the card that might be the card number
-              const cardNumberAnnotation = textAnnotations.find(a => 
-                /^\d+$/.test(a.description) && 
-                a.boundingPoly?.vertices && 
-                a.boundingPoly.vertices.every((v: any) => v.y < 1000)
-              );
-              
-              if (cardNumberAnnotation) {
-                result.cardNumber = `CSMLB-${cardNumberAnnotation.description}`;
-                console.log(`Inferred Chrome Stars of MLB card number from annotation: ${result.cardNumber}`);
-              }
-            }
-          } else {
-            result.collection = 'Stars of MLB';
-            console.log('DETECTED: Regular Stars of MLB card');
-            
-            // Look for SMLB card number pattern
-            const smlbMatch = fullText.match(/SMLB[-]?(\d+)/i);
-            if (smlbMatch && smlbMatch[1]) {
-              result.cardNumber = `SMLB-${smlbMatch[1]}`;
-              console.log(`Found Stars of MLB card number: ${result.cardNumber}`);
-            } else {
-              // Try to find any standalone number that might be the card number
-              const cardNumberAnnotation = textAnnotations.find(a => 
-                /^\d+$/.test(a.description) && 
-                a.boundingPoly?.vertices && 
-                a.description.length <= 3
-              );
-              
-              if (cardNumberAnnotation) {
-                result.cardNumber = `SMLB-${cardNumberAnnotation.description}`;
-                console.log(`Inferred Stars of MLB card number: ${result.cardNumber}`);
-              }
-            }
-          }
-          
-          // Extract year from copyright text
-          const yearMatch = fullText.match(/©\s*(\d{4})/);
-          if (yearMatch) {
-            result.year = parseInt(yearMatch[1]);
-          } else {
-            // Check for year in text
-            const yearTextMatch = fullText.match(/20\d\d/);
-            if (yearTextMatch) {
-              result.year = parseInt(yearTextMatch[0]);
-            }
-          }
-          
-          console.log('Detected player card from text and annotations');
-        } else if (firstNameAnnotation.description === 'SAL' && lastNameAnnotation.description === 'FRELICK') {
-          // Special handling for Sal Frelick detected through annotation texts
-          result.sport = 'Baseball';
-          result.brand = 'Topps';
-          
-          // For Sal Frelick's card, we know the exact card number from the baseball notation on the back
-          // It's "89B-9" in a baseball icon in the top left corner
-          // The "35" is just part of the 35th Anniversary logo
-          result.cardNumber = '89B-9';
-          
-          result.collection = '35th Anniversary';
-          result.year = 2024;
-          result.variant = 'Rookie';
-          result.condition = 'PSA 8';
-          console.log('Detected Sal Frelick from separate annotations with special card handling');
-        } else {
-          console.log('Detected player from separate name components:', 
-                     result.playerFirstName, result.playerLastName);
-        }
+        result.playerLastName  = lastNameAnnotation.description.charAt(0) +
+                               lastNameAnnotation.description.slice(1).toLowerCase();
+        console.log('Detected player from separate annotation blocks:',
+                    result.playerFirstName, result.playerLastName);
       } else {
         // Generic name extraction for other cards
         const nameRegex = /([A-Z][a-z]+)(?:\s+([A-Z][a-z]+))/g;
@@ -942,25 +820,16 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
         while ((match = nameRegex.exec(fullText)) !== null) {
           nameMatches.push(match);
         }
-        
         if (nameMatches.length > 0) {
-          // Get the first name match - assuming it's likely the player name
           const nameParts = nameMatches[0][0].split(' ');
           if (nameParts.length >= 2) {
             result.playerFirstName = nameParts[0];
             result.playerLastName = nameParts.slice(1).join(' ');
-            console.log('Detected player using generic pattern:', 
-                       result.playerFirstName, result.playerLastName);
+            console.log('Detected player using generic pattern:', result.playerFirstName, result.playerLastName);
           }
         }
       }
-    }
-    
-    // Special handling for certain players with known cards
-    // For Sal Frelick's Topps 35th Anniversary card
-    if (result.playerFirstName === 'Sal' && result.playerLastName === 'Frelick') {
-      result.brand = 'Topps';
-      console.log('Set brand to Topps based on known Sal Frelick card');
+
     }
     
     // Find brand specifically looking for 'Topps' text at the top right corner (where brand logos often appear)
@@ -1585,50 +1454,6 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       console.log('Text analysis suggests this is a rookie card based on career description');
     }
       
-    // 5. Known 2024 Topps Stars of MLB rookie players list
-    // These players are definitively rookie cards in the 2024 Stars of MLB set
-    const knownRookiePlayers = [
-      'Ceddanne Rafaela',
-      'Jordan Walker',
-      'Elly De La Cruz',
-      'Sal Frelick',
-      'Masyn Winn',
-      'Garrett Crochet',
-      'Matt Wallner',
-      'Jackson Holliday',
-      'Wyatt Langford',
-      'Paul Skenes',
-      'Jackson Merrill',
-      'Jackson Chourio',
-      'Kyle Harrison',
-      'Tyler Black',
-      'Joey Ortiz',
-      'Nolan Schanuel',
-      'Junior Caminero'
-    ];
-    
-    // Build a player name for comparison
-    const playerFullName = result.playerFirstName && result.playerLastName
-      ? `${result.playerFirstName} ${result.playerLastName}`
-      : '';
-    
-    console.log(`Player name for rookie check: "${playerFullName}"`);
-    
-    // Log all known rookie players for debugging
-    console.log(`Checking against known rookie players: ${knownRookiePlayers.join(', ')}`);
-
-    // More dynamic rookie detection is accomplished through pattern matching and ML context analysis
-    
-    // Check if this is a known rookie in the 2024 Stars of MLB set
-    const isKnownRookieInStarsOfMLB = 
-      playerFullName && 
-      knownRookiePlayers.some(name => 
-        playerFullName.toLowerCase() === name.toLowerCase() ||
-        playerFullName.toLowerCase().includes(name.toLowerCase()) ||
-        name.toLowerCase().includes(playerFullName.toLowerCase())) &&
-      (result.collection || '').toLowerCase().includes('stars of mlb') &&
-      (result.year === 2024 || result.year === 2023);
-      
     // Look for rookie indicators in the card text that suggest a player is new
     // Many cards describe rookie achievements or mention MLB debuts
     const rookieTextIndicators = [
@@ -1648,13 +1473,8 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       result.isRookieCard = true;
     }
     
-    if (isKnownRookieInStarsOfMLB) {
-      console.log(`Known rookie player detected in Stars of MLB: ${playerFullName}`);
-    }
-    
-    // Check all detection methods
-    if (hasRCLogo || hasRCText || isRecentRookie || isStarsOfMLBWithRC || isKnownRookieInStarsOfMLB || hasRookieDescriptionText || hasRookieIndicatorText) {
-      // Mark this as a rookie card
+    // Check all detection methods (purely dynamic — no hardcoded player lists)
+    if (hasRCLogo || hasRCText || isRecentRookie || isStarsOfMLBWithRC || hasRookieDescriptionText || hasRookieIndicatorText) {
       result.isRookieCard = true;
       
       if (hasRCLogo) {
@@ -1665,8 +1485,6 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
         console.log('Detected potential rookie card based on year and collection');
       } else if (isStarsOfMLBWithRC) {
         console.log('Detected rookie card: Stars of MLB card with RC logo');
-      } else if (isKnownRookieInStarsOfMLB) {
-        console.log('Detected rookie card: Known rookie player in Stars of MLB set');
       } else if (hasRookieDescriptionText) {
         console.log('Detected rookie card from card description text analysis');
       } else if (hasRookieIndicatorText) {
@@ -1778,77 +1596,50 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       }
     }
     
-    // Look for card numbers in top left (common in Topps base cards and series)
-    // The algorithm needs to be more flexible about positions since card orientations can vary
-    
-    // IMPORTANT: Skip this section entirely for Sal Frelick cards since we know the exact card number
-    if (!(result.playerFirstName === 'Sal' && result.playerLastName === 'Frelick')) {
-      // First look for numbers in standard top left position
+    // Look for numbers in top left (common card number position on base cards like Topps Series)
+    // Only applied when a specific card number has not already been found via pattern matching above.
+    if (!result.cardNumber) {
       let topLeftNumbers = textAnnotations.filter(annotation => {
         const text = annotation.description;
-        // For Series Two cards, we're looking for numbers like "380"
         if (!/^\d{1,3}$/.test(text)) return false;
-        
         const boundingPoly = annotation.boundingPoly;
         if (!boundingPoly || !boundingPoly.vertices) return false;
-        
-        // Standard top left position
         return boundingPoly.vertices.every((v: any) => v.x < 200 && v.y < 200);
       });
-      
-      // If no results, try a broader search for card numbers
+
       if (topLeftNumbers.length === 0) {
-        // Try top quarter of the image with more lenient x-position
         topLeftNumbers = textAnnotations.filter(annotation => {
           const text = annotation.description;
-          // For Series Two cards, we're looking for numbers like "380"
           if (!/^\d{1,3}$/.test(text)) return false;
-          
           const boundingPoly = annotation.boundingPoly;
           if (!boundingPoly || !boundingPoly.vertices) return false;
-          
-          // Any position in the top quarter
           return boundingPoly.vertices.every((v: any) => v.y < 300);
         });
       }
-      
-      // If still no results, try an even broader search looking for numbers in more locations
+
       if (topLeftNumbers.length === 0) {
-        // Look for any standalone number that could be a card number
-        topLeftNumbers = textAnnotations.filter(annotation => {
-          const text = annotation.description;
-          return /^\d{1,3}$/.test(text);
-        });
-      }
-      
-      // For Series cards, sometimes the number is part of a text like "CARD 380"
-      if (topLeftNumbers.length === 0) {
-        // Look for text that contains a card number pattern
-        const cardNumberPattern = /CARD\s*#?\s*(\d{1,3})|#\s*(\d{1,3})/i;
-        const cardNumberText = textAnnotations.find(annotation => 
-          cardNumberPattern.test(annotation.description)
+        topLeftNumbers = textAnnotations.filter(annotation =>
+          /^\d{1,3}$/.test(annotation.description)
         );
-        
+      }
+
+      if (topLeftNumbers.length === 0) {
+        const cardNumberPattern = /CARD\s*#?\s*(\d{1,3})|#\s*(\d{1,3})/i;
+        const cardNumberText = textAnnotations.find(a => cardNumberPattern.test(a.description));
         if (cardNumberText) {
           const matches = cardNumberText.description.match(cardNumberPattern);
-          if (matches) {
-            // The number could be in group 1 or 2 depending on which pattern matched
-            const cardNumber = matches[1] || matches[2];
-            if (cardNumber) {
-              result.cardNumber = cardNumber;
-              console.log('Identified card number from text pattern:', result.cardNumber);
-            }
+          const cardNumber = matches?.[1] || matches?.[2];
+          if (cardNumber) {
+            result.cardNumber = cardNumber;
+            console.log('Identified card number from text pattern:', result.cardNumber);
           }
         }
       }
-      
+
       if (topLeftNumbers.length > 0) {
-        // Use the first detected number in the top left as the card number
         result.cardNumber = topLeftNumbers[0].description;
         console.log('Identified card number from top left position:', result.cardNumber);
       }
-    } else {
-      console.log('Skipping general top-left number detection for Sal Frelick card - keeping 89B-9');
     }
     
     // This secondary serial number check is now redundant with our improved detection above
@@ -1951,21 +1742,12 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       // (the 1989 is part of the 35th Anniversary "1989-2024" logo)
       result.year = 2024;
       
-      // Handle specific player card numbers for Topps 35th Anniversary cards
-      // This is a fallback in case the OCR failed to detect the card number correctly
-      if (fullText.includes('ALEX') && fullText.includes('BREGMAN')) {
-        // If this is Alex Bregman's card but we detected "1989" as the card number
-        // (which is part of the 35th Anniversary "1989-2024" logo), correct it
-        if (result.cardNumber === '1989' || result.cardNumber === '192') {
-          result.cardNumber = '89B-32';
-          console.log('Recognized Alex Bregman card, corrected card number to:', result.cardNumber);
-        }
-      } else if (fullText.includes('SAL') && fullText.includes('FRELICK')) {
-        // If this is Sal Frelick's card but the OCR missed the card number
-        if (!result.cardNumber || result.cardNumber === '1989') {
-          result.cardNumber = '89B-9';
-          console.log('Recognized Sal Frelick card, corrected card number to:', result.cardNumber);
-        }
+      // The "1989" in the 35th Anniversary logo is commonly misread as the card number.
+      // Clear it so the card number pattern matchers (which look for "89B-9" format) can
+      // find the real card number, and the DB lookup can match correctly.
+      if (result.cardNumber === '1989' || result.cardNumber === '192') {
+        console.log(`Clearing misread card number "${result.cardNumber}" — likely the "1989" from 35th Anniversary logo`);
+        result.cardNumber = '';
       }
     }
     

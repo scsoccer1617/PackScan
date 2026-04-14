@@ -4,6 +4,7 @@ import { analyzeSportsCardImage } from './dynamicCardAnalyzer';
 import { analyzeScoreCard } from './scoreCardAnalyzer';
 import { detectFoilVariant } from './foilVariantDetector';
 import { lookupCard } from './cardDatabaseService';
+import { batchExtractTextFromImages, clearOcrCache } from './googleVisionFetch';
 import { db } from '@db';
 import { cardVariations } from '@shared/schema';
 import { and, eq, sql } from 'drizzle-orm';
@@ -156,6 +157,24 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
       frontImage ? `Front: ${frontImage.originalname} (${frontImage.size} bytes)` : 'No front image',
       backImage ? `Back: ${backImage.originalname} (${backImage.size} bytes)` : 'No back image'
     );
+
+    // ── Batch Vision API call ─────────────────────────────────────────────────
+    // Send both images to Vision in a SINGLE batchAnnotateImages request.
+    // Results are stored in the per-request OCR cache so that all subsequent
+    // calls to extractTextFromImage() within this scan are free cache hits.
+    // This reduces Vision API round-trips from 4 (2 per image) down to 1.
+    clearOcrCache();
+    try {
+      const batchImages: { base64: string; label: string }[] = [];
+      if (frontImage) batchImages.push({ base64: frontImage.buffer.toString('base64'), label: 'front' });
+      if (backImage)  batchImages.push({ base64: backImage.buffer.toString('base64'),  label: 'back'  });
+      if (batchImages.length > 0) {
+        await batchExtractTextFromImages(batchImages);
+      }
+    } catch (batchErr: any) {
+      // Non-fatal: downstream calls will fall back to individual Vision requests
+      console.warn('Batch Vision call failed, will fall back to individual calls:', batchErr.message);
+    }
 
     // Create a timeout promise that rejects after 30 seconds
     const createTimeout = () => new Promise<never>((_, reject) => {
