@@ -1599,11 +1599,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .orderBy(desc(importHistory.importedAt))
         .limit(1);
 
+      // lastImportedAt = most recent import event across both types
+      const timestamps = [
+        lastCardsImport?.importedAt,
+        lastVariationsImport?.importedAt,
+      ].filter(Boolean) as Date[];
+      const lastImportedAt = timestamps.length
+        ? timestamps.reduce((a, b) => (a > b ? a : b))
+        : null;
+
       return res.json({
         cards: cardCount?.count ?? 0,
         variations: varCount?.count ?? 0,
         cardsDelta: lastCardsImport?.delta ?? null,
         variationsDelta: lastVariationsImport?.delta ?? null,
+        lastImportedAt,
         lastCardsImportedAt: lastCardsImport?.importedAt ?? null,
         lastVariationsImportedAt: lastVariationsImport?.importedAt ?? null,
       });
@@ -1630,8 +1640,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           console.log(`[CardDB] Import skipped ${result.errors.length} row(s):`);
           result.errors.forEach(e => console.log(`  • ${e}`));
         }
-        // Record import event
-        const countAfter = result.imported;
+        // Record import event using true post-import table total
+        const [afterCount] = await db.select({ count: sql<number>`count(*)::int` }).from(cardDatabase);
+        const countAfter = afterCount?.count ?? 0;
         await db.insert(importHistory).values({
           type: 'cards',
           countBefore,
@@ -1669,8 +1680,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           console.log(`[CardDB] Variations import skipped ${result.errors.length} row(s):`);
           result.errors.forEach(e => console.log(`  • ${e}`));
         }
-        // Record import event
-        const countAfter = result.imported;
+        // Record import event using true post-import table total
+        const [afterCount] = await db.select({ count: sql<number>`count(*)::int` }).from(cardVariations);
+        const countAfter = afterCount?.count ?? 0;
         await db.insert(importHistory).values({
           type: 'variations',
           countBefore,

@@ -1,13 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { Camera, Search, TrendingUp, Layers } from "lucide-react";
-import { Button } from "@/components/ui/button";
 
 interface DbStats {
   cards: number;
   variations: number;
   cardsDelta: number | null;
   variationsDelta: number | null;
+  lastImportedAt: string | null;
   lastCardsImportedAt: string | null;
   lastVariationsImportedAt: string | null;
 }
