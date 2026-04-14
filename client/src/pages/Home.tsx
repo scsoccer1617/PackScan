@@ -16,11 +16,14 @@ function formatNumber(n: number) {
   return n.toLocaleString();
 }
 
-function formatDelta(delta: number | null) {
-  if (delta === null) return null;
-  if (delta > 0) return `+${formatNumber(delta)} added last update`;
-  if (delta === 0) return "No change last update";
-  return `${formatNumber(Math.abs(delta))} removed last update`;
+function formatSubtitle(delta: number | null, importedAt: string | null) {
+  if (delta === null || importedAt === null) return null;
+  const date = new Date(importedAt);
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  const yyyy = date.getFullYear();
+  const count = delta >= 0 ? `+${formatNumber(delta)}` : formatNumber(delta);
+  return `${count} since ${mm}/${dd}/${yyyy}`;
 }
 
 export default function Home() {
@@ -56,9 +59,9 @@ export default function Home() {
               <p className="text-2xl font-bold text-gray-900">
                 {formatNumber(stats?.cards ?? 0)}
               </p>
-              {formatDelta(stats?.cardsDelta ?? null) && (
+              {formatSubtitle(stats?.cardsDelta ?? null, stats?.lastCardsImportedAt ?? null) && (
                 <p className="text-xs text-green-600 mt-0.5">
-                  {formatDelta(stats?.cardsDelta ?? null)}
+                  {formatSubtitle(stats?.cardsDelta ?? null, stats?.lastCardsImportedAt ?? null)}
                 </p>
               )}
             </>
@@ -79,9 +82,9 @@ export default function Home() {
               <p className="text-2xl font-bold text-gray-900">
                 {formatNumber(stats?.variations ?? 0)}
               </p>
-              {formatDelta(stats?.variationsDelta ?? null) && (
+              {formatSubtitle(stats?.variationsDelta ?? null, stats?.lastVariationsImportedAt ?? null) && (
                 <p className="text-xs text-green-600 mt-0.5">
-                  {formatDelta(stats?.variationsDelta ?? null)}
+                  {formatSubtitle(stats?.variationsDelta ?? null, stats?.lastVariationsImportedAt ?? null)}
                 </p>
               )}
             </>
