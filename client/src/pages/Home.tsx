@@ -95,35 +95,33 @@ export default function Home() {
           Choose a lookup method
         </p>
 
-        <button
-          onClick={() => navigate("/scan")}
-          className="w-full mb-3 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-2xl p-5 flex items-center gap-4 shadow-sm transition-colors text-left"
-        >
-          <div className="p-3 bg-white/20 rounded-xl flex-shrink-0">
-            <Camera className="w-7 h-7" />
-          </div>
-          <div>
-            <p className="font-semibold text-lg leading-tight">Scan Cards</p>
-            <p className="text-blue-100 text-sm mt-0.5">
-              Upload a photo — we'll identify the card automatically
-            </p>
-          </div>
-        </button>
+        <div className="grid grid-cols-2 gap-3">
+          <button
+            onClick={() => navigate("/scan")}
+            className="bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-2xl p-5 flex flex-col items-center gap-3 shadow-sm transition-colors text-center"
+          >
+            <div className="p-3 bg-white/20 rounded-xl">
+              <Camera className="w-7 h-7" />
+            </div>
+            <div>
+              <p className="font-semibold text-base leading-tight">Scan Cards</p>
+              <p className="text-blue-100 text-xs mt-1">Upload a photo to identify</p>
+            </div>
+          </button>
 
-        <button
-          onClick={() => navigate("/search")}
-          className="w-full bg-white hover:bg-gray-50 active:bg-gray-100 border border-gray-200 text-gray-800 rounded-2xl p-5 flex items-center gap-4 shadow-sm transition-colors text-left"
-        >
-          <div className="p-3 bg-blue-50 rounded-xl flex-shrink-0">
-            <Search className="w-7 h-7 text-blue-600" />
-          </div>
-          <div>
-            <p className="font-semibold text-lg leading-tight text-gray-900">Manual Lookup</p>
-            <p className="text-gray-500 text-sm mt-0.5">
-              Type in player, year, brand and card number
-            </p>
-          </div>
-        </button>
+          <button
+            onClick={() => navigate("/search")}
+            className="bg-white hover:bg-gray-50 active:bg-gray-100 border border-gray-200 text-gray-800 rounded-2xl p-5 flex flex-col items-center gap-3 shadow-sm transition-colors text-center"
+          >
+            <div className="p-3 bg-blue-50 rounded-xl">
+              <Search className="w-7 h-7 text-blue-600" />
+            </div>
+            <div>
+              <p className="font-semibold text-base leading-tight text-gray-900">Manual Lookup</p>
+              <p className="text-gray-500 text-xs mt-1">Type in card details</p>
+            </div>
+          </button>
+        </div>
       </div>
     </div>
   );
