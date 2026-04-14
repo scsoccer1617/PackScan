@@ -213,8 +213,8 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
               cardDetails.collection = "Stars of MLB";
               cardDetails.brand = 'Topps';
               
-              // Extract card number - keep the full SMLB-XX format
-              const smlbMatch = lines[i].match(/SMLB-\d+/);
+              // Extract card number - keep the full SMLB-XX or CSMLB-XX format
+              const smlbMatch = lines[i].match(/C?SMLB-\d+/);
               if (smlbMatch) {
                 cardDetails.cardNumber = smlbMatch[0];
               }
@@ -225,11 +225,12 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
         }
       }
       
-      // If still can't find, try explicit pattern match across the entire text
-      const volpeMatch = text.match(/SMLB-(\d+)\s+([A-Z]+)\s+([A-Z]+)/i);
-      if (volpeMatch && volpeMatch[2] && volpeMatch[3]) {
-        const firstName = volpeMatch[2];
-        const lastName = volpeMatch[3];
+      // If still can't find, try explicit pattern match across the entire text.
+      // Capture the optional 'C' prefix so CSMLB-2 → "CSMLB-2", SMLB-76 → "SMLB-76".
+      const volpeMatch = text.match(/(C?)SMLB-(\d+)\s+([A-Z]+)\s+([A-Z]+)/i);
+      if (volpeMatch && volpeMatch[3] && volpeMatch[4]) {
+        const firstName = volpeMatch[3];
+        const lastName = volpeMatch[4];
         
         // Make sure these aren't generic words
         if (!/STARS|OF|MLB|NEW|YORK/.test(firstName + lastName)) {
@@ -243,7 +244,10 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
           // Set collection info
           cardDetails.collection = "Stars of MLB";
           cardDetails.brand = 'Topps';
-          cardDetails.cardNumber = volpeMatch[1];
+          // Build the full card number including any 'C' prefix (e.g. CSMLB-2 or SMLB-76)
+          const prefix = volpeMatch[1].toUpperCase();
+          cardDetails.cardNumber = prefix ? `${prefix}SMLB-${volpeMatch[2]}` : `SMLB-${volpeMatch[2]}`;
+          console.log(`Card number set to: ${cardDetails.cardNumber}`);
           return;
         }
       }

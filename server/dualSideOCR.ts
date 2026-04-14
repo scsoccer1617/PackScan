@@ -683,6 +683,23 @@ async function combineCardResults(
     }
     
     if (visualFoilResult?.isFoil && visualFoilResult.foilType) {
+      // Crackle texture detection is the most unreliable pattern — Chrome card surfaces and
+      // jersey colors produce scattered-color signatures that the detector mistakes for Crackle.
+      // Require 0.80 confidence for any Crackle-type foilType, regardless of DB validation.
+      const isCrackleType = /crackle/i.test(visualFoilResult.foilType);
+      // Also guard Chrome-variant cards: if the card is already identified as Chrome and the
+      // visual detector says something other than Chrome itself, require very high confidence.
+      const isChromVariantCard = (combined.variant || '').toLowerCase() === 'chrome';
+      const CRACKLE_CONFIDENCE_THRESHOLD = 0.80;
+      if (isCrackleType && visualFoilResult.confidence < CRACKLE_CONFIDENCE_THRESHOLD) {
+        combined.foilType = null;
+        combined.isFoil = false;
+        console.log(`[FoilDB] Crackle foil "${visualFoilResult.foilType}" rejected — confidence ${visualFoilResult.confidence.toFixed(2)} < ${CRACKLE_CONFIDENCE_THRESHOLD} (crackle threshold)`);
+      } else if (isChromVariantCard && !/chrome/i.test(visualFoilResult.foilType) && visualFoilResult.confidence < CRACKLE_CONFIDENCE_THRESHOLD) {
+        combined.foilType = null;
+        combined.isFoil = false;
+        console.log(`[FoilDB] Chrome-variant card: non-Chrome foil "${visualFoilResult.foilType}" rejected — confidence ${visualFoilResult.confidence.toFixed(2)} < ${CRACKLE_CONFIDENCE_THRESHOLD}`);
+      } else {
       // Cross-check the detected foil color against known variations for this set.
       // If the set HAS variations in the DB but none reference the detected color,
       // it's almost certainly a false positive (e.g. blue jersey detected as Blue Foil).
@@ -729,6 +746,7 @@ async function combineCardResults(
         combined.isFoil = true;
         console.log(`Visual foil detection successful: ${visualFoilResult.foilType} (confidence: ${visualFoilResult.confidence})`);
       }
+      } // end of crackle/chrome guard else block
       console.log(`Visual indicators: ${visualFoilResult.indicators.join('; ')}`);
     } else if (visualFoilResult && !visualFoilResult.indicators.some(indicator => indicator.includes('Error in visual analysis'))) {
       // Visual detection ran but did not find foil — trust it and clear any foil state.

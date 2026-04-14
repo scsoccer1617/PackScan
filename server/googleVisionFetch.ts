@@ -10,11 +10,13 @@ let _visionClient: ImageAnnotatorClient | null = null;
 // batchExtractTextFromImages() populates this before the downstream analysers
 // run. extractTextFromImage() checks it first so that a batch call eliminates
 // all redundant Vision API round-trips within the same scan request.
-// Key = first 100 chars of base64 (unique fingerprint; full key wastes memory).
+// Key = first 100 chars of base64 + total length. Using only the first 100 chars is
+// insufficient because all JPEG files from the same camera share identical header bytes;
+// adding the length makes front vs. back images always distinct cache entries.
 const _ocrCache = new Map<string, { fullText: string; textAnnotations: any[] }>();
 
 function _cacheKey(base64: string): string {
-  return base64.substring(0, 100);
+  return base64.substring(0, 100) + '_' + base64.length;
 }
 
 export function clearOcrCache(): void {
