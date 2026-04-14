@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -331,9 +331,33 @@ function AdminPanel({ password, onLock }: { password: string; onLock: () => void
 // ── Root export: gate wrapper ────────────────────────────────────────────────
 
 export default function CardDatabaseAdmin() {
-  const [password, setPassword] = useState<string | null>(
-    () => sessionStorage.getItem(SESSION_KEY)
-  );
+  const [password, setPassword] = useState<string | null>(null);
+  const [verifying, setVerifying] = useState(true);
+
+  // On every mount, re-verify any stored session password against the server.
+  // This ensures the gate re-appears if the password changed or the session
+  // was tampered with, rather than blindly trusting sessionStorage.
+  useEffect(() => {
+    const stored = sessionStorage.getItem(SESSION_KEY);
+    if (!stored) {
+      setVerifying(false);
+      return;
+    }
+    fetch("/api/card-database/check-auth", {
+      headers: { "x-admin-password": stored },
+    })
+      .then((res) => {
+        if (res.ok) {
+          setPassword(stored);
+        } else {
+          sessionStorage.removeItem(SESSION_KEY);
+        }
+      })
+      .catch(() => {
+        sessionStorage.removeItem(SESSION_KEY);
+      })
+      .finally(() => setVerifying(false));
+  }, []);
 
   const handleUnlock = (pw: string) => setPassword(pw);
 
@@ -341,6 +365,14 @@ export default function CardDatabaseAdmin() {
     sessionStorage.removeItem(SESSION_KEY);
     setPassword(null);
   };
+
+  if (verifying) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
 
   if (!password) {
     return <PasswordGate onUnlock={handleUnlock} />;
