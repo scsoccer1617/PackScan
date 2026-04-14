@@ -2,7 +2,7 @@ import express, { Express, Request, Response, NextFunction } from 'express';
 import { Server, createServer } from 'http';
 import multer from 'multer';
 import { db } from '../db';
-import { and, desc, eq, isNull, sql, max } from 'drizzle-orm';
+import { and, desc, eq, gte, isNull, sql, max } from 'drizzle-orm';
 import { syncConfirmedCard } from './syncDatabase';
 import {
   cards,
@@ -1579,31 +1579,61 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return res.json({ ok: true });
   });
 
-  // GET /api/card-database/stats — how many cards/variations are loaded, with deltas from last import
+  // GET /api/card-database/stats — counts with deltas from the first import of the day
   app.get(`${apiPrefix}/card-database/stats`, async (_req, res) => {
     try {
-      const [cardCount] = await db.select({ count: sql<number>`count(*)::int` }).from(cardDatabase);
-      const [varCount] = await db.select({ count: sql<number>`count(*)::int` }).from(cardVariations);
+      const [[cardCount], [varCount]] = await Promise.all([
+        db.select({ count: sql<number>`count(*)::int` }).from(cardDatabase),
+        db.select({ count: sql<number>`count(*)::int` }).from(cardVariations),
+      ]);
 
-      // Fetch most recent import event for each type
-      const [lastCardsImport] = await db
-        .select()
-        .from(importHistory)
-        .where(eq(importHistory.type, 'cards'))
-        .orderBy(desc(importHistory.importedAt))
-        .limit(1);
-      const [lastVariationsImport] = await db
-        .select()
-        .from(importHistory)
-        .where(eq(importHistory.type, 'variations'))
-        .orderBy(desc(importHistory.importedAt))
-        .limit(1);
+      // Today midnight UTC — used to find the first import of the current day
+      const todayStart = new Date();
+      todayStart.setUTCHours(0, 0, 0, 0);
 
-      // lastImportedAt = most recent import event across both types
-      const timestamps = [
-        lastCardsImport?.importedAt,
-        lastVariationsImport?.importedAt,
-      ].filter(Boolean) as Date[];
+      // First import of today for each type (gives us the countBefore baseline)
+      const [[firstCardsToday], [firstVariationsToday]] = await Promise.all([
+        db.select().from(importHistory)
+          .where(and(eq(importHistory.type, 'cards'), gte(importHistory.importedAt, todayStart)))
+          .orderBy(importHistory.importedAt)
+          .limit(1),
+        db.select().from(importHistory)
+          .where(and(eq(importHistory.type, 'variations'), gte(importHistory.importedAt, todayStart)))
+          .orderBy(importHistory.importedAt)
+          .limit(1),
+      ]);
+
+      // Fallback: most recent historical import when there is no import today
+      const [[lastCardsImport], [lastVariationsImport]] = await Promise.all([
+        firstCardsToday
+          ? Promise.resolve([firstCardsToday])
+          : db.select().from(importHistory)
+              .where(eq(importHistory.type, 'cards'))
+              .orderBy(desc(importHistory.importedAt))
+              .limit(1),
+        firstVariationsToday
+          ? Promise.resolve([firstVariationsToday])
+          : db.select().from(importHistory)
+              .where(eq(importHistory.type, 'variations'))
+              .orderBy(desc(importHistory.importedAt))
+              .limit(1),
+      ]);
+
+      // Delta = current table total minus count-before of the reference import.
+      // When there were imports today, this accumulates all of today's growth.
+      // When falling back to a historical import, use that import's own delta.
+      const cardsDelta = firstCardsToday
+        ? (cardCount?.count ?? 0) - firstCardsToday.countBefore
+        : (lastCardsImport?.delta ?? null);
+      const variationsDelta = firstVariationsToday
+        ? (varCount?.count ?? 0) - firstVariationsToday.countBefore
+        : (lastVariationsImport?.delta ?? null);
+
+      // "since" timestamp is the first import of the day (or last ever import)
+      const lastCardsImportedAt = lastCardsImport?.importedAt ?? null;
+      const lastVariationsImportedAt = lastVariationsImport?.importedAt ?? null;
+
+      const timestamps = [lastCardsImportedAt, lastVariationsImportedAt].filter(Boolean) as Date[];
       const lastImportedAt = timestamps.length
         ? timestamps.reduce((a, b) => (a > b ? a : b))
         : null;
@@ -1611,11 +1641,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.json({
         cards: cardCount?.count ?? 0,
         variations: varCount?.count ?? 0,
-        cardsDelta: lastCardsImport?.delta ?? null,
-        variationsDelta: lastVariationsImport?.delta ?? null,
+        cardsDelta,
+        variationsDelta,
         lastImportedAt,
-        lastCardsImportedAt: lastCardsImport?.importedAt ?? null,
-        lastVariationsImportedAt: lastVariationsImport?.importedAt ?? null,
+        lastCardsImportedAt,
+        lastVariationsImportedAt,
       });
     } catch (error: any) {
       console.error('Error fetching card database stats:', error);
