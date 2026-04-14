@@ -1,4 +1,4 @@
-import { pgTable, text, serial, integer, boolean, timestamp, jsonb, numeric } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, boolean, timestamp, jsonb, numeric, index } from "drizzle-orm/pg-core";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { z } from "zod";
 import { relations } from "drizzle-orm";
@@ -167,7 +167,13 @@ export const cardDatabase = pgTable("card_database", {
   rookieFlag: text("rookie_flag"),             // "Rookie Card" or empty
   notes: text("notes"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (table) => [
+  // OCR lookup: brand + year + card_number_raw. year is an integer so it anchors
+  // the index scan; the lower() expressions then apply only to the matching subset.
+  index("card_db_year_brand_cardnum_idx").on(table.year, table.brand, table.cardNumberRaw),
+  // Import delete step filters on brand_id + year — index makes batch deletes fast.
+  index("card_db_brandid_year_idx").on(table.brandId, table.year),
+]);
 
 export const cardDatabaseInsertSchema = createInsertSchema(cardDatabase);
 export type CardDatabaseInsert = z.infer<typeof cardDatabaseInsertSchema>;
@@ -188,7 +194,11 @@ export const cardVariations = pgTable("card_variations", {
   breakerOdds: text("breaker_odds"),
   valueOdds: text("value_odds"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (table) => [
+  // Variation lookup filters on brand_id + year + collection.
+  // Also covers the import delete step (brand_id + year prefix).
+  index("card_var_brandid_year_collection_idx").on(table.brandId, table.year, table.collection),
+]);
 
 export const cardVariationsInsertSchema = createInsertSchema(cardVariations);
 export type CardVariationsInsert = z.infer<typeof cardVariationsInsertSchema>;
