@@ -10,6 +10,29 @@ import EbayPriceResults from "@/components/EbayPriceResults";
 import ParallelPickerSheet, { ParallelOption } from "@/components/ParallelPickerSheet";
 import { CardFormValues } from "@shared/schema";
 
+// Resize + JPEG-compress a dataURL before upload.
+// Caps the longer edge at maxPx and encodes at the given quality.
+// Google Vision reads text accurately from 1200px images; sending full-res
+// camera shots (often 3-8 MB) wastes upload time and Vision API bandwidth.
+async function compressImage(dataUrl: string, maxPx = 1200, quality = 0.82): Promise<Blob> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      let { naturalWidth: w, naturalHeight: h } = img;
+      if (w > maxPx || h > maxPx) {
+        if (w >= h) { h = Math.round((h * maxPx) / w); w = maxPx; }
+        else        { w = Math.round((w * maxPx) / h); h = maxPx; }
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      canvas.getContext('2d')!.drawImage(img, 0, 0, w, h);
+      canvas.toBlob((blob) => resolve(blob!), 'image/jpeg', quality);
+    };
+    img.src = dataUrl;
+  });
+}
+
 // Extract the primary search keyword from a detected parallel string.
 // e.g. "Green Foil" → "Green",  "Gold Prizm" → "Gold",  "Rainbow" → "Rainbow"
 function extractKeyword(foilType: string): string {
@@ -135,33 +158,20 @@ export default function PriceLookup() {
     
     setAnalyzing(true);
     try {
+      // Compress both images in parallel before upload — reduces size 5-10x
+      // (camera images are often 1.5-3 MB; 1200px JPEG is plenty for OCR)
+      const [backBlob, frontBlob] = await Promise.all([
+        compressImage(backImage),
+        frontImage ? compressImage(frontImage) : Promise.resolve(null),
+      ]);
+
+      const formData = new FormData();
+      formData.append('backImage', backBlob, 'back.jpg');
+      if (frontBlob) formData.append('frontImage', frontBlob, 'front.jpg');
+
       const response = await fetch('/api/analyze-card-dual-images', {
         method: 'POST',
-        body: (() => {
-          const formData = new FormData();
-          
-          const backByteCharacters = atob(backImage.split(',')[1]);
-          const backByteNumbers = new Array(backByteCharacters.length);
-          for (let i = 0; i < backByteCharacters.length; i++) {
-            backByteNumbers[i] = backByteCharacters.charCodeAt(i);
-          }
-          const backByteArray = new Uint8Array(backByteNumbers);
-          const backBlob = new Blob([backByteArray], { type: 'image/jpeg' });
-          formData.append('backImage', backBlob, 'back.jpg');
-          
-          if (frontImage) {
-            const frontByteCharacters = atob(frontImage.split(',')[1]);
-            const frontByteNumbers = new Array(frontByteCharacters.length);
-            for (let i = 0; i < frontByteCharacters.length; i++) {
-              frontByteNumbers[i] = frontByteCharacters.charCodeAt(i);
-            }
-            const frontByteArray = new Uint8Array(frontByteNumbers);
-            const frontBlob = new Blob([frontByteArray], { type: 'image/jpeg' });
-            formData.append('frontImage', frontBlob, 'front.jpg');
-          }
-          
-          return formData;
-        })()
+        body: formData,
       });
       
       if (!response.ok) throw new Error('Analysis failed');

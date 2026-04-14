@@ -1,50 +1,45 @@
 import { CardFormValues } from '../shared/schema';
 import { ImageAnnotatorClient } from '@google-cloud/vision';
 
-/**
- * Initialize Google Cloud Vision client with service account credentials
- */
-function initializeVisionClient(): ImageAnnotatorClient {
+// ── Singleton Vision client ───────────────────────────────────────────────────
+// Initialised once on first use and reused across all requests. This avoids
+// the ~100-200ms credential-parsing + gRPC channel setup overhead per call.
+let _visionClient: ImageAnnotatorClient | null = null;
+
+function getVisionClient(): ImageAnnotatorClient {
+  if (_visionClient) return _visionClient;
+
   const clientEmail = process.env.GOOGLE_CLIENT_EMAIL;
   const privateKey = process.env.GOOGLE_PRIVATE_KEY;
-  
+
   if (!clientEmail || !privateKey) {
     throw new Error('Missing Google Cloud service account credentials');
   }
-  
-  console.log('Initializing Google Vision client...');
-  console.log('Client email:', clientEmail);
-  console.log('Private key length:', privateKey.length);
-  console.log('Private key starts with:', privateKey.substring(0, 50));
-  
-  // Clean and format private key properly
-  let cleanPrivateKey = privateKey;
-  
-  // Handle escaped newlines - multiple passes to ensure proper formatting
-  cleanPrivateKey = cleanPrivateKey.replace(/\\n/g, '\n');
-  
-  // Remove any extra quotes that might be surrounding the key
-  cleanPrivateKey = cleanPrivateKey.replace(/^["']|["']$/g, '');
-  
-  // Ensure proper PEM format with correct headers
+
+  console.log('Initializing Google Vision client (once)...');
+
+  let cleanPrivateKey = privateKey
+    .replace(/\\n/g, '\n')
+    .replace(/^["']|["']$/g, '');
+
   if (!cleanPrivateKey.startsWith('-----BEGIN')) {
     cleanPrivateKey = `-----BEGIN PRIVATE KEY-----\n${cleanPrivateKey}\n-----END PRIVATE KEY-----`;
   }
-  
-  // Split into lines and rejoin to ensure proper formatting
-  const lines = cleanPrivateKey.split('\n');
-  const formattedKey = lines.map(line => line.trim()).filter(line => line.length > 0).join('\n');
-  
-  console.log('Formatted private key first line:', formattedKey.split('\n')[0]);
-  console.log('Formatted private key last line:', formattedKey.split('\n')[formattedKey.split('\n').length - 1]);
-  
+
+  const formattedKey = cleanPrivateKey
+    .split('\n')
+    .map(l => l.trim())
+    .filter(l => l.length > 0)
+    .join('\n');
+
   try {
-    return new ImageAnnotatorClient({
+    _visionClient = new ImageAnnotatorClient({
       credentials: {
         client_email: clientEmail,
         private_key: formattedKey,
       },
     });
+    return _visionClient;
   } catch (error: any) {
     console.error('Failed to initialize Vision client:', error.message);
     throw new Error(`Google Vision client initialization failed: ${error.message}`);
@@ -239,8 +234,7 @@ export async function extractTextFromImage(base64Image: string): Promise<{ fullT
     }
     
     try {
-      // Initialize the Vision client
-      const client = initializeVisionClient();
+      const client = getVisionClient();
     
     // Prepare the image for analysis
     const request = {
