@@ -193,3 +193,18 @@ export const cardVariations = pgTable("card_variations", {
 export const cardVariationsInsertSchema = createInsertSchema(cardVariations);
 export type CardVariationsInsert = z.infer<typeof cardVariationsInsertSchema>;
 export type CardVariation = typeof cardVariations.$inferSelect;
+
+// =============================================
+// Import History (tracks each CSV import event)
+// =============================================
+
+export const importHistory = pgTable("import_history", {
+  id: serial("id").primaryKey(),
+  type: text("type").notNull(),            // 'cards' | 'variations'
+  countBefore: integer("count_before").notNull(),
+  countAfter: integer("count_after").notNull(),
+  delta: integer("delta").notNull(),
+  importedAt: timestamp("imported_at").defaultNow().notNull(),
+});
+
+export type ImportHistoryEntry = typeof importHistory.$inferSelect;

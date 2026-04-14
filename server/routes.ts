@@ -11,6 +11,7 @@ import {
   confirmedCards,
   cardInsertSchema,
   cardSchema,
+  importHistory,
   type CardInsert,
   type Card,
   type CardWithRelations
@@ -1578,14 +1579,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return res.json({ ok: true });
   });
 
-  // GET /api/card-database/stats — how many cards/variations are loaded
+  // GET /api/card-database/stats — how many cards/variations are loaded, with deltas from last import
   app.get(`${apiPrefix}/card-database/stats`, async (_req, res) => {
     try {
       const [cardCount] = await db.select({ count: sql<number>`count(*)::int` }).from(cardDatabase);
       const [varCount] = await db.select({ count: sql<number>`count(*)::int` }).from(cardVariations);
+
+      // Fetch most recent import event for each type
+      const [lastCardsImport] = await db
+        .select()
+        .from(importHistory)
+        .where(eq(importHistory.type, 'cards'))
+        .orderBy(desc(importHistory.importedAt))
+        .limit(1);
+      const [lastVariationsImport] = await db
+        .select()
+        .from(importHistory)
+        .where(eq(importHistory.type, 'variations'))
+        .orderBy(desc(importHistory.importedAt))
+        .limit(1);
+
       return res.json({
         cards: cardCount?.count ?? 0,
         variations: varCount?.count ?? 0,
+        cardsDelta: lastCardsImport?.delta ?? null,
+        variationsDelta: lastVariationsImport?.delta ?? null,
+        lastCardsImportedAt: lastCardsImport?.importedAt ?? null,
+        lastVariationsImportedAt: lastVariationsImport?.importedAt ?? null,
       });
     } catch (error: any) {
       console.error('Error fetching card database stats:', error);
@@ -1603,11 +1623,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (!req.file) {
           return res.status(400).json({ error: 'No file provided' });
         }
+        const [beforeCount] = await db.select({ count: sql<number>`count(*)::int` }).from(cardDatabase);
+        const countBefore = beforeCount?.count ?? 0;
         const result = await importCardsCSV(req.file.buffer);
         if (result.errors.length > 0) {
           console.log(`[CardDB] Import skipped ${result.errors.length} row(s):`);
           result.errors.forEach(e => console.log(`  • ${e}`));
         }
+        // Record import event
+        const countAfter = result.imported;
+        await db.insert(importHistory).values({
+          type: 'cards',
+          countBefore,
+          countAfter,
+          delta: countAfter - countBefore,
+        });
         return res.json({
           success: true,
           imported: result.imported,
@@ -1632,11 +1662,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (!req.file) {
           return res.status(400).json({ error: 'No file provided' });
         }
+        const [beforeCount] = await db.select({ count: sql<number>`count(*)::int` }).from(cardVariations);
+        const countBefore = beforeCount?.count ?? 0;
         const result = await importVariationsCSV(req.file.buffer);
         if (result.errors.length > 0) {
           console.log(`[CardDB] Variations import skipped ${result.errors.length} row(s):`);
           result.errors.forEach(e => console.log(`  • ${e}`));
         }
+        // Record import event
+        const countAfter = result.imported;
+        await db.insert(importHistory).values({
+          type: 'variations',
+          countBefore,
+          countAfter,
+          delta: countAfter - countBefore,
+        });
         return res.json({
           success: true,
           imported: result.imported,
