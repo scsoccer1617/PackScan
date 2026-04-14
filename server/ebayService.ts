@@ -748,6 +748,10 @@ export async function searchCardValues(
         if (numMatch && numMatch[1]) {
           const discoveredNum = numMatch[1];
           if (year && discoveredNum === String(year)) continue;
+          // Skip digits that are part of a "Series N" phrase — e.g. "Series 1 Stars of MLB"
+          // would otherwise produce "1 Stars of MLB" as the discovered collection.
+          const precedingText = titleLower.slice(Math.max(0, numMatch.index! - 10), numMatch.index!);
+          if (/series\s*$/.test(precedingText)) continue;
           const specific = `${discoveredNum} ${collection}`;
           moreSpecificCounts.set(specific, (moreSpecificCounts.get(specific) || 0) + 1);
         }

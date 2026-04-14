@@ -360,7 +360,21 @@ async function combineCardResults(
       combined[field] = frontResult[field];
     }
   });
-  
+
+  // Card number special case: if the back produced a purely numeric value (e.g. "2")
+  // but the front produced an alphanumeric value (e.g. "CSMLB-2" or "89B-9"),
+  // the front's value is far more specific — prefer it.
+  if (hasValue(frontResult.cardNumber) && hasValue(combined.cardNumber)) {
+    const frontNum = String(frontResult.cardNumber);
+    const combinedNum = String(combined.cardNumber);
+    const frontHasLetters = /[A-Za-z]/.test(frontNum);
+    const combinedPureNumeric = /^\d+$/.test(combinedNum);
+    if (frontHasLetters && combinedPureNumeric) {
+      console.log(`[CardNum] Preferring front alphanumeric "${frontNum}" over back plain numeric "${combinedNum}"`);
+      combined.cardNumber = frontResult.cardNumber;
+    }
+  }
+
   // When collection came only from the back (front had no collection), verify it's not just a trademark mention.
   // If the front OCR text doesn't contain the collection name, it's likely from legal text on the back.
   if (!hasValue(frontResult.collection) && hasValue(backResult.collection) && hasValue(combined.collection)) {
@@ -695,10 +709,19 @@ async function combineCardResults(
             console.log(`[FoilDB] Visual foil "${visualFoilResult.foilType}" rejected — color keywords [${colorKeywords.join(', ')}] not found in ${setVariations.length} known variations for ${brand} ${year} "${collection}"`);
           }
         } else {
-          // No variations in DB for this set — cannot validate, accept the visual detection
-          combined.foilType = visualFoilResult.foilType;
-          combined.isFoil = true;
-          console.log(`[FoilDB] No DB variations for ${brand} ${year} "${collection}" — accepting visual foil: ${visualFoilResult.foilType}`);
+          // No variations in DB for this set — require higher confidence before accepting,
+          // to avoid false positives from jersey colors or card design colors (e.g. Angels red
+          // being misread as "Red Crackle Foil" on a base Chrome Stars of MLB card).
+          const HIGH_CONFIDENCE_THRESHOLD = 0.65;
+          if (visualFoilResult.confidence >= HIGH_CONFIDENCE_THRESHOLD) {
+            combined.foilType = visualFoilResult.foilType;
+            combined.isFoil = true;
+            console.log(`[FoilDB] No DB variations for ${brand} ${year} "${collection}" — accepting visual foil (confidence ${visualFoilResult.confidence.toFixed(2)} ≥ ${HIGH_CONFIDENCE_THRESHOLD}): ${visualFoilResult.foilType}`);
+          } else {
+            combined.foilType = null;
+            combined.isFoil = false;
+            console.log(`[FoilDB] No DB variations for ${brand} ${year} "${collection}" — rejecting visual foil (confidence ${visualFoilResult.confidence.toFixed(2)} < ${HIGH_CONFIDENCE_THRESHOLD}): ${visualFoilResult.foilType}`);
+          }
         }
       } else {
         // No brand/year to query — accept as-is
