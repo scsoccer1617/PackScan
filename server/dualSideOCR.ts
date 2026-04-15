@@ -467,11 +467,13 @@ async function combineCardResults(
   // read reliably — prefer back name in that case even if front name passed the bogus check.
   const frontOCRTooShort = frontOCRText.trim().length < 50;
   
+  let nameFromBackFallback = false;
   if ((frontNameBogus || frontOCRTooShort) && !backNameBogus && backResult.playerFirstName && backResult.playerLastName) {
     const reason = frontNameBogus ? 'bogus name' : `very short front OCR (${frontOCRText.trim().length} chars)`;
     console.log(`Front player name "${combined.playerFirstName} ${combined.playerLastName}" unreliable (${reason}), using back: "${backResult.playerFirstName} ${backResult.playerLastName}"`);
     combined.playerFirstName = backResult.playerFirstName;
     combined.playerLastName = backResult.playerLastName;
+    nameFromBackFallback = true;
   }
   
   if (!frontNameBogus && !backNameBogus &&
@@ -584,9 +586,11 @@ async function combineCardResults(
 
         // Guard: if OCR clearly identified a player name and the DB result has a DIFFERENT player,
         // the DB matched the wrong card (same card number, wrong set/player). Reject the DB result.
+        // However, if the current name came from a back-image fallback (front OCR was too short/bogus),
+        // the name is low-confidence and should NOT override a DB match.
         const ocrLastName = (combined.playerLastName || '').trim().toLowerCase();
         const dbLastName  = (dbResult.playerLastName  || '').trim().toLowerCase();
-        const hasReliableOcrName = ocrLastName.length > 1 &&
+        const hasReliableOcrName = !nameFromBackFallback && ocrLastName.length > 1 &&
           !['ersary', 'ersary', 'anniv', 'stros', 'epps'].includes(ocrLastName); // filter garbled fragments
         if (hasReliableOcrName && dbLastName && ocrLastName !== dbLastName) {
           console.log(`[CardDB] Player mismatch — OCR: "${combined.playerFirstName} ${combined.playerLastName}", DB: "${dbResult.playerFirstName} ${dbResult.playerLastName}" — rejecting DB result to protect OCR player name`);
