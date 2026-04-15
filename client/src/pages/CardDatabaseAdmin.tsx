@@ -117,12 +117,23 @@ function AdminPanel({ password, onLock }: { password: string; onLock: () => void
     mutationFn: async ({ file, endpoint }: { file: File; endpoint: string }) => {
       const formData = new FormData();
       formData.append("file", file);
-      const res = await fetch(endpoint, {
-        method: "POST",
-        body: formData,
-        headers: authHeader,
-      });
+      let res: Response;
+      try {
+        res = await fetch(endpoint, {
+          method: "POST",
+          body: formData,
+          headers: authHeader,
+        });
+      } catch (networkErr: any) {
+        throw new Error("Cannot reach server — it may be restarting. Please wait a moment and try again.");
+      }
       if (res.status === 401) throw new Error("Unauthorized");
+      if (res.status === 413) throw new Error("File is too large (max 20 MB). Please reduce the file size and retry.");
+      if (!res.ok) {
+        let msg = `Server error (${res.status})`;
+        try { const j = await res.json(); msg = j.error || msg; } catch {}
+        throw new Error(msg);
+      }
       return res.json() as Promise<ImportResult>;
     },
     onError: (err: Error) => {
@@ -173,7 +184,7 @@ function AdminPanel({ password, onLock }: { password: string; onLock: () => void
       }
     } catch (err: any) {
       if (err?.message !== "Unauthorized") {
-        toast({ title: "Import failed", variant: "destructive" });
+        toast({ title: "Import failed", description: err?.message || "Unknown error — please try again.", variant: "destructive" });
       }
     }
   };
@@ -193,7 +204,7 @@ function AdminPanel({ password, onLock }: { password: string; onLock: () => void
       }
     } catch (err: any) {
       if (err?.message !== "Unauthorized") {
-        toast({ title: "Import failed", variant: "destructive" });
+        toast({ title: "Import failed", description: err?.message || "Unknown error — please try again.", variant: "destructive" });
       }
     }
   };

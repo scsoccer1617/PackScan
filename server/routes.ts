@@ -1653,11 +1653,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Multer error handler for CSV uploads — returns JSON instead of HTML on file-size/upload errors
+  function handleUpload(req: Request, res: Response, next: NextFunction) {
+    upload.single('file')(req as any, res as any, (err: any) => {
+      if (err) {
+        if (err.code === 'LIMIT_FILE_SIZE') {
+          return res.status(413).json({ error: 'File is too large (max 20 MB). Please reduce the file size and retry.' });
+        }
+        return res.status(400).json({ error: err.message || 'File upload error' });
+      }
+      next();
+    });
+  }
+
   // POST /api/card-database/import-cards — upload cards CSV
   app.post(
     `${apiPrefix}/card-database/import-cards`,
     requireAdminPassword,
-    upload.single('file'),
+    handleUpload,
     async (req: MulterRequest, res) => {
       try {
         if (!req.file) {
@@ -1697,7 +1710,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post(
     `${apiPrefix}/card-database/import-variations`,
     requireAdminPassword,
-    upload.single('file'),
+    handleUpload,
     async (req: MulterRequest, res) => {
       try {
         if (!req.file) {
