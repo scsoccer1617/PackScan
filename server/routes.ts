@@ -28,6 +28,7 @@ import { importCardsCSV, importVariationsCSV, lookupCard } from './cardDatabaseS
 import { cardDatabase, cardVariations } from '../shared/schema';
 import { join } from 'path';
 import fs from 'fs';
+import { gunzipSync } from 'zlib';
 
 // Configure multer for handling file uploads
 const upload = multer({
@@ -1737,6 +1738,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
   }
 
+  function decompressIfNeeded(req: MulterRequest): Buffer {
+    if (!req.file) throw new Error('No file provided');
+    const isCompressed = req.body?.compressed === 'gzip' || req.file.originalname?.endsWith('.gz');
+    if (isCompressed) {
+      console.log(`[Import] Decompressing gzip upload (${(req.file.buffer.length / 1024 / 1024).toFixed(1)} MB compressed)`);
+      const decompressed = gunzipSync(req.file.buffer);
+      console.log(`[Import] Decompressed to ${(decompressed.length / 1024 / 1024).toFixed(1)} MB`);
+      return decompressed;
+    }
+    return req.file.buffer;
+  }
+
   // POST /api/card-database/import-cards — upload cards CSV (returns job ID immediately)
   app.post(
     `${apiPrefix}/card-database/import-cards`,
@@ -1744,12 +1757,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     handleUpload,
     async (req: MulterRequest, res) => {
       try {
-        if (!req.file) return res.status(400).json({ error: 'No file provided' });
+        const csvBuffer = decompressIfNeeded(req);
         const [beforeRow] = await db.select({ count: sql<number>`count(*)::int` }).from(cardDatabase);
         const countBefore = beforeRow?.count ?? 0;
         const jobId = randomUUID();
         importJobs.set(jobId, { status: 'queued', type: 'cards', progress: { processed: 0, total: 0 }, startedAt: Date.now() });
-        runCardsImportJob(jobId, req.file.buffer, countBefore); // intentionally not awaited
+        runCardsImportJob(jobId, csvBuffer, countBefore);
         return res.json({ jobId });
       } catch (error: any) {
         console.error('Error starting cards import job:', error);
@@ -1765,12 +1778,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     handleUpload,
     async (req: MulterRequest, res) => {
       try {
-        if (!req.file) return res.status(400).json({ error: 'No file provided' });
+        const csvBuffer = decompressIfNeeded(req);
         const [beforeRow] = await db.select({ count: sql<number>`count(*)::int` }).from(cardVariations);
         const countBefore = beforeRow?.count ?? 0;
         const jobId = randomUUID();
         importJobs.set(jobId, { status: 'queued', type: 'variations', progress: { processed: 0, total: 0 }, startedAt: Date.now() });
-        runVariationsImportJob(jobId, req.file.buffer, countBefore); // intentionally not awaited
+        runVariationsImportJob(jobId, csvBuffer, countBefore);
         return res.json({ jobId });
       } catch (error: any) {
         console.error('Error starting variations import job:', error);
