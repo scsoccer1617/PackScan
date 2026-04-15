@@ -750,25 +750,33 @@ async function combineCardResults(
       console.log(`Visual indicators: ${visualFoilResult.indicators.join('; ')}`);
     } else if (visualFoilResult && !visualFoilResult.indicators.some(indicator => indicator.includes('Error in visual analysis'))) {
       // Visual detection ran but did not find foil — trust it and clear any foil state.
-      // EXCEPTION: If the back image explicitly prints the variant name as its very first line
+      // EXCEPTION: If the back image explicitly prints the variant name prominently near the top
       // (e.g. "REFRACTOR" on Bowman Chrome autos), that printed label is authoritative.
-      const backFirstLine = (backOCRText || '').split(/\r?\n/)[0]?.trim().toUpperCase() ?? '';
-      const explicitVariantLabels: Record<string, string> = {
-        'REFRACTOR': 'Refractor',
-        'GOLD REFRACTOR': 'Gold Refractor',
-        'BLUE REFRACTOR': 'Blue Refractor',
-        'PURPLE REFRACTOR': 'Purple Refractor',
-        'ATOMIC REFRACTOR': 'Atomic Refractor',
-        'PRIZM': 'Prizm',
-        'CRACKED ICE': 'Cracked Ice',
-        'WAVE': 'Wave',
-        'SPECKLE': 'Speckle',
-      };
-      const labelMatch = explicitVariantLabels[backFirstLine];
-      if (labelMatch) {
-        combined.foilType = labelMatch;
+      // Check the first 3 non-empty lines of the back OCR text for explicit variant keywords.
+      // This is deliberately robust to OCR noise (punctuation, extra chars) by using
+      // word-boundary matching rather than exact equality.
+      const backTopLines = (backOCRText || '')
+        .split(/\r?\n/)
+        .map(l => l.trim())
+        .filter(l => l.length > 0)
+        .slice(0, 3)
+        .join(' ')
+        .toUpperCase();
+      const explicitVariantLabelPatterns: Array<{ pattern: RegExp; label: string }> = [
+        { pattern: /\bGOLD REFRACTOR\b/, label: 'Gold Refractor' },
+        { pattern: /\bBLUE REFRACTOR\b/, label: 'Blue Refractor' },
+        { pattern: /\bPURPLE REFRACTOR\b/, label: 'Purple Refractor' },
+        { pattern: /\bATOMIC REFRACTOR\b/, label: 'Atomic Refractor' },
+        { pattern: /\bSPECKLE REFRACTOR\b/, label: 'Speckle Refractor' },
+        { pattern: /\bREFRACTOR\b/, label: 'Refractor' },
+        { pattern: /\bCRACKED ICE\b/, label: 'Cracked Ice' },
+        { pattern: /\bSUPERFRACTOR\b/, label: 'Superfractor' },
+      ];
+      const backLabelMatch = explicitVariantLabelPatterns.find(({ pattern }) => pattern.test(backTopLines));
+      if (backLabelMatch) {
+        combined.foilType = backLabelMatch.label;
         combined.isFoil = true;
-        console.log(`[FoilLabel] Back image first line "${backFirstLine}" is an explicit variant label — overriding visual rejection with: ${labelMatch}`);
+        console.log(`[FoilLabel] Explicit variant label "${backLabelMatch.label}" found in back OCR top lines — overriding visual rejection`);
       } else {
         // Serial number alone is not enough evidence; the DB variation lookup already handles
         // mapping serial numbers to parallel names (e.g. /499 → Sky Blue).
