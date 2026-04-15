@@ -312,6 +312,17 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
       // Common birthplace/hometown abbreviations that look like names
       'VENEZ', 'VENEZUELA', 'DOMINICAN', 'REPUBLIC', 'MEXICO', 'CUBA', 'PANAMA', 'COLOMBIA',
       'CANADA', 'JAPAN', 'KOREA', 'AUSTRALIA', 'PUERTO', 'RICO',
+      // Set/product/collection words that can be confused for player names
+      'PIXEL', 'PORTRAITS', 'PORTRAIT', 'FINEST', 'FUTURES', 'ROOKIES', 'GALLERY',
+      'ICONS', 'CONTENDERS', 'PRESTIGE', 'CHRONICLES', 'HARDWARE', 'ELITE',
+      'IMMACULATE', 'LUMINANCE', 'SPECTRA', 'OBSIDIAN', 'NOIR', 'OPTIC',
+      'THREADS', 'CERTIFIED', 'ABSOLUTE', 'LIMITED', 'TRIBUTE', 'BRILLIANCE',
+      'CLASSICS', 'LEGENDS', 'PROSPECTS', 'SIGNATURES', 'AUTOGRAPHS', 'PARALLELS',
+      'VALUED', 'PRIVATE', 'EXCLUSIVE', 'PREMIER', 'PRIME',
+      'NATIONAL', 'DIGITAL', 'VINTAGE', 'RETRO', 'REVIVAL', 'REPRINT',
+      'PITTSBURGH', 'HOUSTON', 'TORONTO', 'SEATTLE', 'OAKLAND', 'TAMPA', 'MIAMI',
+      'MINNESOTA', 'CINCINNATI', 'MILWAUKEE', 'DETROIT', 'CLEVELAND', 'BALTIMORE',
+      'ARIZONA', 'COLORADO', 'TEXAS', 'DENVER', 'MONTREAL', 'WASHINGTON',
     ]);
     
     const isNonNameWord = (word: string): boolean => {
@@ -363,7 +374,7 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
             const lastName = nameWords.slice(1).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
             
             const isFollowedByTeamPosition = (i + 1 < rawLines.length) && 
-              /PHILLIES|YANKEES|DODGERS|METS|CUBS|OUTFIELDER|INFIELDER|PITCHER|CATCHER|SHORTSTOP|BASEMAN/i.test(rawLines[i + 1]);
+              /PHILLIES|YANKEES|DODGERS|METS|CUBS|BRAVES|ASTROS|RANGERS|PADRES|GIANTS|CARDINALS|NATIONALS|ORIOLES|GUARDIANS|TWINS|RAYS|MARLINS|PIRATES|REDS|BREWERS|TIGERS|ROYALS|ATHLETICS|MARINERS|ANGELS|ROCKIES|DIAMONDBACKS|OUTFIELDER|INFIELDER|PITCHER|CATCHER|SHORTSTOP|BASEMAN|STARTING|CLOSER|RELIEVER/i.test(rawLines[i + 1]);
             
             const priority = isFollowedByTeamPosition ? 0 : (i < 5 ? 1 : 2);
             
@@ -387,7 +398,7 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
             const lastName = remainingWords.slice(1).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
             
             const isFollowedByTeamPosition = (i + 1 < rawLines.length) && 
-              /PHILLIES|YANKEES|DODGERS|METS|CUBS|OUTFIELDER|INFIELDER|PITCHER|CATCHER|SHORTSTOP|BASEMAN|ASTROS|BREWERS|PADRES|GIANTS|THIRD BASE|FIRST BASE|SECOND BASE/i.test(rawLines[i + 1]);
+              /PHILLIES|YANKEES|DODGERS|METS|CUBS|BRAVES|ASTROS|RANGERS|PADRES|GIANTS|CARDINALS|NATIONALS|ORIOLES|GUARDIANS|TWINS|RAYS|MARLINS|PIRATES|REDS|BREWERS|TIGERS|ROYALS|ATHLETICS|MARINERS|ANGELS|ROCKIES|DIAMONDBACKS|OUTFIELDER|INFIELDER|PITCHER|CATCHER|SHORTSTOP|BASEMAN|STARTING|CLOSER|RELIEVER/i.test(rawLines[i + 1]);
             
             const priority = isFollowedByTeamPosition ? 0 : (i < 5 ? 1 : 2);
             
