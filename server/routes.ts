@@ -32,7 +32,7 @@ import fs from 'fs';
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 20 * 1024 * 1024, // 20MB limit to accommodate high-res card photos
+    fileSize: 60 * 1024 * 1024, // 60MB limit to accommodate large CSVs and high-res card photos
   },
 });
 

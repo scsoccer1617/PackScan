@@ -128,7 +128,7 @@ function AdminPanel({ password, onLock }: { password: string; onLock: () => void
         throw new Error("Cannot reach server — it may be restarting. Please wait a moment and try again.");
       }
       if (res.status === 401) throw new Error("Unauthorized");
-      if (res.status === 413) throw new Error("File is too large (max 20 MB). Please reduce the file size and retry.");
+      if (res.status === 413) throw new Error("File is too large (max 60 MB). Please reduce the file size and retry.");
       if (!res.ok) {
         let msg = `Server error (${res.status})`;
         try { const j = await res.json(); msg = j.error || msg; } catch {}
