@@ -716,18 +716,24 @@ async function combineCardResults(
           const colorMatchFound = colorKeywords.length > 0 && setVariations.some(varName =>
             colorKeywords.some(kw => varName.includes(kw))
           );
-          const DB_VALIDATED_MIN_CONFIDENCE = 0.65;
           const hasStrongIndicators = visualFoilResult.indicators?.some((ind: string) =>
             /strongFoil=true|reflective=true/i.test(ind)
           ) ?? false;
-          if (colorMatchFound && (visualFoilResult.confidence >= DB_VALIDATED_MIN_CONFIDENCE || hasStrongIndicators)) {
+          const satMatch = visualFoilResult.indicators?.find((ind: string) =>
+            /Same-color avg saturation:\s*(\d+)/i.test(ind)
+          );
+          const avgSaturation = satMatch
+            ? parseInt(satMatch.match(/Same-color avg saturation:\s*(\d+)/i)?.[1] || '0', 10)
+            : 0;
+          const isVividFoilColor = avgSaturation >= 90;
+          if (colorMatchFound && (hasStrongIndicators || isVividFoilColor)) {
             combined.foilType = visualFoilResult.foilType;
             combined.isFoil = true;
-            console.log(`[FoilDB] Visual foil "${visualFoilResult.foilType}" validated against set variations (keywords: ${colorKeywords.join(', ')}, confidence: ${visualFoilResult.confidence.toFixed(2)})`);
+            console.log(`[FoilDB] Visual foil "${visualFoilResult.foilType}" validated against set variations (keywords: ${colorKeywords.join(', ')}, confidence: ${visualFoilResult.confidence.toFixed(2)}, avgSat: ${avgSaturation})`);
           } else if (colorMatchFound) {
             combined.foilType = null;
             combined.isFoil = false;
-            console.log(`[FoilDB] Visual foil "${visualFoilResult.foilType}" color exists in DB but confidence too low (${visualFoilResult.confidence.toFixed(2)} < ${DB_VALIDATED_MIN_CONFIDENCE}, strongIndicators=${hasStrongIndicators}) — rejecting as false positive`);
+            console.log(`[FoilDB] Visual foil "${visualFoilResult.foilType}" color exists in DB but not vivid enough (avgSat=${avgSaturation} < 90, strongIndicators=${hasStrongIndicators}) — rejecting as false positive`);
           } else {
             combined.foilType = null;
             combined.isFoil = false;
