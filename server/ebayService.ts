@@ -679,14 +679,17 @@ export async function searchCardValues(
     ];
 
     // Named parallel variants — always indicate a parallel, not a team colour.
+    // NOTE: Do NOT include product-line names here — "sapphire" (Bowman Chrome Sapphire),
+    // "chrome" (Bowman Chrome), "heritage" (Topps Heritage), "vintage" (Topps Vintage)
+    // are set names, not parallel colours.
     const PARALLEL_COLORS = [
-      'royal blue', 'sky blue', 'ice blue', 'sapphire', 'aqua',
+      'royal blue', 'sky blue', 'ice blue', 'aqua',
       'neon green', 'lime green', 'neon pink', 'hot pink',
       'teal', 'burgundy', 'copper', 'magenta', 'platinum',
       'rose gold', 'emerald', 'ruby', 'amethyst', 'cobalt',
-      'arctic', 'electric', 'vintage', 'heritage', 'independence day',
+      'arctic', 'electric', 'independence day',
       'jack-o\'-lantern', 'jack o lantern', 'pumpkin', 'camo',
-      'camouflage', 'snow', 'lava', 'fire', 'chrome'
+      'camouflage', 'snow', 'lava', 'fire'
     ];
 
     // Single-word colour names used as Topps/Bowman/Panini parallel names.

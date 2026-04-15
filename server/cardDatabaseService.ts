@@ -314,15 +314,25 @@ export async function lookupCard(input: CardLookupInput): Promise<CardLookupResu
       }
     }
 
-    // When still multiple hits, prefer simpler/shorter collections (base sets over variations/inserts)
+    // When still multiple hits, use the OCR player name to pick the best match.
+    // The same card number often maps to different players across sets (e.g.
+    // Bowman 2022 #91 = Scherzer in "Bowman Baseball", Turner in "Bowman Chrome Sapphire").
     if (cardRows.length > 1) {
+      const lastNameNorm = (playerLastName || '').trim().toLowerCase();
       cardRows.sort((a, b) => {
-        // Penalize rows that look like variation/insert sets (contain " - " or have long names)
+        // Primary: player name match (OCR is authoritative for who is on the card)
+        const aNameMatch = lastNameNorm && a.playerName.toLowerCase().includes(lastNameNorm) ? 1 : 0;
+        const bNameMatch = lastNameNorm && b.playerName.toLowerCase().includes(lastNameNorm) ? 1 : 0;
+        if (aNameMatch !== bNameMatch) return bNameMatch - aNameMatch;
+        // Secondary: prefer simpler/shorter collections (base sets over variations/inserts)
         const aIsBase = !a.collection.includes(' - ') ? 0 : 1;
         const bIsBase = !b.collection.includes(' - ') ? 0 : 1;
         if (aIsBase !== bIsBase) return aIsBase - bIsBase;
         return a.collection.length - b.collection.length;
       });
+      if (lastNameNorm) {
+        console.log(`[CardDB] Multiple matches (${cardRows.length}) — sorted by player name "${lastNameNorm}": top pick "${cardRows[0].playerName}" (${cardRows[0].set || cardRows[0].collection})`);
+      }
     }
 
     // ── Step 1b: Prefix-match fallback ──────────────────────────────────
