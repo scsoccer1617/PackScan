@@ -780,19 +780,26 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
     }
 
     // Plain number format: #123 or No. 123
-    // Guard: must NOT be a CODE# token from the legal text (e.g. CODE#065939 → skip)
-    const plainNumberPattern = /(?:#|No\.?\s*)(\d+)/;
-    const plainNumberMatch = text.match(plainNumberPattern);
-    if (plainNumberMatch && plainNumberMatch[1]) {
+    // Guard: must NOT be a CODE# token from the legal text (e.g. CODE#065939 → skip).
+    // Use global iteration so a CODE# hit doesn't block a later valid #123 match.
+    const plainNumberPatternGlobal = /(?:#|No\.?\s*)(\d+)/g;
+    let plainNumberMatch;
+    while ((plainNumberMatch = plainNumberPatternGlobal.exec(text)) !== null) {
       const candidate = plainNumberMatch[1];
-      const lineWithMatch = lines.find(line => line.includes(plainNumberMatch[0]));
+      const matchedToken = plainNumberMatch[0];
+      const lineWithMatch = lines.find(line => line.includes(matchedToken));
 
       if (lineWithMatch && isDOBFormat(lineWithMatch)) {
         console.log(`Skipping plain number "${candidate}" that appears in a date/stat line`);
-      } else if (lineWithMatch && /CODE#/i.test(lineWithMatch)) {
+        continue;
+      }
+      if (lineWithMatch && /CODE#/i.test(lineWithMatch)) {
         console.log(`Skipping plain number "${candidate}" — matched # is part of a CODE# legal token`);
-      } else if (candidate.length === 1) {
+        continue;
+      }
+      if (candidate.length === 1) {
         cardDetails.cardNumber = candidate;
+        break;
       } else {
         cardDetails.cardNumber = candidate;
         return;
