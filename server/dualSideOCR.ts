@@ -716,10 +716,18 @@ async function combineCardResults(
           const colorMatchFound = colorKeywords.length > 0 && setVariations.some(varName =>
             colorKeywords.some(kw => varName.includes(kw))
           );
-          if (colorMatchFound) {
+          const DB_VALIDATED_MIN_CONFIDENCE = 0.65;
+          const hasStrongIndicators = visualFoilResult.indicators?.some((ind: string) =>
+            /strongFoil=true|reflective=true/i.test(ind)
+          ) ?? false;
+          if (colorMatchFound && (visualFoilResult.confidence >= DB_VALIDATED_MIN_CONFIDENCE || hasStrongIndicators)) {
             combined.foilType = visualFoilResult.foilType;
             combined.isFoil = true;
-            console.log(`[FoilDB] Visual foil "${visualFoilResult.foilType}" validated against set variations (keywords: ${colorKeywords.join(', ')})`);
+            console.log(`[FoilDB] Visual foil "${visualFoilResult.foilType}" validated against set variations (keywords: ${colorKeywords.join(', ')}, confidence: ${visualFoilResult.confidence.toFixed(2)})`);
+          } else if (colorMatchFound) {
+            combined.foilType = null;
+            combined.isFoil = false;
+            console.log(`[FoilDB] Visual foil "${visualFoilResult.foilType}" color exists in DB but confidence too low (${visualFoilResult.confidence.toFixed(2)} < ${DB_VALIDATED_MIN_CONFIDENCE}, strongIndicators=${hasStrongIndicators}) — rejecting as false positive`);
           } else {
             combined.foilType = null;
             combined.isFoil = false;
