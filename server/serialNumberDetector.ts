@@ -77,6 +77,11 @@ function detectSerialNumberFromPositions(textAnnotations: any[]): SerialNumberRe
     const topCandidate = sortedCandidates[0];
     const isIsolated = checkIfIsolated(topCandidate, textAnnotations);
     
+    // Validate the serial number before accepting it
+    if (!isValidSerialNumber(topCandidate.description)) {
+      return { serialNumber: '', isNumbered: false, detectionMethod: 'position-invalid' };
+    }
+
     if (isIsolated) {
       return {
         serialNumber: topCandidate.description,

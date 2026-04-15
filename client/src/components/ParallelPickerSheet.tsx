@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
@@ -28,6 +28,13 @@ export default function ParallelPickerSheet({
 }: ParallelPickerSheetProps) {
   const [selected, setSelected] = useState<string>(() => options[0]?.variationOrParallel ?? CUSTOM_VALUE);
   const [customText, setCustomText] = useState("");
+
+  useEffect(() => {
+    if (open && options.length > 0) {
+      setSelected(options[0].variationOrParallel);
+      setCustomText("");
+    }
+  }, [open, options]);
 
   const handleConfirm = () => {
     if (selected === CUSTOM_VALUE) {

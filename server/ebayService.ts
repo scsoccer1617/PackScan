@@ -295,7 +295,9 @@ function prioritizeListingsByCardMatch(
           'glitter', 'mojo', 'prism', 'atomic', 'mega', 'super', 'hyper',
           'chrome', 'silk', 'satin', 'marble', 'camo', 'speckle', 'snow',
           'fire', 'electric', 'neon', 'fluorescent', 'frost', 'arctic',
-          'sapphire', 'ruby', 'emerald', 'diamond', 'platinum', 'titanium'
+          'sapphire', 'ruby', 'emerald', 'diamond', 'platinum', 'titanium',
+          'border', 'refractor', 'xfractor', 'leaf', 'vintage', 'retro',
+          'candy', 'holiday', 'independence'
         ];
         for (const qualifier of wrongParallelQualifiers) {
           if (!foilWords.includes(qualifier) && new RegExp(`\\b${qualifier}\\b`, 'i').test(title)) {
@@ -738,7 +740,9 @@ export async function searchCardValues(
       'glitter', 'mojo', 'prism', 'atomic', 'mega', 'super', 'hyper',
       'chrome', 'silk', 'satin', 'marble', 'camo', 'speckle', 'snow',
       'fire', 'electric', 'neon', 'fluorescent', 'frost', 'arctic',
-      'sapphire', 'ruby', 'emerald', 'diamond', 'platinum', 'titanium'
+      'sapphire', 'ruby', 'emerald', 'diamond', 'platinum', 'titanium',
+      'border', 'refractor', 'xfractor', 'leaf', 'vintage', 'retro',
+      'candy', 'holiday', 'independence'
     ];
 
     const hardFilter = (r: EbaySearchResult): boolean => {
