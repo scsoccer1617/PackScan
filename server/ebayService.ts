@@ -285,6 +285,26 @@ function prioritizeListingsByCardMatch(
           break;
         }
       }
+
+      // Penalize listings with a DIFFERENT parallel variant than what we searched for.
+      // e.g. searching "Aqua Foil" but listing says "Aqua Crackle Foil" — different parallel.
+      if (foilSearchTerm) {
+        const foilWords = foilSearchTerm.split(/\s+/);
+        const wrongParallelQualifiers = [
+          'crackle', 'shimmer', 'ice', 'lava', 'mosaic', 'wave', 'sparkle',
+          'glitter', 'mojo', 'prism', 'atomic', 'mega', 'super', 'hyper',
+          'chrome', 'silk', 'satin', 'marble', 'camo', 'speckle', 'snow',
+          'fire', 'electric', 'neon', 'fluorescent', 'frost', 'arctic',
+          'sapphire', 'ruby', 'emerald', 'diamond', 'platinum', 'titanium'
+        ];
+        for (const qualifier of wrongParallelQualifiers) {
+          if (!foilWords.includes(qualifier) && new RegExp(`\\b${qualifier}\\b`, 'i').test(title)) {
+            score -= 100;
+            console.log(`  ↳ Wrong-parallel penalty (-100): searching "${foilSearchTerm}" but title has "${qualifier}"`);
+            break;
+          }
+        }
+      }
     }
     
     // Penalize generic listings (reduce score)
@@ -711,6 +731,16 @@ export async function searchCardValues(
     // Terms that definitively indicate an autograph
     const HARD_AUTO_TERMS = ['autograph', 'autographed', 'on-card auto', 'signed'];
 
+    const foilSearchTermLower = foilType ? getFoilSearchTerm(foilType).toLowerCase() : '';
+    const foilSearchWords = foilSearchTermLower ? foilSearchTermLower.split(/\s+/) : [];
+    const WRONG_PARALLEL_QUALIFIERS = [
+      'crackle', 'shimmer', 'ice', 'lava', 'mosaic', 'wave', 'sparkle',
+      'glitter', 'mojo', 'prism', 'atomic', 'mega', 'super', 'hyper',
+      'chrome', 'silk', 'satin', 'marble', 'camo', 'speckle', 'snow',
+      'fire', 'electric', 'neon', 'fluorescent', 'frost', 'arctic',
+      'sapphire', 'ruby', 'emerald', 'diamond', 'platinum', 'titanium'
+    ];
+
     const hardFilter = (r: EbaySearchResult): boolean => {
       const t = r.title.toLowerCase();
 
@@ -721,6 +751,18 @@ export async function searchCardValues(
           return re.test(t);
         });
         if (hasAuto) return false;
+      }
+
+      // Filter wrong-parallel listings when a specific parallel is requested.
+      // e.g. searching "Aqua Foil" → filter out "Aqua Crackle Foil" listings.
+      if (foilSearchTermLower && !isBaseCardSearch) {
+        const hasWrongQualifier = WRONG_PARALLEL_QUALIFIERS.some(q =>
+          !foilSearchWords.includes(q) && new RegExp(`\\b${q}\\b`, 'i').test(t)
+        );
+        if (hasWrongQualifier && !t.includes(foilSearchTermLower)) {
+          console.log(`  ↳ Hard-filtered (wrong parallel): searching "${foilSearchTermLower}" but title="${r.title}"`);
+          return false;
+        }
       }
 
       // Filter parallels when card is a base card
