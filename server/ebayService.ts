@@ -267,6 +267,37 @@ function prioritizeListingsByCardMatch(
       score += 30;
       matchedElements.push(`collection ${collection}`);
     }
+
+    // Penalize listings from a DIFFERENT collection/product line when one is specified.
+    // e.g. searching "Bowman Chrome" should not return "Sapphire Edition" or "Draft" listings.
+    if (collection) {
+      const collLower = collection.toLowerCase();
+      const COLLECTION_INDICATORS = [
+        'chrome', 'sapphire', 'sapphire edition', 'draft', 'prospect', 'prospects',
+        'heritage', 'sterling', 'platinum', 'finest', 'stadium club',
+        'gallery', 'select', 'optic', 'prizm', 'mosaic', 'donruss',
+        'series 1', 'series 2', 'series 3', 'update', 'traded',
+        'opening day', 'big league', 'archives', 'allen & ginter',
+        'allen and ginter', 'gypsy queen', 'tier one', 'luminaries',
+        'definitive', 'dynasty', 'tribute', 'museum', 'inception',
+        'gold label', 'five star', 'national treasures', 'immaculate',
+        'flawless', 'noir', 'spectra', 'obsidian', 'clearly authentic',
+        '1st edition', 'first edition', 'mega box', 'holiday',
+        'bowman chrome', 'topps chrome', 'bowman draft', 'bowman sterling',
+      ];
+      const collWords = collLower.split(/\s+/);
+      for (const indicator of COLLECTION_INDICATORS) {
+        const indicatorWords = indicator.split(/\s+/);
+        const isPartOfOurCollection = indicatorWords.every(w => collWords.includes(w));
+        if (isPartOfOurCollection) continue;
+        const re = new RegExp(`\\b${indicator.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+')}\\b`, 'i');
+        if (re.test(title)) {
+          score -= 80;
+          console.log(`  ↳ Wrong-collection penalty (-80): searching "${collection}" but title has "${indicator}"`);
+          break;
+        }
+      }
+    }
     
     // Foil type match (medium priority - 50 points for special variants)
     if (foilType) {
@@ -766,6 +797,31 @@ export async function searchCardValues(
         if (hasWrongQualifier && !t.includes(foilSearchTermLower)) {
           console.log(`  ↳ Hard-filtered (wrong parallel): searching "${foilSearchTermLower}" but title="${r.title}"`);
           return false;
+        }
+      }
+
+      // Filter wrong-collection listings when a specific collection is set.
+      // e.g. searching "Chrome" should not return "Sapphire Edition" or "Draft" results.
+      if (searchCollection) {
+        const HARD_COLLECTION_INDICATORS = [
+          'chrome', 'sapphire', 'sapphire edition', 'draft', 'prospects',
+          'heritage', 'sterling', 'finest', 'stadium club',
+          'gallery', 'select', 'optic', 'prizm', 'mosaic', 'donruss',
+          'series 1', 'series 2', 'series 3', 'update', 'traded',
+          'opening day', 'big league', 'archives', 'allen & ginter',
+          'gypsy queen', 'tier one', 'inception', 'gold label',
+          'national treasures', 'immaculate', 'clearly authentic',
+          '1st edition', 'bowman chrome', 'topps chrome', 'bowman draft',
+        ];
+        const searchCollWords = searchCollection.toLowerCase().split(/\s+/);
+        for (const indicator of HARD_COLLECTION_INDICATORS) {
+          const indWords = indicator.split(/\s+/);
+          if (indWords.every(w => searchCollWords.includes(w))) continue;
+          const re = new RegExp(`\\b${indicator.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+')}\\b`, 'i');
+          if (re.test(t)) {
+            console.log(`  ↳ Hard-filtered (wrong collection): searching "${searchCollection}" but title has "${indicator}" → "${r.title}"`);
+            return false;
+          }
         }
       }
 
