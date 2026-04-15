@@ -59,15 +59,23 @@ function filterBySerialStatus(options: ParallelOption[], isNumbered: boolean): P
   return options.filter(o => !o.serialNumber || o.serialNumber.trim() === "");
 }
 
-// Filter parallel options to those whose serial number limit exactly matches
-// the detected serial number. Both sides are normalized by stripping slashes
-// (e.g. "/499" and "499" both compare as "499").
+// Extract the serial limit (denominator) from detected serial strings.
+// "487/499" → "499",  "/499" → "499",  "499" → "499"
+function extractSerialLimit(serial: string): string {
+  const afterSlash = serial.match(/\/(\d+)\s*$/);
+  if (afterSlash) return afterSlash[1];
+  const bareDigits = serial.match(/^(\d+)$/);
+  if (bareDigits) return bareDigits[1];
+  return "";
+}
+
+// Filter parallel options to those whose serial number limit matches the detected one.
 function filterBySerialNumber(options: ParallelOption[], detectedSerial: string): ParallelOption[] {
-  const normalized = detectedSerial.replace(/\//g, "").trim();
-  if (!normalized) return [];
+  const limit = extractSerialLimit(detectedSerial);
+  if (!limit) return [];
   return options.filter(o => {
     if (!o.serialNumber) return false;
-    return o.serialNumber.replace(/\//g, "").trim() === normalized;
+    return extractSerialLimit(o.serialNumber) === limit;
   });
 }
 
@@ -129,22 +137,45 @@ export default function PriceLookup() {
       const allOptions = await fetchParallels(data.brand, data.year as number, data.collection, data.set);
 
       // STEP 1 — Serial number match (highest confidence).
-      // If we have an exact serial number (e.g. /499), look for DB parallels that
-      // carry that exact limit. Only one parallel should have /499 for a given set,
-      // so this almost always resolves unambiguously without prompting the user.
+      // Filter DB parallels by the exact serial limit (e.g. /499). Multiple parallels
+      // can share the same limit (Refractors /499, Sky Blue /499, Base /499), so when
+      // there are multiple hits we further narrow using the OCR-detected foil keyword.
       if (detectedSerial) {
         const bySerial = filterBySerialNumber(allOptions, detectedSerial);
         if (bySerial.length === 1) {
-          // Unambiguous serial number match — auto-select, no prompt needed
+          // Unambiguous serial match → auto-select, no prompt
           const match = bySerial[0];
           setCardData({ ...data, foilType: match.variationOrParallel, serialNumber: detectedSerial, isNumbered: true });
           setShowPriceResults(true);
           return;
         }
-        if (bySerial.length >= 2) {
-          // Rare: multiple parallels share the same serial number limit — ask the user
+        if (bySerial.length >= 2 && detected) {
+          // Multiple parallels share this serial number — try narrowing by foil keyword
+          const narrowed = filterByKeyword(bySerial, detected);
+          if (narrowed.length === 1) {
+            // Serial + keyword together uniquely identify the parallel → auto-select
+            const match = narrowed[0];
+            setCardData({ ...data, foilType: match.variationOrParallel, serialNumber: detectedSerial, isNumbered: true });
+            setShowPriceResults(true);
+            return;
+          }
+          if (narrowed.length >= 2) {
+            // Still ambiguous after both filters — ask the user, but only show the narrowed set
+            setParallelOptions(narrowed);
+            setDetectedKeyword(extractKeyword(detected));
+            setShowParallelPicker(true);
+            return;
+          }
+          // narrowed to 0 (foil keyword matched nothing in serial set) — show all serial matches
           setParallelOptions(bySerial);
           setDetectedKeyword(extractKeyword(detected));
+          setShowParallelPicker(true);
+          return;
+        }
+        if (bySerial.length >= 2) {
+          // Serial matches but no foil type detected — ask with those options
+          setParallelOptions(bySerial);
+          setDetectedKeyword("");
           setShowParallelPicker(true);
           return;
         }
