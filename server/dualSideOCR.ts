@@ -750,12 +750,33 @@ async function combineCardResults(
       console.log(`Visual indicators: ${visualFoilResult.indicators.join('; ')}`);
     } else if (visualFoilResult && !visualFoilResult.indicators.some(indicator => indicator.includes('Error in visual analysis'))) {
       // Visual detection ran but did not find foil — trust it and clear any foil state.
-      // Serial number alone is not enough evidence; the DB variation lookup already handles
-      // mapping serial numbers to parallel names (e.g. /499 → Sky Blue).
-      combined.foilType = null;
-      combined.isFoil = false;
-      console.log('Visual foil detection rejected foil characteristics — clearing foil state');
-      console.log(`Visual rejection reason: ${visualFoilResult.indicators.join('; ')}`);
+      // EXCEPTION: If the back image explicitly prints the variant name as its very first line
+      // (e.g. "REFRACTOR" on Bowman Chrome autos), that printed label is authoritative.
+      const backFirstLine = (backOCRText || '').split(/\r?\n/)[0]?.trim().toUpperCase() ?? '';
+      const explicitVariantLabels: Record<string, string> = {
+        'REFRACTOR': 'Refractor',
+        'GOLD REFRACTOR': 'Gold Refractor',
+        'BLUE REFRACTOR': 'Blue Refractor',
+        'PURPLE REFRACTOR': 'Purple Refractor',
+        'ATOMIC REFRACTOR': 'Atomic Refractor',
+        'PRIZM': 'Prizm',
+        'CRACKED ICE': 'Cracked Ice',
+        'WAVE': 'Wave',
+        'SPECKLE': 'Speckle',
+      };
+      const labelMatch = explicitVariantLabels[backFirstLine];
+      if (labelMatch) {
+        combined.foilType = labelMatch;
+        combined.isFoil = true;
+        console.log(`[FoilLabel] Back image first line "${backFirstLine}" is an explicit variant label — overriding visual rejection with: ${labelMatch}`);
+      } else {
+        // Serial number alone is not enough evidence; the DB variation lookup already handles
+        // mapping serial numbers to parallel names (e.g. /499 → Sky Blue).
+        combined.foilType = null;
+        combined.isFoil = false;
+        console.log('Visual foil detection rejected foil characteristics — clearing foil state');
+        console.log(`Visual rejection reason: ${visualFoilResult.indicators.join('; ')}`);
+      }
     } else {
       // Visual detection couldn't run, fall back to text-based detection for explicit mentions
       console.log('Visual detection unavailable, falling back to text-based foil detection...');

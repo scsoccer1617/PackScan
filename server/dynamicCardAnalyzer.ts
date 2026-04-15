@@ -754,7 +754,33 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
       }
     }
     
+    // Autograph card numbers: letters-dash-letters (e.g. CPA-LRE, HA-RJ, BA-XX, RC-JD)
+    // These appear on Bowman Prospect Autographs, Heritage Autographs, etc.
+    // Must run BEFORE the plainNumberPattern so CODE#065939 doesn't win over CPA-LRE.
+    const nonCardLetterPrefixes = new Set(['CMP', 'CODE', 'WWW', 'COM', 'INC', 'MLB', 'NFL', 'NBA', 'NHL', 'USA', 'URL', 'AKA', 'DBA', 'LLC', 'LTD', 'REG', 'TM']);
+    const autographCardPattern = /\b([A-Z]{1,4})-([A-Z]{2,5})\b/g;
+    let autographMatch;
+    while ((autographMatch = autographCardPattern.exec(text)) !== null) {
+      const prefix = autographMatch[1];
+      const suffix = autographMatch[2];
+      const fullMatch = autographMatch[0];
+      if (nonCardLetterPrefixes.has(prefix)) continue;
+      if (nonCardLetterPrefixes.has(suffix)) continue;
+      const lineWithMatch = lines.find(line => line.toLowerCase().includes(fullMatch.toLowerCase()));
+      if (!lineWithMatch) continue;
+      // Skip if this appears in a biographical/legal line
+      if (/\b(DRAFTED|DRAFT|BORN|SIGNED|OVERALL|ROUND|PICK|AGENT|FREE|RIGHTS|RESERVED|LICENSED|TRADEMARK|COMPANY|VISIT)\b/i.test(lineWithMatch)) continue;
+      if (/CODE#/i.test(lineWithMatch)) continue;
+      // Require the line to be short (autograph card # lines are typically standalone or near player info)
+      // or appear on a line that isn't a long bio paragraph
+      if (lineWithMatch.length > 120) continue;
+      cardDetails.cardNumber = fullMatch;
+      console.log(`Detected autograph-format card number (letter-letter): ${fullMatch}`);
+      return;
+    }
+
     // Plain number format: #123 or No. 123
+    // Guard: must NOT be a CODE# token from the legal text (e.g. CODE#065939 → skip)
     const plainNumberPattern = /(?:#|No\.?\s*)(\d+)/;
     const plainNumberMatch = text.match(plainNumberPattern);
     if (plainNumberMatch && plainNumberMatch[1]) {
@@ -763,6 +789,8 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
 
       if (lineWithMatch && isDOBFormat(lineWithMatch)) {
         console.log(`Skipping plain number "${candidate}" that appears in a date/stat line`);
+      } else if (lineWithMatch && /CODE#/i.test(lineWithMatch)) {
+        console.log(`Skipping plain number "${candidate}" — matched # is part of a CODE# legal token`);
       } else if (candidate.length === 1) {
         cardDetails.cardNumber = candidate;
       } else {
@@ -1075,7 +1103,7 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>,
       { pattern: /BOWMAN CHROME/i, name: "Bowman Chrome" },
       { pattern: /PRIZM/i, name: "Prizm" },
       { pattern: /OPTIC/i, name: "Optic" },
-      { pattern: /OPENING DAY/i, name: "Opening Day" },
+      { pattern: /\bOPENING DAY\b(?!\s+of\b)/i, name: "Opening Day" },
       { pattern: /UPDATE SERIES/i, name: "Update Series" },
       { pattern: /GOLD LABEL/i, name: "Gold Label" },
       { pattern: /STADIUM CLUB/i, name: "Stadium Club" },
@@ -1274,6 +1302,15 @@ function extractCmpNumber(fullText: string, cardDetails: Partial<CardFormValues>
     const code = `CMP${match[1]}`;
     cardDetails.cmpNumber = code;
     console.log(`[OCR] Detected CMP code in fine print: ${code}`);
+    return;
+  }
+  // Bowman and some Topps products use a bare CODE# format without the "CMP" prefix
+  // e.g. "WWW.TOPPS.COM. CODE#065939" — store the digits directly as the cmpNumber.
+  const bowmanCodePattern = /\bCODE#(\d{4,7})\b/i;
+  const bowmanMatch = fullText.match(bowmanCodePattern);
+  if (bowmanMatch) {
+    cardDetails.cmpNumber = bowmanMatch[1];
+    console.log(`[OCR] Detected Bowman-style CODE# in fine print: ${bowmanMatch[1]}`);
   }
 }
 
