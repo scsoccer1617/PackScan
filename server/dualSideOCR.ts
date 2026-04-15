@@ -584,69 +584,43 @@ async function combineCardResults(
       if (dbResult.found) {
         console.log(`[CardDB] DB hit — ${dbResult.playerFirstName} ${dbResult.playerLastName}, team: ${dbResult.team}, collection: ${dbResult.collection}, cardNumber: ${dbResult.cardNumber}`);
 
-        // Guard: if OCR clearly identified a player name and the DB result has a DIFFERENT player,
-        // the DB matched the wrong card (same card number, wrong set/player). Reject the DB result.
-        // However, if the current name came from a back-image fallback (front OCR was too short/bogus),
-        // the name is low-confidence and should NOT override a DB match.
-        const ocrLastName = (combined.playerLastName || '').trim().toLowerCase();
-        const dbLastName  = (dbResult.playerLastName  || '').trim().toLowerCase();
-        const hasReliableOcrName = !nameFromBackFallback && ocrLastName.length > 1 &&
-          !['ersary', 'ersary', 'anniv', 'stros', 'epps'].includes(ocrLastName); // filter garbled fragments
-        if (hasReliableOcrName && dbLastName && ocrLastName !== dbLastName) {
-          console.log(`[CardDB] Player mismatch — OCR: "${combined.playerFirstName} ${combined.playerLastName}", DB: "${dbResult.playerFirstName} ${dbResult.playerLastName}" — rejecting DB result to protect OCR player name`);
-        } else {
-        // Override player name with authoritative DB value
+        const ocrName = `${combined.playerFirstName || ''} ${combined.playerLastName || ''}`.trim();
+        const dbName  = `${dbResult.playerFirstName || ''} ${dbResult.playerLastName || ''}`.trim();
+        if (ocrName.toLowerCase() !== dbName.toLowerCase()) {
+          console.log(`[CardDB] OCR name "${ocrName}" differs from DB "${dbName}" — trusting DB (brand+year+cardNumber match is authoritative)`);
+        }
+
         if (dbResult.playerFirstName) combined.playerFirstName = dbResult.playerFirstName;
         if (dbResult.playerLastName)  combined.playerLastName  = dbResult.playerLastName;
 
-        // Override team from DB (often not in OCR)
         if (dbResult.team && !combined.notes) combined.notes = `Team: ${dbResult.team}`;
 
-        // DB collection is authoritative — always override OCR collection.
-        // OCR often reads the product set name ("Series One") as the collection,
-        // but the DB knows the correct subset name ("Base Set").
         if (dbResult.collection) combined.collection = dbResult.collection;
 
-        // Use authoritative DB card number if it's more complete than what OCR detected.
-        // E.g. OCR reads "T91" but DB has "T91-13" — use the full DB value.
         if (dbResult.cardNumber) {
           const ocrNum = (combined.cardNumber || '').replace(/^#/, '').trim().toLowerCase();
           const dbNum  = dbResult.cardNumber.replace(/^#/, '').trim().toLowerCase();
-          // Use DB number if OCR number is a prefix of DB number (i.e., OCR was truncated)
-          // or if they match exactly
           if (ocrNum === dbNum || dbNum.startsWith(ocrNum)) {
             console.log(`[CardDB] Card number set from DB: ${dbResult.cardNumber} (OCR had: ${combined.cardNumber})`);
             combined.cardNumber = dbResult.cardNumber;
           }
         }
 
-        // CMP code from DB
         if (dbResult.cmpNumber) combined.cmpNumber = dbResult.cmpNumber;
 
-        // Set from DB
         if (dbResult.set) combined.set = dbResult.set;
 
-        // Rookie card from DB
         if (dbResult.isRookieCard) combined.isRookieCard = true;
 
-        // NOTE: DB variation names (e.g. "Magenta Refractors", "Yellow Rainbow Foil") are parallels,
-        // not card variants. Variant is reserved for short prints / image variations driven by
-        // CMP code mappings. Until CMP mappings are built, variant stays blank (Base/Standard).
-
-        // Serial number from DB variation (only if OCR didn't find one)
         if (dbResult.serialNumber && !combined.serialNumber) {
           combined.serialNumber = dbResult.serialNumber;
           if (/\/\d+/.test(dbResult.serialNumber)) combined.isNumbered = true;
         }
 
-        // Stash the DB-resolved parallel/variation name (e.g. "Aqua", "Yellow Rainbow Foil").
-        // We apply it AFTER visual/text foil detection so visual detection can still override;
-        // but when detection fails, this becomes the authoritative foilType source.
         if (dbResult.variation) {
           dbVariation = dbResult.variation;
           console.log(`[CardDB] Stashed DB variation for foil fallback: "${dbResult.variation}"`);
         }
-        } // end else (player names matched or OCR name was unreliable)
       } else {
         console.log('[CardDB] No DB match — proceeding with OCR-only results');
       }
