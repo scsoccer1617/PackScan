@@ -435,7 +435,7 @@ async function combineCardResults(
     'AVG', 'SLG', 'OBP', 'ERA', 'RBI', 'HR', 'BB', 'SO', 'AB',
     'TOTALS', 'MAJ', 'LEA', 'THIRD', 'FIRST', 'SECOND', 'BASE',
     'OUTFIELD', 'HOUSTON', 'MILWAUKEE', 'PHILADELPHIA', 'CHICAGO',
-    'EPPS', 'STROS', 'OXY', 'LAPPS',
+    'EPPS', 'STROS', 'OXY', 'LAPPS', 'MLBPLAYERS', 'MLBPA',
     'LOP', 'PPS', 'TANKY', 'LOPPS',
     'KC', 'TB', 'LA', 'NY', 'SF', 'SD', 'STL', 'CLE', 'DET', 'MIN', 'CHC', 'CHW', 'CWS',
     'MIL', 'PIT', 'CIN', 'ATL', 'MIA', 'PHI', 'NYM', 'NYY', 'BOS', 'BAL', 'TOR',
@@ -463,17 +463,13 @@ async function combineCardResults(
   
   const frontNameBogus = isBogusFn(combined.playerFirstName, combined.playerLastName);
   const backNameBogus = isBogusFn(backResult.playerFirstName, backResult.playerLastName);
-  // Very short front OCR (< 50 chars) means poor image quality / foil surface that OCR couldn't
-  // read reliably — prefer back name in that case even if front name passed the bogus check.
-  const frontOCRTooShort = frontOCRText.trim().length < 50;
   
-  let nameFromBackFallback = false;
-  if ((frontNameBogus || frontOCRTooShort) && !backNameBogus && backResult.playerFirstName && backResult.playerLastName) {
-    const reason = frontNameBogus ? 'bogus name' : `very short front OCR (${frontOCRText.trim().length} chars)`;
-    console.log(`Front player name "${combined.playerFirstName} ${combined.playerLastName}" unreliable (${reason}), using back: "${backResult.playerFirstName} ${backResult.playerLastName}"`);
+  if (frontNameBogus && !backNameBogus && backResult.playerFirstName && backResult.playerLastName) {
+    console.log(`Front player name "${combined.playerFirstName} ${combined.playerLastName}" is bogus, using back: "${backResult.playerFirstName} ${backResult.playerLastName}"`);
     combined.playerFirstName = backResult.playerFirstName;
     combined.playerLastName = backResult.playerLastName;
-    nameFromBackFallback = true;
+  } else if (!frontNameBogus) {
+    console.log(`Front player name "${combined.playerFirstName} ${combined.playerLastName}" looks valid — keeping it (front is authoritative for player name)`);
   }
   
   if (!frontNameBogus && !backNameBogus &&
@@ -622,7 +618,50 @@ async function combineCardResults(
           console.log(`[CardDB] Stashed DB variation for foil fallback: "${dbResult.variation}"`);
         }
       } else {
-        console.log('[CardDB] No DB match — proceeding with OCR-only results');
+        // Fallback: if back card number failed and front has a different card number, retry with front's
+        const frontNum = String(frontResult.cardNumber || '').trim();
+        const backNum = String(combined.cardNumber || '').trim();
+        if (frontNum && frontNum !== backNum) {
+          console.log(`[CardDB] No match with back cardNumber="${backNum}" — retrying with front cardNumber="${frontNum}"`);
+          try {
+            const fallbackResult = await lookupCard({
+              brand: combined.brand,
+              year: combined.year,
+              cardNumber: frontNum,
+              collection: combined.collection || frontResult.collection,
+              serialNumber: combined.serialNumber,
+              playerLastName: combined.playerLastName,
+            });
+            if (fallbackResult.found) {
+              console.log(`[CardDB] Fallback DB hit — ${fallbackResult.playerFirstName} ${fallbackResult.playerLastName}, team: ${fallbackResult.team}, collection: ${fallbackResult.collection}, cardNumber: ${fallbackResult.cardNumber}`);
+              if (fallbackResult.playerFirstName) combined.playerFirstName = fallbackResult.playerFirstName;
+              if (fallbackResult.playerLastName)  combined.playerLastName  = fallbackResult.playerLastName;
+              if (fallbackResult.team && !combined.notes) combined.notes = `Team: ${fallbackResult.team}`;
+              if (fallbackResult.collection) combined.collection = fallbackResult.collection;
+              if (fallbackResult.cardNumber) {
+                console.log(`[CardDB] Card number corrected from DB: ${fallbackResult.cardNumber} (back had: ${backNum}, front had: ${frontNum})`);
+                combined.cardNumber = fallbackResult.cardNumber;
+              }
+              if (fallbackResult.cmpNumber) combined.cmpNumber = fallbackResult.cmpNumber;
+              if (fallbackResult.set) combined.set = fallbackResult.set;
+              if (fallbackResult.isRookieCard) combined.isRookieCard = true;
+              if (fallbackResult.serialNumber && !combined.serialNumber) {
+                combined.serialNumber = fallbackResult.serialNumber;
+                if (/\/\d+/.test(fallbackResult.serialNumber)) combined.isNumbered = true;
+              }
+              if (fallbackResult.variation) {
+                dbVariation = fallbackResult.variation;
+                console.log(`[CardDB] Stashed DB variation for foil fallback: "${fallbackResult.variation}"`);
+              }
+            } else {
+              console.log('[CardDB] Fallback lookup also found no match — proceeding with OCR-only results');
+            }
+          } catch (fallbackErr: any) {
+            console.error('[CardDB] Fallback lookup failed (non-fatal):', fallbackErr.message);
+          }
+        } else {
+          console.log('[CardDB] No DB match — proceeding with OCR-only results');
+        }
       }
     } catch (err: any) {
       console.error('[CardDB] Lookup failed (non-fatal):', err.message);
