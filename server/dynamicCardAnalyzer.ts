@@ -1357,26 +1357,85 @@ async function extractSerialNumber(text: string, cardDetails: Partial<CardFormVa
  * CMP codes follow the pattern: "CMP" followed by 4–10 digits (e.g. "CMP100358").
  * They appear in copyright/legal text such as:
  *   "© 2025 Topps, LLC. All rights reserved. CMP100358"
- * The full OCR text (not uppercased) is used to handle mixed-case prints.
+ *
+ * OCR commonly garbles the tiny legal text, producing variants like:
+ *   - "CMP 100358" (space inserted)
+ *   - "CMP1OO358" (digits read as letters)
+ *   - "CMPI00358" or "CMPIO0358" (leading digit misread)
+ *   - "CHP100358", "CNP100358", "GMP100358" (letter misreads)
+ *   - "CMPID0358" (digit-letter transpositions)
+ *   - Newline between CMP and digits
  */
 function extractCmpNumber(fullText: string, cardDetails: Partial<CardFormValues>): void {
-  // Match "CMP" (case-insensitive) followed immediately by 4–10 digits.
-  // Not preceded by another letter (to avoid matching things like "ACMP123").
-  const cmpPattern = /(?<![A-Za-z])CMP(\d{4,10})/i;
-  const match = fullText.match(cmpPattern);
-  if (match) {
-    const code = `CMP${match[1]}`;
+  // 1. Exact match: "CMP" immediately followed by digits (most reliable)
+  const exactPattern = /(?<![A-Za-z])CMP(\d{4,10})/i;
+  const exactMatch = fullText.match(exactPattern);
+  if (exactMatch) {
+    const code = `CMP${exactMatch[1]}`;
     cardDetails.cmpNumber = code;
-    console.log(`[OCR] Detected CMP code in fine print: ${code}`);
+    console.log(`[OCR] Detected CMP code: ${code}`);
     return;
   }
-  // Bowman and some Topps products use a bare CODE# format without the "CMP" prefix
-  // e.g. "WWW.TOPPS.COM. CODE#065939" — store the digits directly as the cmpNumber.
-  const bowmanCodePattern = /\bCODE#(\d{4,7})\b/i;
+
+  // 2. Space/newline between CMP and digits: "CMP 100358" or "CMP\n100358"
+  const spacedPattern = /(?<![A-Za-z])CMP[\s\n]+(\d{4,10})/i;
+  const spacedMatch = fullText.match(spacedPattern);
+  if (spacedMatch) {
+    const code = `CMP${spacedMatch[1]}`;
+    cardDetails.cmpNumber = code;
+    console.log(`[OCR] Detected CMP code (with space): ${code}`);
+    return;
+  }
+
+  // 3. OCR-garbled CMP prefix: common misreads of "CMP" in tiny print
+  //    CHP, CNP, GMP, CMF, CWP, etc. — followed by digits
+  const garbledPrefixPattern = /(?<![A-Za-z])(?:C[HMWN]P|[GC]MP|CM[FPB])[\s\n]*(\d{4,10})/i;
+  const garbledPrefixMatch = fullText.match(garbledPrefixPattern);
+  if (garbledPrefixMatch) {
+    const code = `CMP${garbledPrefixMatch[1]}`;
+    cardDetails.cmpNumber = code;
+    console.log(`[OCR] Detected CMP code (garbled prefix "${garbledPrefixMatch[0].trim()}"): ${code}`);
+    return;
+  }
+
+  // 4. Mixed letter/digit OCR errors in the digit string: "CMP1OO358" where O→0
+  //    Match CMP followed by a mix of digits and O/I/l that looks like a code
+  const mixedPattern = /(?<![A-Za-z])CMP[\s\n]*([0-9OoIl]{4,10})/i;
+  const mixedMatch = fullText.match(mixedPattern);
+  if (mixedMatch) {
+    const cleaned = mixedMatch[1]
+      .replace(/[Oo]/g, '0')
+      .replace(/[Iil]/g, '1');
+    if (/^\d{4,10}$/.test(cleaned)) {
+      const code = `CMP${cleaned}`;
+      cardDetails.cmpNumber = code;
+      console.log(`[OCR] Detected CMP code (OCR digit fix "${mixedMatch[1]}" → "${cleaned}"): ${code}`);
+      return;
+    }
+  }
+
+  // 5. Bowman and some Topps products use a bare CODE# format without the "CMP" prefix
+  //    e.g. "WWW.TOPPS.COM. CODE#065939"
+  const bowmanCodePattern = /\bCODE[\s]*#[\s]*(\d{4,7})\b/i;
   const bowmanMatch = fullText.match(bowmanCodePattern);
   if (bowmanMatch) {
     cardDetails.cmpNumber = bowmanMatch[1];
     console.log(`[OCR] Detected Bowman-style CODE# in fine print: ${bowmanMatch[1]}`);
+    return;
+  }
+
+  // 6. Last resort: look for a standalone 5-8 digit number at the very end of the text
+  //    (last 200 chars) near copyright/legal context — many cards end with the CMP code
+  //    as the final token on the card back.
+  const tail = fullText.slice(-200);
+  if (/(?:©|\(C\)|topps|panini|upper\s*deck|donruss|bowman|llc|inc\.|reserved)/i.test(tail)) {
+    const endDigits = tail.match(/\b(\d{5,8})\s*$/);
+    if (endDigits) {
+      const code = `CMP${endDigits[1]}`;
+      cardDetails.cmpNumber = code;
+      console.log(`[OCR] Detected likely CMP code at end of legal text: ${code}`);
+      return;
+    }
   }
 }
 
