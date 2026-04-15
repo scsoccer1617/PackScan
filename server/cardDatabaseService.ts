@@ -94,10 +94,14 @@ export async function importCardsCSV(csvBuffer: Buffer, onProgress?: (processed:
 
   for (const combo of brandYearCombos) {
     const [bId, yr] = combo.split('|');
-    const deleted = await db.delete(cardDatabase)
-      .where(and(eq(cardDatabase.brandId, bId), eq(cardDatabase.year, parseInt(yr))))
-      .returning({ id: cardDatabase.id });
-    replaced += deleted.length;
+    const [countRow] = await db.select({ count: sql<number>`count(*)::int` }).from(cardDatabase)
+      .where(and(eq(cardDatabase.brandId, bId), eq(cardDatabase.year, parseInt(yr))));
+    const delCount = countRow?.count ?? 0;
+    if (delCount > 0) {
+      await db.delete(cardDatabase)
+        .where(and(eq(cardDatabase.brandId, bId), eq(cardDatabase.year, parseInt(yr))));
+      replaced += delCount;
+    }
   }
   if (replaced > 0) console.log(`[CardDB] Removed ${replaced} existing card rows before re-import`);
 
@@ -200,10 +204,14 @@ export async function importVariationsCSV(csvBuffer: Buffer, onProgress?: (proce
 
   for (const combo of brandYearCombos) {
     const [bId, yr] = combo.split('|');
-    const deleted = await db.delete(cardVariations)
-      .where(and(eq(cardVariations.brandId, bId), eq(cardVariations.year, parseInt(yr))))
-      .returning({ id: cardVariations.id });
-    replaced += deleted.length;
+    const [countRow] = await db.select({ count: sql<number>`count(*)::int` }).from(cardVariations)
+      .where(and(eq(cardVariations.brandId, bId), eq(cardVariations.year, parseInt(yr))));
+    const delCount = countRow?.count ?? 0;
+    if (delCount > 0) {
+      await db.delete(cardVariations)
+        .where(and(eq(cardVariations.brandId, bId), eq(cardVariations.year, parseInt(yr))));
+      replaced += delCount;
+    }
   }
   if (replaced > 0) console.log(`[CardDB] Removed ${replaced} existing variation rows before re-import`);
 
