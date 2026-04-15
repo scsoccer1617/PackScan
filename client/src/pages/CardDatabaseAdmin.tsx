@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -20,6 +20,14 @@ interface ImportResult {
   replaced: number;
   errors: string[];
   errorCount: number;
+  error?: string;
+}
+
+interface ImportJobStatus {
+  status: 'queued' | 'running' | 'done' | 'error';
+  type: 'cards' | 'variations';
+  progress: { processed: number; total: number };
+  result?: { imported: number; replaced: number; errorCount: number; errors: string[] };
   error?: string;
 }
 
@@ -106,6 +114,10 @@ function AdminPanel({ password, onLock }: { password: string; onLock: () => void
 
   const [cardsResult, setCardsResult] = useState<ImportResult | null>(null);
   const [variationsResult, setVariationsResult] = useState<ImportResult | null>(null);
+  const [cardsJobId, setCardsJobId] = useState<string | null>(null);
+  const [variationsJobId, setVariationsJobId] = useState<string | null>(null);
+  const [cardsJob, setCardsJob] = useState<ImportJobStatus | null>(null);
+  const [variationsJob, setVariationsJob] = useState<ImportJobStatus | null>(null);
 
   const authHeader = { "x-admin-password": password };
 
@@ -113,18 +125,57 @@ function AdminPanel({ password, onLock }: { password: string; onLock: () => void
     queryKey: ["/api/card-database/stats"],
   });
 
+  // ── Poll for job status ──────────────────────────────────────────────────
+  const pollJob = useCallback(async (jobId: string, isCards: boolean) => {
+    try {
+      const res = await fetch(`/api/card-database/import-status/${jobId}`, { headers: authHeader });
+      if (res.status === 401) { onLock(); return; }
+      if (!res.ok) return;
+      const job: ImportJobStatus = await res.json();
+      if (isCards) setCardsJob(job); else setVariationsJob(job);
+
+      if (job.status === 'done' && job.result) {
+        queryClient.invalidateQueries({ queryKey: ["/api/card-database/stats"] });
+        const r = job.result;
+        const result: ImportResult = { success: true, imported: r.imported, replaced: r.replaced, errors: r.errors, errorCount: r.errorCount };
+        if (isCards) { setCardsResult(result); setCardsJobId(null); setCardsJob(null); }
+        else { setVariationsResult(result); setVariationsJobId(null); setVariationsJob(null); }
+        const label = isCards ? 'Cards imported' : 'Variations imported';
+        const desc = r.replaced > 0
+          ? `${r.imported.toLocaleString()} rows loaded (${r.replaced.toLocaleString()} replaced).`
+          : `${r.imported.toLocaleString()} rows loaded.`;
+        toast({ title: label, description: desc });
+      } else if (job.status === 'error') {
+        if (isCards) { setCardsJobId(null); setCardsJob(null); }
+        else { setVariationsJobId(null); setVariationsJob(null); }
+        toast({ title: "Import failed", description: job.error || "Unknown error", variant: "destructive" });
+      }
+    } catch { /* ignore transient poll errors */ }
+  }, [password]);
+
+  useEffect(() => {
+    if (!cardsJobId) return;
+    pollJob(cardsJobId, true);
+    const id = setInterval(() => pollJob(cardsJobId, true), 2000);
+    return () => clearInterval(id);
+  }, [cardsJobId, pollJob]);
+
+  useEffect(() => {
+    if (!variationsJobId) return;
+    pollJob(variationsJobId, false);
+    const id = setInterval(() => pollJob(variationsJobId, false), 2000);
+    return () => clearInterval(id);
+  }, [variationsJobId, pollJob]);
+
+  // ── Upload mutation — returns {jobId} immediately ────────────────────────
   const uploadMutation = useMutation({
     mutationFn: async ({ file, endpoint }: { file: File; endpoint: string }) => {
       const formData = new FormData();
       formData.append("file", file);
       let res: Response;
       try {
-        res = await fetch(endpoint, {
-          method: "POST",
-          body: formData,
-          headers: authHeader,
-        });
-      } catch (networkErr: any) {
+        res = await fetch(endpoint, { method: "POST", body: formData, headers: authHeader });
+      } catch {
         throw new Error("Cannot reach server — it may be restarting. Please wait a moment and try again.");
       }
       if (res.status === 401) throw new Error("Unauthorized");
@@ -134,7 +185,7 @@ function AdminPanel({ password, onLock }: { password: string; onLock: () => void
         try { const j = await res.json(); msg = j.error || msg; } catch {}
         throw new Error(msg);
       }
-      return res.json() as Promise<ImportResult>;
+      return res.json() as Promise<{ jobId: string }>;
     },
     onError: (err: Error) => {
       if (err.message === "Unauthorized") {
@@ -146,10 +197,7 @@ function AdminPanel({ password, onLock }: { password: string; onLock: () => void
 
   const clearMutation = useMutation({
     mutationFn: async () => {
-      const res = await fetch("/api/card-database/clear", {
-        method: "DELETE",
-        headers: authHeader,
-      });
+      const res = await fetch("/api/card-database/clear", { method: "DELETE", headers: authHeader });
       if (res.status === 401) throw new Error("Unauthorized");
       return res.json();
     },
@@ -173,15 +221,10 @@ function AdminPanel({ password, onLock }: { password: string; onLock: () => void
     const file = cardsFileRef.current?.files?.[0];
     if (!file) { toast({ title: "No file selected", variant: "destructive" }); return; }
     setCardsResult(null);
+    setCardsJob(null);
     try {
-      const result = await uploadMutation.mutateAsync({ file, endpoint: "/api/card-database/import-cards" });
-      setCardsResult(result);
-      if (result.success) {
-        queryClient.invalidateQueries({ queryKey: ["/api/card-database/stats"] });
-        toast({ title: "Cards imported", description: result.replaced > 0 ? `${result.imported.toLocaleString()} cards loaded (${result.replaced.toLocaleString()} previous rows replaced).` : `${result.imported.toLocaleString()} cards loaded.` });
-      } else {
-        toast({ title: "Import failed", description: result.error, variant: "destructive" });
-      }
+      const { jobId } = await uploadMutation.mutateAsync({ file, endpoint: "/api/card-database/import-cards" });
+      setCardsJobId(jobId);
     } catch (err: any) {
       if (err?.message !== "Unauthorized") {
         toast({ title: "Import failed", description: err?.message || "Unknown error — please try again.", variant: "destructive" });
@@ -193,15 +236,10 @@ function AdminPanel({ password, onLock }: { password: string; onLock: () => void
     const file = variationsFileRef.current?.files?.[0];
     if (!file) { toast({ title: "No file selected", variant: "destructive" }); return; }
     setVariationsResult(null);
+    setVariationsJob(null);
     try {
-      const result = await uploadMutation.mutateAsync({ file, endpoint: "/api/card-database/import-variations" });
-      setVariationsResult(result);
-      if (result.success) {
-        queryClient.invalidateQueries({ queryKey: ["/api/card-database/stats"] });
-        toast({ title: "Variations imported", description: result.replaced > 0 ? `${result.imported.toLocaleString()} variations loaded (${result.replaced.toLocaleString()} previous rows replaced).` : `${result.imported.toLocaleString()} variations loaded.` });
-      } else {
-        toast({ title: "Import failed", description: result.error, variant: "destructive" });
-      }
+      const { jobId } = await uploadMutation.mutateAsync({ file, endpoint: "/api/card-database/import-variations" });
+      setVariationsJobId(jobId);
     } catch (err: any) {
       if (err?.message !== "Unauthorized") {
         toast({ title: "Import failed", description: err?.message || "Unknown error — please try again.", variant: "destructive" });
@@ -209,7 +247,8 @@ function AdminPanel({ password, onLock }: { password: string; onLock: () => void
     }
   };
 
-  const isPending = uploadMutation.isPending;
+  const cardsRunning = !!cardsJobId;
+  const variationsRunning = !!variationsJobId;
 
   return (
     <div className="p-4 space-y-5">
@@ -267,13 +306,16 @@ function AdminPanel({ password, onLock }: { password: string; onLock: () => void
             accept=".csv"
             className="block w-full text-sm text-slate-500 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-xs file:font-medium file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
           />
-          <Button onClick={handleCardsImport} disabled={isPending} size="sm" className="w-full">
-            {isPending ? (
-              <><RefreshCw className="w-3.5 h-3.5 mr-1.5 animate-spin" /> Importing…</>
+          <Button onClick={handleCardsImport} disabled={cardsRunning || uploadMutation.isPending} size="sm" className="w-full">
+            {cardsRunning || (uploadMutation.isPending) ? (
+              <><RefreshCw className="w-3.5 h-3.5 mr-1.5 animate-spin" /> {uploadMutation.isPending ? "Uploading…" : "Importing…"}</>
             ) : (
               <><Upload className="w-3.5 h-3.5 mr-1.5" /> Import Cards</>
             )}
           </Button>
+          {cardsJob && (cardsJob.status === 'queued' || cardsJob.status === 'running') && (
+            <ImportProgress job={cardsJob} color="blue" />
+          )}
           {cardsResult && <ImportResultBadge result={cardsResult} label="cards" />}
         </CardContent>
       </Card>
@@ -295,17 +337,20 @@ function AdminPanel({ password, onLock }: { password: string; onLock: () => void
           />
           <Button
             onClick={handleVariationsImport}
-            disabled={isPending}
+            disabled={variationsRunning || uploadMutation.isPending}
             size="sm"
             variant="outline"
             className="w-full border-purple-300 text-purple-700 hover:bg-purple-50"
           >
-            {isPending ? (
-              <><RefreshCw className="w-3.5 h-3.5 mr-1.5 animate-spin" /> Importing…</>
+            {variationsRunning || uploadMutation.isPending ? (
+              <><RefreshCw className="w-3.5 h-3.5 mr-1.5 animate-spin" /> {uploadMutation.isPending ? "Uploading…" : "Importing…"}</>
             ) : (
               <><Upload className="w-3.5 h-3.5 mr-1.5" /> Import Variations</>
             )}
           </Button>
+          {variationsJob && (variationsJob.status === 'queued' || variationsJob.status === 'running') && (
+            <ImportProgress job={variationsJob} color="purple" />
+          )}
           {variationsResult && <ImportResultBadge result={variationsResult} label="variations" />}
         </CardContent>
       </Card>
@@ -335,6 +380,32 @@ function AdminPanel({ password, onLock }: { password: string; onLock: () => void
           </Button>
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+// ── Progress bar shown while a background import job is running ───────────────
+function ImportProgress({ job, color }: { job: ImportJobStatus; color: 'blue' | 'purple' }) {
+  const { processed, total } = job.progress;
+  const pct = total > 0 ? Math.round((processed / total) * 100) : 0;
+  const barColor = color === 'blue' ? 'bg-blue-500' : 'bg-purple-500';
+  const textColor = color === 'blue' ? 'text-blue-600' : 'text-purple-600';
+  return (
+    <div className="space-y-1.5">
+      <div className="flex justify-between text-xs text-muted-foreground">
+        <span className={`font-medium ${textColor}`}>
+          {job.status === 'queued' ? 'Preparing…' : `Inserting rows… ${pct}%`}
+        </span>
+        {total > 0 && (
+          <span>{processed.toLocaleString()} / {total.toLocaleString()}</span>
+        )}
+      </div>
+      <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+        <div
+          className={`h-full ${barColor} rounded-full transition-all duration-500`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
     </div>
   );
 }

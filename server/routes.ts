@@ -1,6 +1,7 @@
 import express, { Express, Request, Response, NextFunction } from 'express';
 import { Server, createServer } from 'http';
 import multer from 'multer';
+import { randomUUID } from 'crypto';
 import { db } from '../db';
 import { and, desc, eq, gte, isNull, sql, max } from 'drizzle-orm';
 import { syncConfirmedCard } from './syncDatabase';
@@ -35,6 +36,76 @@ const upload = multer({
     fileSize: 60 * 1024 * 1024, // 60MB limit to accommodate large CSVs and high-res card photos
   },
 });
+
+// ─── Background Import Job Tracking ─────────────────────────────────────────
+interface ImportJobState {
+  status: 'queued' | 'running' | 'done' | 'error';
+  type: 'cards' | 'variations';
+  progress: { processed: number; total: number };
+  result?: { imported: number; replaced: number; errorCount: number; errors: string[] };
+  error?: string;
+  startedAt: number;
+}
+const importJobs = new Map<string, ImportJobState>();
+// Evict completed jobs older than 2 hours every 30 minutes
+setInterval(() => {
+  const cutoff = Date.now() - 7_200_000;
+  for (const [id, job] of importJobs.entries()) {
+    if (job.startedAt < cutoff) importJobs.delete(id);
+  }
+}, 1_800_000).unref();
+
+async function runCardsImportJob(jobId: string, buffer: Buffer, countBefore: number): Promise<void> {
+  const job = importJobs.get(jobId);
+  if (!job) return;
+  job.status = 'running';
+  try {
+    const result = await importCardsCSV(buffer, (processed, total) => {
+      const j = importJobs.get(jobId);
+      if (j) j.progress = { processed, total };
+    });
+    if (result.errors.length > 0) {
+      console.log(`[CardDB] Import skipped ${result.errors.length} row(s) (first 5):`);
+      result.errors.slice(0, 5).forEach(e => console.log(`  • ${e}`));
+    }
+    const [afterRow] = await db.select({ count: sql<number>`count(*)::int` }).from(cardDatabase);
+    const countAfter = afterRow?.count ?? 0;
+    await db.insert(importHistory).values({ type: 'cards', countBefore, countAfter, delta: countAfter - countBefore });
+    job.status = 'done';
+    job.result = { imported: result.imported, replaced: result.replaced, errorCount: result.errors.length, errors: result.errors.slice(0, 200) };
+    job.progress = { processed: result.imported, total: result.imported };
+  } catch (err: any) {
+    console.error('[CardDB] Background cards import error:', err);
+    const j = importJobs.get(jobId);
+    if (j) { j.status = 'error'; j.error = err.message || 'Unknown error'; }
+  }
+}
+
+async function runVariationsImportJob(jobId: string, buffer: Buffer, countBefore: number): Promise<void> {
+  const job = importJobs.get(jobId);
+  if (!job) return;
+  job.status = 'running';
+  try {
+    const result = await importVariationsCSV(buffer, (processed, total) => {
+      const j = importJobs.get(jobId);
+      if (j) j.progress = { processed, total };
+    });
+    if (result.errors.length > 0) {
+      console.log(`[CardDB] Variations import skipped ${result.errors.length} row(s) (first 5):`);
+      result.errors.slice(0, 5).forEach(e => console.log(`  • ${e}`));
+    }
+    const [afterRow] = await db.select({ count: sql<number>`count(*)::int` }).from(cardVariations);
+    const countAfter = afterRow?.count ?? 0;
+    await db.insert(importHistory).values({ type: 'variations', countBefore, countAfter, delta: countAfter - countBefore });
+    job.status = 'done';
+    job.result = { imported: result.imported, replaced: result.replaced, errorCount: result.errors.length, errors: result.errors.slice(0, 200) };
+    job.progress = { processed: result.imported, total: result.imported };
+  } catch (err: any) {
+    console.error('[CardDB] Background variations import error:', err);
+    const j = importJobs.get(jobId);
+    if (j) { j.status = 'error'; j.error = err.message || 'Unknown error'; }
+  }
+}
 
 // Define a proper interface for multer file objects
 interface MulterFile {
@@ -1666,85 +1737,54 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
   }
 
-  // POST /api/card-database/import-cards — upload cards CSV
+  // POST /api/card-database/import-cards — upload cards CSV (returns job ID immediately)
   app.post(
     `${apiPrefix}/card-database/import-cards`,
     requireAdminPassword,
     handleUpload,
     async (req: MulterRequest, res) => {
       try {
-        if (!req.file) {
-          return res.status(400).json({ error: 'No file provided' });
-        }
-        const [beforeCount] = await db.select({ count: sql<number>`count(*)::int` }).from(cardDatabase);
-        const countBefore = beforeCount?.count ?? 0;
-        const result = await importCardsCSV(req.file.buffer);
-        if (result.errors.length > 0) {
-          console.log(`[CardDB] Import skipped ${result.errors.length} row(s):`);
-          result.errors.forEach(e => console.log(`  • ${e}`));
-        }
-        // Record import event using true post-import table total
-        const [afterCount] = await db.select({ count: sql<number>`count(*)::int` }).from(cardDatabase);
-        const countAfter = afterCount?.count ?? 0;
-        await db.insert(importHistory).values({
-          type: 'cards',
-          countBefore,
-          countAfter,
-          delta: countAfter - countBefore,
-        });
-        return res.json({
-          success: true,
-          imported: result.imported,
-          replaced: result.replaced,
-          errors: result.errors,
-          errorCount: result.errors.length,
-        });
+        if (!req.file) return res.status(400).json({ error: 'No file provided' });
+        const [beforeRow] = await db.select({ count: sql<number>`count(*)::int` }).from(cardDatabase);
+        const countBefore = beforeRow?.count ?? 0;
+        const jobId = randomUUID();
+        importJobs.set(jobId, { status: 'queued', type: 'cards', progress: { processed: 0, total: 0 }, startedAt: Date.now() });
+        runCardsImportJob(jobId, req.file.buffer, countBefore); // intentionally not awaited
+        return res.json({ jobId });
       } catch (error: any) {
-        console.error('Error importing cards CSV:', error);
-        return res.status(500).json({ error: error.message || 'Failed to import cards CSV' });
+        console.error('Error starting cards import job:', error);
+        return res.status(500).json({ error: error.message || 'Failed to start import' });
       }
     }
   );
 
-  // POST /api/card-database/import-variations — upload variations CSV
+  // POST /api/card-database/import-variations — upload variations CSV (returns job ID immediately)
   app.post(
     `${apiPrefix}/card-database/import-variations`,
     requireAdminPassword,
     handleUpload,
     async (req: MulterRequest, res) => {
       try {
-        if (!req.file) {
-          return res.status(400).json({ error: 'No file provided' });
-        }
-        const [beforeCount] = await db.select({ count: sql<number>`count(*)::int` }).from(cardVariations);
-        const countBefore = beforeCount?.count ?? 0;
-        const result = await importVariationsCSV(req.file.buffer);
-        if (result.errors.length > 0) {
-          console.log(`[CardDB] Variations import skipped ${result.errors.length} row(s):`);
-          result.errors.forEach(e => console.log(`  • ${e}`));
-        }
-        // Record import event using true post-import table total
-        const [afterCount] = await db.select({ count: sql<number>`count(*)::int` }).from(cardVariations);
-        const countAfter = afterCount?.count ?? 0;
-        await db.insert(importHistory).values({
-          type: 'variations',
-          countBefore,
-          countAfter,
-          delta: countAfter - countBefore,
-        });
-        return res.json({
-          success: true,
-          imported: result.imported,
-          replaced: result.replaced,
-          errors: result.errors,
-          errorCount: result.errors.length,
-        });
+        if (!req.file) return res.status(400).json({ error: 'No file provided' });
+        const [beforeRow] = await db.select({ count: sql<number>`count(*)::int` }).from(cardVariations);
+        const countBefore = beforeRow?.count ?? 0;
+        const jobId = randomUUID();
+        importJobs.set(jobId, { status: 'queued', type: 'variations', progress: { processed: 0, total: 0 }, startedAt: Date.now() });
+        runVariationsImportJob(jobId, req.file.buffer, countBefore); // intentionally not awaited
+        return res.json({ jobId });
       } catch (error: any) {
-        console.error('Error importing variations CSV:', error);
-        return res.status(500).json({ error: error.message || 'Failed to import variations CSV' });
+        console.error('Error starting variations import job:', error);
+        return res.status(500).json({ error: error.message || 'Failed to start import' });
       }
     }
   );
+
+  // GET /api/card-database/import-status/:jobId — poll for background import progress
+  app.get(`${apiPrefix}/card-database/import-status/:jobId`, requireAdminPassword, (req, res) => {
+    const job = importJobs.get(req.params.jobId);
+    if (!job) return res.status(404).json({ error: 'Job not found or expired' });
+    return res.json(job);
+  });
 
   // DELETE /api/card-database/clear — wipe and re-import (admin utility)
   app.delete(`${apiPrefix}/card-database/clear`, requireAdminPassword, async (_req, res) => {
