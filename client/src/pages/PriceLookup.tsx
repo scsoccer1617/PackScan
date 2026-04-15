@@ -46,7 +46,8 @@ function filterByKeyword(options: ParallelOption[], foilType: string): ParallelO
   if (!foilType.trim()) return [];
   const keyword = extractKeyword(foilType).toLowerCase();
   if (!keyword) return [];
-  return options.filter(o => o.variationOrParallel.toLowerCase().includes(keyword));
+  const wordBoundary = new RegExp(`\\b${keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+  return options.filter(o => wordBoundary.test(o.variationOrParallel));
 }
 
 // Filter parallel options by serialization status.
