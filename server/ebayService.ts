@@ -678,25 +678,32 @@ export async function searchCardValues(
       'gold refractor', 'black refractor', 'blue refractor', 'red refractor'
     ];
 
-    // Standalone colour names that indicate parallels when paired with a serial run
-    // or other parallel context.  We ONLY exclude these from base-card results when
-    // they appear next to a serial ("/NNN") or a parallel descriptor, because many
-    // base card listings legitimately mention team colours.
+    // Named parallel variants — always indicate a parallel, not a team colour.
     const PARALLEL_COLORS = [
       'royal blue', 'sky blue', 'ice blue', 'sapphire', 'aqua',
       'neon green', 'lime green', 'neon pink', 'hot pink',
       'teal', 'burgundy', 'copper', 'magenta', 'platinum',
       'rose gold', 'emerald', 'ruby', 'amethyst', 'cobalt',
-      'arctic', 'electric', 'vintage', 'heritage', 'independence day'
+      'arctic', 'electric', 'vintage', 'heritage', 'independence day',
+      'jack-o\'-lantern', 'jack o lantern', 'pumpkin', 'camo',
+      'camouflage', 'snow', 'lava', 'fire', 'chrome'
     ];
 
-    // Single-word colour names that ONLY indicate a parallel when next to /NNN or
-    // a parallel descriptor (refractor, shimmer, etc.) — by themselves they may be
-    // team colour mentions in normal listings.
+    // Single-word colour names used as Topps/Bowman/Panini parallel names.
+    // In eBay titles these typically appear between the set/brand name and the
+    // player name (e.g. "2024 Topps Update Yellow Jose Butto").
+    // We filter these for base-card searches because if the scan detected no
+    // parallel, any colour-named variant is a mismatch.
     const AMBIGUOUS_COLORS = [
       'blue', 'green', 'red', 'gold', 'silver', 'purple',
       'orange', 'pink', 'yellow', 'black', 'white'
     ];
+
+    // Builds a regex that matches a colour word appearing between the
+    // brand/set and the player name — the position where parallel names
+    // appear in eBay listing titles.
+    const playerLast = (safePlayerName || '').split(' ').pop()?.toLowerCase() || '';
+    const brandLower = (brand || '').toLowerCase();
 
     // Terms that definitively indicate an autograph
     const HARD_AUTO_TERMS = ['autograph', 'autographed', 'on-card auto', 'signed'];
@@ -730,28 +737,44 @@ export async function searchCardValues(
         });
         if (!isNumberedCard && hasSmallSerial) return false;
 
-        // Filter named-parallel colour terms (e.g. "Royal Blue", "Sapphire", "Rose Gold")
-        // These almost always indicate a parallel, not a team colour.
+        // Filter named-parallel colour/variant terms (e.g. "Royal Blue", "Sapphire",
+        // "Jack-O'-Lantern") — these always indicate a parallel.
         const hasNamedColor = PARALLEL_COLORS.some(kw => {
-          const re = new RegExp(`\\b${kw.replace(/\s+/g, '\\s+')}\\b`, 'i');
-          return re.test(t);
+          const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
+          return new RegExp(`\\b${escaped}`, 'i').test(t);
         });
         if (hasNamedColor) {
           console.log(`  ↳ Hard-filtered (named parallel colour): "${r.title}"`);
           return false;
         }
 
-        // Filter ambiguous single-word colours ONLY when they appear next to
-        // a serial run (/NNN) or a parallel descriptor — indicating the colour
-        // refers to a parallel, not a team name.
-        if (hasSmallSerial) {
-          const hasAmbiguousColor = AMBIGUOUS_COLORS.some(c =>
-            new RegExp(`\\b${c}\\b`, 'i').test(t)
-          );
-          if (hasAmbiguousColor) {
-            console.log(`  ↳ Hard-filtered (colour + serial): "${r.title}"`);
-            return false;
+        // Filter ambiguous single-word colours (blue, gold, yellow, etc.).
+        // These indicate a parallel when they appear in a "variant position" in the
+        // eBay title — typically between the brand/set and the player name, e.g.
+        // "2024 Topps Update Yellow Jose Butto".  We detect this by checking if the
+        // colour word appears BEFORE the player's last name in the title.
+        // Also filter when paired with a serial run (/NNN).
+        const colorInVariantPosition = AMBIGUOUS_COLORS.some(c => {
+          const colorRe = new RegExp(`\\b${c}\\b`, 'i');
+          const colorMatch = colorRe.exec(t);
+          if (!colorMatch) return false;
+          // If paired with a serial number, always a parallel
+          if (hasSmallSerial) return true;
+          // Check if colour appears before the player name — variant position
+          if (playerLast && playerLast.length > 1) {
+            const playerIdx = t.indexOf(playerLast);
+            if (playerIdx > 0 && colorMatch.index < playerIdx) {
+              // Make sure the colour isn't part of the brand/set itself
+              // (e.g. "Gold" in "Gold Label" or "Black" in "Black Gold")
+              if (brandLower && colorMatch.index < brandLower.length + 5) return false;
+              return true;
+            }
           }
+          return false;
+        });
+        if (colorInVariantPosition) {
+          console.log(`  ↳ Hard-filtered (colour in variant position): "${r.title}"`);
+          return false;
         }
 
         // Filter Bowman/Topps color-border parallels (e.g. "Blue Border", "Purple Border")
