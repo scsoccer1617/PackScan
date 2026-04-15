@@ -82,7 +82,8 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     extractCardMetadata(cleanText, cardDetails, joinedText);
     
     // SERIAL NUMBER DETECTION - Look for serial numbering with enhanced detection
-    await extractSerialNumber(cleanText, cardDetails, textAnnotations);
+    // Pass original multi-line text so line-by-line pattern matching works correctly
+    await extractSerialNumber(joinedText, cardDetails, textAnnotations);
     
     // CARD FEATURES DETECTION - Rookie cards, autographs, etc.
     detectCardFeatures(cleanText, cardDetails);

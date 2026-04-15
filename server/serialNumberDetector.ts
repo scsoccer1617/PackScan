@@ -85,17 +85,25 @@ function detectSerialNumberFromPositions(textAnnotations: any[]): SerialNumberRe
       };
     }
     
-    // If not isolated, still consider it if it's in a corner position
+    // If not isolated, still consider it if it's in a corner/edge position
+    // Serial numbers can appear in any corner (bottom-left on rotated Topps backs, bottom-right, etc.)
     const position = getAnnotationPosition(topCandidate);
-    if (position.x > 800 && position.y > 600) { // Bottom-right area
+    const isInCornerArea = (position.x > 700 || position.x < 200) && (position.y > 500 || position.y < 200);
+    if (isInCornerArea) {
       return {
         serialNumber: topCandidate.description,
         isNumbered: true,
         detectionMethod: 'position-corner'
       };
     }
-    
-    return { serialNumber: '', isNumbered: false, detectionMethod: 'position' };
+
+    // Even if not isolated or in a corner, accept exact-format annotations
+    // (NNN/NNN is very unlikely to appear as non-serial text)
+    return {
+      serialNumber: topCandidate.description,
+      isNumbered: true,
+      detectionMethod: 'position-format'
+    };
   } catch (error) {
     console.error('Error in position-based serial number detection:', error);
     return { serialNumber: '', isNumbered: false, detectionMethod: 'position-error' };
