@@ -673,9 +673,9 @@ export async function searchCardValues(
     const HARD_PARALLEL_TERMS = [
       'parallel', 'refractor', 'xfractor', 'rainbow', 'mojo', 'holo', 'holographic',
       'foilboard', 'sparkle', 'glitter', 'prizm', 'laser', 'atomic', 'crackle', 'shimmer',
-      'aqua foil', 'blue foil', 'red foil', 'green foil', 'gold foil',
-      'purple foil', 'orange foil', 'pink foil', 'silver foil', 'rainbow foil',
-      'gold refractor', 'black refractor', 'blue refractor', 'red refractor'
+      'foil',
+      'gold refractor', 'black refractor', 'blue refractor', 'red refractor',
+      'montgomery club'
     ];
 
     // Named parallel variants — always indicate a parallel, not a team colour.
