@@ -295,7 +295,11 @@ export async function lookupCard(input: CardLookupInput): Promise<CardLookupResu
       const matchScore = (dbStr: string): number => {
         const norm = normalizeOrdinals(dbStr.toLowerCase());
         if (norm === collectionNorm) return 100;
-        if (norm.includes(collectionNorm) || collectionNorm.includes(norm)) return 50;
+        // DB is a superset of OCR text (e.g. DB "Chrome Prospects" contains OCR "Chrome").
+        // Score 90 — nearly as good as exact, and more specific is better for eBay filtering.
+        if (norm.includes(collectionNorm)) return 90;
+        // OCR is a superset of DB text (less common, lower confidence)
+        if (collectionNorm.includes(norm)) return 50;
         return 0;
       };
 
@@ -324,11 +328,13 @@ export async function lookupCard(input: CardLookupInput): Promise<CardLookupResu
         const aNameMatch = lastNameNorm && a.playerName.toLowerCase().includes(lastNameNorm) ? 1 : 0;
         const bNameMatch = lastNameNorm && b.playerName.toLowerCase().includes(lastNameNorm) ? 1 : 0;
         if (aNameMatch !== bNameMatch) return bNameMatch - aNameMatch;
-        // Secondary: prefer simpler/shorter collections (base sets over variations/inserts)
-        const aIsBase = !a.collection.includes(' - ') ? 0 : 1;
-        const bIsBase = !b.collection.includes(' - ') ? 0 : 1;
-        if (aIsBase !== bIsBase) return aIsBase - bIsBase;
-        return a.collection.length - b.collection.length;
+        // Secondary: prefer more specific (longer) collection names for better eBay filtering.
+        // e.g. "Chrome Prospects" is more useful than "Chrome" for narrowing search results.
+        // But deprioritise insert/sub-collections with " - " separators.
+        const aIsInsert = a.collection.includes(' - ') ? 1 : 0;
+        const bIsInsert = b.collection.includes(' - ') ? 1 : 0;
+        if (aIsInsert !== bIsInsert) return aIsInsert - bIsInsert;
+        return b.collection.length - a.collection.length;
       });
       if (lastNameNorm) {
         console.log(`[CardDB] Multiple matches (${cardRows.length}) — sorted by player name "${lastNameNorm}": top pick "${cardRows[0].playerName}" (${cardRows[0].set || cardRows[0].collection})`);
