@@ -59,6 +59,18 @@ function filterBySerialStatus(options: ParallelOption[], isNumbered: boolean): P
   return options.filter(o => !o.serialNumber || o.serialNumber.trim() === "");
 }
 
+// Filter parallel options to those whose serial number limit exactly matches
+// the detected serial number. Both sides are normalized by stripping slashes
+// (e.g. "/499" and "499" both compare as "499").
+function filterBySerialNumber(options: ParallelOption[], detectedSerial: string): ParallelOption[] {
+  const normalized = detectedSerial.replace(/\//g, "").trim();
+  if (!normalized) return [];
+  return options.filter(o => {
+    if (!o.serialNumber) return false;
+    return o.serialNumber.replace(/\//g, "").trim() === normalized;
+  });
+}
+
 // Fetch parallel options from the DB for a given card
 async function fetchParallels(
   brand: string,
@@ -104,6 +116,7 @@ export default function PriceLookup() {
     setCardData(data);
 
     const detected = data.foilType?.trim() || "";
+    const detectedSerial = data.serialNumber?.trim() || "";
 
     // No parallel detected — go straight to eBay as a base card
     if (!detected) {
@@ -114,21 +127,38 @@ export default function PriceLookup() {
     // Fetch DB parallels and filter to matching variants
     if (data.brand && data.year) {
       const allOptions = await fetchParallels(data.brand, data.year as number, data.collection, data.set);
-      const byKeyword = filterByKeyword(allOptions, detected);
-      // Only show parallels whose serialization status matches the card:
-      // non-numbered card → non-serialized parallels; numbered card → serialized ones.
-      const filtered = filterBySerialStatus(byKeyword, !!data.isNumbered);
 
-      if (filtered.length >= 2) {
-        // Multiple variants of the same parallel type detected — ask the user
-        setParallelOptions(filtered);
-        setDetectedKeyword(extractKeyword(detected));
-        setShowParallelPicker(true);
-        return;
+      // STEP 1 — Serial number match (highest confidence).
+      // If we have an exact serial number (e.g. /499), look for DB parallels that
+      // carry that exact limit. Only one parallel should have /499 for a given set,
+      // so this almost always resolves unambiguously without prompting the user.
+      if (detectedSerial) {
+        const bySerial = filterBySerialNumber(allOptions, detectedSerial);
+        if (bySerial.length === 1) {
+          // Unambiguous serial number match — auto-select, no prompt needed
+          const match = bySerial[0];
+          setCardData({ ...data, foilType: match.variationOrParallel, serialNumber: detectedSerial, isNumbered: true });
+          setShowPriceResults(true);
+          return;
+        }
+        if (bySerial.length >= 2) {
+          // Rare: multiple parallels share the same serial number limit — ask the user
+          setParallelOptions(bySerial);
+          setDetectedKeyword(extractKeyword(detected));
+          setShowParallelPicker(true);
+          return;
+        }
+        // 0 serial matches — fall through to keyword matching below
       }
 
+      // STEP 2 — Keyword + serialization-status match.
+      // Used when no serial number was detected, or the serial matched nothing in the DB.
+      // Only prompt if OCR found a color/keyword AND multiple parallels share it.
+      const byKeyword = filterByKeyword(allOptions, detected);
+      const filtered = filterBySerialStatus(byKeyword, !!data.isNumbered);
+
       if (filtered.length === 1) {
-        // Exactly one DB match — silently use it
+        // Exactly one keyword match — silently use it
         const match = filtered[0];
         const updated: Partial<CardFormValues> = { ...data, foilType: match.variationOrParallel };
         if (match.serialNumber) {
@@ -138,6 +168,14 @@ export default function PriceLookup() {
         }
         setCardData(updated);
         setShowPriceResults(true);
+        return;
+      }
+
+      if (filtered.length >= 2) {
+        // Multiple parallels match the same color/keyword — ask the user to disambiguate
+        setParallelOptions(filtered);
+        setDetectedKeyword(extractKeyword(detected));
+        setShowParallelPicker(true);
         return;
       }
     }
