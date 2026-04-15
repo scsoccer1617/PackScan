@@ -592,13 +592,29 @@ async function combineCardResults(
     }
   };
 
-  const tryLookup = async (brand: any, year: any, cardNumber: any, collection: any): Promise<boolean> => {
+  const ocrPlayerFirst = (combined.playerFirstName || '').trim().toLowerCase();
+  const ocrPlayerLast  = (combined.playerLastName  || '').trim().toLowerCase();
+
+  const tryLookup = async (brand: any, year: any, cardNumber: any, collection: any, opts?: { requireNameMatch?: boolean }): Promise<boolean> => {
     const result = await lookupCard({
       brand, year, cardNumber, collection,
       serialNumber: combined.serialNumber,
       playerLastName: combined.playerLastName,
     });
     if (result.found) {
+      if (opts?.requireNameMatch) {
+        const dbFirst = (result.playerFirstName || '').trim().toLowerCase();
+        const dbLast  = (result.playerLastName  || '').trim().toLowerCase();
+        const lastMatch = ocrPlayerLast && dbLast && (
+          ocrPlayerLast === dbLast ||
+          ocrPlayerLast.startsWith(dbLast) ||
+          dbLast.startsWith(ocrPlayerLast)
+        );
+        if (!lastMatch) {
+          console.log(`[CardDB] Fallback match rejected — DB player "${result.playerFirstName} ${result.playerLastName}" doesn't match OCR "${combined.playerFirstName} ${combined.playerLastName}" (fallback card number may be jersey number)`);
+          return false;
+        }
+      }
       applyDbResult(result, `DB hit`);
       return true;
     }
@@ -610,12 +626,14 @@ async function combineCardResults(
     try {
       let found = await tryLookup(combined.brand, combined.year, combined.cardNumber, combined.collection);
 
-      // Fallback 1: try front card number if different from back
+      // Fallback 1: try front card number if different from back.
+      // requireNameMatch=true because front "card numbers" are often jersey
+      // numbers — if the DB player doesn't match the OCR player, reject.
       const frontNum = String(frontResult.cardNumber || '').trim();
       const backNum = String(combined.cardNumber || '').trim();
       if (!found && frontNum && frontNum !== backNum) {
         console.log(`[CardDB] No match with cardNumber="${backNum}" — retrying with front cardNumber="${frontNum}"`);
-        found = await tryLookup(combined.brand, combined.year, frontNum, combined.collection || frontResult.collection);
+        found = await tryLookup(combined.brand, combined.year, frontNum, combined.collection || frontResult.collection, { requireNameMatch: true });
       }
 
       // Fallback 2: try ±1 year (OCR often gets copyright year wrong by one)
@@ -624,9 +642,10 @@ async function combineCardResults(
         const numbersToTry = [backNum, frontNum].filter(n => n);
         for (const num of numbersToTry) {
           if (found) break;
+          const isFrontNum = num === frontNum && num !== backNum;
           for (const delta of [1, -1]) {
             console.log(`[CardDB] Retrying with year=${yr + delta} cardNumber="${num}"`);
-            found = await tryLookup(combined.brand, yr + delta, num, combined.collection || frontResult.collection);
+            found = await tryLookup(combined.brand, yr + delta, num, combined.collection || frontResult.collection, isFrontNum ? { requireNameMatch: true } : undefined);
             if (found) break;
           }
         }

@@ -775,7 +775,7 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
     // Autograph card numbers: letters-dash-letters (e.g. CPA-LRE, HA-RJ, BA-XX, RC-JD)
     // These appear on Bowman Prospect Autographs, Heritage Autographs, etc.
     // Must run BEFORE the plainNumberPattern so CODE#065939 doesn't win over CPA-LRE.
-    const nonCardLetterPrefixes = new Set(['CMP', 'CODE', 'WWW', 'COM', 'INC', 'MLB', 'NFL', 'NBA', 'NHL', 'USA', 'URL', 'AKA', 'DBA', 'LLC', 'LTD', 'REG', 'TM', 'WALK', 'OFF', 'RBI', 'ERA', 'AVG', 'OBP', 'OPS', 'WAR', 'SLG', 'WHIP']);
+    const nonCardLetterPrefixes = new Set(['CMP', 'CODE', 'WWW', 'COM', 'INC', 'MLB', 'NFL', 'NBA', 'NHL', 'USA', 'URL', 'AKA', 'DBA', 'LLC', 'LTD', 'REG', 'TM', 'WALK', 'OFF', 'RBI', 'ERA', 'AVG', 'OBP', 'OPS', 'WAR', 'SLG', 'WHIP', 'ALL', 'STAR', 'PRO', 'MVP', 'HOF', 'NL', 'AL']);
     const autographCardPattern = /\b([A-Z]{1,4})-([A-Z]{2,5})\b/g;
     let autographMatch;
     while ((autographMatch = autographCardPattern.exec(text)) !== null) {
