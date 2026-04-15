@@ -270,10 +270,11 @@ function prioritizeListingsByCardMatch(
 
     // Penalize listings from a DIFFERENT collection/product line when one is specified.
     // e.g. searching "Bowman Chrome" should not return "Sapphire Edition" or "Draft" listings.
-    if (collection) {
+    // Skip generic collection names (e.g. "Base Set") that shouldn't trigger filtering.
+    if (collection && !['base set', 'base', 'base cards'].includes(collection.toLowerCase())) {
       const collLower = collection.toLowerCase();
       const COLLECTION_INDICATORS = [
-        'chrome', 'sapphire', 'sapphire edition', 'draft', 'prospect', 'prospects',
+        'chrome', 'sapphire', 'sapphire edition', 'draft',
         'heritage', 'sterling', 'platinum', 'finest', 'stadium club',
         'gallery', 'select', 'optic', 'prizm', 'mosaic', 'donruss',
         'series 1', 'series 2', 'series 3', 'update', 'traded',
@@ -802,9 +803,11 @@ export async function searchCardValues(
 
       // Filter wrong-collection listings when a specific collection is set.
       // e.g. searching "Chrome" should not return "Sapphire Edition" or "Draft" results.
-      if (searchCollection) {
+      // Use rawCollection (the actual collection name like "Chrome"), NOT searchCollection
+      // which may be a generic set name like "Baseball".
+      if (rawCollection && !GENERIC_COLLECTION_NAMES.has(rawCollection.toLowerCase())) {
         const HARD_COLLECTION_INDICATORS = [
-          'chrome', 'sapphire', 'sapphire edition', 'draft', 'prospects',
+          'chrome', 'sapphire', 'sapphire edition', 'draft',
           'heritage', 'sterling', 'finest', 'stadium club',
           'gallery', 'select', 'optic', 'prizm', 'mosaic', 'donruss',
           'series 1', 'series 2', 'series 3', 'update', 'traded',
@@ -813,13 +816,13 @@ export async function searchCardValues(
           'national treasures', 'immaculate', 'clearly authentic',
           '1st edition', 'bowman chrome', 'topps chrome', 'bowman draft',
         ];
-        const searchCollWords = searchCollection.toLowerCase().split(/\s+/);
+        const collLowerWords = rawCollection.toLowerCase().split(/\s+/);
         for (const indicator of HARD_COLLECTION_INDICATORS) {
           const indWords = indicator.split(/\s+/);
-          if (indWords.every(w => searchCollWords.includes(w))) continue;
+          if (indWords.every(w => collLowerWords.includes(w))) continue;
           const re = new RegExp(`\\b${indicator.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+')}\\b`, 'i');
           if (re.test(t)) {
-            console.log(`  ↳ Hard-filtered (wrong collection): searching "${searchCollection}" but title has "${indicator}" → "${r.title}"`);
+            console.log(`  ↳ Hard-filtered (wrong collection): searching "${rawCollection}" but title has "${indicator}" → "${r.title}"`);
             return false;
           }
         }
