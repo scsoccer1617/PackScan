@@ -318,8 +318,13 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
       'IMMACULATE', 'LUMINANCE', 'SPECTRA', 'OBSIDIAN', 'NOIR', 'OPTIC',
       'THREADS', 'CERTIFIED', 'ABSOLUTE', 'LIMITED', 'TRIBUTE', 'BRILLIANCE',
       'CLASSICS', 'LEGENDS', 'PROSPECTS', 'SIGNATURES', 'AUTOGRAPHS', 'PARALLELS',
+      'AUTOGRAPH', 'ISSUE', 'ISSUES',
       'VALUED', 'PRIVATE', 'EXCLUSIVE', 'PREMIER', 'PRIME',
       'NATIONAL', 'DIGITAL', 'VINTAGE', 'RETRO', 'REVIVAL', 'REPRINT',
+      // Stat/bio terms that appear on card backs and can look like 2-word names
+      'AVERAGE', 'AGAINST', 'EARNED', 'OPPONENT', 'BATTERS', 'FACED',
+      'INNINGS', 'PITCHED', 'STRIKEOUT', 'STRIKEOUTS', 'COMPLETE', 'SHUTOUT',
+      'GAMES', 'STARTED', 'HOLDS', 'SAVES', 'WALKS', 'ALLOWED',
       'PITTSBURGH', 'HOUSTON', 'TORONTO', 'SEATTLE', 'OAKLAND', 'TAMPA', 'MIAMI',
       'MINNESOTA', 'CINCINNATI', 'MILWAUKEE', 'DETROIT', 'CLEVELAND', 'BALTIMORE',
       'ARIZONA', 'COLORADO', 'TEXAS', 'DENVER', 'MONTREAL', 'WASHINGTON',
@@ -828,8 +833,9 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
       console.log(`Detected standalone card number at very top of text (highest priority): ${firstLineEarly}`);
       return;
     }
-    // Alphanumeric first-line check: e.g. "US56", "RC12", "BDP42" — common Topps insert/update prefixes
-    const alphaNumFirstLine = firstLineEarly.match(/^([A-Z]{1,4})(\d{1,4})$/);
+    // Alphanumeric first-line check: e.g. "US56", "RC12", "BDP42", "B24-YC"
+    // The optional (-[A-Z]{1,4}) suffix captures formats like "B24-YC" (Bowman prospect cards).
+    const alphaNumFirstLine = firstLineEarly.match(/^([A-Z]{1,4})(\d{1,4})(-[A-Z]{1,4})?$/);
     if (alphaNumFirstLine && !earlyCodePrefixSkip.has(alphaNumFirstLine[1]) && parseInt(alphaNumFirstLine[2]) > 0 && parseInt(alphaNumFirstLine[2]) < 10000) {
       cardDetails.cardNumber = firstLineEarly;
       console.log(`Detected alphanumeric card number at very top of text (highest priority): ${firstLineEarly}`);
@@ -910,7 +916,15 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
             console.log(`Skipping nearby line with biography/acquisition context: "${nearbyLine.substring(0, 60)}"`);
             continue;
           }
-          // Check for hyphenated alphanumeric card numbers first (BD-7, HRC-42)
+          // Check for alphanumeric+letter card numbers first (B24-YC, BDP24-AB)
+          // These have an alphanumeric prefix ending in digit + hyphen + letter suffix
+          const nearbyAlphaDigitLetter = nearbyLine.match(/^([A-Z][A-Z0-9]*\d)-([A-Z]{1,4})$/);
+          if (nearbyAlphaDigitLetter) {
+            cardDetails.cardNumber = nearbyAlphaDigitLetter[0];
+            console.log(`Detected alphanumeric+letter card number near brand: ${nearbyAlphaDigitLetter[0]}`);
+            return;
+          }
+          // Check for hyphenated alphanumeric card numbers (BD-7, HRC-42)
           const nearbyHyphenMatch = nearbyLine.match(/\b([A-Z]{1,4})-(\d{1,4})\b/);
           if (nearbyHyphenMatch && nearbyHyphenMatch[0]) {
             const nearbyHyphenDigits = parseInt(nearbyHyphenMatch[2]);
@@ -947,6 +961,23 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
       }
     }
     
+    // Alphanumeric-prefix + letter-suffix card numbers: B24-YC, BDP24-AB, etc.
+    // Format: letter(s)+digit(s) prefix (ending in digit), hyphen, letter(s) suffix (1-4 letters).
+    // Must run BEFORE alphaNumPatternEarly which would truncate "B24-YC" → "B24".
+    const alphaDigitLetterPattern = /\b([A-Z][A-Z0-9]*\d)-([A-Z]{1,4})\b/g;
+    let alphaDigitLetterMatch;
+    while ((alphaDigitLetterMatch = alphaDigitLetterPattern.exec(text)) !== null) {
+      const fullMatch = alphaDigitLetterMatch[0];
+      const lineWithMatch = lines.find(line => line.toLowerCase().includes(fullMatch.toLowerCase()));
+      if (!lineWithMatch) continue;
+      if (/\b(DRAFTED|DRAFT|BORN|SIGNED|OVERALL|ROUND|PICK|AGENT|FREE|RIGHTS|RESERVED|LICENSED|TRADEMARK|COMPANY|VISIT)\b/i.test(lineWithMatch)) continue;
+      if (/CODE#/i.test(lineWithMatch)) continue;
+      if (lineWithMatch.length > 120) continue;
+      cardDetails.cardNumber = fullMatch;
+      console.log(`Detected alphanumeric+letter card number (e.g. B24-YC): ${fullMatch}`);
+      return;
+    }
+
     // Check for hyphenated alphanumeric card numbers (BD-7, BDC-15, HRC-42, etc.)
     // These are high-confidence and should be checked before standalone numbers
     const nonCardCodePrefixes = new Set(['CMP', 'CODE', 'WWW', 'COM', 'INC', 'MLB', 'OBP', 'ERA', 'AVG', 'WAR', 'SLG', 'RBI', 'HT', 'WT', 'ACQ', 'RD', 'RND', 'PK', 'OVR']);
