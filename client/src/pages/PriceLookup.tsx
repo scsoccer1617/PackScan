@@ -126,9 +126,10 @@ export default function PriceLookup() {
 
     const detected = data.foilType?.trim() || "";
     const detectedSerial = data.serialNumber?.trim() || "";
+    const isNumberedCard = !!data.isNumbered || /\d+\/\d+/.test(detectedSerial);
 
-    // No parallel detected — go straight to eBay as a base card
-    if (!detected) {
+    // No parallel detected AND no serial number — go straight to eBay as a base card
+    if (!detected && !isNumberedCard) {
       setShowPriceResults(true);
       return;
     }

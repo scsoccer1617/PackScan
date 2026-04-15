@@ -119,13 +119,14 @@ function detectSerialNumberFromPatterns(fullText: string): SerialNumberResult {
     const lines = fullText.split('\n');
     
     for (const line of lines) {
-      // Skip long lines that are likely paragraph text
-      if (line.length > 50) continue;
-      
       // Skip lines with common non-serial number keywords
       if (/TRADED|ACQUIRED|CONTRACT|BORN|STATS|RECORD|CAREER|HIGHLIGHTS|PERFORMANCE|DRAFTED/i.test(line)) {
         continue;
       }
+      
+      // For long lines (copyright blocks, etc.), only try the serial patterns —
+      // serial numbers like "010/399" often appear in long copyright text on card backs
+      const isLongLine = line.length > 50;
       
       for (const pattern of patterns) {
         pattern.lastIndex = 0; // Reset regex
@@ -135,14 +136,15 @@ function detectSerialNumberFromPatterns(fullText: string): SerialNumberResult {
           let serialNumber = '';
           
           if (match[1] && !match[2]) {
-            // Single capture group (e.g., "010/399")
             serialNumber = match[1];
           } else if (match[1] && match[2]) {
-            // Two capture groups (e.g., "010" and "399")
             serialNumber = `${match[1]}/${match[2]}`;
           }
           
           if (serialNumber && isValidSerialNumber(serialNumber)) {
+            if (isLongLine && isSerialNumberInBioContext(serialNumber, line)) {
+              continue;
+            }
             return {
               serialNumber,
               isNumbered: true,
