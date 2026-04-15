@@ -565,103 +565,75 @@ async function combineCardResults(
   // OCR foil/serial/condition data is preserved and not overwritten.
   // dbVariation is stashed here and applied AFTER visual/text foil detection as a fallback.
   let dbVariation: string | null = null;
+
+  const applyDbResult = (dbResult: any, label: string) => {
+    console.log(`[CardDB] ${label} — ${dbResult.playerFirstName} ${dbResult.playerLastName}, team: ${dbResult.team}, collection: ${dbResult.collection}, cardNumber: ${dbResult.cardNumber}`);
+    const ocrName = `${combined.playerFirstName || ''} ${combined.playerLastName || ''}`.trim();
+    const dbName  = `${dbResult.playerFirstName || ''} ${dbResult.playerLastName || ''}`.trim();
+    if (ocrName.toLowerCase() !== dbName.toLowerCase()) {
+      console.log(`[CardDB] OCR name "${ocrName}" differs from DB "${dbName}" — trusting DB (brand+year+cardNumber match is authoritative)`);
+    }
+    if (dbResult.playerFirstName) combined.playerFirstName = dbResult.playerFirstName;
+    if (dbResult.playerLastName)  combined.playerLastName  = dbResult.playerLastName;
+    if (dbResult.team && !combined.notes) combined.notes = `Team: ${dbResult.team}`;
+    if (dbResult.collection) combined.collection = dbResult.collection;
+    if (dbResult.cardNumber) combined.cardNumber = dbResult.cardNumber;
+    if (dbResult.cmpNumber) combined.cmpNumber = dbResult.cmpNumber;
+    if (dbResult.set) combined.set = dbResult.set;
+    if (dbResult.isRookieCard) combined.isRookieCard = true;
+    if (dbResult.year) combined.year = dbResult.year;
+    if (dbResult.serialNumber && !combined.serialNumber) {
+      combined.serialNumber = dbResult.serialNumber;
+      if (/\/\d+/.test(dbResult.serialNumber)) combined.isNumbered = true;
+    }
+    if (dbResult.variation) {
+      dbVariation = dbResult.variation;
+      console.log(`[CardDB] Stashed DB variation for foil fallback: "${dbResult.variation}"`);
+    }
+  };
+
+  const tryLookup = async (brand: any, year: any, cardNumber: any, collection: any): Promise<boolean> => {
+    const result = await lookupCard({
+      brand, year, cardNumber, collection,
+      serialNumber: combined.serialNumber,
+      playerLastName: combined.playerLastName,
+    });
+    if (result.found) {
+      applyDbResult(result, `DB hit`);
+      return true;
+    }
+    return false;
+  };
+
   if (combined.brand && combined.year && combined.cardNumber) {
     console.log(`[CardDB] Attempting lookup: brand="${combined.brand}" year=${combined.year} cardNumber="${combined.cardNumber}" collection="${combined.collection}"`);
     try {
-      const dbResult = await lookupCard({
-        brand: combined.brand,
-        year: combined.year,
-        cardNumber: combined.cardNumber,
-        collection: combined.collection,
-        serialNumber: combined.serialNumber,
-        playerLastName: combined.playerLastName,
-      });
+      let found = await tryLookup(combined.brand, combined.year, combined.cardNumber, combined.collection);
 
-      if (dbResult.found) {
-        console.log(`[CardDB] DB hit — ${dbResult.playerFirstName} ${dbResult.playerLastName}, team: ${dbResult.team}, collection: ${dbResult.collection}, cardNumber: ${dbResult.cardNumber}`);
+      // Fallback 1: try front card number if different from back
+      const frontNum = String(frontResult.cardNumber || '').trim();
+      const backNum = String(combined.cardNumber || '').trim();
+      if (!found && frontNum && frontNum !== backNum) {
+        console.log(`[CardDB] No match with cardNumber="${backNum}" — retrying with front cardNumber="${frontNum}"`);
+        found = await tryLookup(combined.brand, combined.year, frontNum, combined.collection || frontResult.collection);
+      }
 
-        const ocrName = `${combined.playerFirstName || ''} ${combined.playerLastName || ''}`.trim();
-        const dbName  = `${dbResult.playerFirstName || ''} ${dbResult.playerLastName || ''}`.trim();
-        if (ocrName.toLowerCase() !== dbName.toLowerCase()) {
-          console.log(`[CardDB] OCR name "${ocrName}" differs from DB "${dbName}" — trusting DB (brand+year+cardNumber match is authoritative)`);
-        }
-
-        if (dbResult.playerFirstName) combined.playerFirstName = dbResult.playerFirstName;
-        if (dbResult.playerLastName)  combined.playerLastName  = dbResult.playerLastName;
-
-        if (dbResult.team && !combined.notes) combined.notes = `Team: ${dbResult.team}`;
-
-        if (dbResult.collection) combined.collection = dbResult.collection;
-
-        if (dbResult.cardNumber) {
-          const ocrNum = (combined.cardNumber || '').replace(/^#/, '').trim().toLowerCase();
-          const dbNum  = dbResult.cardNumber.replace(/^#/, '').trim().toLowerCase();
-          if (ocrNum === dbNum || dbNum.startsWith(ocrNum)) {
-            console.log(`[CardDB] Card number set from DB: ${dbResult.cardNumber} (OCR had: ${combined.cardNumber})`);
-            combined.cardNumber = dbResult.cardNumber;
+      // Fallback 2: try ±1 year (OCR often gets copyright year wrong by one)
+      if (!found) {
+        const yr = combined.year as number;
+        const numbersToTry = [backNum, frontNum].filter(n => n);
+        for (const num of numbersToTry) {
+          if (found) break;
+          for (const delta of [1, -1]) {
+            console.log(`[CardDB] Retrying with year=${yr + delta} cardNumber="${num}"`);
+            found = await tryLookup(combined.brand, yr + delta, num, combined.collection || frontResult.collection);
+            if (found) break;
           }
         }
+      }
 
-        if (dbResult.cmpNumber) combined.cmpNumber = dbResult.cmpNumber;
-
-        if (dbResult.set) combined.set = dbResult.set;
-
-        if (dbResult.isRookieCard) combined.isRookieCard = true;
-
-        if (dbResult.serialNumber && !combined.serialNumber) {
-          combined.serialNumber = dbResult.serialNumber;
-          if (/\/\d+/.test(dbResult.serialNumber)) combined.isNumbered = true;
-        }
-
-        if (dbResult.variation) {
-          dbVariation = dbResult.variation;
-          console.log(`[CardDB] Stashed DB variation for foil fallback: "${dbResult.variation}"`);
-        }
-      } else {
-        // Fallback: if back card number failed and front has a different card number, retry with front's
-        const frontNum = String(frontResult.cardNumber || '').trim();
-        const backNum = String(combined.cardNumber || '').trim();
-        if (frontNum && frontNum !== backNum) {
-          console.log(`[CardDB] No match with back cardNumber="${backNum}" — retrying with front cardNumber="${frontNum}"`);
-          try {
-            const fallbackResult = await lookupCard({
-              brand: combined.brand,
-              year: combined.year,
-              cardNumber: frontNum,
-              collection: combined.collection || frontResult.collection,
-              serialNumber: combined.serialNumber,
-              playerLastName: combined.playerLastName,
-            });
-            if (fallbackResult.found) {
-              console.log(`[CardDB] Fallback DB hit — ${fallbackResult.playerFirstName} ${fallbackResult.playerLastName}, team: ${fallbackResult.team}, collection: ${fallbackResult.collection}, cardNumber: ${fallbackResult.cardNumber}`);
-              if (fallbackResult.playerFirstName) combined.playerFirstName = fallbackResult.playerFirstName;
-              if (fallbackResult.playerLastName)  combined.playerLastName  = fallbackResult.playerLastName;
-              if (fallbackResult.team && !combined.notes) combined.notes = `Team: ${fallbackResult.team}`;
-              if (fallbackResult.collection) combined.collection = fallbackResult.collection;
-              if (fallbackResult.cardNumber) {
-                console.log(`[CardDB] Card number corrected from DB: ${fallbackResult.cardNumber} (back had: ${backNum}, front had: ${frontNum})`);
-                combined.cardNumber = fallbackResult.cardNumber;
-              }
-              if (fallbackResult.cmpNumber) combined.cmpNumber = fallbackResult.cmpNumber;
-              if (fallbackResult.set) combined.set = fallbackResult.set;
-              if (fallbackResult.isRookieCard) combined.isRookieCard = true;
-              if (fallbackResult.serialNumber && !combined.serialNumber) {
-                combined.serialNumber = fallbackResult.serialNumber;
-                if (/\/\d+/.test(fallbackResult.serialNumber)) combined.isNumbered = true;
-              }
-              if (fallbackResult.variation) {
-                dbVariation = fallbackResult.variation;
-                console.log(`[CardDB] Stashed DB variation for foil fallback: "${fallbackResult.variation}"`);
-              }
-            } else {
-              console.log('[CardDB] Fallback lookup also found no match — proceeding with OCR-only results');
-            }
-          } catch (fallbackErr: any) {
-            console.error('[CardDB] Fallback lookup failed (non-fatal):', fallbackErr.message);
-          }
-        } else {
-          console.log('[CardDB] No DB match — proceeding with OCR-only results');
-        }
+      if (!found) {
+        console.log('[CardDB] No DB match after all fallbacks — proceeding with OCR-only results');
       }
     } catch (err: any) {
       console.error('[CardDB] Lookup failed (non-fatal):', err.message);

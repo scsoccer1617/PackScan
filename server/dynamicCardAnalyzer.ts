@@ -775,7 +775,7 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
     // Autograph card numbers: letters-dash-letters (e.g. CPA-LRE, HA-RJ, BA-XX, RC-JD)
     // These appear on Bowman Prospect Autographs, Heritage Autographs, etc.
     // Must run BEFORE the plainNumberPattern so CODE#065939 doesn't win over CPA-LRE.
-    const nonCardLetterPrefixes = new Set(['CMP', 'CODE', 'WWW', 'COM', 'INC', 'MLB', 'NFL', 'NBA', 'NHL', 'USA', 'URL', 'AKA', 'DBA', 'LLC', 'LTD', 'REG', 'TM']);
+    const nonCardLetterPrefixes = new Set(['CMP', 'CODE', 'WWW', 'COM', 'INC', 'MLB', 'NFL', 'NBA', 'NHL', 'USA', 'URL', 'AKA', 'DBA', 'LLC', 'LTD', 'REG', 'TM', 'WALK', 'OFF', 'RBI', 'ERA', 'AVG', 'OBP', 'OPS', 'WAR', 'SLG', 'WHIP']);
     const autographCardPattern = /\b([A-Z]{1,4})-([A-Z]{2,5})\b/g;
     let autographMatch;
     while ((autographMatch = autographCardPattern.exec(text)) !== null) {
@@ -1251,6 +1251,19 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>,
       }
     }
     
+    // Handle OCR-garbled copyright+brand: "©2021" often reads as "02021", "02121", "&02021", etc.
+    // Try stripping a leading non-year digit/char to recover the real 4-digit year.
+    const garbledBrandYear = /[&0O](\d{4})\d?\s+(?:THE\s+)?(TOPPS|LEAF|BOWMAN|FLEER|DONRUSS|SCORE|UPPER DECK|PANINI)/i;
+    const garbledMatch = text.match(garbledBrandYear);
+    if (garbledMatch && garbledMatch[1]) {
+      const year = parseInt(garbledMatch[1], 10);
+      if (year >= 1900 && year <= new Date().getFullYear()) {
+        cardDetails.year = year;
+        console.log(`Using garbled-copyright brand year as card date: ${cardDetails.year} (from "${garbledMatch[0]}")`);
+        return;
+      }
+    }
+    
     // Check for copyright year pattern next
     // Also handles OCR-garbled copyright symbols like "LO2024", "IO2024", "O2024" which are common OCR misreads of "© 2024"
     const copyrightYearPattern = /(?:©|\(C\)|\&copy;|\&\s*©|\&\s*\(C\)|[LlIi]?[OoQ])(?:\s*)(\d{4})/i;
@@ -1279,27 +1292,29 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>,
     }
     
     // Fall back to looking for 4-digit years (but this is less reliable)
-    // This is more risky as it can pick up birth years
-    const yearPattern = /\b(19\d{2}|20\d{2})\b/;
-    const yearMatches = text.match(new RegExp(yearPattern, 'g')) || [];
+    // This is more risky as it can pick up birth years or signing years
+    const yearPattern = /\b(19\d{2}|20\d{2})\b/g;
+    const yearCandidates: number[] = [];
+    let ym;
+    while ((ym = yearPattern.exec(text)) !== null) {
+      const y = parseInt(ym[1], 10);
+      if (y < 1900 || y > new Date().getFullYear()) continue;
+      const ctx = text.substring(Math.max(0, ym.index - 40), ym.index).toUpperCase();
+      if (/\b(SIGNED|ACQ|DRAFTED|BORN|TRADED|ACQUIRED|AGENT)\b/.test(ctx)) {
+        console.log(`Skipping year ${y} — appears in signing/bio context`);
+        continue;
+      }
+      yearCandidates.push(y);
+    }
     
-    if (yearMatches.length > 0) {
-      // Get all matches and find the most likely card year
-      const years = yearMatches
-        .map(match => parseInt(match.replace(/[^\d]/g, ''), 10))
-        .filter(year => year >= 1900 && year <= new Date().getFullYear());
-      
-      if (years.length > 0) {
-        // When multiple years are found, prefer years from 1980-2025 as card years
-        // since these are most likely to be production years not birth years
-        const modernYears = years.filter(year => year >= 1980 && year <= 2025);
-        if (modernYears.length > 0) {
-          cardDetails.year = modernYears[0];
-          console.log(`Selected modern year as most likely card date: ${cardDetails.year}`);
-        } else {
-          cardDetails.year = years[0];
-          console.log(`Using first detected year as card date: ${cardDetails.year}`);
-        }
+    if (yearCandidates.length > 0) {
+      const modernYears = yearCandidates.filter(y => y >= 1980 && y <= 2026);
+      if (modernYears.length > 0) {
+        cardDetails.year = Math.max(...modernYears);
+        console.log(`Selected latest modern year as most likely card date: ${cardDetails.year}`);
+      } else {
+        cardDetails.year = yearCandidates[0];
+        console.log(`Using first detected year as card date: ${cardDetails.year}`);
       }
     }
   } catch (error) {
