@@ -667,6 +667,7 @@ export async function searchCardValues(
     // This is more reliable than scoring alone because if every eBay result is a
     // parallel, scoring penalties still leave parallels in the top 5.
     const isBaseCardSearch = !foilType || foilType.trim() === '';
+    const isNumberedCard   = !!isNumbered;
 
     // Terms that definitively indicate a parallel/special version (word-boundary matched)
     const HARD_PARALLEL_TERMS = [
@@ -675,6 +676,26 @@ export async function searchCardValues(
       'aqua foil', 'blue foil', 'red foil', 'green foil', 'gold foil',
       'purple foil', 'orange foil', 'pink foil', 'silver foil', 'rainbow foil',
       'gold refractor', 'black refractor', 'blue refractor', 'red refractor'
+    ];
+
+    // Standalone colour names that indicate parallels when paired with a serial run
+    // or other parallel context.  We ONLY exclude these from base-card results when
+    // they appear next to a serial ("/NNN") or a parallel descriptor, because many
+    // base card listings legitimately mention team colours.
+    const PARALLEL_COLORS = [
+      'royal blue', 'sky blue', 'ice blue', 'sapphire', 'aqua',
+      'neon green', 'lime green', 'neon pink', 'hot pink',
+      'teal', 'burgundy', 'copper', 'magenta', 'platinum',
+      'rose gold', 'emerald', 'ruby', 'amethyst', 'cobalt',
+      'arctic', 'electric', 'vintage', 'heritage', 'independence day'
+    ];
+
+    // Single-word colour names that ONLY indicate a parallel when next to /NNN or
+    // a parallel descriptor (refractor, shimmer, etc.) — by themselves they may be
+    // team colour mentions in normal listings.
+    const AMBIGUOUS_COLORS = [
+      'blue', 'green', 'red', 'gold', 'silver', 'purple',
+      'orange', 'pink', 'yellow', 'black', 'white'
     ];
 
     // Terms that definitively indicate an autograph
@@ -702,19 +723,38 @@ export async function searchCardValues(
 
         // Filter serially-numbered listings (e.g. /150, /75, /250) —
         // a non-numbered base card should never match a /NNN print run.
-        // Use a minimum threshold of /5000 to avoid false positives on
-        // things like card years written as "2022/2022".
         const serialInTitle = t.match(/\/(\d+)/g);
-        if (serialInTitle) {
-          const hasSmallSerial = serialInTitle.some(s => {
-            const n = parseInt(s.slice(1), 10);
-            return n <= 5000;
-          });
-          if (hasSmallSerial) return false;
+        const hasSmallSerial = serialInTitle?.some(s => {
+          const n = parseInt(s.slice(1), 10);
+          return n > 0 && n <= 5000;
+        });
+        if (!isNumberedCard && hasSmallSerial) return false;
+
+        // Filter named-parallel colour terms (e.g. "Royal Blue", "Sapphire", "Rose Gold")
+        // These almost always indicate a parallel, not a team colour.
+        const hasNamedColor = PARALLEL_COLORS.some(kw => {
+          const re = new RegExp(`\\b${kw.replace(/\s+/g, '\\s+')}\\b`, 'i');
+          return re.test(t);
+        });
+        if (hasNamedColor) {
+          console.log(`  ↳ Hard-filtered (named parallel colour): "${r.title}"`);
+          return false;
+        }
+
+        // Filter ambiguous single-word colours ONLY when they appear next to
+        // a serial run (/NNN) or a parallel descriptor — indicating the colour
+        // refers to a parallel, not a team name.
+        if (hasSmallSerial) {
+          const hasAmbiguousColor = AMBIGUOUS_COLORS.some(c =>
+            new RegExp(`\\b${c}\\b`, 'i').test(t)
+          );
+          if (hasAmbiguousColor) {
+            console.log(`  ↳ Hard-filtered (colour + serial): "${r.title}"`);
+            return false;
+          }
         }
 
         // Filter Bowman/Topps color-border parallels (e.g. "Blue Border", "Purple Border")
-        // These are named parallels that don't use "parallel" or "refractor" in their titles.
         const COLOR_BORDER = /\b(blue|purple|orange|green|gold|red|yellow|pink|aqua|teal|black|white|silver|copper|burgundy)\s+border\b/i;
         if (COLOR_BORDER.test(t)) return false;
       }
@@ -723,10 +763,10 @@ export async function searchCardValues(
     };
 
     const filtered = prioritizedResults.filter(hardFilter);
-    console.log(`Hard filter: ${results.length} → ${filtered.length} results (removed ${results.length - filtered.length} parallel/auto listings)`);
+    console.log(`Hard filter: ${prioritizedResults.length} → ${filtered.length} results (removed ${prioritizedResults.length - filtered.length} parallel/auto listings)`);
 
-    // Use filtered results if we have enough; otherwise fall back to full scored set
-    const candidateResults = filtered.length >= 3 ? filtered : prioritizedResults;
+    // Always use filtered results — show fewer correct matches rather than wrong ones
+    const candidateResults = filtered;
 
     // Only use top 5 results for display and calculation
     const topResults = candidateResults.slice(0, 5);
