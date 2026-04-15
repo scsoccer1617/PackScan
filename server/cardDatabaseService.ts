@@ -11,8 +11,10 @@ import { db } from '../db';
 import { cardDatabase, cardVariations } from '../shared/schema';
 import { and, eq, sql } from 'drizzle-orm';
 import { parse } from 'csv-parse/sync';
+import { parse as parseStream } from 'csv-parse';
 import { readFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
+import { Readable } from 'stream';
 
 const CARDS_CSV    = resolve('attached_assets/Baseball_Card_Database_-_baseball_cards_(5)_1775393864176.csv');
 const VARS_CSV     = resolve('attached_assets/Baseball_Card_Database_-_baseball_card_variations_(3)_1775393870208.csv');
@@ -67,21 +69,44 @@ export async function importCardsCSV(csvBuffer: Buffer, onProgress?: (processed:
   let imported = 0;
   let replaced = 0;
 
-  const records = parse(csvBuffer, {
-    columns: true,
-    skip_empty_lines: true,
-    trim: true,
-    relax_column_count: true,
-  }) as Record<string, string>[];
-
-  // Pass 1: parse all valid rows and collect which brand+year combos are present
-  const rows: typeof cardDatabase.$inferInsert[] = [];
   const brandYearCombos = new Set<string>();
+  let totalRows = 0;
 
-  for (let i = 0; i < records.length; i++) {
-    const row = records[i];
-    const lineNum = i + 2;
+  const streamParse = (buf: Buffer): AsyncIterable<Record<string, string>> =>
+    Readable.from(buf).pipe(parseStream({ columns: true, skip_empty_lines: true, trim: true, relax_column_count: true }));
 
+  for await (const row of streamParse(csvBuffer)) {
+    totalRows++;
+    const brand = (row['brand'] || row['Brand'] || '').trim();
+    const brandId = (row['brand_id'] || row['Brand_id'] || '').trim();
+    const yearStr = (row['year'] || row['Year'] || '').trim();
+    if (brand && yearStr) {
+      const year = parseInt(yearStr, 10);
+      if (!isNaN(year) && year >= 1900 && year <= 2100) {
+        const resolvedBrandId = brandId || brand.toLowerCase().replace(/\s+/g, '_');
+        brandYearCombos.add(`${resolvedBrandId}|${year}`);
+      }
+    }
+  }
+
+  console.log(`[CardDB] Pass 1 complete: ${totalRows} CSV rows, ${brandYearCombos.size} brand+year combos`);
+  onProgress?.(0, totalRows);
+
+  for (const combo of brandYearCombos) {
+    const [bId, yr] = combo.split('|');
+    const deleted = await db.delete(cardDatabase)
+      .where(and(eq(cardDatabase.brandId, bId), eq(cardDatabase.year, parseInt(yr))))
+      .returning({ id: cardDatabase.id });
+    replaced += deleted.length;
+  }
+  if (replaced > 0) console.log(`[CardDB] Removed ${replaced} existing card rows before re-import`);
+
+  const BATCH_SIZE = 500;
+  let batch: typeof cardDatabase.$inferInsert[] = [];
+  let lineNum = 1;
+
+  for await (const row of streamParse(csvBuffer)) {
+    lineNum++;
     const brand = (row['brand'] || row['Brand'] || '').trim();
     const brandId = (row['brand_id'] || row['Brand_id'] || '').trim();
     const yearStr = (row['year'] || row['Year'] || '').trim();
@@ -101,8 +126,7 @@ export async function importCardsCSV(csvBuffer: Buffer, onProgress?: (processed:
     }
 
     const resolvedBrandId = brandId || brand.toLowerCase().replace(/\s+/g, '_');
-    brandYearCombos.add(`${resolvedBrandId}|${year}`);
-    rows.push({
+    batch.push({
       brandId: resolvedBrandId,
       brand,
       year,
@@ -115,30 +139,26 @@ export async function importCardsCSV(csvBuffer: Buffer, onProgress?: (processed:
       rookieFlag: (row['rookie_flag'] || row['Rookie_flag'] || '').trim() || null,
       notes: (row['notes'] || row['Notes'] || '').trim() || null,
     });
+
+    if (batch.length >= BATCH_SIZE) {
+      try {
+        await db.insert(cardDatabase).values(batch);
+        imported += batch.length;
+        onProgress?.(imported, totalRows);
+      } catch (err: any) {
+        errors.push(`Batch insert error at line ~${lineNum}: ${err.message}`);
+      }
+      batch = [];
+    }
   }
 
-  onProgress?.(0, rows.length);
-
-  // Pass 2: delete existing rows for every brand+year found in the file so we never duplicate
-  for (const combo of brandYearCombos) {
-    const [bId, yr] = combo.split('|');
-    const deleted = await db.delete(cardDatabase)
-      .where(and(eq(cardDatabase.brandId, bId), eq(cardDatabase.year, parseInt(yr))))
-      .returning({ id: cardDatabase.id });
-    replaced += deleted.length;
-  }
-  if (replaced > 0) console.log(`[CardDB] Removed ${replaced} existing card rows before re-import`);
-
-  // Pass 3: insert all fresh rows in batches
-  const BATCH_SIZE = 500;
-  for (let i = 0; i < rows.length; i += BATCH_SIZE) {
-    const batch = rows.slice(i, i + BATCH_SIZE);
+  if (batch.length > 0) {
     try {
       await db.insert(cardDatabase).values(batch);
       imported += batch.length;
-      onProgress?.(imported, rows.length);
+      onProgress?.(imported, totalRows);
     } catch (err: any) {
-      errors.push(`Batch insert error: ${err.message}`);
+      errors.push(`Batch insert error (final): ${err.message}`);
     }
   }
 
@@ -155,21 +175,44 @@ export async function importVariationsCSV(csvBuffer: Buffer, onProgress?: (proce
   let imported = 0;
   let replaced = 0;
 
-  const records = parse(csvBuffer, {
-    columns: true,
-    skip_empty_lines: true,
-    trim: true,
-    relax_column_count: true,
-  }) as Record<string, string>[];
-
-  // Pass 1: parse all valid rows and collect which brand+year combos are present
-  const rows: typeof cardVariations.$inferInsert[] = [];
   const brandYearCombos = new Set<string>();
+  let totalRows = 0;
 
-  for (let i = 0; i < records.length; i++) {
-    const row = records[i];
-    const lineNum = i + 2;
+  const streamParse = (buf: Buffer): AsyncIterable<Record<string, string>> =>
+    Readable.from(buf).pipe(parseStream({ columns: true, skip_empty_lines: true, trim: true, relax_column_count: true }));
 
+  for await (const row of streamParse(csvBuffer)) {
+    totalRows++;
+    const brand = (row['brand'] || row['Brand'] || '').trim();
+    const brandId = (row['brand_id'] || row['Brand_id'] || '').trim();
+    const yearStr = (row['year'] || row['Year'] || '').trim();
+    if (brand && yearStr) {
+      const year = parseInt(yearStr, 10);
+      if (!isNaN(year) && year >= 1900 && year <= 2100) {
+        const resolvedBrandId = brandId || brand.toLowerCase().replace(/\s+/g, '_');
+        brandYearCombos.add(`${resolvedBrandId}|${year}`);
+      }
+    }
+  }
+
+  console.log(`[CardDB] Variations pass 1 complete: ${totalRows} CSV rows, ${brandYearCombos.size} brand+year combos`);
+  onProgress?.(0, totalRows);
+
+  for (const combo of brandYearCombos) {
+    const [bId, yr] = combo.split('|');
+    const deleted = await db.delete(cardVariations)
+      .where(and(eq(cardVariations.brandId, bId), eq(cardVariations.year, parseInt(yr))))
+      .returning({ id: cardVariations.id });
+    replaced += deleted.length;
+  }
+  if (replaced > 0) console.log(`[CardDB] Removed ${replaced} existing variation rows before re-import`);
+
+  const BATCH_SIZE = 500;
+  let batch: typeof cardVariations.$inferInsert[] = [];
+  let lineNum = 1;
+
+  for await (const row of streamParse(csvBuffer)) {
+    lineNum++;
     const brand = (row['brand'] || row['Brand'] || '').trim();
     const brandId = (row['brand_id'] || row['Brand_id'] || '').trim();
     const yearStr = (row['year'] || row['Year'] || '').trim();
@@ -191,8 +234,7 @@ export async function importVariationsCSV(csvBuffer: Buffer, onProgress?: (proce
     const serialNumber = normalizeSerial(rawSerial);
 
     const resolvedBrandId = brandId || brand.toLowerCase().replace(/\s+/g, '_');
-    brandYearCombos.add(`${resolvedBrandId}|${year}`);
-    rows.push({
+    batch.push({
       brandId: resolvedBrandId,
       brand,
       year,
@@ -206,30 +248,26 @@ export async function importVariationsCSV(csvBuffer: Buffer, onProgress?: (proce
       breakerOdds: (row['breaker_odds'] || '').trim() || null,
       valueOdds: (row['value_odds'] || '').trim() || null,
     });
+
+    if (batch.length >= BATCH_SIZE) {
+      try {
+        await db.insert(cardVariations).values(batch);
+        imported += batch.length;
+        onProgress?.(imported, totalRows);
+      } catch (err: any) {
+        errors.push(`Batch insert error at line ~${lineNum}: ${err.message}`);
+      }
+      batch = [];
+    }
   }
 
-  onProgress?.(0, rows.length);
-
-  // Pass 2: delete existing rows for every brand+year found in the file so we never duplicate
-  for (const combo of brandYearCombos) {
-    const [bId, yr] = combo.split('|');
-    const deleted = await db.delete(cardVariations)
-      .where(and(eq(cardVariations.brandId, bId), eq(cardVariations.year, parseInt(yr))))
-      .returning({ id: cardVariations.id });
-    replaced += deleted.length;
-  }
-  if (replaced > 0) console.log(`[CardDB] Removed ${replaced} existing variation rows before re-import`);
-
-  // Pass 3: insert all fresh rows in batches
-  const BATCH_SIZE = 500;
-  for (let i = 0; i < rows.length; i += BATCH_SIZE) {
-    const batch = rows.slice(i, i + BATCH_SIZE);
+  if (batch.length > 0) {
     try {
       await db.insert(cardVariations).values(batch);
       imported += batch.length;
-      onProgress?.(imported, rows.length);
+      onProgress?.(imported, totalRows);
     } catch (err: any) {
-      errors.push(`Batch insert error: ${err.message}`);
+      errors.push(`Batch insert error (final): ${err.message}`);
     }
   }
 
