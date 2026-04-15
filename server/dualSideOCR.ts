@@ -331,10 +331,13 @@ async function combineCardResults(
     'isRookieCard', 'brand', 'collection', 'variant'
   ];
   
-  // Fields where back image has priority (card numbers, CMP codes are most reliably found on the back)
+  // Fields where back image has priority (CMP codes, year, etc. are most reliably found on the back)
   const backPriorityFields: (keyof CardFormValues)[] = [
-    'cardNumber', 'year', 'sport', 'serialNumber', 'cmpNumber'
+    'year', 'sport', 'serialNumber', 'cmpNumber'
   ];
+
+  // Card number is EXCLUSIVELY from the back — never use front
+  const backOnlyFields: (keyof CardFormValues)[] = ['cardNumber'];
   
   // Helper: check if a field value is meaningfully set (not empty, null, undefined, or 0 for numeric fields)
   const hasValue = (val: any): boolean => {
@@ -352,7 +355,7 @@ async function combineCardResults(
     }
   });
   
-  // Then copy back priority fields
+  // Then copy back priority fields (back preferred, front as fallback)
   backPriorityFields.forEach(field => {
     if (hasValue(backResult[field])) {
       combined[field] = backResult[field];
@@ -361,17 +364,19 @@ async function combineCardResults(
     }
   });
 
-  // Card number special case: if the back produced a purely numeric value (e.g. "2")
-  // but the front produced an alphanumeric value (e.g. "CSMLB-2" or "89B-9"),
-  // the front's value is far more specific — prefer it.
-  if (hasValue(frontResult.cardNumber) && hasValue(combined.cardNumber)) {
-    const frontNum = String(frontResult.cardNumber);
-    const combinedNum = String(combined.cardNumber);
-    const frontHasLetters = /[A-Za-z]/.test(frontNum);
-    const combinedPureNumeric = /^\d+$/.test(combinedNum);
-    if (frontHasLetters && combinedPureNumeric) {
-      console.log(`[CardNum] Preferring front alphanumeric "${frontNum}" over back plain numeric "${combinedNum}"`);
-      combined.cardNumber = frontResult.cardNumber;
+  // Back-only fields — NEVER use front values
+  backOnlyFields.forEach(field => {
+    if (hasValue(backResult[field])) {
+      combined[field] = backResult[field];
+    }
+  });
+
+  // Log when back has no card number
+  if (!hasValue(backResult.cardNumber)) {
+    if (hasValue(frontResult.cardNumber)) {
+      console.log(`[CardNum] Back has no card number; front had "${frontResult.cardNumber}" but front values are ignored for card numbers (likely jersey number)`);
+    } else {
+      console.log(`[CardNum] Neither front nor back detected a card number`);
     }
   }
 
@@ -624,30 +629,17 @@ async function combineCardResults(
   if (combined.brand && combined.year && combined.cardNumber) {
     console.log(`[CardDB] Attempting lookup: brand="${combined.brand}" year=${combined.year} cardNumber="${combined.cardNumber}" collection="${combined.collection}"`);
     try {
-      let found = await tryLookup(combined.brand, combined.year, combined.cardNumber, combined.collection);
-
-      // Fallback 1: try front card number if different from back.
-      // requireNameMatch=true because front "card numbers" are often jersey
-      // numbers — if the DB player doesn't match the OCR player, reject.
-      const frontNum = String(frontResult.cardNumber || '').trim();
       const backNum = String(combined.cardNumber || '').trim();
-      if (!found && frontNum && frontNum !== backNum) {
-        console.log(`[CardDB] No match with cardNumber="${backNum}" — retrying with front cardNumber="${frontNum}"`);
-        found = await tryLookup(combined.brand, combined.year, frontNum, combined.collection || frontResult.collection, { requireNameMatch: true });
-      }
+      let found = await tryLookup(combined.brand, combined.year, backNum, combined.collection);
 
-      // Fallback 2: try ±1 year (OCR often gets copyright year wrong by one)
-      if (!found) {
+      // Fallback: try ±1 year (OCR often gets copyright year wrong by one)
+      // Only uses the back card number — front numbers are unreliable (jersey numbers etc.)
+      if (!found && backNum) {
         const yr = combined.year as number;
-        const numbersToTry = [backNum, frontNum].filter(n => n);
-        for (const num of numbersToTry) {
+        for (const delta of [1, -1]) {
+          console.log(`[CardDB] Retrying with year=${yr + delta} cardNumber="${backNum}"`);
+          found = await tryLookup(combined.brand, yr + delta, backNum, combined.collection);
           if (found) break;
-          const isFrontNum = num === frontNum && num !== backNum;
-          for (const delta of [1, -1]) {
-            console.log(`[CardDB] Retrying with year=${yr + delta} cardNumber="${num}"`);
-            found = await tryLookup(combined.brand, yr + delta, num, combined.collection || frontResult.collection, isFrontNum ? { requireNameMatch: true } : undefined);
-            if (found) break;
-          }
         }
       }
 
