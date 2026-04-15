@@ -73,14 +73,16 @@ function detectSerialNumberFromPositions(textAnnotations: any[]): SerialNumberRe
       return bScore - aScore;
     });
     
-    // Check if the top candidate is isolated (serial numbers are typically alone)
     const topCandidate = sortedCandidates[0];
-    const isIsolated = checkIfIsolated(topCandidate, textAnnotations);
     
-    // Validate the serial number before accepting it
+    // Basic format validation (allows denominator >= 1)
     if (!isValidSerialNumber(topCandidate.description)) {
       return { serialNumber: '', isNumbered: false, detectionMethod: 'position-invalid' };
     }
+
+    const isIsolated = checkIfIsolated(topCandidate, textAnnotations);
+    const position = getAnnotationPosition(topCandidate);
+    const isInCornerArea = (position.x > 700 || position.x < 200) && (position.y > 500 || position.y < 200);
 
     if (isIsolated) {
       return {
@@ -90,10 +92,6 @@ function detectSerialNumberFromPositions(textAnnotations: any[]): SerialNumberRe
       };
     }
     
-    // If not isolated, still consider it if it's in a corner/edge position
-    // Serial numbers can appear in any corner (bottom-left on rotated Topps backs, bottom-right, etc.)
-    const position = getAnnotationPosition(topCandidate);
-    const isInCornerArea = (position.x > 700 || position.x < 200) && (position.y > 500 || position.y < 200);
     if (isInCornerArea) {
       return {
         serialNumber: topCandidate.description,
@@ -102,8 +100,13 @@ function detectSerialNumberFromPositions(textAnnotations: any[]): SerialNumberRe
       };
     }
 
-    // Even if not isolated or in a corner, accept exact-format annotations
-    // (NNN/NNN is very unlikely to appear as non-serial text)
+    // Not isolated and not in a corner — this is likely inside the central text block.
+    // Require denominator >= 10 to avoid false positives from dates/stats.
+    if (!isValidSerialNumber(topCandidate.description, true)) {
+      console.log(`Rejecting position-format serial "${topCandidate.description}" — small denominator without corner/isolated position`);
+      return { serialNumber: '', isNumbered: false, detectionMethod: 'position-invalid-center' };
+    }
+
     return {
       serialNumber: topCandidate.description,
       isNumbered: true,
@@ -121,11 +124,11 @@ function detectSerialNumberFromPositions(textAnnotations: any[]): SerialNumberRe
  */
 function detectSerialNumberFromPatterns(fullText: string): SerialNumberResult {
   try {
-    // Common serial number patterns
+    // Common serial number patterns — allow 1+ digit denominators (/1, /5, /99, /1000)
     const patterns = [
-      /\b(\d{1,3}\/\d{2,4})\b/g,           // 010/399, 16/99, 123/1000
-      /\b(\d{1,3})\s*\/\s*(\d{2,4})\b/g,   // 010 / 399 (with spaces)
-      /\b(\d{1,3})\s+OF\s+(\d{2,4})\b/gi,  // 16 OF 99
+      /\b(\d{1,3}\/\d{1,4})\b/g,           // 1/1, 010/399, 16/99, 123/1000
+      /\b(\d{1,3})\s*\/\s*(\d{1,4})\b/g,   // 010 / 399 (with spaces)
+      /\b(\d{1,3})\s+OF\s+(\d{1,4})\b/gi,  // 16 OF 99
     ];
     
     // Split text into lines to avoid matching serial numbers in paragraphs
@@ -157,6 +160,22 @@ function detectSerialNumberFromPatterns(fullText: string): SerialNumberResult {
           if (serialNumber && isValidSerialNumber(serialNumber)) {
             if (isLongLine && isSerialNumberInBioContext(serialNumber, line)) {
               continue;
+            }
+            // Small denominators (< 10) via pattern matching (no position data)
+            // are high risk for date/stat false positives (e.g. "3/5", "8/7").
+            // Only accept if the line is very short (standalone serial) or
+            // an explicit bio-context check passes.
+            const denom = parseInt(serialNumber.split('/')[1], 10);
+            if (denom < 10) {
+              const trimmed = line.trim();
+              if (trimmed !== serialNumber && trimmed.length > 15) {
+                console.log(`Rejecting pattern serial "${serialNumber}" — small denominator on non-standalone line`);
+                continue;
+              }
+              if (isSerialNumberInBioContext(serialNumber, fullText)) {
+                console.log(`Rejecting pattern serial "${serialNumber}" — small denominator in bio context`);
+                continue;
+              }
             }
             return {
               serialNumber,
@@ -265,23 +284,28 @@ function isSerialNumberInBioContext(serialNumber: string, fullText: string): boo
 }
 
 /**
- * Validate that a detected serial number looks legitimate
+ * Validate that a detected serial number looks legitimate.
+ * `requirePosition` controls strictness:
+ *   - false (default): general validation, denominator >= 1
+ *   - true : used when the candidate lacks strong positional evidence
+ *            (i.e., not isolated and not in a corner), so we require
+ *            denominator >= 10 to avoid date/stat false positives.
  */
-function isValidSerialNumber(serialNumber: string): boolean {
+function isValidSerialNumber(serialNumber: string, requirePosition: boolean = false): boolean {
   const parts = serialNumber.split('/');
   if (parts.length !== 2) return false;
   
   const num = parseInt(parts[0], 10);
   const total = parseInt(parts[1], 10);
   
-  // Basic validation rules
+  const minDenominator = requirePosition ? 10 : 1;
+
   return (
     !isNaN(num) && 
     !isNaN(total) && 
     num > 0 && 
     num <= total && 
-    total >= 10 && // Most serial numbers are at least /10
-    total <= 10000 && // Most don't exceed /10000
-    num < total // Serial number should be less than total
+    total >= minDenominator &&
+    total <= 10000
   );
 }
