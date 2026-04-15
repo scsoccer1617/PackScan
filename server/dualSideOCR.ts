@@ -435,6 +435,9 @@ async function combineCardResults(
     'MAJOR', 'LEAGUE', 'BATTING', 'RECORD', 'STADIUM', 'CLUB', 'COLLECTION',
     'OPENING', 'DAY', 'HERITAGE', 'PRIZM', 'SELECT', 'MOSAIC',
     'BASEBALL', 'CARD', 'ROOKIE', 'STARS', 'MLB',
+    'GAME-USED', 'MEMORABILIA', 'RELIC', 'AUTOGRAPH', 'AUTOGRAPHED', 'SWATCH',
+    'PATCH', 'JERSEY', 'UNIFORM', 'EQUIPMENT', 'GAME', 'USED', 'WORN',
+    'INSERT', 'PARALLEL', 'REFRACTOR', 'CONNECT', 'CITY',
     'DRAFTED', 'BORN', 'FREE', 'AGENT',
     'ANNIV', 'ANNIVERSARY', 'ERSARY', 'COMPLETE',
     'AVG', 'SLG', 'OBP', 'ERA', 'RBI', 'HR', 'BB', 'SO', 'AB',
@@ -456,7 +459,15 @@ async function combineCardResults(
     if (!firstName || !lastName) return true;
     const fullName = `${firstName} ${lastName}`.toUpperCase();
     const words = fullName.split(/\s+/);
-    if (words.some(w => bogusNameWords.has(stripTrademarkSuffix(w))) || words.length > 4) return true;
+    const isBogusWord = (w: string): boolean => {
+      const cleaned = stripTrademarkSuffix(w);
+      if (bogusNameWords.has(cleaned)) return true;
+      if (cleaned.includes('-')) {
+        return cleaned.split('-').every(part => bogusNameWords.has(part));
+      }
+      return false;
+    };
+    if (words.some(w => isBogusWord(w)) || words.length > 4) return true;
     if (words.some(w => w.length <= 1)) return true;
     if (words.some(w => /^\d/.test(w))) return true;
     if (words.length === 2 && words.every(w => w.length <= 3)) return true;
