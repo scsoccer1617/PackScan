@@ -695,11 +695,6 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       console.log('Identified Topps brand from 35th Anniversary collection');
     }
     
-    // If we detect a card number like "89B-9" or similar format, it's very likely a Topps card
-    if (!result.brand && result.cardNumber && /\d{1,2}[A-Za-z]\d?[-]\d{1,2}/.test(result.cardNumber)) {
-      result.brand = 'Topps';
-      console.log('Identified Topps brand from card number format:', result.cardNumber);
-    }
     
     
     // Print all text annotations for debugging
@@ -718,8 +713,8 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     
     // Generic card number detection from text annotations in the top portion of the card
     const cardNumberPatterns = [
-      /^\d{1,2}[A-Za-z]\d?[-]?\d{1,2}$/,       // 89B-9, 89B2-32 (letter-number hybrids)
-      /^[A-Za-z]{2,5}[-]?\d{1,3}$/,             // HOU-11, SMLB-27 (prefix + digits)
+      /^\d{1,2}[A-Za-z]\d?[-]?\d{1,2}$/,       // Digit-letter-digit hybrids (e.g., BD-7)
+      /^[A-Za-z]{2,5}[-]?\d{1,3}$/,             // Alphanumeric prefix + digits (e.g., HOU-11)
       /^#?\d{1,3}[A-Za-z]?$/,                   // #123, 123A, 99
       /^[A-Za-z][-]?\d{1,3}$/,                  // T-206, B-12
       /^(?:card|no)[.\s#]?\d{1,3}[A-Za-z]?$/i,  // "Card 123", "No.99"
@@ -784,8 +779,7 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
 
     const is35thAnniversaryCard = fullText.includes('35') && fullText.includes('ANNIVERSARY');
     
-    // If we detect a card with the 89B pattern, it's very likely from the 35th Anniversary collection
-    if (is35thAnniversaryCard || (bestCardNumber && bestCardNumber.description.includes('89B'))) {
+    if (is35thAnniversaryCard) {
       console.log('*** DETECTED 35th ANNIVERSARY CARD PATTERN ***');
       // Set collection-specific values but keep the dynamic card number
       if (!result.brand) result.brand = 'Topps';
@@ -825,12 +819,11 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       // Fallback: Check for specific patterns in the full text
       // This catches cases where the OCR didn't identify the text as a separate element
       
-      // Look for patterns like 89B-9, 89B2-32, or HOU-11 in the full text
       const specificPatterns = [
-        /\b[A-Z]{2,5}[-]?\d{1,3}\b/i,             // Alphanumeric prefixed (SMLB-27, HOU-11, etc.)
-        /\b\d{1,2}[A-Za-z]\d?[-]\d{1,2}\b/,       // Digit-letter-digit hybrids (89B-9, 89B2-32)
-        /\b[A-Z]{3}[-]\d{1,2}\b/,                  // Team codes (HOU-11, NYY-8)
-        /\b\d{1,2}[A-Za-z][-]?\d{1,2}\b/,          // Digit-letter combos (89B9, 89B-9)
+        /\b[A-Z]{2,5}[-]?\d{1,3}\b/i,             // Alphanumeric prefixed (e.g., HOU-11, BD-7)
+        /\b\d{1,2}[A-Za-z]\d?[-]\d{1,2}\b/,       // Digit-letter-digit hybrids
+        /\b[A-Z]{3}[-]\d{1,2}\b/,                  // Team codes (e.g., HOU-11, NYY-8)
+        /\b\d{1,2}[A-Za-z][-]?\d{1,2}\b/,          // Digit-letter combos
       ];
       
       let cardNumberMatch = null;
@@ -1005,10 +998,7 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     
     // Context-based year correction
     // For 35th Anniversary and recent collections
-    if (is35thAnniversaryCard || 
-        result.collection === '35th Anniversary' || 
-        (result.cardNumber && result.cardNumber.includes('89B'))) {
-      // Override any detected year for 35th Anniversary cards
+    if (is35thAnniversaryCard || result.collection === '35th Anniversary') {
       result.year = 2024;
       console.log('Overriding year to 2024 for 35th Anniversary collection');
     }
@@ -1361,8 +1351,7 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       result.year = 2024;
       
       // The "1989" in the 35th Anniversary logo is commonly misread as the card number.
-      // Clear it so the card number pattern matchers (which look for "89B-9" format) can
-      // find the real card number, and the DB lookup can match correctly.
+      // Clear misread card number so real card number detection can find the actual value.
       if (result.cardNumber === '1989' || result.cardNumber === '192') {
         console.log(`Clearing misread card number "${result.cardNumber}" — likely the "1989" from 35th Anniversary logo`);
         result.cardNumber = '';
