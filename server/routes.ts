@@ -1657,7 +1657,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const [[cardCount], [varCount], [setCount], [sportCount]] = await Promise.all([
         db.select({ count: sql<number>`count(*)::int` }).from(cardDatabase),
         db.select({ count: sql<number>`count(*)::int` }).from(cardVariations),
-        db.select({ count: sql<number>`count(distinct ${cardDatabase.set})::int` }).from(cardDatabase),
+        db.select({ count: sql<number>`count(distinct ${cardDatabase.collection})::int` }).from(cardDatabase),
         db.execute(sql`SELECT count(distinct reverse(split_part(reverse(brand_id), '_', 1)))::int as count FROM card_database`),
       ]);
       const sportsCount = (sportCount as any).rows?.[0]?.count ?? (sportCount as any)[0]?.count ?? 0;

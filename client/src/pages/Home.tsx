@@ -98,7 +98,7 @@ export default function Home() {
             <div className="p-1.5 bg-amber-50 rounded-lg">
               <Layers className="w-4 h-4 text-amber-600" />
             </div>
-            <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Sets</span>
+            <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Collections</span>
           </div>
           {isLoading ? (
             <div className="h-8 w-20 bg-gray-100 animate-pulse rounded" />
