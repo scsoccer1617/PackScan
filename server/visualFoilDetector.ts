@@ -369,6 +369,35 @@ export async function detectFoilFromImage(base64Image: string, options?: { isNum
         confidence = 0;
         indicators.push('REJECTED: Likely false positive from white border reflection');
       }
+
+      // Solid-color parallels (Sapphire, Blue, Red, Green, Gold, etc.) ALWAYS have
+      // borders tinted with their parallel color. If the card shows a prominent
+      // white border, the detected color tint is almost certainly coming from the
+      // player photo/background — not the card's border treatment. Reject the
+      // color-parallel classification even when chrome/metallic labels are present
+      // (Chrome BASE cards have chrome surfaces + white borders and are NOT Sapphire).
+      //
+      // Allowed exceptions (parallels that legitimately keep white borders):
+      //   - Rainbow Foil / Prismatic (no single solid color)
+      //   - Plain "Chrome" (the base chrome surface itself)
+      //   - Silver Foil (neutral, not a color parallel)
+      if (hasWhiteBorderReflection && foilType) {
+        const ft = foilType.toLowerCase();
+        const isNeutralOrPrismatic =
+          ft === 'chrome' ||
+          ft === 'silver foil' ||
+          ft.includes('rainbow') ||
+          ft.includes('prismatic') ||
+          ft.includes('iridescent');
+        if (!isNeutralOrPrismatic) {
+          const rejected = foilType;
+          console.log(`REJECTING color parallel "${rejected}" - card has white borders (solid-color parallels have colored borders)`);
+          isFoil = false;
+          foilType = null;
+          confidence = 0;
+          indicators.push(`REJECTED "${rejected}": white border dominant — color tint is from photo, not a colored-border parallel`);
+        }
+      }
     }
 
     const hasColorBasedFoil = isFoil && foilType && foilType !== 'Foil';
