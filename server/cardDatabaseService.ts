@@ -318,6 +318,30 @@ export async function lookupCard(input: CardLookupInput): Promise<CardLookupResu
       )
       .limit(10);
 
+    // ── Step 1a: Off-by-one year fallback (vintage copyright convention) ──
+    // Vintage Topps/Fleer/Donruss cards (pre-1987) were printed with the previous
+    // year's copyright (e.g. a 1979 Topps card has "© 1978" on the back, with stats
+    // ending in 1978). Collectors catalog these by release year (1979), so OCR of
+    // the back often yields copyright_year = release_year - 1. If we didn't find
+    // a match, try year+1 before falling back.
+    if (cardRows.length === 0 && year >= 1900 && year < 1990) {
+      const bumpedRows = await db
+        .select()
+        .from(cardDatabase)
+        .where(
+          and(
+            sql`lower(${cardDatabase.brand}) = lower(${brandNorm})`,
+            eq(cardDatabase.year, year + 1),
+            sql`lower(${cardDatabase.cardNumberRaw}) = lower(${cardNumNorm})`
+          )
+        )
+        .limit(10);
+      if (bumpedRows.length > 0) {
+        console.log(`[CardDB] Off-by-one year fallback: no match for ${year} ${brandNorm} #${cardNumNorm}; found ${bumpedRows.length} match(es) at year ${year + 1} (copyright→release year convention)`);
+        cardRows = bumpedRows;
+      }
+    }
+
     // If collection provided, score and filter by collection + set similarity.
     // The OCR text from the back of a card (e.g. "SERIES TWO", "SAPPHIRE") often
     // maps directly to the DB `set` column rather than `collection`. Scoring both
