@@ -1,7 +1,6 @@
 import { Request, Response } from 'express';
 import { CardFormValues } from '@shared/schema';
 import { analyzeSportsCardImage } from './dynamicCardAnalyzer';
-import { analyzeScoreCard } from './scoreCardAnalyzer';
 import { detectFoilVariant } from './foilVariantDetector';
 import { lookupCard } from './cardDatabaseService';
 import { batchExtractTextFromImages, clearOcrCache } from './googleVisionFetch';

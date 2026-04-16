@@ -23,7 +23,6 @@ import { searchCardValues, getEbaySearchUrl, clearEbayCache } from './ebayServic
 import { z } from 'zod';
 import { handleDualSideCardAnalysis } from './dualSideOCR';
 import { extractTextFromImage, analyzeSportsCardImage } from './googleVisionFetch';
-import { handleJordanWicksCard } from './jordanWicksRoute';
 import { importCardsCSV, importVariationsCSV, lookupCard } from './cardDatabaseService';
 import { cardDatabase, cardVariations } from '../shared/schema';
 import { join } from 'path';
@@ -891,74 +890,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     // Check for special cards first by looking at the request
     const file = req.file;
     
-    if (file) {
-      try {
-        // Extract text from the image
-        const base64Image = file.buffer.toString('base64');
-        const { fullText } = await extractTextFromImage(base64Image);
-        
-        // Check if this is the Anthony Volpe Stars of MLB card
-        if ((fullText.includes('STARS OF MLB') || fullText.includes('STARS OF TILB') || fullText.includes('SMLB-')) && 
-            (fullText.includes('ANTHONY VOLPE') || (fullText.includes('ANTHONY') && fullText.includes('VOLPE')))) {
-          
-          console.log('Detected Anthony Volpe Stars of MLB card - using hardcoded data');
-          
-          // For Stars of MLB cards, we want to use the full "SMLB-XX" format as the card number
-          const smlbMatch = fullText.match(/SMLB-(\d+)/);
-          const cardNumber = smlbMatch ? `SMLB-${smlbMatch[1]}` : 'SMLB-76';
-          
-          // Return the hardcoded data for this specific card
-          return res.json({
-            success: true,
-            data: {
-              playerFirstName: 'Anthony',
-              playerLastName: 'Volpe',
-              brand: 'Topps',
-              collection: 'Stars of MLB',
-              cardNumber: cardNumber,
-              year: 2024,
-              sport: 'Baseball',
-              condition: 'PSA 8',
-              estimatedValue: 5,
-              isRookieCard: true,
-              isAutographed: false,
-              isNumbered: false
-            }
-          });
-        }
-        
-        // Check if this is the Jordan Wicks card
-        if (fullText.includes('JORDAN WICKS') && fullText.includes('FLAGSHIP')) {
-          console.log('Detected Jordan Wicks Flagship Collection card - using hardcoded data');
-          
-          // Return the hardcoded data for this specific card
-          return res.json({
-            success: true,
-            data: {
-              playerFirstName: 'Jordan',
-              playerLastName: 'Wicks',
-              brand: 'Topps',
-              collection: 'Flagship Collection',
-              cardNumber: '76', 
-              year: 2024,
-              sport: 'Baseball',
-              condition: 'PSA 8',
-              variant: '',
-              serialNumber: '',
-              estimatedValue: 0,
-              isRookieCard: true,
-              isAutographed: false,
-              isNumbered: false
-            }
-          });
-        }
-      } catch (error) {
-        console.error('Error in Jordan Wicks detection:', error);
-        // Continue to regular OCR processing if there's an error
-      }
-    }
-    
-    // If not the Jordan Wicks card, use the regular handler
     return handleDualSideCardAnalysis(req, res);
   });
 
@@ -1918,7 +1849,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               isAutographed: false,
               isNumbered: !!(dbResult.serialNumber),
               isFoil: false,
-              sport: 'Baseball',
+              sport: '',
               cmpNumber: dbResult.cmpNumber || undefined,
             },
           });
@@ -1941,7 +1872,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           isAutographed: false,
           isNumbered: false,
           isFoil: false,
-          sport: 'Baseball',
+          sport: '',
         },
       });
     } catch (error: any) {

@@ -181,80 +181,6 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
       }
     }
     
-    // Special case for Stars of MLB cards
-    if (text.includes('STARS OF MLB') || text.includes('SMLB-')) {
-      console.log('Found Stars of MLB card');
-      
-      const lines = text.split('\n');
-      
-      // Look for the player name which typically comes right after the card number line
-      for (let i = 0; i < Math.min(7, lines.length); i++) {
-        // Look directly for the line with player name after SMLB-76
-        if (lines[i].includes('SMLB-') && i + 1 < lines.length) {
-          console.log(`Found SMLB line: "${lines[i]}", next line: "${lines[i+1]}"`);
-          
-          const nameLine = lines[i + 1].trim();
-          // Check if this line looks like a player name (all caps, no numbers)
-          if (nameLine && /^[A-Z][A-Z\s\-']{2,30}$/.test(nameLine) && 
-              !nameLine.includes('STARS') && !nameLine.includes('MLB')) {
-            
-            const nameParts = nameLine.split(' ');
-            
-            if (nameParts.length >= 2) {
-              cardDetails.playerFirstName = nameParts[0].charAt(0).toUpperCase() + 
-                                            nameParts[0].slice(1).toLowerCase();
-              cardDetails.playerLastName = nameParts.slice(1).join(' ')
-                                            .split(' ')
-                                            .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-                                            .join(' ');
-              
-              console.log(`Detected player name from Stars of MLB card: ${cardDetails.playerFirstName} ${cardDetails.playerLastName}`);
-              
-              // Set collection and fix card number
-              cardDetails.collection = "Stars of MLB";
-              cardDetails.brand = 'Topps';
-              
-              // Extract card number - keep the full SMLB-XX or CSMLB-XX format
-              const smlbMatch = lines[i].match(/C?SMLB-\d+/);
-              if (smlbMatch) {
-                cardDetails.cardNumber = smlbMatch[0];
-              }
-              
-              return;
-            }
-          }
-        }
-      }
-      
-      // If still can't find, try explicit pattern match across the entire text.
-      // Capture the optional 'C' prefix so CSMLB-2 → "CSMLB-2", SMLB-76 → "SMLB-76".
-      const volpeMatch = text.match(/(C?)SMLB-(\d+)\s+([A-Z]+)\s+([A-Z]+)/i);
-      if (volpeMatch && volpeMatch[3] && volpeMatch[4]) {
-        const firstName = volpeMatch[3];
-        const lastName = volpeMatch[4];
-        
-        // Make sure these aren't generic words
-        if (!/STARS|OF|MLB|NEW|YORK/.test(firstName + lastName)) {
-          cardDetails.playerFirstName = firstName.charAt(0).toUpperCase() + 
-                                        firstName.slice(1).toLowerCase();
-          cardDetails.playerLastName = lastName.charAt(0).toUpperCase() + 
-                                      lastName.slice(1).toLowerCase();
-          
-          console.log(`Detected player name from SMLB pattern: ${cardDetails.playerFirstName} ${cardDetails.playerLastName}`);
-          
-          // Set collection info
-          cardDetails.collection = "Stars of MLB";
-          cardDetails.brand = 'Topps';
-          // Build the full card number including any 'C' prefix (e.g. CSMLB-2 or SMLB-76)
-          const prefix = volpeMatch[1].toUpperCase();
-          cardDetails.cardNumber = prefix ? `${prefix}SMLB-${volpeMatch[2]}` : `SMLB-${volpeMatch[2]}`;
-          console.log(`Card number set to: ${cardDetails.cardNumber}`);
-          return;
-        }
-      }
-      
-    }
-    
     // Special case for multi-word last names and special formats like Collector's Choice
     const brandWords = new Set(['TOPPS', 'BOWMAN', 'DONRUSS', 'PANINI', 'FLEER', 'SCORE', 'LEAF', 'PRINTED', 'USA']);
     const multiWordNameMatch = text.match(/([A-Z][a-zA-Z]+)\s+([A-Z][A-Z\s]+)\s+(?:•|\.|\*|:|,)\s*([A-Z]+)/);
@@ -776,7 +702,7 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
     // Autograph card numbers: letters-dash-letters (e.g. CPA-LRE, HA-RJ, BA-XX, RC-JD)
     // These appear on Bowman Prospect Autographs, Heritage Autographs, etc.
     // Must run BEFORE the plainNumberPattern so CODE#065939 doesn't win over CPA-LRE.
-    const nonCardLetterPrefixes = new Set(['CMP', 'CODE', 'WWW', 'COM', 'INC', 'MLB', 'NFL', 'NBA', 'NHL', 'USA', 'URL', 'AKA', 'DBA', 'LLC', 'LTD', 'REG', 'TM', 'WALK', 'OFF', 'RBI', 'ERA', 'AVG', 'OBP', 'OPS', 'WAR', 'SLG', 'WHIP', 'ALL', 'STAR', 'PRO', 'MVP', 'HOF', 'NL', 'AL']);
+    const nonCardLetterPrefixes = new Set(['CMP', 'CODE', 'WWW', 'COM', 'INC', 'MLB', 'NFL', 'NBA', 'NHL', 'MLS', 'USA', 'URL', 'AKA', 'DBA', 'LLC', 'LTD', 'REG', 'TM', 'WALK', 'OFF', 'RBI', 'ERA', 'AVG', 'OBP', 'OPS', 'WAR', 'SLG', 'WHIP', 'ALL', 'STAR', 'PRO', 'MVP', 'HOF', 'NL', 'AL', 'PPG', 'RPG', 'APG', 'FGP', 'FTP', 'TD', 'YDS', 'ATT', 'QBR', 'INT', 'SOG', 'PIM', 'SHG', 'GWG', 'PKS']);
     const autographCardPattern = /\b([A-Z]{1,4})-([A-Z]{2,5})\b/g;
     let autographMatch;
     while ((autographMatch = autographCardPattern.exec(text)) !== null) {
@@ -983,7 +909,7 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
 
     // Check for hyphenated alphanumeric card numbers (BD-7, BDC-15, HRC-42, etc.)
     // These are high-confidence and should be checked before standalone numbers
-    const nonCardCodePrefixes = new Set(['CMP', 'CODE', 'WWW', 'COM', 'INC', 'MLB', 'OBP', 'ERA', 'AVG', 'WAR', 'SLG', 'RBI', 'HT', 'WT', 'ACQ', 'RD', 'RND', 'PK', 'OVR']);
+    const nonCardCodePrefixes = new Set(['CMP', 'CODE', 'WWW', 'COM', 'INC', 'MLB', 'NFL', 'NBA', 'NHL', 'MLS', 'OBP', 'ERA', 'AVG', 'WAR', 'SLG', 'RBI', 'HT', 'WT', 'ACQ', 'RD', 'RND', 'PK', 'OVR', 'PPG', 'RPG', 'APG', 'FGP', 'FTP', 'TD', 'YDS', 'ATT', 'QBR', 'INT', 'SOG', 'PIM', 'SHG', 'GWG', 'PKS']);
     const hyphenAlphaNumPatternEarly = /\b([A-Z]{1,4})-(\d{1,4})\b/g;
     let hyphenMatchEarly;
     while ((hyphenMatchEarly = hyphenAlphaNumPatternEarly.exec(text)) !== null) {
@@ -1148,8 +1074,6 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>,
     
     const collectionPatterns = [
       { pattern: /RIFLEMAN/i, name: "Rifleman" },
-      { pattern: /CHROME STARS OF MLB|CSMLB/, name: "Stars of MLB", variant: "Chrome" },
-      { pattern: /STARS OF MLB|SMLB/, name: "Stars of MLB" },
       { pattern: /HERITAGE/i, name: "Heritage" },
       { pattern: /ALLEN & GINTER|ALLEN AND GINTER/i, name: "Allen & Ginter" },
       { pattern: /BOWMAN CHROME/i, name: "Bowman Chrome" },
