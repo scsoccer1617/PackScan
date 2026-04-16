@@ -30,7 +30,7 @@ export default function SimpleCardForm() {
   const form = useForm<CardFormValues>({
     resolver: zodResolver(cardSchema),
     defaultValues: {
-      sport: "Baseball",
+      sport: "",
       playerFirstName: "",
       playerLastName: "",
       brand: "Topps",

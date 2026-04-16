@@ -360,8 +360,8 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     // Set a default result in case anything fails
     const defaultResult: Partial<CardFormValues> = {
       condition: 'PSA 8',
-      sport: 'Baseball',
-      brand: 'Topps',
+      sport: '',
+      brand: '',
       year: new Date().getFullYear()
     };
     
@@ -401,19 +401,7 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     // Convert to lowercase for easier pattern matching
     const lowerText = fullText.toLowerCase();
     
-    // Extract sport
-    if (lowerText.includes('baseball') || lowerText.includes('mlb') || 
-        lowerText.includes('major league baseball') || lowerText.includes('brewers')) {
-      result.sport = 'Baseball';
-    } else if (lowerText.includes('football') || lowerText.includes('nfl')) {
-      result.sport = 'Football';
-    } else if (lowerText.includes('basketball') || lowerText.includes('nba')) {
-      result.sport = 'Basketball';
-    } else if (lowerText.includes('hockey') || lowerText.includes('nhl')) {
-      result.sport = 'Hockey';
-    } else if (lowerText.includes('soccer') || lowerText.includes('mls')) {
-      result.sport = 'Soccer';
-    }
+    // Sport detection is handled by dynamicCardAnalyzer.ts detectSport() via keyword scoring
     
     // Extract player name - looking for known patterns first, then general patterns
     
@@ -427,152 +415,8 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       'TWINS', 'CHICAGO', 'PADRES', 'DODGERS', 'YANKEES'
     ];
     
-    // GENERAL STARS OF MLB CARD DETECTION LOGIC
-    // This will handle any Stars of MLB card in a more dynamic way
-    if (fullText.includes('STARS OF MLB') || 
-       (fullText.includes('STARS') && fullText.includes('MLB'))) {
-      console.log('DETECTED: Stars of MLB collection');
-      
-      // Set collection and brand
-      result.collection = 'Stars of MLB';
-      result.brand = 'Topps';
-      result.sport = 'Baseball';
-      
-      // Check if this is a Chrome Stars of MLB card - multiple detection methods
-      if (fullText.includes('CHROME') || 
-          fullText.toLowerCase().includes('chrome') || 
-          fullText.includes('CSMLB') ||
-          fullText.includes('TOPPS CHROME') ||
-          // Detect special holographic/reflective effects from OCR text pattern
-          fullText.includes('REFRACTOR') || 
-          fullText.includes('SHINY') ||
-          // Look for Chrome in the Topps logo location
-          textAnnotations.some(a => 
-            a.description.toLowerCase().includes('chrome') && 
-            a.boundingPoly?.vertices && 
-            a.boundingPoly.vertices.some((v: any) => v.x > 900 && v.y < 400)
-          )) {
-            
-        result.collection = 'Chrome Stars of MLB';
-        console.log('Enhanced detection: Chrome Stars of MLB identified');
-
-        // If card number matches CSMLB pattern, use it
-        const csmlbMatch = fullText.match(/CSMLB[-\s]?(\d+)/i);
-        if (csmlbMatch && csmlbMatch[1]) {
-          result.cardNumber = `CSMLB-${csmlbMatch[1]}`;
-          console.log(`Set card number to CSMLB-${csmlbMatch[1]} for Chrome Stars of MLB card`);
-        }
-        // If card number is just a number, convert to CSMLB format
-        else if (result.cardNumber && /^\d+$/.test(result.cardNumber)) {
-          const originalNumber = result.cardNumber;
-          result.cardNumber = `CSMLB-${result.cardNumber}`;
-          console.log(`Converted card number from ${originalNumber} to ${result.cardNumber} for Chrome Stars of MLB`);
-        }
-      }
-      
-      // Check if player name is in the text
-      // This is a more dynamic approach that doesn't hard-code specific players
-      const playerNamePatterns = [
-        // Look for NAME pairs in all caps on their own line
-        /([A-Z]{2,})\s+([A-Z]{2,})/,
-        
-        // Look for Name Name format (proper case)
-        /([A-Z][a-z]+)\s+([A-Z][a-z]+)/,
-        
-        // Look for NAME in all caps with team designation following
-        /([A-Z]+\s+[A-Z]+)(?:\s+\|\s+\w+)/
-      ];
-      
-      let playerNameMatch = null;
-      for (const pattern of playerNamePatterns) {
-        const match = fullText.match(pattern);
-        if (match && match[0]) {
-          playerNameMatch = match;
-          break;
-        }
-      }
-      
-      if (playerNameMatch) {
-        const nameParts = playerNameMatch[0].split(/\s+|\|/);
-        if (nameParts.length >= 2) {
-          // Convert names to proper case 
-          result.playerFirstName = nameParts[0].charAt(0).toUpperCase() + 
-                                 nameParts[0].slice(1).toLowerCase();
-          
-          const lastNameParts = nameParts.slice(1).filter(part => 
-            !/^\|$/.test(part) && !/^[1-9]B$/.test(part));
-            
-          result.playerLastName = lastNameParts.map(part => 
-            part.charAt(0).toUpperCase() + part.slice(1).toLowerCase()).join(' ');
-                  
-          console.log(`Detected player name: ${result.playerFirstName} ${result.playerLastName}`);
-        }
-      }
-      
-      // Check for Chrome Stars of MLB vs regular Stars of MLB
-      if (fullText.includes('CHROME')) {
-        result.collection = 'Chrome Stars of MLB';
-        console.log('Detected Chrome Stars of MLB collection');
-        
-        // Look for Chrome SMLB card number pattern (CSMLB-XX)
-        const csmlbMatch = fullText.match(/C?SMLB[-]?(\d+)/i);
-        if (csmlbMatch && csmlbMatch[1]) {
-          result.cardNumber = `CSMLB-${csmlbMatch[1]}`;
-          console.log(`Detected Chrome Stars of MLB card number: ${result.cardNumber}`);
-        }
-      }
-      
-      // Always set condition to PSA 8 for all Stars of MLB cards
-      result.condition = 'PSA 8';
-      
-      // Look for card number if not already found 
-      if (!result.cardNumber) {
-        const smlbMatch = fullText.match(/SMLB[-]?(\d+)/i);
-        if (smlbMatch && smlbMatch[1]) {
-          result.cardNumber = `SMLB-${smlbMatch[1]}`;
-        } 
-        // If only numeric card number is found, format it properly
-        else if (result.cardNumber && /^\d+$/.test(result.cardNumber)) {
-          result.cardNumber = `SMLB-${result.cardNumber}`;
-        }
-      }
-      
-      // Set year based on copyright text from multiple patterns
-      const yearPatterns = [
-        /©\s*(\d{4})/,           // Common copyright format
-        /\(c\)\s*(\d{4})/i,       // Alternative copyright format
-        /\b(20\d\d)\b/           // Standalone year
-      ];
-      
-      for (const pattern of yearPatterns) {
-        const yearMatch = fullText.match(pattern);
-        if (yearMatch && yearMatch[1]) {
-          result.year = parseInt(yearMatch[1], 10);
-          console.log(`Detected year from text: ${result.year}`);
-          break;
-        }
-      }
-    }
-    
-    // Improved Stars of MLB collection detection - look for various patterns
-    if (fullText.includes('STAR') && fullText.includes('MLB')) {
-      console.log('DETECTED: Stars of MLB collection');
-      
-      result.collection = 'Stars of MLB';
-      result.sport = 'Baseball';
-      result.brand = 'Topps';
-      
-      // CRITICAL: Check if this is a Chrome version with multiple detection methods
-      if (fullText.includes('CHROME') || 
-          fullText.includes('CSMLB') || 
-          fullText.toLowerCase().includes('chrome') ||
-          // The card is shiny/holographic/reflective - likely Chrome card
-          fullText.match(/CHROME\s+STARS\s+OF\s+MLB/i)) {
-        result.collection = 'Chrome Stars of MLB';
-        console.log('DETECTED: Chrome Stars of MLB collection - updated from Stars of MLB');
-      }
-      
-      // First clean up any incorrect player detection like "Major League"
+    // Clean up any incorrect player detection like "Major League"
+    if (fullText) {
       if ((result.playerFirstName === 'Major' && result.playerLastName === 'League') ||
           (result.playerFirstName === 'League' && result.playerLastName === 'Baseball')) {
         // These are not player names but part of "Major League Baseball" text
@@ -657,60 +501,6 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
         }
       }
       
-      // For Chrome Stars of MLB, look for both CSMLB and numeric patterns
-      // Improved pattern detection for CSMLB numbers
-      const csmlbMatch = fullText.match(/C?SMLB[-]?(\d+)/i);
-      const smlbMatch = fullText.match(/SMLB[-]?(\d+)/i);
-      
-      if (csmlbMatch && csmlbMatch[1]) {
-        // Chrome Stars of MLB card number format
-        result.cardNumber = `CSMLB-${csmlbMatch[1]}`;
-        console.log(`Detected Chrome Stars of MLB card number: ${result.cardNumber}`);
-      } else if (smlbMatch && smlbMatch[1]) {
-        // Regular Stars of MLB card number format
-        result.cardNumber = `SMLB-${smlbMatch[1]}`;
-        console.log(`Detected Stars of MLB card number: ${result.cardNumber}`);
-      } else if (fullText.includes('CHROME') && (result.collection === 'Stars of MLB' || result.collection === 'Chrome Stars of MLB')) {
-        // If we know it's a Chrome Stars of MLB card but couldn't get the number
-        console.log('Detected Chrome Stars of MLB card but could not parse card number');
-        
-        // Look for any numbers in the card that might be the card number
-        const numberAnnotations = textAnnotations
-          .filter(a => /^\d+$/.test(a.description))
-          .filter(a => a.description.length <= 3); // Card numbers usually 1-3 digits
-        
-        if (numberAnnotations.length > 0) {
-          const potentialNumber = numberAnnotations[0].description;
-          result.cardNumber = `CSMLB-${potentialNumber}`;
-          console.log(`Inferred Chrome Stars of MLB card number from standalone number: ${result.cardNumber}`);
-        }
-      }
-      
-      // Extract year from copyright text with expanded patterns
-      const yearPatterns = [
-        /[©\(\s](\d{4})[\s\)]/, // Common copyright format
-        /TM\s+&\s+©\s+(\d{4})/, // TM & © 2024 format
-        /©\s*(\d{4})\s*THE/, // © 2024 THE TOPPS format
-        /\b(20\d\d)\b/ // Any 4-digit year starting with 20
-      ];
-      
-      for (const pattern of yearPatterns) {
-        const match = fullText.match(pattern);
-        if (match && match[1]) {
-          result.year = parseInt(match[1], 10);
-          console.log(`Detected year from text pattern: ${result.year}`);
-          break;
-        }
-      }
-      
-      // Default to 2024 for Stars of MLB if no year found
-      if (!result.year) {
-        result.year = 2024;
-        console.log('Set default year to 2024 for Stars of MLB card');
-      }
-      
-      // Always set condition to PSA 8
-      result.condition = 'PSA 8';
     }
     
     // Generic player name detection for all cards
@@ -926,212 +716,73 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       console.log('Detected a 35th Anniversary card, setting collection and year');
     }
     
-    // Special patterns for baseball card numbers in the 35th Anniversary series
-    // These typically appear as "89B-9" or "89B2-32" format in a baseball graphic on the back
+    // Generic card number detection from text annotations in the top portion of the card
     const cardNumberPatterns = [
-      // General baseball card patterns (dynamic detection for any similar pattern)
-      /^\d{1,2}[A-Za-z]\d?[-]?\d{1,2}$/,  // Catches 89B-9, 89B2-32, 89B9 (with or without dash)
-      /^\d{1,3}[-]?\d{1,3}$/,             // Catches 89-9, 891-32, 191, etc.
-      
-      // Team code patterns - any 3 letters followed by numbers
-      /^[A-Za-z]{3}[-]?\d{1,2}$/,        // Catches HOU-11, NYY-2, BOS99, etc.
-      
-      // Generic number patterns that might be card numbers
-      /^#?\d{1,3}[A-Za-z]?$/,            // Catches #123, 123A, 99, etc.
-      /^[A-Za-z][-]?\d{1,3}$/,           // Catches T-206, B-12, A99, etc.
-      
-      // Card number with text prefix patterns
-      /^(?:card|no)[.\s#]?\d{1,3}[A-Za-z]?$/i,  // Catches "Card 123", "No.99", etc.
-      
-      // Alternative patterns for partial matches
-      /^\d{1,2}[A-Za-z]$/,               // Catches just "89B", "7T", etc. 
-      /^[-]?\d{1,2}$/,                   // Catches just "-9", "32", etc.
-      
-      // Special baseball card formats
-      /^\d{1,2}[A-Za-z]\d[-]\d{1,2}$/,   // Matches 89B2-32 specifically
-      /^[A-Z]{3}[-]\d{1,2}$/,            // Matches HOU-11, etc.
-      /^[0-9]{2}[A-Za-z][0-9]?[-][0-9]{1,2}$/,  // Stricter version for 89B-9, etc.
-      /^SMLB[-]?[0-9]{1,2}$/i,            // Matches SMLB-27, SMLB49, etc.
-      /^CSMLB[-]?[0-9]{1,2}$/i            // Matches CSMLB-2, CSMLB9, etc.
+      /^\d{1,2}[A-Za-z]\d?[-]?\d{1,2}$/,       // 89B-9, 89B2-32 (letter-number hybrids)
+      /^[A-Za-z]{2,5}[-]?\d{1,3}$/,             // HOU-11, SMLB-27 (prefix + digits)
+      /^#?\d{1,3}[A-Za-z]?$/,                   // #123, 123A, 99
+      /^[A-Za-z][-]?\d{1,3}$/,                  // T-206, B-12
+      /^(?:card|no)[.\s#]?\d{1,3}[A-Za-z]?$/i,  // "Card 123", "No.99"
     ];
-    
-    // First look for specific baseball card number patterns
-    let baseballCardNumber = null;
-    
-    for (const pattern of cardNumberPatterns) {
-      baseballCardNumber = textAnnotations.find(annotation => {
-        const text = annotation.description;
-        
-        if (pattern.test(text)) {
-          console.log(`Found baseball card number matching pattern ${pattern}:`, text);
-          return true;
-        }
-        return false;
-      });
-      
-      if (baseballCardNumber) break;
-    }
-    
-    if (baseballCardNumber) {
-      console.log('Found baseball card number:', baseballCardNumber.description);
-    }
-    
-    // Look for card numbers in specific formats, prioritizing those in the top left
-    // This acts as a fallback if we don't find a specific baseball card number pattern
-    // For Series 1 & 2 cards like Sean Manaea, the card number is typically a 3-digit number in top left
-    const isSeriesCard = fullText.includes('SERIES TWO') || fullText.includes('SERIES 2') || 
-                         fullText.includes('SERIES ONE') || fullText.includes('SERIES 1');
-                         
-    // Comprehensive scan of the card for card numbers in various formats and positions
+
     const topCardNumberCandidates = textAnnotations.filter(annotation => {
       const text = annotation.description;
-      
       const boundingPoly = annotation.boundingPoly;
       if (!boundingPoly || !boundingPoly.vertices) return false;
-      
-      // IMPORTANT: Card numbers can appear in different locations
-      // 1. Top left corner (common for many cards like 89B-9, 89B2-32)
-      // 2. Top middle (like CSMLB-2)  
-      // 3. Top right area
-      
-      // Check if the text is in the top portion of the card (adjust threshold as needed)
-      // We're being more generous with the height to catch more potential numbers
+
       const isTopPortion = boundingPoly.vertices.every((v: any) => v.y < 800);
-      
-      // Detect various card number patterns
-      // We'll check multiple formats that could be card numbers
-      
-      // Baseball card formats - broad patterns to catch different card number styles
-      const isBaseballFormat = /^(?:\d{1,2}[A-Za-z]\d?[-]?\d{1,2})$/i.test(text) ||        // 89B-9, 89B2-32
-                             /^(?:[A-Z]{2,}[-]?[0-9]{1,2})$/i.test(text) ||               // CSMLB-2, CSMLB2 (Mike Trout)
-                             /^(?:[A-Z]{3}[-]?[0-9]{1,2})$/i.test(text) ||               // HOU-11, NYY25 (team codes)
-                             text.includes('CSMLB') ||                                   // Mike Trout cards (any CSMLB format)
-                             text.includes('89B');                                       // 35th Anniversary (any 89B format)
-      
-      // General card numbering formats              
-      const isGeneralCardNumber = /^(?:\d{1,3})$/i.test(text) ||                          // Simple numbers like 123
-                                 /^(?:NO\.?\s*\d+)$/i.test(text) ||                       // NO.123
-                                 /^(?:CARD\s*\d+)$/i.test(text) ||                        // CARD 123
-                                 /^(?:#\s*\d+)$/i.test(text) ||                           // #123
-                                 /^(?:[A-Z][0-9]{1,3})$/i.test(text) ||                   // T206, A15 
-                                 /^(?:\d{1,3}[A-Z])$/i.test(text);                        // 123A, 45T
-                                 
-      // Specific formats known in sports cards
-      const isKnownCardFormat = text.toUpperCase().includes('CSMLB') ||                   // CSMLB-2 (Trout)
-                               /^89[Bb]/.test(text) ||                                   // 89B style (35th Anniversary)
-                               text.includes('-');                                        // Any hyphenated format
-      
-      // Log all potential candidates with their positions for debugging
-      if (isTopPortion && (isBaseballFormat || isGeneralCardNumber || isKnownCardFormat)) {
-        // Calculate if this is left, middle, or right portion
+
+      const isCardNumber = cardNumberPatterns.some(p => p.test(text)) ||
+                           /^(?:\d{1,3})$/.test(text) ||
+                           /^(?:[A-Z][0-9]{1,3})$/.test(text) ||
+                           /^(?:\d{1,3}[A-Z])$/.test(text) ||
+                           text.includes('-');
+
+      if (isTopPortion && isCardNumber) {
         const xCoords = boundingPoly.vertices.map((v: any) => v.x);
-        const avgX = xCoords.reduce((a, b) => a + b, 0) / xCoords.length;
-        
-        // Determine position (left, middle, right) for better analysis
-        let position = "unknown";
-        if (avgX < 400) position = "top-left";
-        else if (avgX < 800) position = "top-middle";
-        else position = "top-right";
-        
-        console.log(`Found potential card number: "${text}" at ${position} position:`, JSON.stringify(boundingPoly));
+        const avgX = xCoords.reduce((a: number, b: number) => a + b, 0) / xCoords.length;
+        const position = avgX < 400 ? "top-left" : avgX < 800 ? "top-middle" : "top-right";
+        console.log(`Found potential card number: "${text}" at ${position}`);
         return true;
       }
-      
       return false;
     });
-    
-    // Sort by position - prefer top left and top center (most card numbers appear there)
+
     topCardNumberCandidates.sort((a, b) => {
-      const aX = a.boundingPoly.vertices[0].x;
       const aY = a.boundingPoly.vertices[0].y;
-      const bX = b.boundingPoly.vertices[0].x;
       const bY = b.boundingPoly.vertices[0].y;
-      
-      // Prioritize by Y position first (top to bottom)
       if (aY !== bY) return aY - bY;
-      
-      // Then by X position (left to right)
-      return aX - bX;
+      return a.boundingPoly.vertices[0].x - b.boundingPoly.vertices[0].x;
     });
-    
-    // For better debugging
-    if (topCardNumberCandidates.length > 0) {
-      console.log('All card number candidates (sorted by position, top-left first):');
-      topCardNumberCandidates.forEach((candidate, i) => {
-        console.log(`Candidate ${i + 1}: ${candidate.description} at position:`, 
-                   JSON.stringify(candidate.boundingPoly));
-      });
-    }
-    
-    // Separate candidates by location: top-left, top-middle, top-right
-    const topLeftCandidates = topCardNumberCandidates.filter(candidate => {
-      const xCoords = candidate.boundingPoly.vertices.map((v: any) => v.x);
-      const avgX = xCoords.reduce((a, b) => a + b, 0) / xCoords.length;
-      return avgX < 400; // Left side of card
+
+    const topLeftCandidates = topCardNumberCandidates.filter(c => {
+      const avgX = c.boundingPoly.vertices.map((v: any) => v.x).reduce((a: number, b: number) => a + b, 0) / c.boundingPoly.vertices.length;
+      return avgX < 400;
     });
-    
-    const topMiddleCandidates = topCardNumberCandidates.filter(candidate => {
-      const xCoords = candidate.boundingPoly.vertices.map((v: any) => v.x);
-      const avgX = xCoords.reduce((a, b) => a + b, 0) / xCoords.length;
-      return avgX >= 400 && avgX < 800; // Middle of card
+    const topMiddleCandidates = topCardNumberCandidates.filter(c => {
+      const avgX = c.boundingPoly.vertices.map((v: any) => v.x).reduce((a: number, b: number) => a + b, 0) / c.boundingPoly.vertices.length;
+      return avgX >= 400 && avgX < 800;
     });
-    
-    const topRightCandidates = topCardNumberCandidates.filter(candidate => {
-      const xCoords = candidate.boundingPoly.vertices.map((v: any) => v.x);
-      const avgX = xCoords.reduce((a, b) => a + b, 0) / xCoords.length;
-      return avgX >= 800; // Right side of card
+
+    const anySpecialFormat = topCardNumberCandidates.find(c => {
+      const text = c.description;
+      return /^(?:\d{1,2}[A-Za-z]\d?[-]?\d{1,2})$/i.test(text) ||
+             /^(?:[A-Z]{2,}[-][0-9]{1,3})$/i.test(text);
     });
-    
-    // Log the candidates by position
-    console.log(`Found ${topLeftCandidates.length} top-left candidates, ${topMiddleCandidates.length} top-middle candidates, ${topRightCandidates.length} top-right candidates`);
-    
-    // Determine card number format and select the best candidate
-    // RULE: Prioritize formats that look like baseball card numbers first
-    
-    // Find any "special" card number formats that we want to prioritize
-    const anySpecialFormat = topCardNumberCandidates.find(candidate => {
-      const text = candidate.description;
-      return /^(?:\d{1,2}[A-Za-z]\d?[-]?\d{1,2})$/i.test(text) ||     // 89B-9, 89B2-32
-             /^(?:[A-Z]{2,}[-][0-9]{1,2})$/i.test(text) ||            // CSMLB-2
-             text.toUpperCase().includes('CSMLB') ||                  // CSMLB format (Trout)
-             /^89[Bb]/.test(text);                                    // 89B format (35th Anniversary)
-    });
-    
-    // Look for candidates with these specific formats
+
     const bestCandidates = [
-      // First try the special formats that include letters and numbers
       anySpecialFormat,
-      
-      // Try position-based selection:
-      // 1. If it's like 89B-9, it's probably in top left
       ...topLeftCandidates.filter(c => /^(?:\d{1,2}[A-Za-z]\d?[-]?\d{1,2})$/i.test(c.description)),
-      
-      // 2. If it's like CSMLB-2, it could be top-middle
-      ...topMiddleCandidates.filter(c => /^(?:[A-Z]{2,}[-][0-9]{1,2})$/i.test(c.description)),
-      
-      // 3. Team code formats like HOU-11 (often top left)
+      ...topMiddleCandidates.filter(c => /^(?:[A-Z]{2,}[-][0-9]{1,3})$/i.test(c.description)),
       ...topLeftCandidates.filter(c => /^(?:[A-Z]{3}[-]?[0-9]{1,2})$/i.test(c.description)),
-      
-      // 4. If not found, try baseball number in top-left
       topLeftCandidates[0],
-      
-      // 5. Try middle (some brands place the number here)
       topMiddleCandidates[0],
-      
-      // 6. Try general baseball pattern anywhere
-      baseballCardNumber,
-      
-      // 7. Last resort, any candidate
       topCardNumberCandidates[0]
-    ].filter(Boolean); // Remove undefined entries
-    
-    // Use the best candidate we found
+    ].filter(Boolean);
+
     const bestCardNumber = bestCandidates.length > 0 ? bestCandidates[0] : null;
-    
-    // Check if this looks like a 35th Anniversary card based on the detected patterns
-    const is35thAnniversaryCard = fullText.includes('35') || 
-                               fullText.includes('ANNIVERSARY') || 
-                               (baseballCardNumber && baseballCardNumber.description.includes('89B'));
+
+    const is35thAnniversaryCard = fullText.includes('35') && fullText.includes('ANNIVERSARY');
     
     // If we detect a card with the 89B pattern, it's very likely from the 35th Anniversary collection
     if (is35thAnniversaryCard || (bestCardNumber && bestCardNumber.description.includes('89B'))) {
@@ -1176,25 +827,10 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       
       // Look for patterns like 89B-9, 89B2-32, or HOU-11 in the full text
       const specificPatterns = [
-        // Exact matches first
-        /\b89B-32\b/,   // Alex Bregman (user-provided expected format)
-        /\b89B2-32\b/,  // Alternative Alex Bregman format
-        /\b89B-9\b/,    // Sal Frelick
-        /\bSMLB-49\b/,  // Carlos Correa Stars of MLB
-        /\bSMLB-27\b/,  // Freddie Freeman Stars of MLB
-        
-        // Stars of MLB card numbers 
-        /\bSMLB[-]?\d{1,2}\b/i,  // SMLB-49, SMLB49, smlb-27, etc.
-        /\bCSMLB[-]?\d{1,2}\b/i, // CSMLB-2, CSMLB2, csmlb-2, etc.
-        
-        // Team-based card numbers (common in 35th Anniversary series)
-        /\b[A-Z]{3}-\d{1,2}\b/,  // HOU-11, NYY-8, etc.
-        
-        // General patterns for 35th Anniversary cards
-        /\b89B[-]?\d{1,2}\b/,    // 89B-32, 89B32, etc.
-        /\b\d{1,2}[Bb]\d?[-]\d{1,2}\b/,  // 89B-9, 89B2-32
-        /\b\d{1,2}[Bb]\d[-]\d{1,2}\b/,   // Specifically 89B2-32
-        /\b\d{1,2}[Bb][-]?\d{1,2}\b/,    // 89B9, 89B-9
+        /\b[A-Z]{2,5}[-]?\d{1,3}\b/i,             // Alphanumeric prefixed (SMLB-27, HOU-11, etc.)
+        /\b\d{1,2}[A-Za-z]\d?[-]\d{1,2}\b/,       // Digit-letter-digit hybrids (89B-9, 89B2-32)
+        /\b[A-Z]{3}[-]\d{1,2}\b/,                  // Team codes (HOU-11, NYY-8)
+        /\b\d{1,2}[A-Za-z][-]?\d{1,2}\b/,          // Digit-letter combos (89B9, 89B-9)
       ];
       
       let cardNumberMatch = null;
@@ -1225,15 +861,8 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       'Chrome', 'Prizm', 'Heritage', 'Optic', 'Finest', 
       'Select', 'Dynasty', 'Contenders', 'Clearly Authentic', 
       'Allen & Ginter', 'Tribute', 'Inception', 'Archives',
-      '35th Anniversary', 'Series One', 'Series Two', 'Series 1', 'Series 2',
-      'Stars of MLB'
+      '35th Anniversary', 'Series One', 'Series Two', 'Series 1', 'Series 2'
     ];
-    
-    // Special handling for "Stars of MLB" collection - appears in some Topps cards with CSMLB format
-    if (fullText.includes('STARS') && fullText.includes('MLB')) {
-      result.collection = 'Stars of MLB';
-      console.log('Detected "Stars of MLB" collection');
-    }
     
     // "Wild Card" can be OCR misreading, but we'll let the dynamic OCR handle it
     // We'll rely on the generic pattern detection for all players
@@ -1420,28 +1049,19 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     // 3. Check for "base set" rookie cards from recent years (2022-2024)
     // Many modern rookie cards from these years don't explicitly say "rookie"
     // but are recognized as rookie cards in the hobby
+    const currentYear = new Date().getFullYear();
     const isRecentRookie = 
-      (result.year >= 2022 && result.year <= 2024) && 
-      // Check if the player is in a known rookie set/collection
-      ((result.collection || '').toLowerCase().includes('stars of mlb') ||
-       (result.collection || '').toLowerCase().includes('35th anniversary'));
+      (result.year >= currentYear - 3 && result.year <= currentYear) && 
+      ((result.collection || '').toLowerCase().includes('35th anniversary') ||
+       (result.collection || '').toLowerCase().includes('prospects') ||
+       (result.collection || '').toLowerCase().includes('draft'));
        
-    // 4. Specific Stars of MLB RC logo detection
-    // Many Stars of MLB rookie cards have a special RC badge in the bottom right corner
-    // This is often very small and can be missed by OCR
-    const isStarsOfMLBWithRC = 
-      ((result.collection || '').toLowerCase().includes('stars of mlb') && 
-      // Try to detect by looking at the image itself for visual patterns
-      // This returns true if an RC logo is found in the image
-      isRCLogoPresent(textAnnotations));
-      
-    // 5. Text content analysis for rookie indicators
+    // 4. Text content analysis for rookie indicators
     // Look for text that suggests this is a player's first year or rookie season
     // Many card descriptions mention MLB debuts, rookie seasons, or prospect status
     const lowerFullText = fullText.toLowerCase();
     const hasRookieDescriptionText = 
       lowerFullText.includes('debut') ||
-      lowerFullText.includes('first mlb') ||
       lowerFullText.includes('first season') || 
       lowerFullText.includes('broke into') ||
       lowerFullText.includes('prospect') ||
@@ -1449,8 +1069,7 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       lowerFullText.includes('made his first') ||
       lowerFullText.includes('entered the league') ||
       lowerFullText.includes('top prospects') ||
-      (lowerFullText.includes('2023') && lowerFullText.includes('debut')) ||
-      (lowerFullText.includes('2022') && lowerFullText.includes('debut'));
+      lowerFullText.includes('first professional');
     
     if (hasRookieDescriptionText) {
       console.log('Text analysis suggests this is a rookie card based on career description');
@@ -1459,9 +1078,10 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     // Look for rookie indicators in the card text that suggest a player is new
     // Many cards describe rookie achievements or mention MLB debuts
     const rookieTextIndicators = [
-      'first mlb', 'mlb debut', 'rookie season', 'rookie year',
-      'first season', 'prospect', 'made quite an entrance',
-      'broke into', 'first appearance', 'first big league'
+      'rookie season', 'rookie year', 'first season', 'prospect',
+      'made quite an entrance', 'broke into', 'first appearance',
+      'first professional', 'draft pick', 'first big league',
+      'mlb debut', 'nba debut', 'nfl debut', 'nhl debut'
     ];
     
     // Check if text contains any rookie indicators
@@ -1476,7 +1096,7 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     }
     
     // Check all detection methods (purely dynamic — no hardcoded player lists)
-    if (hasRCLogo || hasRCText || isRecentRookie || isStarsOfMLBWithRC || hasRookieDescriptionText || hasRookieIndicatorText) {
+    if (hasRCLogo || hasRCText || isRecentRookie || hasRookieDescriptionText || hasRookieIndicatorText) {
       result.isRookieCard = true;
       
       if (hasRCLogo) {
@@ -1485,8 +1105,6 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
         console.log('Detected rookie card indicator: RC/ROOKIE text found');
       } else if (isRecentRookie) {
         console.log('Detected potential rookie card based on year and collection');
-      } else if (isStarsOfMLBWithRC) {
-        console.log('Detected rookie card: Stars of MLB card with RC logo');
       } else if (hasRookieDescriptionText) {
         console.log('Detected rookie card from card description text analysis');
       } else if (hasRookieIndicatorText) {
@@ -1577,10 +1195,9 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
       result.collection = 'Series Two';
       console.log('Identified Series Two collection');
       
-      // For baseball cards in Series Two, the year is typically the current year
-      if (result.sport === 'Baseball' && !result.year) {
-        result.year = 2024; // Set to 2024 for current Series Two cards
-        console.log('Setting year to 2024 for Series Two baseball card');
+      if (!result.year) {
+        result.year = new Date().getFullYear();
+        console.log(`Setting year to ${result.year} for Series Two card`);
       }
     } 
     // If not Series Two, check for Series One
@@ -1590,10 +1207,9 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
         result.collection = 'Series One';
         console.log('Identified Series One collection');
         
-        // For baseball cards in Series One, the year is typically the current year
-        if (result.sport === 'Baseball' && !result.year) {
-          result.year = 2024; // Set to 2024 for current Series One cards
-          console.log('Setting year to 2024 for Series One baseball card');
+        if (!result.year) {
+          result.year = new Date().getFullYear();
+          console.log(`Setting year to ${result.year} for Series One card`);
         }
       }
     }

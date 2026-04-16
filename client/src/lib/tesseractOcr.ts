@@ -41,31 +41,9 @@ export const extractCardInfoFromText = (text: string): Partial<CardFormValues> =
   // Convert to lowercase for easier pattern matching
   const lowerText = text.toLowerCase();
   
-  // Check for specific card
-  if (text.includes('SAL FRELICK') || text.includes('Sal Frelick')) {
-    result.playerFirstName = 'Sal';
-    result.playerLastName = 'Frelick';
-    result.sport = 'Baseball';
-    result.brand = 'Topps';
-    result.collection = '35th Anniversary';
-    result.year = 2024;
-    
-    // Check if it's a rookie card
-    if (text.includes('RC') || text.includes('Rookie')) {
-      result.variant = 'Rookie';
-    }
-    
-    // Look for card number
-    if (text.includes('89B-9')) {
-      result.cardNumber = '89B-9';
-    }
-    
-    return result;
-  }
-  
-  // Extract sport
+  // Extract sport via keyword matching (same logic as server-side detectSport)
   if (lowerText.includes('baseball') || lowerText.includes('mlb') || 
-      lowerText.includes('major league baseball') || lowerText.includes('brewers')) {
+      lowerText.includes('major league baseball')) {
     result.sport = 'Baseball';
   } else if (lowerText.includes('football') || lowerText.includes('nfl')) {
     result.sport = 'Football';

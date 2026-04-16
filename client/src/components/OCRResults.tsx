@@ -212,12 +212,12 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
             <div className="space-y-2 col-span-1 md:col-span-2">
               <Label htmlFor="sport">Sport</Label>
               <Select
-                value={editedData.sport || 'Baseball'}
+                value={editedData.sport || ''}
                 onValueChange={(value) => handleInputChange('sport', value)}
               >
                 <SelectTrigger id="sport">
                   <SelectValue placeholder="Select sport">
-                    {editedData.sport || 'Baseball'}
+                    {editedData.sport || 'Select sport'}
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>

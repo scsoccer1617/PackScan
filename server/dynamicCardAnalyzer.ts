@@ -207,7 +207,8 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
     const nonNameWords = new Set([
       'TOPPS', 'LOPPS', 'OPPS', 'TOPPE', 'CHROME', 'BOWMAN', 'FLEER', 'DONRUSS', 'PANINI', 'SCORE', 'LEAF',
       'UPPER', 'DECK', 'SERIES', 'ONE', 'TWO', 'THREE', 'OPENING', 'DAY', 'STADIUM', 'CLUB',
-      'BASEBALL', 'CARD', 'ROOKIE', 'STARS', 'MLB', 'TILB', 'SMLB',
+      'BASEBALL', 'FOOTBALL', 'BASKETBALL', 'HOCKEY', 'SOCCER',
+      'CARD', 'ROOKIE', 'STARS', 'MLB', 'NBA', 'NFL', 'NHL', 'MLS', 'TILB', 'SMLB',
       'MAJOR', 'LEAGUE', 'BATTING', 'RECORD', 'PITCHING', 'FIELDING',
       'OUTFIELDER', 'INFIELDER', 'PITCHER', 'CATCHER', 'SHORTSTOP', 'DESIGNATED', 'HITTER',
       'FIRST', 'SECOND', 'THIRD', 'BASEMAN', 'LEFT', 'RIGHT', 'CENTER', 'FIELDER',
@@ -871,7 +872,7 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
           if (nearbyAlphaNumMatch) {
             const prefix = nearbyAlphaNumMatch[1];
             const digits = nearbyAlphaNumMatch[2];
-            if (parseInt(digits) <= 999 && !/^(OF|IN|AT|TO|BY|OR|ON|IS|IT|AS|IF|UP|NO|SO|DO|AN|AM|BE|HE|WE|MY|US|THE|AND|FOR|ARE|BUT|NOT|YOU|ALL|HAS|HIS|HOW|ITS|MAY|OUR|OUT|WAY|WHO|DID|GET|HIM|LET|SAY|SHE|TOO|USE|MLB|NFL|NBA|NHL|USA|NL|AL|FT|LB|HR|AB|BB|SO|IP|ER|GS|SV|WL|GP|GF|RS|BA|HT|WT|ACQ)$/i.test(prefix)) {
+            if (parseInt(digits) <= 999 && !/^(OF|IN|AT|TO|BY|OR|ON|IS|IT|AS|IF|UP|NO|SO|DO|AN|AM|BE|HE|WE|MY|US|THE|AND|FOR|ARE|BUT|NOT|YOU|ALL|HAS|HIS|HOW|ITS|MAY|OUR|OUT|WAY|WHO|DID|GET|HIM|LET|SAY|SHE|TOO|USE|MLB|NFL|NBA|NHL|MLS|USA|NL|AL|FT|LB|HR|AB|BB|SO|IP|ER|GS|SV|WL|GP|GF|RS|BA|HT|WT|ACQ|PPG|RPG|APG|FGP|FTP|TD|YDS|ATT|QBR|INT|SOG|PIM|SHG|GWG|PKS)$/i.test(prefix)) {
               cardDetails.cardNumber = nearbyAlphaNumMatch[0];
               console.log(`Detected alphanumeric card number ${nearbyAlphaNumMatch[0]} near brand line - high confidence`);
               return;
@@ -938,7 +939,7 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
       if (text.includes('CODE ' + fullMatch)) continue;
       if (parseInt(digits) > 999) continue;
       // Skip patterns that look like brand abbreviations, common words, stat/bio prefixes, or draft round (RD)
-      if (/^(OF|IN|AT|TO|BY|OR|ON|IS|IT|AS|IF|UP|NO|SO|DO|AN|AM|BE|HE|WE|MY|US|THE|AND|FOR|ARE|BUT|NOT|YOU|ALL|HAS|HIS|HOW|ITS|MAY|OUR|OUT|WAY|WHO|DID|GET|HIM|LET|SAY|SHE|TOO|USE|MLB|NFL|NBA|NHL|USA|NL|AL|FT|LB|LBS|HR|AB|BB|SO|IP|ER|GS|SV|WL|GP|GF|RS|BA|RD|RND|PK|OVR)$/i.test(prefix)) continue;
+      if (/^(OF|IN|AT|TO|BY|OR|ON|IS|IT|AS|IF|UP|NO|SO|DO|AN|AM|BE|HE|WE|MY|US|THE|AND|FOR|ARE|BUT|NOT|YOU|ALL|HAS|HIS|HOW|ITS|MAY|OUR|OUT|WAY|WHO|DID|GET|HIM|LET|SAY|SHE|TOO|USE|MLB|NFL|NBA|NHL|MLS|USA|NL|AL|FT|LB|LBS|HR|AB|BB|SO|IP|ER|GS|SV|WL|GP|GF|RS|BA|RD|RND|PK|OVR|PPG|RPG|APG|FGP|FTP|TD|YDS|ATT|QBR|INT|SOG|PIM|SHG|GWG|PKS)$/i.test(prefix)) continue;
       // Skip if the match appears in a bio/stat line (case-insensitive search for the line)
       const lineWithAlphaNum = lines.find(line => line.toLowerCase().includes(fullMatch.toLowerCase()));
       if (lineWithAlphaNum && isDOBFormat(lineWithAlphaNum)) continue;
@@ -1498,46 +1499,6 @@ function detectSport(text: string, cardDetails: Partial<CardFormValues>): void {
     console.log(`Input text (first 200 chars): ${text.substring(0, 200)}`);
     console.log(`Current sport before detection: ${cardDetails.sport}`);
     console.log(`Current player: ${cardDetails.playerFirstName} ${cardDetails.playerLastName}`);
-    
-    // If sport is already explicitly set to non-baseball, don't override it
-    if (cardDetails.sport && cardDetails.sport !== 'Baseball' && cardDetails.sport !== '') {
-      console.log(`Sport already set to ${cardDetails.sport}, skipping detection`);
-      return;
-    }
-    
-    // First, check for explicit sport indicators that should override everything else
-    if (text.match(/\bBASKETBALL\b|\bNBA\b|\bNATIONAL BASKETBALL ASSOCIATION\b/i)) {
-      cardDetails.sport = "Basketball";
-      console.log("Sport detected (explicit indicator): Basketball");
-      return;
-    }
-    else if (text.match(/\bBASEBALL CARD\b|\bMAJOR LEAGUE BASEBALL\b|\bMLB\b/i)) {
-      cardDetails.sport = "Baseball";
-      console.log("Sport detected (explicit indicator): Baseball");
-      return;
-    } 
-    else if (text.match(/\bFOOTBALL CARD\b|\bNATIONAL FOOTBALL LEAGUE\b|\bNFL\b/i)) {
-      cardDetails.sport = "Football";
-      console.log("Sport detected (explicit indicator): Football");
-      return;
-    } 
-    else if (text.match(/\bHOCKEY CARD\b|\bNATIONAL HOCKEY LEAGUE\b|\bNHL\b/i)) {
-      cardDetails.sport = "Hockey";
-      console.log("Sport detected (explicit indicator): Hockey");
-      return;
-    } 
-    else if (text.match(/\bSOCCER CARD\b|\bMAJOR LEAGUE SOCCER\b|\bMLS\b|\bFIFA\b/i)) {
-      cardDetails.sport = "Soccer";
-      console.log("Sport detected (explicit indicator): Soccer");
-      return;
-    }
-    
-    // For card collections with known sports
-    if (text.includes("STARS OF MLB") || text.includes("SMLB-")) {
-      cardDetails.sport = "Baseball";
-      console.log("Sport detected (from collection): Baseball");
-      return;
-    }
     
     // Initialize scores for each sport
     let baseballScore = 0;
