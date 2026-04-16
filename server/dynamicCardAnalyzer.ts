@@ -1073,11 +1073,25 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>,
     // COLLECTION DETECTION - Look for common collections/sets
     // Prefer to use regex for collections to avoid false positives
     
-    const collectionPatterns = [
+    const collectionPatterns: Array<{
+      pattern: RegExp;
+      name: string;
+      variant?: string;
+      brandOverride?: string;
+      /**
+       * When true, this pattern will NOT be matched against the legal/full-text
+       * fallback. Use for brand/product names that appear verbatim in the
+       * copyright line of EVERY card from that brand (base or Chrome), e.g.
+       * "BOWMAN AND BOWMAN CHROME ARE REGISTERED TRADEMARKS...". Without this
+       * guard, a base Bowman card would be misclassified as "Bowman Chrome"
+       * solely because the trademark line mentions both product names.
+       */
+      skipLegalFallback?: boolean;
+    }> = [
       { pattern: /RIFLEMAN/i, name: "Rifleman" },
       { pattern: /HERITAGE/i, name: "Heritage" },
       { pattern: /ALLEN & GINTER|ALLEN AND GINTER/i, name: "Allen & Ginter" },
-      { pattern: /BOWMAN CHROME/i, name: "Bowman Chrome" },
+      { pattern: /BOWMAN CHROME/i, name: "Bowman Chrome", skipLegalFallback: true },
       { pattern: /PRIZM/i, name: "Prizm" },
       { pattern: /OPTIC/i, name: "Optic" },
       { pattern: /\bOPENING DAY\b(?!\s+(?:of|for|the|in|an|at|to|period|roster|ceremony|signing)\b)/i, name: "Opening Day" },
@@ -1142,6 +1156,9 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>,
     
     if (!cardDetails.collection) {
       for (const collectionData of collectionPatterns) {
+        // Skip patterns flagged as unsafe for legal-text matching (brand/product
+        // names that appear in the copyright line of every card in that family).
+        if (collectionData.skipLegalFallback) continue;
         if (fullTextUpper.match(collectionData.pattern)) {
           applyCollectionMatch(collectionData, fullTextUpper, ' from legal/full text fallback');
           break;
