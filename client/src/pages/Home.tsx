@@ -39,7 +39,7 @@ export default function Home() {
     <div className="flex flex-col min-h-full">
       {/* Hero section */}
       <div className="bg-gradient-to-b from-blue-600 to-blue-700 text-white px-6 pt-10 pb-12">
-        <h2 className="text-2xl font-bold mb-1">Baseball Card Lookup</h2>
+        <h2 className="text-2xl font-bold mb-1">Sports Card Lookup</h2>
         <p className="text-blue-100 text-sm">
           Instantly identify cards and check real-time eBay prices.
         </p>
