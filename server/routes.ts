@@ -1654,10 +1654,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // GET /api/card-database/stats — counts with deltas from the first import of the day
   app.get(`${apiPrefix}/card-database/stats`, async (_req, res) => {
     try {
-      const [[cardCount], [varCount]] = await Promise.all([
+      const [[cardCount], [varCount], [setCount], [sportCount]] = await Promise.all([
         db.select({ count: sql<number>`count(*)::int` }).from(cardDatabase),
         db.select({ count: sql<number>`count(*)::int` }).from(cardVariations),
+        db.select({ count: sql<number>`count(distinct ${cardDatabase.set})::int` }).from(cardDatabase),
+        db.execute(sql`SELECT count(distinct reverse(split_part(reverse(brand_id), '_', 1)))::int as count FROM card_database`),
       ]);
+      const sportsCount = (sportCount as any).rows?.[0]?.count ?? (sportCount as any)[0]?.count ?? 0;
 
       // Today midnight UTC — used to find the first import of the current day
       const todayStart = new Date();
@@ -1713,6 +1716,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.json({
         cards: cardCount?.count ?? 0,
         variations: varCount?.count ?? 0,
+        sets: setCount?.count ?? 0,
+        sports: sportsCount,
         cardsDelta,
         variationsDelta,
         lastImportedAt,
