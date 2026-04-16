@@ -42,23 +42,23 @@ export default function Home() {
       </div>
 
       {/* Stats cards */}
-      <div className="px-4 -mt-6 grid grid-cols-3 gap-3 mb-6">
-        <div className="bg-white rounded-xl shadow-md p-4 border border-gray-100">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="p-1.5 bg-blue-50 rounded-lg">
-              <User className="w-4 h-4 text-blue-600" />
+      <div className="px-4 -mt-6 grid grid-cols-3 gap-2 sm:gap-3 mb-6">
+        <div className="bg-white rounded-xl shadow-md p-2.5 sm:p-4 border border-gray-100 min-w-0">
+          <div className="flex items-center gap-1.5 mb-1.5 sm:mb-2">
+            <div className="p-1 sm:p-1.5 bg-blue-50 rounded-lg shrink-0">
+              <User className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-blue-600" />
             </div>
-            <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Cards</span>
+            <span className="text-[10px] sm:text-xs font-medium text-gray-500 uppercase tracking-wide truncate">Cards</span>
           </div>
           {isLoading ? (
-            <div className="h-8 w-20 bg-gray-100 animate-pulse rounded" />
+            <div className="h-6 sm:h-8 w-16 sm:w-20 bg-gray-100 animate-pulse rounded" />
           ) : (
             <>
-              <p className="text-2xl font-bold text-gray-900">
+              <p className="text-base sm:text-2xl font-bold text-gray-900 truncate">
                 {formatNumber(stats?.cards ?? 0)}
               </p>
               {formatSubtitle(stats?.cardsDelta ?? null) && (
-                <p className="text-xs text-green-600 mt-0.5">
+                <p className="text-[10px] sm:text-xs text-green-600 mt-0.5 truncate">
                   {formatSubtitle(stats?.cardsDelta ?? null)}
                 </p>
               )}
@@ -66,22 +66,22 @@ export default function Home() {
           )}
         </div>
 
-        <div className="bg-white rounded-xl shadow-md p-4 border border-gray-100">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="p-1.5 bg-teal-50 rounded-lg">
-              <Gem className="w-4 h-4 text-teal-600" />
+        <div className="bg-white rounded-xl shadow-md p-2.5 sm:p-4 border border-gray-100 min-w-0">
+          <div className="flex items-center gap-1.5 mb-1.5 sm:mb-2">
+            <div className="p-1 sm:p-1.5 bg-teal-50 rounded-lg shrink-0">
+              <Gem className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-teal-600" />
             </div>
-            <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Parallels</span>
+            <span className="text-[10px] sm:text-xs font-medium text-gray-500 uppercase tracking-wide truncate">Parallels</span>
           </div>
           {isLoading ? (
-            <div className="h-8 w-20 bg-gray-100 animate-pulse rounded" />
+            <div className="h-6 sm:h-8 w-16 sm:w-20 bg-gray-100 animate-pulse rounded" />
           ) : (
             <>
-              <p className="text-2xl font-bold text-gray-900">
+              <p className="text-base sm:text-2xl font-bold text-gray-900 truncate">
                 {formatNumber(stats?.variations ?? 0)}
               </p>
               {formatSubtitle(stats?.variationsDelta ?? null) && (
-                <p className="text-xs text-green-600 mt-0.5">
+                <p className="text-[10px] sm:text-xs text-green-600 mt-0.5 truncate">
                   {formatSubtitle(stats?.variationsDelta ?? null)}
                 </p>
               )}
@@ -89,17 +89,17 @@ export default function Home() {
           )}
         </div>
 
-        <div className="bg-white rounded-xl shadow-md p-4 border border-gray-100">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="p-1.5 bg-orange-50 rounded-lg">
-              <Trophy className="w-4 h-4 text-orange-600" />
+        <div className="bg-white rounded-xl shadow-md p-2.5 sm:p-4 border border-gray-100 min-w-0">
+          <div className="flex items-center gap-1.5 mb-1.5 sm:mb-2">
+            <div className="p-1 sm:p-1.5 bg-orange-50 rounded-lg shrink-0">
+              <Trophy className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-orange-600" />
             </div>
-            <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Sports</span>
+            <span className="text-[10px] sm:text-xs font-medium text-gray-500 uppercase tracking-wide truncate">Sports</span>
           </div>
           {isLoading ? (
-            <div className="h-8 w-20 bg-gray-100 animate-pulse rounded" />
+            <div className="h-6 sm:h-8 w-16 sm:w-20 bg-gray-100 animate-pulse rounded" />
           ) : (
-            <p className="text-2xl font-bold text-gray-900">
+            <p className="text-base sm:text-2xl font-bold text-gray-900 truncate">
               {formatNumber(stats?.sports ?? 0)}
             </p>
           )}
