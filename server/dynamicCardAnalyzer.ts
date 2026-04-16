@@ -703,7 +703,7 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
     // Autograph card numbers: letters-dash-letters (e.g. CPA-LRE, HA-RJ, BA-XX, RC-JD)
     // These appear on Bowman Prospect Autographs, Heritage Autographs, etc.
     // Must run BEFORE the plainNumberPattern so CODE#065939 doesn't win over CPA-LRE.
-    const nonCardLetterPrefixes = new Set(['CMP', 'CODE', 'WWW', 'COM', 'INC', 'MLB', 'NFL', 'NBA', 'NHL', 'MLS', 'USA', 'URL', 'AKA', 'DBA', 'LLC', 'LTD', 'REG', 'TM', 'WALK', 'OFF', 'RBI', 'ERA', 'AVG', 'OBP', 'OPS', 'WAR', 'SLG', 'WHIP', 'ALL', 'STAR', 'PRO', 'MVP', 'HOF', 'NL', 'AL', 'PPG', 'RPG', 'APG', 'FGP', 'FTP', 'TD', 'YDS', 'ATT', 'QBR', 'INT', 'SOG', 'PIM', 'SHG', 'GWG', 'PKS']);
+    const nonCardLetterPrefixes = new Set(['CMP', 'CODE', 'WWW', 'COM', 'INC', 'MLB', 'NFL', 'NBA', 'NHL', 'MLS', 'USA', 'URL', 'AKA', 'DBA', 'LLC', 'LTD', 'REG', 'TM', 'WALK', 'OFF', 'RBI', 'ERA', 'AVG', 'OBP', 'OPS', 'WAR', 'SLG', 'WHIP', 'ALL', 'STAR', 'PRO', 'MVP', 'HOF', 'NL', 'AL', 'PPG', 'RPG', 'APG', 'FGP', 'FTP', 'TD', 'YDS', 'ATT', 'QBR', 'INT', 'SOG', 'PIM', 'SHG', 'GWG', 'PKS', 'GA', 'CS', 'YC', 'RC']);
     const autographCardPattern = /\b([A-Z]{1,4})-([A-Z]{2,5})\b/g;
     let autographMatch;
     while ((autographMatch = autographCardPattern.exec(text)) !== null) {
@@ -910,7 +910,7 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
 
     // Check for hyphenated alphanumeric card numbers (BD-7, BDC-15, HRC-42, etc.)
     // These are high-confidence and should be checked before standalone numbers
-    const nonCardCodePrefixes = new Set(['CMP', 'CODE', 'WWW', 'COM', 'INC', 'MLB', 'NFL', 'NBA', 'NHL', 'MLS', 'OBP', 'ERA', 'AVG', 'WAR', 'SLG', 'RBI', 'HT', 'WT', 'ACQ', 'RD', 'RND', 'PK', 'OVR', 'PPG', 'RPG', 'APG', 'FGP', 'FTP', 'TD', 'YDS', 'ATT', 'QBR', 'INT', 'SOG', 'PIM', 'SHG', 'GWG', 'PKS']);
+    const nonCardCodePrefixes = new Set(['CMP', 'CODE', 'WWW', 'COM', 'INC', 'MLB', 'NFL', 'NBA', 'NHL', 'MLS', 'OBP', 'ERA', 'AVG', 'WAR', 'SLG', 'RBI', 'HT', 'WT', 'ACQ', 'RD', 'RND', 'PK', 'OVR', 'PPG', 'RPG', 'APG', 'FGP', 'FTP', 'TD', 'YDS', 'ATT', 'QBR', 'INT', 'SOG', 'PIM', 'SHG', 'GWG', 'PKS', 'GA', 'CS', 'YC', 'RC']);
     const hyphenAlphaNumPatternEarly = /\b([A-Z]{1,4})-(\d{1,4})\b/g;
     let hyphenMatchEarly;
     while ((hyphenMatchEarly = hyphenAlphaNumPatternEarly.exec(text)) !== null) {

@@ -1382,8 +1382,8 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     // Return default values instead of failing completely
     return {
       condition: 'PSA 8',
-      sport: 'Baseball',
-      brand: 'Topps',
+      sport: '',
+      brand: '',
       year: new Date().getFullYear(),
       // If we can extract anything from the failed analysis, include it
       ...error.partialResults
