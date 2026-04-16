@@ -18,14 +18,10 @@ function formatNumber(n: number) {
   return n.toLocaleString();
 }
 
-function formatSubtitle(delta: number | null, importedAt: string | null) {
-  if (delta === null || importedAt === null) return null;
-  const date = new Date(importedAt);
-  const mm = String(date.getMonth() + 1).padStart(2, "0");
-  const dd = String(date.getDate()).padStart(2, "0");
-  const yyyy = date.getFullYear();
+function formatSubtitle(delta: number | null) {
+  if (delta === null) return null;
   const count = delta >= 0 ? `+${formatNumber(delta)}` : formatNumber(delta);
-  return `${count} since ${mm}/${dd}/${yyyy}`;
+  return `${count} added`;
 }
 
 export default function Home() {
@@ -61,9 +57,9 @@ export default function Home() {
               <p className="text-2xl font-bold text-gray-900">
                 {formatNumber(stats?.cards ?? 0)}
               </p>
-              {formatSubtitle(stats?.cardsDelta ?? null, stats?.lastCardsImportedAt ?? null) && (
+              {formatSubtitle(stats?.cardsDelta ?? null) && (
                 <p className="text-xs text-green-600 mt-0.5">
-                  {formatSubtitle(stats?.cardsDelta ?? null, stats?.lastCardsImportedAt ?? null)}
+                  {formatSubtitle(stats?.cardsDelta ?? null)}
                 </p>
               )}
             </>
@@ -84,9 +80,9 @@ export default function Home() {
               <p className="text-2xl font-bold text-gray-900">
                 {formatNumber(stats?.variations ?? 0)}
               </p>
-              {formatSubtitle(stats?.variationsDelta ?? null, stats?.lastVariationsImportedAt ?? null) && (
+              {formatSubtitle(stats?.variationsDelta ?? null) && (
                 <p className="text-xs text-green-600 mt-0.5">
-                  {formatSubtitle(stats?.variationsDelta ?? null, stats?.lastVariationsImportedAt ?? null)}
+                  {formatSubtitle(stats?.variationsDelta ?? null)}
                 </p>
               )}
             </>
