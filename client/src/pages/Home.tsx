@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { Camera, Search, User, Gem, Layers, Trophy } from "lucide-react";
+import { Camera, Search, User, Gem, Trophy } from "lucide-react";
 
 interface DbStats {
   cards: number;
@@ -46,7 +46,7 @@ export default function Home() {
       </div>
 
       {/* Stats cards */}
-      <div className="px-4 -mt-6 grid grid-cols-2 gap-3 mb-6">
+      <div className="px-4 -mt-6 grid grid-cols-3 gap-3 mb-6">
         <div className="bg-white rounded-xl shadow-md p-4 border border-gray-100">
           <div className="flex items-center gap-2 mb-2">
             <div className="p-1.5 bg-blue-50 rounded-lg">
@@ -90,22 +90,6 @@ export default function Home() {
                 </p>
               )}
             </>
-          )}
-        </div>
-
-        <div className="bg-white rounded-xl shadow-md p-4 border border-gray-100">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="p-1.5 bg-amber-50 rounded-lg">
-              <Layers className="w-4 h-4 text-amber-600" />
-            </div>
-            <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Collections</span>
-          </div>
-          {isLoading ? (
-            <div className="h-8 w-20 bg-gray-100 animate-pulse rounded" />
-          ) : (
-            <p className="text-2xl font-bold text-gray-900">
-              {formatNumber(stats?.sets ?? 0)}
-            </p>
           )}
         </div>
 
