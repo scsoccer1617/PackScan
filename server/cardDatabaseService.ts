@@ -369,18 +369,38 @@ export async function lookupCard(input: CardLookupInput): Promise<CardLookupResu
     // Bowman 2022 #91 = Scherzer in "Bowman Baseball", Turner in "Bowman Chrome Sapphire").
     if (cardRows.length > 1) {
       const lastNameNorm = (playerLastName || '').trim().toLowerCase();
+      // Subsets that require an explicit OCR signal (autograph/swatch/relic visible).
+      // Without such a signal, these should never be the default match.
+      const isSpecialtySubset = (col: string) => {
+        const c = col.toLowerCase();
+        return c.includes('autograph') || c.includes(' auto') || c.endsWith(' auto') ||
+               c.includes('relic') || c.includes('patch') ||
+               c.includes('memorabilia') || c.includes('signature');
+      };
+      const isBaseSet = (col: string) => {
+        const c = col.toLowerCase().trim();
+        return c === 'base set' || c === 'base';
+      };
       cardRows.sort((a, b) => {
         // Primary: player name match (OCR is authoritative for who is on the card)
         const aNameMatch = lastNameNorm && a.playerName.toLowerCase().includes(lastNameNorm) ? 1 : 0;
         const bNameMatch = lastNameNorm && b.playerName.toLowerCase().includes(lastNameNorm) ? 1 : 0;
         if (aNameMatch !== bNameMatch) return bNameMatch - aNameMatch;
-        // Secondary: prefer more specific (longer) collection names for better eBay filtering.
-        // e.g. "Chrome Prospects" is more useful than "Chrome" for narrowing search results.
-        // But deprioritise insert/sub-collections with " - " separators.
+        // Deprioritise insert/sub-collections with " - " separators.
         const aIsInsert = a.collection.includes(' - ') ? 1 : 0;
         const bIsInsert = b.collection.includes(' - ') ? 1 : 0;
         if (aIsInsert !== bIsInsert) return aIsInsert - bIsInsert;
-        return b.collection.length - a.collection.length;
+        // Deprioritise autograph/relic/patch/memorabilia subsets — these need an
+        // explicit OCR signal (visible signature/swatch) to be the right match.
+        const aIsSpecialty = isSpecialtySubset(a.collection) ? 1 : 0;
+        const bIsSpecialty = isSpecialtySubset(b.collection) ? 1 : 0;
+        if (aIsSpecialty !== bIsSpecialty) return aIsSpecialty - bIsSpecialty;
+        // Prefer "Base Set" / "Base" as the safe default for tied non-specialty rows.
+        const aIsBase = isBaseSet(a.collection) ? 1 : 0;
+        const bIsBase = isBaseSet(b.collection) ? 1 : 0;
+        if (aIsBase !== bIsBase) return bIsBase - aIsBase;
+        // Final tiebreak: prefer shorter (more general) collection names for non-specialty rows.
+        return a.collection.length - b.collection.length;
       });
       if (lastNameNorm) {
         console.log(`[CardDB] Multiple matches (${cardRows.length}) — sorted by player name "${lastNameNorm}": top pick "${cardRows[0].playerName}" (${cardRows[0].set || cardRows[0].collection})`);
