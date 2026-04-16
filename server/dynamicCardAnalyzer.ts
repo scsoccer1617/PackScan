@@ -1181,22 +1181,41 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>,
     // Important: Look for copyright symbols as they usually indicate production year
     
     // First check for year followed by brand company name - highest confidence source
-    // Handles: "2024 THE TOPPS COMPANY", "2025 TOPPS, INC", "1991 SCORE INC"
-    const brandYearPattern = /(\d{4})\s+(?:THE\s+)?(TOPPS|LEAF|BOWMAN|FLEER|DONRUSS|SCORE|UPPER DECK|PANINI)(?:\s+COMPANY|\s+INC\.?|,\s+INC\.?)?/i;
+    // Handles: "2024 THE TOPPS COMPANY", "2025 TOPPS, INC", "1991 SCORE INC",
+    //          "1979, TOPPS CHEWING GUM" (vintage comma-separator), "1979 TOPPS"
+    // Also handles reverse order: "TOPPS 1979", "TOPPS, INC 1979", "CHEWING GUM, INC. 1979"
+    //
+    // `[\s,.;:]+` matches any combination of whitespace/punctuation between the
+    // year and brand — vintage Topps cards print "© 1979, TOPPS" with a comma
+    // that broke the stricter `\s+` version.
+    const brandYearPattern = /(\d{4})[\s,.;:]+(?:THE\s+)?(TOPPS|LEAF|BOWMAN|FLEER|DONRUSS|SCORE|UPPER\s+DECK|PANINI)(?:[\s,.]+(?:CHEWING\s+GUM|COMPANY|INC\.?|LTD|CORP|LLC))?/i;
     const brandYearMatch = text.match(brandYearPattern);
     
     if (brandYearMatch && brandYearMatch[1]) {
       const year = parseInt(brandYearMatch[1], 10);
       if (year >= 1900 && year <= new Date().getFullYear()) {
         cardDetails.year = year;
-        console.log(`Using brand year as card date: ${cardDetails.year}`);
+        console.log(`Using brand year as card date: ${cardDetails.year} (from "${brandYearMatch[0]}")`);
+        return;
+      }
+    }
+    
+    // Reverse order: brand name followed by year, e.g. "TOPPS CHEWING GUM, INC. 1979",
+    // "TOPPS COMPANY 2024", or generally "<BRAND> ... <4-digit year>" within a short window.
+    const brandThenYearPattern = /(TOPPS|LEAF|BOWMAN|FLEER|DONRUSS|SCORE|UPPER\s+DECK|PANINI)(?:[\s,.]+(?:CHEWING\s+GUM|COMPANY|INC\.?|LTD|CORP|LLC))?[\s,.;:]+(\d{4})/i;
+    const brandThenYearMatch = text.match(brandThenYearPattern);
+    if (brandThenYearMatch && brandThenYearMatch[2]) {
+      const year = parseInt(brandThenYearMatch[2], 10);
+      if (year >= 1900 && year <= new Date().getFullYear()) {
+        cardDetails.year = year;
+        console.log(`Using brand-then-year pattern as card date: ${cardDetails.year} (from "${brandThenYearMatch[0]}")`);
         return;
       }
     }
     
     // Handle OCR-garbled copyright+brand: "©2021" often reads as "02021", "02121", "&02021", etc.
     // Try stripping a leading non-year digit/char to recover the real 4-digit year.
-    const garbledBrandYear = /[&0O](\d{4})\d?\s+(?:THE\s+)?(TOPPS|LEAF|BOWMAN|FLEER|DONRUSS|SCORE|UPPER DECK|PANINI)/i;
+    const garbledBrandYear = /[&0O](\d{4})\d?[\s,.;:]+(?:THE\s+)?(TOPPS|LEAF|BOWMAN|FLEER|DONRUSS|SCORE|UPPER\s+DECK|PANINI)/i;
     const garbledMatch = text.match(garbledBrandYear);
     if (garbledMatch && garbledMatch[1]) {
       const year = parseInt(garbledMatch[1], 10);
