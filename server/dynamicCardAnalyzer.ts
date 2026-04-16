@@ -1012,7 +1012,18 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
 function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>, originalText?: string): void {
   try {
     // BRAND DETECTION - Look for common card manufacturers with proper capitalization
+    //
+    // IMPORTANT: multi-word / compound brand names (e.g. "TOPPS CHROME",
+    // "BOWMAN CHROME") MUST appear before their single-word parents
+    // ("TOPPS", "BOWMAN"). The detector picks the first brand found in
+    // non-legal text and stops, so if "TOPPS" is listed first it would
+    // claim the match before "TOPPS CHROME" ever gets a chance. Ordering
+    // by specificity (most specific first) lets the compound brand win
+    // on Chrome cards while still falling through to plain "Topps" on
+    // flagship cards that never print "CHROME" anywhere.
     const brands = [
+      { search: 'TOPPS CHROME', display: 'Topps Chrome' },
+      { search: 'BOWMAN CHROME', display: 'Bowman Chrome' },
       { search: 'BOWMAN', display: 'Bowman' },
       { search: 'TOPPS', display: 'Topps' },
       { search: 'UPPER DECK', display: 'Upper Deck' },
