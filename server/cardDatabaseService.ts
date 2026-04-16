@@ -381,6 +381,7 @@ export async function lookupCard(input: CardLookupInput): Promise<CardLookupResu
         const c = col.toLowerCase().trim();
         return c === 'base set' || c === 'base';
       };
+      const brandLower = (brandNorm || '').toLowerCase().trim();
       cardRows.sort((a, b) => {
         // Primary: player name match (OCR is authoritative for who is on the card)
         const aNameMatch = lastNameNorm && a.playerName.toLowerCase().includes(lastNameNorm) ? 1 : 0;
@@ -399,6 +400,24 @@ export async function lookupCard(input: CardLookupInput): Promise<CardLookupResu
         const aIsBase = isBaseSet(a.collection) ? 1 : 0;
         const bIsBase = isBaseSet(b.collection) ? 1 : 0;
         if (aIsBase !== bIsBase) return bIsBase - aIsBase;
+        // Prefer the row whose `set` EXACTLY matches the OCR brand — this is the
+        // flagship product. e.g. OCR brand="Bowman" → prefer set="Bowman" over
+        // set="Bowman Chrome Sapphire". Without this, the shorter-collection-name
+        // tiebreak would pick "Base" (specialty set) over "Base Set" (flagship).
+        const aSet = (a.set || '').toLowerCase().trim();
+        const bSet = (b.set || '').toLowerCase().trim();
+        const aSetIsFlagship = brandLower && aSet === brandLower ? 1 : 0;
+        const bSetIsFlagship = brandLower && bSet === brandLower ? 1 : 0;
+        if (aSetIsFlagship !== bSetIsFlagship) return bSetIsFlagship - aSetIsFlagship;
+        // Next best: prefer the row whose `set` STARTS WITH the brand and is
+        // the shortest such set — covers cases like brand="Topps" with no
+        // flagship "Topps" row, preferring "Topps Chrome" over "Topps Chrome Sapphire".
+        const aSetMatchesBrand = brandLower && aSet.startsWith(brandLower) ? 1 : 0;
+        const bSetMatchesBrand = brandLower && bSet.startsWith(brandLower) ? 1 : 0;
+        if (aSetMatchesBrand !== bSetMatchesBrand) return bSetMatchesBrand - aSetMatchesBrand;
+        if (aSetMatchesBrand && bSetMatchesBrand && aSet.length !== bSet.length) {
+          return aSet.length - bSet.length;
+        }
         // Final tiebreak: prefer shorter (more general) collection names for non-specialty rows.
         return a.collection.length - b.collection.length;
       });
