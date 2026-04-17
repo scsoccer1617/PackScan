@@ -1406,7 +1406,21 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>,
       { pattern: /\bBOWMAN BEST\b/i, name: "Bowman's Best" },
       { pattern: /\bARCHIVES?\b/i, name: "Archives" },
       { pattern: /\bFINEST\b/i, name: "Finest" },
-      { pattern: /\bGYPSY QUEEN\b/i, name: "Gypsy Queen" }
+      { pattern: /\bGYPSY QUEEN\b/i, name: "Gypsy Queen" },
+      // Common Topps insert subsets (front-of-card subset banners)
+      { pattern: /\bFUTURE STARS\b/i, name: "Future Stars" },
+      { pattern: /\bSTARS OF (?:THE )?MLB\b/i, name: "Stars of MLB" },
+      { pattern: /\bALL[- ]TOPPS TEAM\b/i, name: "All-Topps Team" },
+      { pattern: /\bTITANS OF THE GAME\b/i, name: "Titans of the Game" },
+      { pattern: /\bBIG TICKET PLAYERS\b/i, name: "Big Ticket Players" },
+      { pattern: /\bHOME FIELD ADVANTAGE\b/i, name: "Home Field Advantage" },
+      { pattern: /\bFIRST PITCH\b/i, name: "First Pitch" },
+      { pattern: /\bHEAVY LUMBER\b/i, name: "Heavy Lumber" },
+      { pattern: /\bRAW POWER\b/i, name: "Raw Power" },
+      { pattern: /\bTOPPS PROFILES\b/i, name: "Topps Profiles" },
+      { pattern: /\bGREATEST HITS\b/i, name: "Greatest Hits" },
+      { pattern: /\bALL ACES\b/i, name: "All Aces" },
+      { pattern: /\bALL KINGS\b/i, name: "All Kings" },
     ];
     
     const legalTextPattern = /(?:REGISTERED\s+)?TRADEMARK|ALL\s+RIGHTS\s+RESERVED|©|\(C\)|OFFICIALLY\s+LICENSED|\b(?:TOPPS|BOWMAN|FLEER|DONRUSS|SCORE|LEAF|UPPER DECK|PANINI|PLAYOFF|PACIFIC|SKYBOX|PINNACLE)\b.*?\b(?:INC|LTD|CORP|LLC)\b|\b\d{4}\s+\w+.*?\b(?:INC|LTD|CORP|LLC)\b/i;
