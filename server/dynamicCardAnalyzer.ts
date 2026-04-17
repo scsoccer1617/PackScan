@@ -908,19 +908,63 @@ function extractCardNumberPass(
     // Autograph card numbers: letters-dash-letters (e.g. CPA-LRE, HA-RJ, BA-XX, RC-JD)
     // These appear on Bowman Prospect Autographs, Heritage Autographs, etc.
     // Must run BEFORE the plainNumberPattern so CODE#065939 doesn't win over CPA-LRE.
-    const nonCardLetterPrefixes = new Set(['CMP', 'CODE', 'WWW', 'COM', 'INC', 'MLB', 'NFL', 'NBA', 'NHL', 'MLS', 'USA', 'URL', 'AKA', 'DBA', 'LLC', 'LTD', 'REG', 'TM', 'WALK', 'OFF', 'RBI', 'ERA', 'AVG', 'OBP', 'OPS', 'WAR', 'SLG', 'WHIP', 'ALL', 'STAR', 'PRO', 'MVP', 'HOF', 'NL', 'AL', 'PPG', 'RPG', 'APG', 'FGP', 'FTP', 'TD', 'YDS', 'ATT', 'QBR', 'INT', 'SOG', 'PIM', 'SHG', 'GWG', 'GP', 'PKS', 'GA', 'CS', 'YC', 'RC']);
+    const nonCardLetterPrefixes = new Set([
+      // Legal / boilerplate
+      'CMP', 'CODE', 'WWW', 'COM', 'INC', 'MLB', 'NFL', 'NBA', 'NHL', 'MLS', 'USA', 'URL',
+      'AKA', 'DBA', 'LLC', 'LTD', 'REG', 'TM',
+      // Stat abbreviations
+      'WALK', 'OFF', 'RBI', 'ERA', 'AVG', 'OBP', 'OPS', 'WAR', 'SLG', 'WHIP',
+      'PPG', 'RPG', 'APG', 'FGP', 'FTP', 'TD', 'YDS', 'ATT', 'QBR', 'INT',
+      'SOG', 'PIM', 'SHG', 'GWG', 'GP', 'PKS', 'GA', 'CS', 'YC', 'RC',
+      'ALL', 'STAR', 'PRO', 'MVP', 'HOF', 'NL', 'AL',
+      // Common English bio-text words that get hyphenated on card backs
+      // (e.g. "TWO-GAME SPAN", "FIVE-TOOL", "BIG-LEAGUE", "ALL-STAR", "PRO-DEBUT",
+      // "STAT-LINE", "GAME-DAY", "CALL-UP", "WALK-OFF", "FREE-AGENT", "RIGHT-HAND").
+      'ONE', 'TWO', 'THREE', 'FOUR', 'FIVE', 'SIX', 'SEVEN', 'EIGHT', 'NINE', 'TEN',
+      'GAME', 'GAMES', 'TIME', 'TIMES', 'YEAR', 'YEARS', 'DAY', 'DAYS',
+      'TEAM', 'HIT', 'HITS', 'RUN', 'RUNS', 'WIN', 'WINS', 'LOSS', 'PLAY',
+      'CALL', 'TOOL', 'TOOLS', 'SPAN', 'LEAGUE', 'DEBUT', 'LINE', 'BACK', 'FRONT',
+      'RIGHT', 'LEFT', 'FAST', 'SLOW', 'NEW', 'OLD', 'BIG', 'TOP', 'END', 'OUT',
+      'WAY', 'NIGHT', 'AGENT', 'HAND', 'HEAD', 'NAME', 'HOME', 'AWAY', 'BASE',
+      'FIRST', 'LAST', 'BEST', 'NEXT', 'EVEN', 'ALSO', 'BORN', 'JUNE', 'JULY',
+    ]);
     const autographCardPattern = /\b([A-Z]{1,4})-([A-Z]{2,5})\b/g;
     let autographMatch;
     while ((autographMatch = autographCardPattern.exec(text)) !== null) {
       const prefix = autographMatch[1];
       const suffix = autographMatch[2];
       const fullMatch = autographMatch[0];
-      if (nonCardLetterPrefixes.has(prefix)) continue;
-      if (nonCardLetterPrefixes.has(suffix)) continue;
+      const matchStart = autographMatch.index;
+      if (nonCardLetterPrefixes.has(prefix)) {
+        console.log(`Skipping autograph candidate "${fullMatch}" — prefix "${prefix}" is a known non-card word`);
+        continue;
+      }
+      if (nonCardLetterPrefixes.has(suffix)) {
+        console.log(`Skipping autograph candidate "${fullMatch}" — suffix "${suffix}" is a known non-card word`);
+        continue;
+      }
+
+      // Body-text guard: real autograph card numbers stand alone or sit
+      // next to player info ("RYAN RITTER  CPA-RR"). They are NOT embedded
+      // inside sentences ("HOMERED FIVE TIMES IN ONE TWO-GAME SPAN"). If
+      // the immediate textual neighbourhood looks like a sentence — many
+      // uppercase word tokens on either side — reject the match. We use
+      // 60-char windows on each side and consider 4+ word tokens per
+      // window to be sentence-like.
+      const before = text.slice(Math.max(0, matchStart - 60), matchStart);
+      const after = text.slice(matchStart + fullMatch.length, matchStart + fullMatch.length + 60);
+      const wordTokenCount = (s: string) => (s.match(/\b[A-Z]{2,}\b/g) || []).length;
+      const beforeWords = wordTokenCount(before);
+      const afterWords = wordTokenCount(after);
+      if (beforeWords >= 4 || afterWords >= 4) {
+        console.log(`Skipping autograph candidate "${fullMatch}" — embedded in body text (before=${beforeWords} words, after=${afterWords} words)`);
+        continue;
+      }
+
       const lineWithMatch = lines.find(line => line.toLowerCase().includes(fullMatch.toLowerCase()));
       if (!lineWithMatch) continue;
       // Skip if this appears in a biographical/legal line
-      if (/\b(DRAFTED|DRAFT|BORN|SIGNED|OVERALL|ROUND|PICK|AGENT|FREE|RIGHTS|RESERVED|LICENSED|TRADEMARK|COMPANY|VISIT)\b/i.test(lineWithMatch)) continue;
+      if (/\b(DRAFTED|DRAFT|BORN|SIGNED|OVERALL|ROUND|PICK|AGENT|FREE|RIGHTS|RESERVED|LICENSED|TRADEMARK|COMPANY|VISIT|HOMERED|SLUGGED|PROMOTED|MONSTER|PITCHED|BATTED|FIELDED|SCORED)\b/i.test(lineWithMatch)) continue;
       if (/CODE#/i.test(lineWithMatch)) continue;
       // Require the line to be short (autograph card # lines are typically standalone or near player info)
       // or appear on a line that isn't a long bio paragraph
