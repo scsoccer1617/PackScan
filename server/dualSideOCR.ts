@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import sharp from 'sharp';
 import { CardFormValues } from '@shared/schema';
 import { analyzeSportsCardImage } from './dynamicCardAnalyzer';
 import { detectFoilVariant } from './foilVariantDetector';
@@ -7,6 +8,35 @@ import { batchExtractTextFromImages, clearOcrCache } from './googleVisionFetch';
 import { db } from '@db';
 import { cardVariations } from '@shared/schema';
 import { and, eq, sql } from 'drizzle-orm';
+
+/**
+ * Normalize an uploaded image buffer by physically applying its EXIF
+ * orientation and stripping EXIF metadata. iOS/Android cameras save photos in
+ * the sensor's native orientation and attach an EXIF rotation flag; Google
+ * Vision's OCR does not honor that flag reliably, so the text comes back
+ * sideways/upside-down for raw camera shots while photo-library uploads (which
+ * are typically already re-encoded by the browser) read fine. Calling
+ * sharp().rotate() with no argument auto-applies the EXIF orientation and
+ * removes the tag, producing a buffer where the pixels are in display order.
+ *
+ * Returns the original buffer unchanged on any failure so a bad input never
+ * blocks the scan.
+ */
+async function normalizeImageOrientation(buffer: Buffer, label: string): Promise<Buffer> {
+  try {
+    const before = await sharp(buffer).metadata();
+    const orientation = before.orientation ?? 1;
+    if (orientation === 1) {
+      return buffer;
+    }
+    const rotated = await sharp(buffer).rotate().toBuffer();
+    console.log(`[OrientFix] ${label}: applied EXIF orientation ${orientation} (${before.width}x${before.height} → rotated)`);
+    return rotated;
+  } catch (err: any) {
+    console.warn(`[OrientFix] ${label}: failed to normalize orientation, using original buffer:`, err?.message);
+    return buffer;
+  }
+}
 
 // Words that describe texture/finish but are NOT color identifiers.
 // Stripped when extracting the color keyword(s) from a detected foil type name.
@@ -156,6 +186,23 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
       frontImage ? `Front: ${frontImage.originalname} (${frontImage.size} bytes)` : 'No front image',
       backImage ? `Back: ${backImage.originalname} (${backImage.size} bytes)` : 'No back image'
     );
+
+    // ── EXIF orientation normalization ────────────────────────────────────────
+    // Phone cameras save photos in sensor orientation with an EXIF rotation
+    // flag. Google Vision OCR doesn't honor that flag, so raw camera shots
+    // arrive sideways/upside-down at the analyzer (which is why photo-library
+    // uploads — already rotated by the browser — produce better results than
+    // direct camera captures). Apply the rotation to the pixels once here so
+    // every downstream consumer (batch Vision call, per-side analyzer, foil
+    // detector) sees correctly-oriented data.
+    await Promise.all([
+      frontImage
+        ? normalizeImageOrientation(frontImage.buffer, 'front').then(b => { frontImage.buffer = b; frontImage.size = b.length; })
+        : Promise.resolve(),
+      backImage
+        ? normalizeImageOrientation(backImage.buffer, 'back').then(b => { backImage.buffer = b; backImage.size = b.length; })
+        : Promise.resolve(),
+    ]);
 
     // ── Batch Vision API call ─────────────────────────────────────────────────
     // Send both images to Vision in a SINGLE batchAnnotateImages request.
