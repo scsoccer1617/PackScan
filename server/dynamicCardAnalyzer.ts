@@ -92,6 +92,41 @@ export async function analyzeSportsCardImage(
     // SERIAL NUMBER DETECTION - Look for serial numbering with enhanced detection
     // Pass original multi-line text so line-by-line pattern matching works correctly
     await extractSerialNumber(joinedText, cardDetails, textAnnotations);
+
+    // FOCUSED SERIAL RECOVERY (front side only) - run a high-contrast OCR pass
+    // when the regular OCR either missed the serial entirely or only managed to
+    // recover the limit ("/150") via the fuzzy fallback. Foil-stamped serials
+    // over busy card art (jersey pinstripes, gradient star backgrounds, etc.)
+    // routinely defeat the standard Vision pass; the enhanced-contrast pipeline
+    // recovers them without affecting the colour-image foil/parallel detector,
+    // which still uses the original unmodified buffer downstream.
+    if (side === 'front') {
+      const initialSerial = (cardDetails.serialNumber || '').trim();
+      const haveCompleteSerial =
+        initialSerial.length > 0 && !initialSerial.startsWith('/');
+      if (!haveCompleteSerial) {
+        try {
+          const { runFocusedSerialOCR } = await import('./focusedSerialOCR');
+          const focused = await runFocusedSerialOCR(base64Image);
+          if (focused?.isNumbered && focused.serialNumber) {
+            const focusedHasNumerator = !focused.serialNumber.startsWith('/');
+            // Adopt the focused result if it's strictly more informative:
+            //  - we had nothing → take whatever it found
+            //  - we had a limit-only "/150" → take a full "041/150" if available,
+            //    otherwise keep the limit
+            if (!initialSerial || focusedHasNumerator) {
+              console.log(
+                `[FocusedOCR] Replacing serial "${initialSerial || '(none)'}" with focused result "${focused.serialNumber}"`
+              );
+              cardDetails.serialNumber = focused.serialNumber;
+              cardDetails.isNumbered = true;
+            }
+          }
+        } catch (err: any) {
+          console.warn('[FocusedOCR] Skipped (non-fatal):', err?.message || err);
+        }
+      }
+    }
     
     // CARD FEATURES DETECTION - Rookie cards, autographs, etc.
     detectCardFeatures(cleanText, cardDetails);
