@@ -1,4 +1,5 @@
 import { ImageAnnotatorClient } from '@google-cloud/vision';
+import { analyzeRegionalFoilEvidence, hueBucketToColorName, type RegionalFoilEvidence } from './regionalFoilAnalyzer';
 
 interface FoilDetectionResult {
   isFoil: boolean;
@@ -161,8 +162,23 @@ function parseVisionColors(rawColors: any[]): ColorEntry[] {
   return parsed;
 }
 
-export async function detectFoilFromImage(base64Image: string, options?: { isNumbered?: boolean }): Promise<FoilDetectionResult> {
+export async function detectFoilFromImage(
+  base64Image: string,
+  options?: { isNumbered?: boolean; imageBuffer?: Buffer }
+): Promise<FoilDetectionResult> {
   console.log('=== VISUAL FOIL DETECTION STARTING (FULL IMAGE ANALYSIS) ===');
+
+  // Run region-aware analysis in parallel with the Vision API call. This
+  // gives us two independent evidence streams: the global Vision colour
+  // histogram (good when the photo is clean) and per-region pixel sampling
+  // (good when fingers/reflections suppress the global signal).
+  let regional: RegionalFoilEvidence | null = null;
+  const regionalPromise = options?.imageBuffer
+    ? analyzeRegionalFoilEvidence(options.imageBuffer).catch(err => {
+        console.log('[Region] regional analysis failed:', err?.message);
+        return null;
+      })
+    : Promise.resolve(null);
   
   try {
     const clientEmail = process.env.GOOGLE_CLIENT_EMAIL;
@@ -327,24 +343,81 @@ export async function detectFoilFromImage(base64Image: string, options?: { isNum
         : 0;
       indicators.push(`Same-color avg saturation: ${sameTintAvgSaturation.toFixed(0)} (${sameTintItems.length} regions)`);
 
-      // Two evidence paths to confirm foil:
-      // 1. High coverage (≥10%): definitive foil border
-      // 2. Moderate coverage (≥5%) + vivid saturation (avg >100): genuine foil color, not muted jersey/background
-      const hasHighCoverageEvidence = hasStrongSimilarTints && sameTintCoverage > 0.10;
-      const hasVividColorEvidence   = hasStrongSimilarTints && sameTintCoverage > 0.05 && sameTintAvgSaturation > 100;
-      const hasStrongColorEvidence  = hasHighCoverageEvidence || hasVividColorEvidence;
+      // ── Await regional evidence and merge it in ──────────────────────────
+      // The regional analyzer samples the 4 border strips and the center
+      // independently. Border agreement on a hue is much stronger evidence
+      // of a coloured-border parallel than a global histogram peak (which
+      // gets diluted by fingers, reflections, and the player photo). Center
+      // rainbow score acts as a stand-in for a "Reflective/Holographic"
+      // Vision label when Vision didn't return one.
+      regional = await regionalPromise;
+      let hasBorderTintEvidence = false;
+      let hasCenterRainbowEvidence = false;
+      let regionalColorName: string | null = null;
+      if (regional) {
+        indicators.push(...regional.indicators);
+        if (regional.borderTint) {
+          // Require ≥2 agreeing strips AND meaningful average coverage.
+          // 2 strips at ≥4% each is the entry bar; saturation >60 keeps
+          // dull skin/wood-grain backgrounds out.
+          if (regional.borderTint.agreeingStripCount >= 2 &&
+              regional.borderTint.coverage >= 0.04 &&
+              regional.borderTint.avgSaturation >= 60) {
+            hasBorderTintEvidence = true;
+            regionalColorName = hueBucketToColorName(regional.borderTint.hue);
+            indicators.push(`[Region] borderTint qualifies as foil evidence → ${regionalColorName}`);
+          }
+        }
+        if (regional.centerRainbowScore >= 0.7 || regional.centerHueCount >= 3) {
+          hasCenterRainbowEvidence = true;
+          indicators.push(`[Region] center rainbow qualifies as reflective evidence (score=${regional.centerRainbowScore.toFixed(2)}, hues=${regional.centerHueCount})`);
+        }
+      }
+      // Treat strong center rainbow the same as a Vision "Reflective" label
+      // for downstream gating.
+      if (hasCenterRainbowEvidence) hasReflectiveLabels = true;
+
+      // Relaxed thresholds — the original numbers required ≥10% same-color
+      // global coverage which fails on cards with fingers/reflections. We
+      // now accept 6% global coverage when EITHER border-strip agreement OR
+      // center rainbow backs it up. Without regional support the original
+      // (stricter) bar still applies, so plain matte cards don't suddenly
+      // become foil.
+      const baseHighCoverage = 0.10;
+      const baseVividCoverage = 0.05;
+      const regionalRelaxedCoverage = (hasBorderTintEvidence || hasCenterRainbowEvidence) ? 0.06 : baseHighCoverage;
+      const hasHighCoverageEvidence = hasStrongSimilarTints && sameTintCoverage > regionalRelaxedCoverage;
+      const hasVividColorEvidence   = hasStrongSimilarTints && sameTintCoverage > baseVividCoverage && sameTintAvgSaturation > 100;
+      // Border agreement alone is enough when its hue lines up with the
+      // global tint OR when the center is unambiguously rainbow.
+      const hasBorderConfirmedColor = hasBorderTintEvidence && (
+        regionalColorName === detectedColorTint || hasCenterRainbowEvidence
+      );
+      const hasStrongColorEvidence = hasHighCoverageEvidence || hasVividColorEvidence || hasBorderConfirmedColor;
       const hasModestSimilarTints = similarTintCount >= 2 && totalTintCoverage > 0.20;
-      
-      indicators.push(`Label support: strongFoil=${hasStrongFoilIndicators}, reflective=${hasReflectiveLabels}`);
-      
+
+      indicators.push(`Label support: strongFoil=${hasStrongFoilIndicators}, reflective=${hasReflectiveLabels} (centerRainbow=${hasCenterRainbowEvidence})`);
+
       const hasVeryStrongColorEvidence = similarTintCount >= 5 && totalTintCoverage > 0.40;
       const hasLabelSupport = hasStrongFoilIndicators || hasReflectiveLabels;
       const isNumbered = options?.isNumbered || false;
       const hasNumberedCardEvidence = isNumbered && similarTintCount >= 2 && totalTintCoverage > 0.08;
-      
+
       indicators.push(`Numbered card context: isNumbered=${isNumbered}, numberedEvidence=${hasNumberedCardEvidence}`);
-      
-      if (hasMetallicColors && detectedColorTint && (hasLabelSupport || hasVeryStrongColorEvidence || hasNumberedCardEvidence || hasStrongColorEvidence) && (hasStrongSimilarTints || hasModestSimilarTints || totalTintCoverage > 0.25 || hasNumberedCardEvidence || hasStrongColorEvidence)) {
+
+      // If the global tint and the border tint disagree, prefer the border
+      // tint — it's the more reliable signal for parallel borders.
+      if (hasBorderTintEvidence && regionalColorName && detectedColorTint && regionalColorName !== detectedColorTint) {
+        indicators.push(`[Region] overriding global tint "${detectedColorTint}" with border tint "${regionalColorName}"`);
+        detectedColorTint = regionalColorName;
+      } else if (hasBorderTintEvidence && regionalColorName && !detectedColorTint) {
+        // Global histogram missed the color entirely (fingers/reflections);
+        // adopt the regional tint as the working color.
+        indicators.push(`[Region] adopting border tint "${regionalColorName}" — global tint was empty`);
+        detectedColorTint = regionalColorName;
+      }
+
+      if ((hasMetallicColors || hasBorderTintEvidence) && detectedColorTint && (hasLabelSupport || hasVeryStrongColorEvidence || hasNumberedCardEvidence || hasStrongColorEvidence) && (hasStrongSimilarTints || hasModestSimilarTints || totalTintCoverage > 0.25 || hasNumberedCardEvidence || hasStrongColorEvidence)) {
         isFoil = true;
         confidence += Math.min(0.6, totalColorVariance * 2 + totalTintCoverage);
         
