@@ -97,30 +97,50 @@ function filterBySerialNumber(options: ParallelOption[], detectedSerial: string)
   });
 }
 
-// Fetch parallel options from the DB for a given card
+// Fetch parallel options from the DB for a given card.
+//
+// Important: parallels often live in a DIFFERENT collection than the base
+// card (e.g. 2026 Topps "Holiday Polka Dots Green/Pink" is filed under
+// collection "Base - Holiday Variation", but is inserted into Topps Series
+// One packs). The endpoint's collection cascade would hide those when the
+// base card OCR'd a different collection. To make sure the picker can
+// surface them, we run two queries in parallel — one collection-precise,
+// one brand+year broad — and merge them with the collection-precise
+// variants first (so the most-relevant matches stay near the top).
 async function fetchParallels(
   brand: string,
   year: number,
   collection?: string,
   set?: string
 ): Promise<ParallelOption[]> {
-  const params = new URLSearchParams({ brand, year: year.toString() });
-  if (collection) params.set("collection", collection);
-  if (set) params.set("set", set);
-  const resp = await fetch(`/api/card-variations/options?${params}`);
-  if (!resp.ok) return [];
-  const data = await resp.json();
-  const raw: { variationOrParallel: string; serialNumber: string | null }[] = data.options || [];
-  // Deduplicate by name
+  const fetchOne = async (extraParams: Record<string, string>) => {
+    const params = new URLSearchParams({ brand, year: year.toString(), ...extraParams });
+    const resp = await fetch(`/api/card-variations/options?${params}`);
+    if (!resp.ok) return [] as { variationOrParallel: string; serialNumber: string | null }[];
+    const data = await resp.json();
+    return (data.options || []) as { variationOrParallel: string; serialNumber: string | null }[];
+  };
+
+  const preciseParams: Record<string, string> = {};
+  if (collection) preciseParams.collection = collection;
+  if (set) preciseParams.set = set;
+
+  const [precise, broad] = await Promise.all([
+    Object.keys(preciseParams).length > 0 ? fetchOne(preciseParams) : Promise.resolve([] as typeof precise),
+    fetchOne({}), // brand+year only — picks up cross-collection parallels
+  ]);
+
+  // Deduplicate by parallel name, keeping the precise list first so it
+  // appears at the top of the picker.
   const seen = new Set<string>();
-  const unique: ParallelOption[] = [];
-  for (const o of raw) {
+  const merged: ParallelOption[] = [];
+  for (const o of [...precise, ...broad]) {
     if (!seen.has(o.variationOrParallel)) {
       seen.add(o.variationOrParallel);
-      unique.push({ variationOrParallel: o.variationOrParallel, serialNumber: o.serialNumber });
+      merged.push({ variationOrParallel: o.variationOrParallel, serialNumber: o.serialNumber });
     }
   }
-  return unique;
+  return merged;
 }
 
 export default function PriceLookup() {
