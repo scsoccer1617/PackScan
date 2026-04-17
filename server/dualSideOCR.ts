@@ -763,7 +763,18 @@ async function combineCardResults(
       // Also guard Chrome-variant cards: if the card is already identified as Chrome and the
       // visual detector says something other than Chrome itself, require very high confidence.
       const isChromVariantCard = (combined.variant || '').toLowerCase() === 'chrome';
-      const CRACKLE_CONFIDENCE_THRESHOLD = 0.80;
+      // Default crackle threshold is strict (0.80) to filter out chrome/jersey false
+      // positives. Lower it to 0.55 when the detector reports BOTH corroborating
+      // signals: a uniform border tint AND a multi-hue center rainbow. Jersey-color
+      // and chrome-surface false positives lack consistent 4-strip border agreement,
+      // so requiring both signals keeps the guard tight while letting genuine
+      // confetti/polka-dot parallels through (e.g. 2026 Topps Confetti Foil with
+      // pink+green dots produces borderTint on all 4 strips + centerRainbow).
+      const indicatorsBlob = (visualFoilResult.indicators || []).join(' | ');
+      const hasBorderTintEvidence = /borderTint qualifies as foil evidence/i.test(indicatorsBlob);
+      const hasCenterRainbowEvidence = /center rainbow qualifies as reflective evidence/i.test(indicatorsBlob);
+      const hasStrongCrackleCorroboration = hasBorderTintEvidence && hasCenterRainbowEvidence;
+      const CRACKLE_CONFIDENCE_THRESHOLD = hasStrongCrackleCorroboration ? 0.55 : 0.80;
       if (isCrackleType && visualFoilResult.confidence < CRACKLE_CONFIDENCE_THRESHOLD) {
         combined.foilType = null;
         combined.isFoil = false;
