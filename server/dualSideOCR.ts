@@ -771,6 +771,11 @@ async function combineCardResults(
       dbVariation = dbResult.variation;
       console.log(`[CardDB] Stashed DB variation for foil fallback: "${dbResult.variation}"`);
     }
+    // Signal success so callers (e.g. the year-widening fallback loop) stop
+    // trying additional years. Without this the function falls through to
+    // `undefined` which tryLookup treats as failure, causing the loop to keep
+    // overwriting `combined` with later-year matches.
+    return true;
   };
 
   const ocrPlayerFirst = (combined.playerFirstName || '').trim().toLowerCase();
@@ -826,13 +831,20 @@ async function combineCardResults(
       // collection), corrupting the year, set, collection, AND player name.
       if (!found && backNum) {
         const yr = combined.year as number;
+        // Autograph parallel-code card numbers (letters-dash-letters with no
+        // digits, e.g. "EZA-JHT") sit immediately next to the copyright/year
+        // on the back of the card, so the year reading is reliable even when
+        // _yearFromBackOnly is set. Skip year-widening for these — otherwise
+        // the player-fallback succeeds at every nearby year and the loop
+        // wanders to whichever year happens to have the most candidates.
+        const isAutographCode = /^[A-Z]+(?:-[A-Z]+)+$/i.test(backNum);
         // Default ±1 window. Widen to ±5 when the year came entirely from the
         // back of the card (no front year), because back stat tables can pick
         // a stat-line year (e.g. "1986 METS") that is years off from the
         // production year. The name-match guard prevents widening from
         // landing on the wrong player at the same brand/#.
-        const yearLowConfidence = !!(combined as any)._yearFromBackOnly || !!(combined as any)._yearFromCopyright;
-        const window = yearLowConfidence ? 5 : 1;
+        const yearLowConfidence = !isAutographCode && (!!(combined as any)._yearFromBackOnly || !!(combined as any)._yearFromCopyright);
+        const window = yearLowConfidence ? 5 : (isAutographCode ? 0 : 1);
         const deltas: number[] = [];
         for (let d = 1; d <= window; d++) { deltas.push(d, -d); }
         if (yearLowConfidence) {
