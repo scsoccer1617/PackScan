@@ -231,20 +231,33 @@ export default function PriceLookup() {
       const filtered = filterBySerialStatus(byKeyword, !!data.isNumbered);
 
       if (filtered.length === 1) {
-        // Exactly one keyword match — silently use it
-        const match = filtered[0];
-        const updated: Partial<CardFormValues> = { ...data, foilType: match.variationOrParallel };
-        if (match.serialNumber) {
-          const limit = match.serialNumber.replace(/\//g, "");
-          // Preserve the OCR-detected full serial (e.g. "029/199") when present;
-          // only fall back to the limit-only form ("/199") if no serial was scanned.
-          updated.serialNumber = detectedSerial && /\d+\s*\/\s*\d+/.test(detectedSerial)
-            ? detectedSerial
-            : `/${limit}`;
-          updated.isNumbered = true;
+        // Exactly one keyword match. Auto-select ONLY when there are no other
+        // non-numbered parallels in the catalog (i.e. it's the unambiguous
+        // answer). Otherwise show the picker with the keyword match first so
+        // the user can correct an OCR misread — e.g. visual detector said
+        // "Red Crackle Foil" and DB has one non-numbered "Red Bordered" but
+        // the card is actually a non-red Sandglitter parallel.
+        const allForStatus = filterBySerialStatus(allOptions, !!data.isNumbered);
+        if (allForStatus.length <= 1) {
+          const match = filtered[0];
+          const updated: Partial<CardFormValues> = { ...data, foilType: match.variationOrParallel };
+          if (match.serialNumber) {
+            const limit = match.serialNumber.replace(/\//g, "");
+            // Preserve the OCR-detected full serial (e.g. "029/199") when present;
+            // only fall back to the limit-only form ("/199") if no serial was scanned.
+            updated.serialNumber = detectedSerial && /\d+\s*\/\s*\d+/.test(detectedSerial)
+              ? detectedSerial
+              : `/${limit}`;
+            updated.isNumbered = true;
+          }
+          setCardData(updated);
+          setShowPriceResults(true);
+          return;
         }
-        setCardData(updated);
-        setShowPriceResults(true);
+        // Multiple non-numbered parallels exist — show picker with keyword match first.
+        setParallelOptions(mergePreferringPrimary(filtered, allForStatus));
+        setDetectedKeyword(extractKeyword(detected));
+        setShowParallelPicker(true);
         return;
       }
 

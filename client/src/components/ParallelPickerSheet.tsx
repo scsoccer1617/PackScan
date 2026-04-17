@@ -18,6 +18,7 @@ interface ParallelPickerSheetProps {
 }
 
 const CUSTOM_VALUE = "__custom__";
+const NONE_VALUE = "__none__";
 
 export default function ParallelPickerSheet({
   open,
@@ -39,13 +40,23 @@ export default function ParallelPickerSheet({
   const handleConfirm = () => {
     if (selected === CUSTOM_VALUE) {
       onConfirm(customText.trim());
+    } else if (selected === NONE_VALUE) {
+      // Search without specifying a parallel — useful when the correct
+      // parallel isn't in the catalog list (e.g. an SSP not yet imported,
+      // or a colour combo like "Pink/Green Polka Dot" Arenado that we
+      // don't have catalogued). Drops the foil keyword from the search
+      // so eBay's broader fallback can still find the right card.
+      onConfirm("");
     } else {
       const opt = options.find(o => o.variationOrParallel === selected);
       onConfirm(selected, opt?.serialNumber ?? undefined);
     }
   };
 
-  const selectedLabel = selected === CUSTOM_VALUE ? (customText || "Custom…") : selected;
+  const selectedLabel =
+    selected === CUSTOM_VALUE ? (customText || "Custom…")
+    : selected === NONE_VALUE ? "No parallel filter"
+    : selected;
 
   return (
     <Sheet open={open}>
@@ -72,6 +83,13 @@ export default function ParallelPickerSheet({
               onSelect={() => setSelected(opt.variationOrParallel)}
             />
           ))}
+
+          <PickerRow
+            label="Not listed — search without parallel"
+            sublabel="Use when the right parallel isn't shown above"
+            selected={selected === NONE_VALUE}
+            onSelect={() => setSelected(NONE_VALUE)}
+          />
 
           <PickerRow
             label="Other / Custom…"
