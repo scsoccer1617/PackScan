@@ -446,7 +446,15 @@ export async function lookupCard(input: CardLookupInput): Promise<CardLookupResu
       // collection scored OCR points and the alphabetical fallback wrongly
       // picked Opening Day.
       const ocrTextNorm = normalizeOrdinals((ocrText || '').toLowerCase());
-      const stripWords = new Set(['set', 'cards', 'card', 'the', 'and', 'of', 'a', 'an', 'series', 'edition', 'baseball', 'basketball', 'football', 'hockey']);
+      // NOTE: do NOT add "series" here. We match the full phrase
+      // ("Series One" / "Series 1" / "Series Two") against the OCR text via
+      // a word-boundary regex, so the danger of "series" alone matching
+      // unrelated cards doesn't apply. Adding it caused Series One to be
+      // rejected as "not meaningful" (only "one" left after stripping +
+      // length filter), so the OCR-vocab tiebreak scored 0 for both
+      // Series One and Opening Day on Topps 2021 Judge #99 → alphabetical
+      // fallback wrongly picked Opening Day.
+      const stripWords = new Set(['set', 'cards', 'card', 'the', 'and', 'of', 'a', 'an', 'edition', 'baseball', 'basketball', 'football', 'hockey']);
       const isMeaningfulName = (name: string): boolean => {
         const tokens = name.toLowerCase().split(/\s+/).filter(t => t.length > 0);
         const meaningful = tokens.filter(t => !stripWords.has(t) && t.length >= 3);
