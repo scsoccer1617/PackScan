@@ -953,10 +953,15 @@ function extractCardNumberPass(
       // window to be sentence-like.
       const before = text.slice(Math.max(0, matchStart - 60), matchStart);
       const after = text.slice(matchStart + fullMatch.length, matchStart + fullMatch.length + 60);
+      // Strong positive signal: an immediate "NO.", "No.", "No", or "#" prefix
+      // is the canonical card-number marker. When present we trust the match
+      // and bypass body-text / long-line heuristics that exist to filter out
+      // accidental hits inside bio paragraphs.
+      const hasCardNumberMarker = /(?:^|[\s(])(?:NO\.?|#)\s*$/i.test(before);
       const wordTokenCount = (s: string) => (s.match(/\b[A-Z]{2,}\b/g) || []).length;
       const beforeWords = wordTokenCount(before);
       const afterWords = wordTokenCount(after);
-      if (beforeWords >= 4 || afterWords >= 4) {
+      if (!hasCardNumberMarker && (beforeWords >= 4 || afterWords >= 4)) {
         console.log(`Skipping autograph candidate "${fullMatch}" — embedded in body text (before=${beforeWords} words, after=${afterWords} words)`);
         continue;
       }
@@ -964,11 +969,12 @@ function extractCardNumberPass(
       const lineWithMatch = lines.find(line => line.toLowerCase().includes(fullMatch.toLowerCase()));
       if (!lineWithMatch) continue;
       // Skip if this appears in a biographical/legal line
-      if (/\b(DRAFTED|DRAFT|BORN|SIGNED|OVERALL|ROUND|PICK|AGENT|FREE|RIGHTS|RESERVED|LICENSED|TRADEMARK|COMPANY|VISIT|HOMERED|SLUGGED|PROMOTED|MONSTER|PITCHED|BATTED|FIELDED|SCORED)\b/i.test(lineWithMatch)) continue;
+      if (!hasCardNumberMarker && /\b(DRAFTED|DRAFT|BORN|SIGNED|OVERALL|ROUND|PICK|AGENT|FREE|RIGHTS|RESERVED|LICENSED|TRADEMARK|COMPANY|VISIT|HOMERED|SLUGGED|PROMOTED|MONSTER|PITCHED|BATTED|FIELDED|SCORED)\b/i.test(lineWithMatch)) continue;
       if (/CODE#/i.test(lineWithMatch)) continue;
       // Require the line to be short (autograph card # lines are typically standalone or near player info)
-      // or appear on a line that isn't a long bio paragraph
-      if (lineWithMatch.length > 120) continue;
+      // or appear on a line that isn't a long bio paragraph — unless we have a
+      // hard NO./# marker right before the match.
+      if (!hasCardNumberMarker && lineWithMatch.length > 120) continue;
       if (!acceptCandidate(fullMatch, 'autograph-letter-letter')) continue;
       cardDetails.cardNumber = fullMatch;
       console.log(`Detected autograph-format card number (letter-letter): ${fullMatch}`);

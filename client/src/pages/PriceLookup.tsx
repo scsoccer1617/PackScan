@@ -236,7 +236,11 @@ export default function PriceLookup() {
         const updated: Partial<CardFormValues> = { ...data, foilType: match.variationOrParallel };
         if (match.serialNumber) {
           const limit = match.serialNumber.replace(/\//g, "");
-          updated.serialNumber = `/${limit}`;
+          // Preserve the OCR-detected full serial (e.g. "029/199") when present;
+          // only fall back to the limit-only form ("/199") if no serial was scanned.
+          updated.serialNumber = detectedSerial && /\d+\s*\/\s*\d+/.test(detectedSerial)
+            ? detectedSerial
+            : `/${limit}`;
           updated.isNumbered = true;
         }
         setCardData(updated);
@@ -334,7 +338,10 @@ export default function PriceLookup() {
       const updated: Partial<CardFormValues> = { ...prev, foilType };
       if (serialNumber) {
         const limit = serialNumber.replace(/\//g, "");
-        updated.serialNumber = `/${limit}`;
+        // Preserve a real OCR-detected serial (e.g. "029/199") if present;
+        // only fall back to the limit-only form when none was scanned.
+        const existing = (cardData?.serialNumber || "").trim();
+        updated.serialNumber = /\d+\s*\/\s*\d+/.test(existing) ? existing : `/${limit}`;
         updated.isNumbered = true;
       }
       return updated;

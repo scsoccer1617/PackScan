@@ -558,9 +558,36 @@ async function combineCardResults(
     return false;
   };
   
-  const frontNameBogus = isBogusFn(combined.playerFirstName, combined.playerLastName);
+  let frontNameBogus = isBogusFn(combined.playerFirstName, combined.playerLastName);
   const backNameBogus = isBogusFn(backResult.playerFirstName, backResult.playerLastName);
-  
+
+  // Catalog-driven bogus check: if the front-detected "first last" string
+  // appears verbatim as a known parallel/insert/variation name in the
+  // card_variations catalog for the same brand+year (e.g. "End Zone" is a
+  // 2025 Panini parallel name, not a player), treat the front name as bogus
+  // so we fall back to the back-side player name. This is fully dynamic —
+  // it relies only on the imported catalog, no hardcoded names.
+  if (!frontNameBogus && combined.playerFirstName && combined.playerLastName && combined.brand && combined.year) {
+    try {
+      const candidate = `${combined.playerFirstName} ${combined.playerLastName}`.trim().toLowerCase();
+      const rows = await db
+        .select({ name: cardVariations.variationOrParallel })
+        .from(cardVariations)
+        .where(and(
+          sql`LOWER(${cardVariations.brand}) = ${String(combined.brand).toLowerCase()}`,
+          eq(cardVariations.year, combined.year as number),
+          sql`LOWER(${cardVariations.variationOrParallel}) = ${candidate}`
+        ))
+        .limit(1);
+      if (rows.length > 0) {
+        console.log(`Front player name "${combined.playerFirstName} ${combined.playerLastName}" matches a known parallel name in card_variations for ${combined.brand} ${combined.year} — treating as bogus`);
+        frontNameBogus = true;
+      }
+    } catch (err) {
+      console.error('Catalog-based player name validation failed:', err);
+    }
+  }
+
   if (frontNameBogus && !backNameBogus && backResult.playerFirstName && backResult.playerLastName) {
     console.log(`Front player name "${combined.playerFirstName} ${combined.playerLastName}" is bogus, using back: "${backResult.playerFirstName} ${backResult.playerLastName}"`);
     combined.playerFirstName = backResult.playerFirstName;
