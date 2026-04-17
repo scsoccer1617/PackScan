@@ -579,6 +579,36 @@ export async function lookupCard(input: CardLookupInput): Promise<CardLookupResu
       }
     }
 
+    // ── Step 1c: Autograph-parallel-code fallback ──────────────────────
+    // Some card numbers are parallel-specific autograph codes (e.g.
+    // "EZA-JHT" for the End Zone Autographs Justin Herbert) that don't
+    // appear in card_database (which catalogs the base card numbers like
+    // "46"). When the OCR'd card number is letters-dash-letters with NO
+    // digits AND we have a player last name, look the player up directly
+    // in card_database for this brand+year and let the OCR-text vocabulary
+    // tiebreak (further down) pick the correct collection/set (e.g. the
+    // back text "PANINI-REVOLUTION" disambiguates Revolution from Prizm).
+    if (cardRows.length === 0 && playerLastName && /^[A-Z]+(?:-[A-Z]+)+$/i.test(cardNumNorm)) {
+      const lastNameNorm = playerLastName.trim().toLowerCase();
+      if (lastNameNorm.length >= 2) {
+        const playerRows = await db
+          .select()
+          .from(cardDatabase)
+          .where(
+            and(
+              sql`lower(${cardDatabase.brand}) = lower(${brandNorm})`,
+              eq(cardDatabase.year, year),
+              sql`lower(${cardDatabase.playerName}) like ${'%' + lastNameNorm + '%'}`
+            )
+          )
+          .limit(200);
+        if (playerRows.length > 0) {
+          console.log(`[CardDB] Autograph-parallel fallback: card number "${cardNumNorm}" not found; falling back to player "${playerLastName}" lookup → ${playerRows.length} candidate(s)`);
+          cardRows = playerRows;
+        }
+      }
+    }
+
     if (cardRows.length === 0) {
       console.log(`[CardDB] No match found for brand="${brandNorm}" year=${year} cardNumber="${cardNumNorm}"`);
       return { found: false, source: 'ocr_fallback' };
