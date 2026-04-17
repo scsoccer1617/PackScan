@@ -1122,17 +1122,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
               (!ocrHasSerial && !ocrHasFoil && !confirmedHasSerial && !confirmedHasVariant)
             );
             
+            // Catalog identity fields (player name, brand, year, collection,
+            // card number, sport, rookie/auto flags) come from the
+            // authoritative card_database lookup. Treat the confirmed_cards
+            // entry as a FALLBACK only — fill a field from the confirmed
+            // record only when the OCR + DB pipeline didn't produce a value.
+            // Otherwise stale confirmations (made before today's lookup
+            // improvements, or under earlier OCR-only logic) would silently
+            // overwrite correct DB results. Example seen in the wild: a
+            // Lindor confirmed when collection="Series Two" was applied as
+            // collection over the new DB result of collection="Base Set".
+            const fillIfEmpty = <T,>(current: T | undefined | null | '', confirmed: T | null | undefined): T | undefined =>
+              (current === undefined || current === null || current === '' ? (confirmed ?? undefined) : current as T);
             cardData = {
               ...cardData,
-              playerFirstName: verified.playerFirstName || cardData.playerFirstName,
-              playerLastName: verified.playerLastName || cardData.playerLastName,
-              brand: verified.brand || cardData.brand,
-              collection: verified.collection || cardData.collection,
-              cardNumber: verified.cardNumber || cardData.cardNumber,
-              year: verified.year || cardData.year,
-              sport: verified.sport || cardData.sport,
-              isRookieCard: verified.isRookieCard ?? cardData.isRookieCard,
-              isAutographed: verified.isAutographed ?? cardData.isAutographed,
+              playerFirstName: fillIfEmpty(cardData.playerFirstName, verified.playerFirstName) ?? cardData.playerFirstName,
+              playerLastName:  fillIfEmpty(cardData.playerLastName,  verified.playerLastName)  ?? cardData.playerLastName,
+              brand:           fillIfEmpty(cardData.brand,           verified.brand)           ?? cardData.brand,
+              collection:      fillIfEmpty(cardData.collection,      verified.collection)      ?? cardData.collection,
+              cardNumber:      fillIfEmpty(cardData.cardNumber,      verified.cardNumber)      ?? cardData.cardNumber,
+              year:            fillIfEmpty(cardData.year,            verified.year)            ?? cardData.year,
+              sport:           fillIfEmpty(cardData.sport,           verified.sport)           ?? cardData.sport,
+              isRookieCard:    cardData.isRookieCard ?? verified.isRookieCard,
+              isAutographed:   cardData.isAutographed ?? verified.isAutographed,
               confirmedMatch: true,
               confirmCount: verified.confirmCount,
             };
