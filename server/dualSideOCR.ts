@@ -657,11 +657,18 @@ async function combineCardResults(
   const ocrPlayerFirst = (combined.playerFirstName || '').trim().toLowerCase();
   const ocrPlayerLast  = (combined.playerLastName  || '').trim().toLowerCase();
 
+  // Concatenate front + back OCR text for the generic vocabulary tiebreaker
+  // in lookupCard. Any DB collection/set name printed on the card (subset
+  // banners like "FUTURE STARS", "CHROME UPDATE", etc.) will be picked up
+  // here without needing to be hand-coded into the OCR pattern list.
+  const combinedOcrText = [frontOCRText, backOCRText].filter(Boolean).join(' \n ');
+
   const tryLookup = async (brand: any, year: any, cardNumber: any, collection: any, opts?: { requireNameMatch?: boolean }): Promise<boolean> => {
     const result = await lookupCard({
       brand, year, cardNumber, collection,
       serialNumber: combined.serialNumber,
       playerLastName: combined.playerLastName,
+      ocrText: combinedOcrText,
     });
     if (result.found) {
       if (opts?.requireNameMatch) {

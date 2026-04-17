@@ -30,6 +30,15 @@ export interface CardLookupInput {
   cardNumber?: string;
   serialNumber?: string;
   playerLastName?: string;  // used to disambiguate when prefix-matching finds multiple candidates
+  /**
+   * Raw OCR text from front and/or back of the card. Used as a generic
+   * tiebreaker when multiple DB rows share the same brand+year+cardNumber:
+   * if exactly one candidate row's collection or set name appears verbatim
+   * in this text, that row is preferred. This lets us discover any subset
+   * label printed on the card (e.g. "FUTURE STARS") without maintaining a
+   * hand-curated list of subset names — the DB itself is the vocabulary.
+   */
+  ocrText?: string;
 }
 
 export interface CardLookupResult {
@@ -291,7 +300,7 @@ export async function importVariationsCSV(csvBuffer: Buffer, onProgress?: (proce
  * Returns authoritative card data if found, or { found: false } to signal fallback.
  */
 export async function lookupCard(input: CardLookupInput): Promise<CardLookupResult> {
-  const { brand, year, collection, cardNumber, serialNumber, playerLastName } = input;
+  const { brand, year, collection, cardNumber, serialNumber, playerLastName, ocrText } = input;
 
   if (!brand || !year || !cardNumber) {
     return { found: false, source: 'ocr_fallback' };
@@ -419,11 +428,54 @@ export async function lookupCard(input: CardLookupInput): Promise<CardLookupResu
         return c === 'base set' || c === 'base';
       };
       const brandLower = (brandNorm || '').toLowerCase().trim();
+
+      // OCR-text vocabulary match: when raw OCR text is available, check
+      // whether each candidate row's collection or set name appears
+      // verbatim in the OCR text. The DB itself is the vocabulary, so we
+      // never need to maintain a hand-curated list of subset names — any
+      // label printed on the card that matches a real DB collection wins.
+      const ocrTextNorm = (ocrText || '').toLowerCase();
+      const stripWords = new Set(['set', 'cards', 'card', 'the', 'and', 'of', 'a', 'an', 'series', 'edition', 'baseball', 'basketball', 'football', 'hockey']);
+      const isMeaningfulName = (name: string): boolean => {
+        const tokens = name.toLowerCase().split(/\s+/).filter(t => t.length > 0);
+        const meaningful = tokens.filter(t => !stripWords.has(t) && t.length >= 3);
+        // Need at least one meaningful token of length >= 4, OR multiple
+        // meaningful tokens — avoids matching trivial words like "Base".
+        return meaningful.some(t => t.length >= 4) || meaningful.length >= 2;
+      };
+      const ocrContainsName = (name: string): boolean => {
+        if (!ocrTextNorm || !name) return false;
+        const norm = name.toLowerCase().trim();
+        if (!norm || !isMeaningfulName(norm)) return false;
+        // Word-boundary match against OCR text.
+        const escaped = norm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        return new RegExp(`\\b${escaped}\\b`).test(ocrTextNorm);
+      };
+      const ocrMatchScore = (row: { collection: string; set: string | null }): number => {
+        const colMatch = ocrContainsName(row.collection) ? 1 : 0;
+        const setMatch = row.set ? (ocrContainsName(row.set) ? 1 : 0) : 0;
+        return colMatch + setMatch;
+      };
+      // Pre-compute scores so we can log which row(s) won on OCR evidence.
+      if (ocrTextNorm) {
+        const scored = cardRows.map(r => ({ row: r, score: ocrMatchScore(r) }));
+        const maxScore = Math.max(...scored.map(s => s.score));
+        if (maxScore > 0) {
+          const winners = scored.filter(s => s.score === maxScore).map(s => `"${s.row.collection}"${s.row.set ? ` / "${s.row.set}"` : ''}`);
+          console.log(`[CardDB] OCR-text vocabulary match: top score=${maxScore}, ${winners.length} row(s) tied → ${winners.slice(0, 3).join(', ')}${winners.length > 3 ? ` (+${winners.length - 3} more)` : ''}`);
+        }
+      }
+
       cardRows.sort((a, b) => {
         // Primary: player name match (OCR is authoritative for who is on the card)
         const aNameMatch = lastNameNorm && a.playerName.toLowerCase().includes(lastNameNorm) ? 1 : 0;
         const bNameMatch = lastNameNorm && b.playerName.toLowerCase().includes(lastNameNorm) ? 1 : 0;
         if (aNameMatch !== bNameMatch) return bNameMatch - aNameMatch;
+        // Secondary: OCR-text vocabulary match — rows whose collection/set
+        // name appears in the printed card text are strongly preferred.
+        const aOcrScore = ocrMatchScore(a);
+        const bOcrScore = ocrMatchScore(b);
+        if (aOcrScore !== bOcrScore) return bOcrScore - aOcrScore;
         // Deprioritise insert/sub-collections with " - " separators.
         const aIsInsert = a.collection.includes(' - ') ? 1 : 0;
         const bIsInsert = b.collection.includes(' - ') ? 1 : 0;
