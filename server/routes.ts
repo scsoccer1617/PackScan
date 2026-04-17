@@ -1070,104 +1070,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      console.log('OCR analysis successful, checking confirmed cards database...');
-      
-      let cardData = backOcrResponse.data;
-      const ocrCardNumber = cardData.cardNumber || '';
-      const ocrYear = cardData.year ? Number(cardData.year) : 0;
-      const ocrBrand = cardData.brand || '';
-      const ocrLastName = cardData.playerLastName || '';
-      
-      if (ocrCardNumber && ocrYear && ocrBrand) {
-        try {
-          const confirmedMatches = await db.select().from(confirmedCards).where(
-            and(
-              eq(confirmedCards.cardNumber, ocrCardNumber),
-              eq(confirmedCards.year, ocrYear),
-              eq(confirmedCards.brand, ocrBrand)
-            )
-          );
-          
-          let verified = null;
-          if (confirmedMatches.length === 1) {
-            verified = confirmedMatches[0];
-            console.log(`Single confirmed match found for card #${ocrCardNumber}/${ocrYear}/${ocrBrand}`);
-          } else if (confirmedMatches.length > 1) {
-            if (ocrLastName) {
-              const lastNameMatch = confirmedMatches.find(
-                m => m.playerLastName?.toLowerCase() === ocrLastName.toLowerCase()
-              );
-              if (lastNameMatch) {
-                verified = lastNameMatch;
-                console.log(`Multiple confirmed matches, selected by lastName match: ${lastNameMatch.playerFirstName} ${lastNameMatch.playerLastName}`);
-              }
-            }
-            if (!verified) {
-              console.log(`Multiple confirmed matches (${confirmedMatches.length}) for card #${ocrCardNumber}/${ocrYear}/${ocrBrand}, no lastName match - skipping auto-override`);
-            }
-          }
-          
-          if (verified) {
-            console.log(`Found confirmed card match (confirmed ${verified.confirmCount} time(s)): ${verified.playerFirstName} ${verified.playerLastName}`);
-            
-            const ocrHasSerial = !!(cardData.serialNumber && cardData.serialNumber.includes('/'));
-            const confirmedHasSerial = !!(verified.serialLimit && verified.serialLimit.includes('/'));
-            const ocrHasFoil = !!(cardData.variant && /foil|refractor|shimmer|prism|holo|chrome|wave|cracked ice|speckle|sparkle/i.test(cardData.variant));
-            const confirmedHasVariant = !!(verified.variant && verified.variant.trim());
-            
-            const ocrMatchesVariant = (
-              (ocrHasSerial && confirmedHasSerial) ||
-              (ocrHasFoil && confirmedHasVariant) ||
-              (!confirmedHasSerial && !confirmedHasVariant) ||
-              (!ocrHasSerial && !ocrHasFoil && !confirmedHasSerial && !confirmedHasVariant)
-            );
-            
-            // Catalog identity fields (player name, brand, year, collection,
-            // card number, sport, rookie/auto flags) come from the
-            // authoritative card_database lookup. Treat the confirmed_cards
-            // entry as a FALLBACK only — fill a field from the confirmed
-            // record only when the OCR + DB pipeline didn't produce a value.
-            // Otherwise stale confirmations (made before today's lookup
-            // improvements, or under earlier OCR-only logic) would silently
-            // overwrite correct DB results. Example seen in the wild: a
-            // Lindor confirmed when collection="Series Two" was applied as
-            // collection over the new DB result of collection="Base Set".
-            const fillIfEmpty = <T,>(current: T | undefined | null | '', confirmed: T | null | undefined): T | undefined =>
-              (current === undefined || current === null || current === '' ? (confirmed ?? undefined) : current as T);
-            cardData = {
-              ...cardData,
-              playerFirstName: fillIfEmpty(cardData.playerFirstName, verified.playerFirstName) ?? cardData.playerFirstName,
-              playerLastName:  fillIfEmpty(cardData.playerLastName,  verified.playerLastName)  ?? cardData.playerLastName,
-              brand:           fillIfEmpty(cardData.brand,           verified.brand)           ?? cardData.brand,
-              collection:      fillIfEmpty(cardData.collection,      verified.collection)      ?? cardData.collection,
-              cardNumber:      fillIfEmpty(cardData.cardNumber,      verified.cardNumber)      ?? cardData.cardNumber,
-              year:            fillIfEmpty(cardData.year,            verified.year)            ?? cardData.year,
-              sport:           fillIfEmpty(cardData.sport,           verified.sport)           ?? cardData.sport,
-              isRookieCard:    cardData.isRookieCard ?? verified.isRookieCard,
-              isAutographed:   cardData.isAutographed ?? verified.isAutographed,
-              confirmedMatch: true,
-              confirmCount: verified.confirmCount,
-            };
-            
-            if (ocrMatchesVariant) {
-              // Do NOT apply variant from confirmed cards. Variant is reserved for short prints /
-              // image variations driven by CMP code mappings (not yet built). Parallel names like
-              // "Magenta Refractors" belong in foilType, not variant.
-              cardData.variant = '';
-              cardData.isNumbered = (verified.isNumbered || ocrHasSerial) ?? cardData.isNumbered;
-              cardData.serialNumber = cardData.serialNumber || verified.serialLimit || '';
-              console.log(`Applied serial data from confirmed card: serial="${cardData.serialNumber}" (variant cleared — awaiting CMP mapping)`);
-            } else {
-              console.log(`Skipping variant override - OCR scan differs from confirmed variant (confirmed: variant="${verified.variant}", serial="${verified.serialLimit}" | OCR: variant="${cardData.variant}", serial="${cardData.serialNumber}")`);
-            }
-          } else {
-            console.log('No confirmed card match found, using OCR results');
-          }
-        } catch (dbError) {
-          console.error('Error checking confirmed cards:', dbError);
-        }
-      }
-      
+      // Confirmed-card lookups used to override scan results to firm up the
+      // database. Now that the player card_database is populated, the DB
+      // lookup is the authoritative source — confirmed thumbs-up presses are
+      // still recorded via POST /api/confirmed-cards as positive feedback,
+      // but they no longer alter the result of a fresh scan.
+      console.log('OCR analysis successful, skipping confirmed-card override (DB lookup is authoritative)');
+
+      const cardData = backOcrResponse.data;
+
       console.log('Starting eBay price lookup...');
       
       try {
@@ -1785,37 +1696,68 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // GET /api/card-database/collections — distinct collections, optionally filtered by brand
+  // GET /api/card-database/collections — distinct collections, optionally filtered by brand and/or year
   app.get(`${apiPrefix}/card-database/collections`, async (req, res) => {
     try {
       const brand = req.query.brand ? String(req.query.brand) : '';
-      const cacheKey = brand.toLowerCase();
+      const yearStr = req.query.year ? String(req.query.year) : '';
+      const year = yearStr ? parseInt(yearStr, 10) : 0;
+      const cacheKey = `${brand.toLowerCase()}|${year || ''}`;
       const now = Date.now();
       const cached = collectionsCache.get(cacheKey);
       if (cached && (now - cached.timestamp) < AUTOCOMPLETE_CACHE_TTL) {
         return res.json(cached.data);
       }
-      let rows;
-      if (brand) {
-        rows = await db
-          .select({ collection: cardDatabase.collection })
-          .from(cardDatabase)
-          .where(sql`lower(${cardDatabase.brand}) = lower(${brand})`)
-          .groupBy(cardDatabase.collection)
-          .orderBy(cardDatabase.collection);
-      } else {
-        rows = await db
-          .select({ collection: cardDatabase.collection })
-          .from(cardDatabase)
-          .groupBy(cardDatabase.collection)
-          .orderBy(cardDatabase.collection);
-      }
-      const data = rows.map(r => r.collection);
+      const conditions: any[] = [];
+      if (brand) conditions.push(sql`lower(${cardDatabase.brand}) = lower(${brand})`);
+      if (year) conditions.push(eq(cardDatabase.year, year));
+      const whereExpr = conditions.length ? and(...conditions) : undefined;
+      const rows = await db
+        .select({ collection: cardDatabase.collection })
+        .from(cardDatabase)
+        .where(whereExpr as any)
+        .groupBy(cardDatabase.collection)
+        .orderBy(cardDatabase.collection);
+      const data = rows.map(r => r.collection).filter(Boolean);
       collectionsCache.set(cacheKey, { data, timestamp: now });
       return res.json(data);
     } catch (error: any) {
       console.error('Error fetching collections for autocomplete:', error);
       return res.status(500).json({ error: 'Failed to fetch collections' });
+    }
+  });
+
+  // GET /api/card-database/sets — distinct set names, optionally filtered by brand/year/collection
+  const setsCache = new Map<string, { data: string[]; timestamp: number }>();
+  app.get(`${apiPrefix}/card-database/sets`, async (req, res) => {
+    try {
+      const brand = req.query.brand ? String(req.query.brand) : '';
+      const yearStr = req.query.year ? String(req.query.year) : '';
+      const collection = req.query.collection ? String(req.query.collection) : '';
+      const year = yearStr ? parseInt(yearStr, 10) : 0;
+      const cacheKey = `${brand.toLowerCase()}|${year || ''}|${collection.toLowerCase()}`;
+      const now = Date.now();
+      const cached = setsCache.get(cacheKey);
+      if (cached && (now - cached.timestamp) < AUTOCOMPLETE_CACHE_TTL) {
+        return res.json(cached.data);
+      }
+      const conditions: any[] = [];
+      if (brand) conditions.push(sql`lower(${cardDatabase.brand}) = lower(${brand})`);
+      if (year) conditions.push(eq(cardDatabase.year, year));
+      if (collection) conditions.push(sql`lower(${cardDatabase.collection}) = lower(${collection})`);
+      const whereExpr = conditions.length ? and(...conditions) : undefined;
+      const rows = await db
+        .select({ set: cardDatabase.set })
+        .from(cardDatabase)
+        .where(whereExpr as any)
+        .groupBy(cardDatabase.set)
+        .orderBy(cardDatabase.set);
+      const data = rows.map(r => r.set).filter((s): s is string => !!s);
+      setsCache.set(cacheKey, { data, timestamp: now });
+      return res.json(data);
+    } catch (error: any) {
+      console.error('Error fetching sets for autocomplete:', error);
+      return res.status(500).json({ error: 'Failed to fetch sets' });
     }
   });
 

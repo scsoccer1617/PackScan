@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Card as CardType, CardWithRelations, CardFormValues, cardSchema } from "@shared/schema";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -34,6 +34,7 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
       playerLastName: "",
       brand: "",
       collection: "",
+      set: "",
       cardNumber: "",
       year: new Date().getFullYear(),
       variant: "",
@@ -68,6 +69,7 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
         playerLastName: card.playerLastName || "",
         brand: card.brand?.name || "",
         collection: card.collection || "",
+        set: (card as any).set || "",
         cardNumber: card.cardNumber || "",
         year: card.year || new Date().getFullYear(),
         variant: card.variant || "",
@@ -165,6 +167,47 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
   const handleSubmit = (values: CardFormValues) => {
     updateCardMutation.mutate(values);
   };
+
+  // Watch brand/year/collection so the Collection + Set dropdowns can refresh
+  // when the user changes any upstream field. Both dropdowns are populated
+  // from card_database via /api/card-database/{collections,sets}.
+  const watchedBrand = form.watch('brand');
+  const watchedYear = form.watch('year');
+  const watchedCollection = form.watch('collection');
+
+  const [collectionOptions, setCollectionOptions] = useState<string[]>([]);
+  const [setOptions, setSetOptions] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!watchedBrand || !watchedYear) {
+      setCollectionOptions([]);
+      return;
+    }
+    const params = new URLSearchParams({
+      brand: String(watchedBrand),
+      year: String(watchedYear),
+    });
+    fetch(`/api/card-database/collections?${params.toString()}`)
+      .then(r => r.json())
+      .then(data => { if (Array.isArray(data)) setCollectionOptions(data); })
+      .catch(() => setCollectionOptions([]));
+  }, [watchedBrand, watchedYear]);
+
+  useEffect(() => {
+    if (!watchedBrand || !watchedYear) {
+      setSetOptions([]);
+      return;
+    }
+    const params = new URLSearchParams({
+      brand: String(watchedBrand),
+      year: String(watchedYear),
+    });
+    if (watchedCollection) params.set('collection', String(watchedCollection));
+    fetch(`/api/card-database/sets?${params.toString()}`)
+      .then(r => r.json())
+      .then(data => { if (Array.isArray(data)) setSetOptions(data); })
+      .catch(() => setSetOptions([]));
+  }, [watchedBrand, watchedYear, watchedCollection]);
 
   return (
     <Dialog 
@@ -276,7 +319,7 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
               />
             </div>
             
-            {/* Collection and Card Number Fields */}
+            {/* Collection and Set Fields (DB-driven, filtered by Brand + Year) */}
             <div className="form-grid">
               <FormField
                 control={form.control}
@@ -284,14 +327,75 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Collection</FormLabel>
-                    <FormControl>
-                      <Input placeholder="e.g. Chrome, Series 1" {...field} />
-                    </FormControl>
+                    {collectionOptions.length > 0 ? (
+                      <Select
+                        onValueChange={(v) => field.onChange(v)}
+                        value={field.value || ''}
+                      >
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select collection" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {collectionOptions.map((c) => (
+                            <SelectItem key={c} value={c}>{c}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <FormControl>
+                        <Input
+                          placeholder={watchedBrand && watchedYear ? "No matches — type a collection" : "Pick brand & year first"}
+                          {...field}
+                          value={field.value || ''}
+                        />
+                      </FormControl>
+                    )}
                     <FormMessage />
                   </FormItem>
                 )}
               />
-              
+
+              <FormField
+                control={form.control}
+                name="set"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Set</FormLabel>
+                    {setOptions.length > 0 ? (
+                      <Select
+                        onValueChange={(v) => field.onChange(v)}
+                        value={field.value || ''}
+                      >
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select set" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {setOptions.map((s) => (
+                            <SelectItem key={s} value={s}>{s}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <FormControl>
+                        <Input
+                          placeholder={watchedBrand && watchedYear ? "No matches — type a set" : "Pick brand & year first"}
+                          {...field}
+                          value={field.value || ''}
+                        />
+                      </FormControl>
+                    )}
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+
+            {/* Card Number Field */}
+            <div className="form-grid">
               <FormField
                 control={form.control}
                 name="cardNumber"

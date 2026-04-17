@@ -27,6 +27,41 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
   // Use state to manage our working copy of data that we can directly modify
   const [data, setData] = useState<Partial<CardFormValues>>({});
   const [editedData, setEditedData] = useState<Partial<CardFormValues>>({});
+  // DB-driven dropdown options for the Collection + Set fields, scoped by
+  // the currently-edited Brand + Year (and Collection for Set).
+  const [collectionOptions, setCollectionOptions] = useState<string[]>([]);
+  const [setOptions, setSetOptions] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!editMode || !editedData.brand || !editedData.year) {
+      setCollectionOptions([]);
+      return;
+    }
+    const params = new URLSearchParams({
+      brand: String(editedData.brand),
+      year: String(editedData.year),
+    });
+    fetch(`/api/card-database/collections?${params.toString()}`)
+      .then(r => r.json())
+      .then(d => { if (Array.isArray(d)) setCollectionOptions(d); })
+      .catch(() => setCollectionOptions([]));
+  }, [editMode, editedData.brand, editedData.year]);
+
+  useEffect(() => {
+    if (!editMode || !editedData.brand || !editedData.year) {
+      setSetOptions([]);
+      return;
+    }
+    const params = new URLSearchParams({
+      brand: String(editedData.brand),
+      year: String(editedData.year),
+    });
+    if (editedData.collection) params.set('collection', String(editedData.collection));
+    fetch(`/api/card-database/sets?${params.toString()}`)
+      .then(r => r.json())
+      .then(d => { if (Array.isArray(d)) setSetOptions(d); })
+      .catch(() => setSetOptions([]));
+  }, [editMode, editedData.brand, editedData.year, editedData.collection]);
   
   // Debug log to check if isRookieCard is properly set
   useEffect(() => {
@@ -267,12 +302,28 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
             </div>
             <div className="space-y-2">
               <Label htmlFor="collection">Collection</Label>
-              <Input
-                id="collection"
-                value={editedData.collection || ''}
-                onChange={(e) => handleInputChange('collection', e.target.value)}
-                placeholder="Card Collection"
-              />
+              {collectionOptions.length > 0 ? (
+                <Select
+                  value={editedData.collection || ''}
+                  onValueChange={(v) => handleInputChange('collection', v)}
+                >
+                  <SelectTrigger id="collection">
+                    <SelectValue placeholder="Select collection" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {collectionOptions.map((c) => (
+                      <SelectItem key={c} value={c}>{c}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Input
+                  id="collection"
+                  value={editedData.collection || ''}
+                  onChange={(e) => handleInputChange('collection', e.target.value)}
+                  placeholder={editedData.brand && editedData.year ? "No matches — type a collection" : "Pick brand & year first"}
+                />
+              )}
             </div>
 
             {/* Third row - Card Number and Year */}
@@ -294,6 +345,33 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
                 onChange={(e) => handleInputChange('year', parseInt(e.target.value) || '')}
                 placeholder="Card Year"
               />
+            </div>
+
+            {/* Set field — DB-driven, filtered by Brand + Year (+ Collection) */}
+            <div className="space-y-2 col-span-1 md:col-span-2">
+              <Label htmlFor="set">Set</Label>
+              {setOptions.length > 0 ? (
+                <Select
+                  value={editedData.set || ''}
+                  onValueChange={(v) => handleInputChange('set', v)}
+                >
+                  <SelectTrigger id="set">
+                    <SelectValue placeholder="Select set" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {setOptions.map((s) => (
+                      <SelectItem key={s} value={s}>{s}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Input
+                  id="set"
+                  value={editedData.set || ''}
+                  onChange={(e) => handleInputChange('set', e.target.value)}
+                  placeholder={editedData.brand && editedData.year ? "No matches — type a set" : "Pick brand & year first"}
+                />
+              )}
             </div>
 
             {/* Fourth row - Variant and Serial Number */}

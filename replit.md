@@ -39,7 +39,8 @@ Preferred communication style: Simple, everyday language.
 - **Dynamic Variant Detection**: Systematically identifies card variants (e.g., foil types, parallels, textures) through visual analysis and eBay listing title analysis.
 - **Generic Detection Logic**: Card processing relies on dynamic, generic detection methods (line-based, regex-based, positional scoring) rather than hard-coded rules for specific cards.
 - **Editable Data**: Users can manually edit detected card fields and re-run eBay searches.
-- **User Feedback**: Thumbs up/down confirmation system to verify OCR accuracy and build a reference database of confirmed cards.
+- **User Feedback**: Thumbs up/down on a scan. Thumbs-up records a positive feedback row in `confirmed_cards` (for analytics/auditing only) — it no longer overrides future scans. Thumbs-down opens the edit flow so the user can correct the detected fields. The `card_database` lookup is the authoritative source of truth for catalog identity (player, brand, year, collection, set, card number, rookie/auto flags).
+- **Edit Card Form (scan results & stored cards)**: Collection and Set fields are dropdowns populated from `card_database`, filtered live by the selected Brand + Year (Set additionally narrows by Collection when set). Falls back to a free-text input when no DB matches exist for the chosen brand/year. Backed by `GET /api/card-database/collections?brand=&year=` and `GET /api/card-database/sets?brand=&year=&collection=`.
 - **Admin Panel**: Available at `/admin/card-database` — shows DB stats and supports uploading new CSV files to refresh the card/variation catalog. Also has a clear-all button for re-importing from scratch.
 
 ### Card Database Admin
