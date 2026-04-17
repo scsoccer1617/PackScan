@@ -399,7 +399,20 @@ export async function lookupCard(input: CardLookupInput): Promise<CardLookupResu
         const c = col.toLowerCase();
         return c.includes('autograph') || c.includes(' auto') || c.endsWith(' auto') ||
                c.includes('relic') || c.includes('patch') ||
-               c.includes('memorabilia') || c.includes('signature');
+               c.includes('memorabilia') || c.includes('signature') ||
+               // Parallel/variation rows that happen to share the base card # —
+               // these should never be the default pick without explicit OCR
+               // evidence (e.g. detected foil/colour, serial number, or matching
+               // collection text). Examples: "Team Color", "Golden Mirror Image
+               // Variations", "Black and White Image Variations", "Rookie Design
+               // Variations", "Inverted Variations", "1965 Inverted Variations".
+               c.includes('variation') || c.includes('variations') ||
+               /\bteam\s+color\b/.test(c) ||
+               /\bmirror\s+image\b/.test(c) ||
+               /\bnegative\b/.test(c) ||
+               /\binverted\b/.test(c) ||
+               /\bsuperfractor\b/.test(c) ||
+               /\brefractor\b/.test(c);
       };
       const isBaseSet = (col: string) => {
         const c = col.toLowerCase().trim();
