@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ExternalLink, TrendingUp, Pencil, RotateCcw, ThumbsUp, ThumbsDown, Check } from "lucide-react";
 import { CardFormValues } from "@shared/schema";
 import { apiRequest } from "@/lib/queryClient";
@@ -44,6 +45,41 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
   const [editMode, setEditMode] = useState(false);
   const [editData, setEditData] = useState<Partial<CardFormValues>>({});
   const [confirmStatus, setConfirmStatus] = useState<'idle' | 'confirming' | 'confirmed' | 'error'>('idle');
+  // DB-driven dropdown options for Collection + Set, scoped by edited Brand+Year
+  // (Set additionally narrows by Collection). Falls back to free-text when empty.
+  const [collectionOptions, setCollectionOptions] = useState<string[]>([]);
+  const [setOptions, setSetOptions] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!editMode || !editData.brand || !editData.year) {
+      setCollectionOptions([]);
+      return;
+    }
+    const params = new URLSearchParams({
+      brand: String(editData.brand),
+      year: String(editData.year),
+    });
+    fetch(`/api/card-database/collections?${params.toString()}`)
+      .then(r => r.json())
+      .then(d => { if (Array.isArray(d)) setCollectionOptions(d); })
+      .catch(() => setCollectionOptions([]));
+  }, [editMode, editData.brand, editData.year]);
+
+  useEffect(() => {
+    if (!editMode || !editData.brand || !editData.year) {
+      setSetOptions([]);
+      return;
+    }
+    const params = new URLSearchParams({
+      brand: String(editData.brand),
+      year: String(editData.year),
+    });
+    if (editData.collection) params.set('collection', String(editData.collection));
+    fetch(`/api/card-database/sets?${params.toString()}`)
+      .then(r => r.json())
+      .then(d => { if (Array.isArray(d)) setSetOptions(d); })
+      .catch(() => setSetOptions([]));
+  }, [editMode, editData.brand, editData.year, editData.collection]);
 
   const handleConfirmCard = async () => {
     if (!cardData || confirmStatus === 'confirming' || confirmStatus === 'confirmed') return;
@@ -300,7 +336,43 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
               <div className="space-y-3">
                 <div>
                   <Label htmlFor="edit-collection">Collection</Label>
-                  <Input id="edit-collection" value={editData.collection || ''} onChange={e => updateEditField('collection', e.target.value)} />
+                  {collectionOptions.length > 0 ? (
+                    <Select
+                      value={editData.collection || ''}
+                      onValueChange={(v) => updateEditField('collection', v)}
+                    >
+                      <SelectTrigger id="edit-collection">
+                        <SelectValue placeholder="Select collection" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {collectionOptions.map((c) => (
+                          <SelectItem key={c} value={c}>{c}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <Input id="edit-collection" value={editData.collection || ''} onChange={e => updateEditField('collection', e.target.value)} />
+                  )}
+                </div>
+                <div>
+                  <Label htmlFor="edit-set">Set</Label>
+                  {setOptions.length > 0 ? (
+                    <Select
+                      value={editData.set || ''}
+                      onValueChange={(v) => updateEditField('set', v)}
+                    >
+                      <SelectTrigger id="edit-set">
+                        <SelectValue placeholder="Select set" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {setOptions.map((s) => (
+                          <SelectItem key={s} value={s}>{s}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <Input id="edit-set" value={editData.set || ''} onChange={e => updateEditField('set', e.target.value)} />
+                  )}
                 </div>
                 <div>
                   <Label>Variant / Parallel</Label>

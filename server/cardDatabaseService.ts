@@ -445,7 +445,15 @@ export async function lookupCard(input: CardLookupInput): Promise<CardLookupResu
       // says "Series 1" but the DB row's set is "Series One", so neither
       // collection scored OCR points and the alphabetical fallback wrongly
       // picked Opening Day.
-      const ocrTextNorm = normalizeOrdinals((ocrText || '').toLowerCase());
+      // Collapse all whitespace (newlines, tabs, multiple spaces) into a single
+      // space so multi-word names like "Flagship Collection" still match when
+      // the OCR returns them on separate lines (raw backOCRText is newline-
+      // delimited per detected text block — a card showing
+      //   FLAGSHIP\nCOLLECTION
+      // would otherwise fail to match the DB row "Flagship Collection" via
+      // the literal-space regex below, and the alphabetical fallback would
+      // wrongly pick "Spotlight" for Topps 2024 Pete Alonso #29.
+      const ocrTextNorm = normalizeOrdinals((ocrText || '').toLowerCase()).replace(/\s+/g, ' ');
       // NOTE: do NOT add "series" here. We match the full phrase
       // ("Series One" / "Series 1" / "Series Two") against the OCR text via
       // a word-boundary regex, so the danger of "series" alone matching
