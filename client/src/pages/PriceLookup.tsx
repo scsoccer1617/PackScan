@@ -125,8 +125,9 @@ async function fetchParallels(
   if (collection) preciseParams.collection = collection;
   if (set) preciseParams.set = set;
 
+  const empty: { variationOrParallel: string; serialNumber: string | null }[] = [];
   const [precise, broad] = await Promise.all([
-    Object.keys(preciseParams).length > 0 ? fetchOne(preciseParams) : Promise.resolve([] as typeof precise),
+    Object.keys(preciseParams).length > 0 ? fetchOne(preciseParams) : Promise.resolve(empty),
     fetchOne({}), // brand+year only — picks up cross-collection parallels
   ]);
 
