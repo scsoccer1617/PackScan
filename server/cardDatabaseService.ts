@@ -602,6 +602,7 @@ export async function lookupCard(input: CardLookupInput): Promise<CardLookupResu
     // in card_database for this brand+year and let the OCR-text vocabulary
     // tiebreak (further down) pick the correct collection/set (e.g. the
     // back text "PANINI-REVOLUTION" disambiguates Revolution from Prizm).
+    let autographFallbackUsed = false;
     if (cardRows.length === 0 && playerLastName && /^[A-Z]+(?:-[A-Z]+)+$/i.test(cardNumNorm)) {
       const lastNameNorm = playerLastName.trim().toLowerCase();
       if (lastNameNorm.length >= 2) {
@@ -619,6 +620,7 @@ export async function lookupCard(input: CardLookupInput): Promise<CardLookupResu
         if (playerRows.length > 0) {
           console.log(`[CardDB] Autograph-parallel fallback: card number "${cardNumNorm}" not found; falling back to player "${playerLastName}" lookup → ${playerRows.length} candidate(s)`);
           cardRows = playerRows;
+          autographFallbackUsed = true;
           // Run the same OCR-vocab + base-set tiebreak we use for the
           // multi-row card-number path. Without this, the player fallback
           // returns rows in Postgres order and cardRows[0] picks an
@@ -656,6 +658,16 @@ export async function lookupCard(input: CardLookupInput): Promise<CardLookupResu
     // Resolve set: prefer card_database.set, fall back to variation row's set
     const resolvedSet = cardRow.set || variationResult?.set || undefined;
 
+    // When the autograph-parallel fallback was used, the matched DB row is
+    // the player's *base* card (e.g. Revolution #46) — used only to discover
+    // the right collection/set/team. The card number actually printed on the
+    // card is the autograph code we OCR'd (e.g. EZA-JHT), so preserve it
+    // rather than overwriting with the base row's card number.
+    const resolvedCardNumber = autographFallbackUsed ? cardNumNorm : cardRow.cardNumberRaw;
+    if (autographFallbackUsed) {
+      console.log(`[CardDB] Autograph-parallel fallback: preserving OCR'd card number "${cardNumNorm}" instead of base row #${cardRow.cardNumberRaw}`);
+    }
+
     return {
       found: true,
       playerFirstName: firstName,
@@ -663,7 +675,7 @@ export async function lookupCard(input: CardLookupInput): Promise<CardLookupResu
       team: cardRow.team || undefined,
       collection: cardRow.collection,
       set: resolvedSet || undefined,
-      cardNumber: cardRow.cardNumberRaw,
+      cardNumber: resolvedCardNumber,
       variation: variationResult?.variationOrParallel,
       serialNumber: variationResult?.serialNumber || serialNumber,
       isRookieCard,
