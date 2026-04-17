@@ -1571,6 +1571,9 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>,
       const year = parseInt(yearTeamMatch[1], 10);
       if (year >= 1900 && year <= new Date().getFullYear()) {
         cardDetails.year = year;
+        // Year+team pattern is non-legal text — clear any low-confidence flag
+        // set earlier by the Leaf/Donruss copyright path.
+        (cardDetails as any)._yearFromCopyright = false;
         console.log(`Using team-year pattern as card date: ${cardDetails.year}`);
         return;
       }
