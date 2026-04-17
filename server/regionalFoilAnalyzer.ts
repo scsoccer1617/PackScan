@@ -202,6 +202,24 @@ function rainbowScore(centerStats: RegionStats): { score: number; hueCount: numb
     return { score: 0, hueCount: hits, perHue };
   }
 
+  // Dominance check: a true foil rainbow distributes its area across
+  // several hues. If one hue accounts for the overwhelming majority of
+  // the qualifying coverage and the rest are slivers, this is a single
+  // dominant colour with noise — typically the player photo (e.g. a
+  // red uniform plus tiny pockets of other hues) rather than a foil
+  // rainbow. Reject when the top hue's share of the qualifying
+  // coverage exceeds 60%.
+  let totalQualifyingCov = 0;
+  let topCov = 0;
+  for (const cov of Object.values(perHue)) {
+    if (cov === undefined) continue;
+    totalQualifyingCov += cov;
+    if (cov > topCov) topCov = cov;
+  }
+  if (totalQualifyingCov > 0 && topCov / totalQualifyingCov > 0.6) {
+    return { score: 0, hueCount: hits, perHue };
+  }
+
   // Map hits → score: 0 hues=0, 1=0, 2=0.35, 3=0.7, 4+=1.0
   const score = hits <= 1 ? 0 : hits === 2 ? 0.35 : hits === 3 ? 0.7 : 1.0;
   return { score, hueCount: hits, perHue };
