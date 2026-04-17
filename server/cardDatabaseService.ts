@@ -402,101 +402,110 @@ export async function lookupCard(input: CardLookupInput): Promise<CardLookupResu
       }
     }
 
-    // When still multiple hits, use the OCR player name to pick the best match.
-    // The same card number often maps to different players across sets (e.g.
-    // Bowman 2022 #91 = Scherzer in "Bowman Baseball", Turner in "Bowman Chrome Sapphire").
-    if (cardRows.length > 1) {
-      const lastNameNorm = (playerLastName || '').trim().toLowerCase();
-      // Subsets that require an explicit OCR signal (autograph/swatch/relic visible).
-      // Without such a signal, these should never be the default match.
-      const isSpecialtySubset = (col: string) => {
-        const c = col.toLowerCase();
-        return c.includes('autograph') || c.includes(' auto') || c.endsWith(' auto') ||
-               c.includes('relic') || c.includes('patch') ||
-               c.includes('memorabilia') || c.includes('signature') ||
-               // Parallel/variation rows that happen to share the base card # —
-               // these should never be the default pick without explicit OCR
-               // evidence (e.g. detected foil/colour, serial number, or matching
-               // collection text). Examples: "Team Color", "Golden Mirror Image
-               // Variations", "Black and White Image Variations", "Rookie Design
-               // Variations", "Inverted Variations", "1965 Inverted Variations".
-               c.includes('variation') || c.includes('variations') ||
-               /\bteam\s+color\b/.test(c) ||
-               /\bmirror\s+image\b/.test(c) ||
-               /\bnegative\b/.test(c) ||
-               /\binverted\b/.test(c) ||
-               /\bsuperfractor\b/.test(c) ||
-               /\brefractor\b/.test(c);
-      };
-      const isBaseSet = (col: string) => {
-        const c = col.toLowerCase().trim();
-        return c === 'base set' || c === 'base';
-      };
-      const brandLower = (brandNorm || '').toLowerCase().trim();
+    // Shared tiebreak helper: when multiple candidate rows survive the lookup,
+    // sort them by player-name match → OCR-text vocabulary match → specialty
+    // deprioritisation → base-set / flagship preferences → shortest name. Used
+    // by both the original multi-row code path AND the autograph-parallel
+    // fallback below so any new disambiguation logic only has to live in one
+    // place.
+    const lastNameNormGlobal = (playerLastName || '').trim().toLowerCase();
+    const brandLower = (brandNorm || '').toLowerCase().trim();
+    const isSpecialtySubset = (col: string) => {
+      const c = col.toLowerCase();
+      return c.includes('autograph') || c.includes(' auto') || c.endsWith(' auto') ||
+             c.includes('relic') || c.includes('patch') ||
+             c.includes('memorabilia') || c.includes('signature') ||
+             // Parallel/variation rows that happen to share the base card # —
+             // these should never be the default pick without explicit OCR
+             // evidence (e.g. detected foil/colour, serial number, or matching
+             // collection text). Examples: "Team Color", "Golden Mirror Image
+             // Variations", "Black and White Image Variations", "Rookie Design
+             // Variations", "Inverted Variations", "1965 Inverted Variations".
+             c.includes('variation') || c.includes('variations') ||
+             /\bteam\s+color\b/.test(c) ||
+             /\bmirror\s+image\b/.test(c) ||
+             /\bnegative\b/.test(c) ||
+             /\binverted\b/.test(c) ||
+             /\bsuperfractor\b/.test(c) ||
+             /\brefractor\b/.test(c);
+    };
+    const isBaseSet = (col: string) => {
+      const c = col.toLowerCase().trim();
+      return c === 'base set' || c === 'base';
+    };
 
-      // OCR-text vocabulary match: when raw OCR text is available, check
-      // whether each candidate row's collection or set name appears
-      // verbatim in the OCR text. The DB itself is the vocabulary, so we
-      // never need to maintain a hand-curated list of subset names — any
-      // label printed on the card that matches a real DB collection wins.
-      // Normalize ordinal words to digits on BOTH sides so "Series 1" in OCR
-      // matches "Series One" in DB (and vice-versa). Without this, the
-      // tiebreak failed for Topps 2021 Judge #99 — the Series One back text
-      // says "Series 1" but the DB row's set is "Series One", so neither
-      // collection scored OCR points and the alphabetical fallback wrongly
-      // picked Opening Day.
-      // Collapse all whitespace (newlines, tabs, multiple spaces) into a single
-      // space so multi-word names like "Flagship Collection" still match when
-      // the OCR returns them on separate lines (raw backOCRText is newline-
-      // delimited per detected text block — a card showing
-      //   FLAGSHIP\nCOLLECTION
-      // would otherwise fail to match the DB row "Flagship Collection" via
-      // the literal-space regex below, and the alphabetical fallback would
-      // wrongly pick "Spotlight" for Topps 2024 Pete Alonso #29.
-      const ocrTextNorm = normalizeOrdinals((ocrText || '').toLowerCase()).replace(/\s+/g, ' ');
-      // NOTE: do NOT add "series" here. We match the full phrase
-      // ("Series One" / "Series 1" / "Series Two") against the OCR text via
-      // a word-boundary regex, so the danger of "series" alone matching
-      // unrelated cards doesn't apply. Adding it caused Series One to be
-      // rejected as "not meaningful" (only "one" left after stripping +
-      // length filter), so the OCR-vocab tiebreak scored 0 for both
-      // Series One and Opening Day on Topps 2021 Judge #99 → alphabetical
-      // fallback wrongly picked Opening Day.
-      const stripWords = new Set(['set', 'cards', 'card', 'the', 'and', 'of', 'a', 'an', 'edition', 'baseball', 'basketball', 'football', 'hockey']);
-      const isMeaningfulName = (name: string): boolean => {
-        const tokens = name.toLowerCase().split(/\s+/).filter(t => t.length > 0);
-        const meaningful = tokens.filter(t => !stripWords.has(t) && t.length >= 3);
-        // Need at least one meaningful token of length >= 4, OR multiple
-        // meaningful tokens — avoids matching trivial words like "Base".
-        return meaningful.some(t => t.length >= 4) || meaningful.length >= 2;
-      };
-      const ocrContainsName = (name: string): boolean => {
-        if (!ocrTextNorm || !name) return false;
-        const norm = normalizeOrdinals(name.toLowerCase().trim());
-        if (!norm || !isMeaningfulName(norm)) return false;
-        // Word-boundary match against OCR text.
-        const escaped = norm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        return new RegExp(`\\b${escaped}\\b`).test(ocrTextNorm);
-      };
-      const ocrMatchScore = (row: { collection: string; set: string | null }): number => {
-        const colMatch = ocrContainsName(row.collection) ? 1 : 0;
-        const setMatch = row.set ? (ocrContainsName(row.set) ? 1 : 0) : 0;
-        return colMatch + setMatch;
-      };
+    // OCR-text vocabulary match: when raw OCR text is available, check
+    // whether each candidate row's collection or set name appears
+    // verbatim in the OCR text. The DB itself is the vocabulary, so we
+    // never need to maintain a hand-curated list of subset names — any
+    // label printed on the card that matches a real DB collection wins.
+    // Normalize ordinal words to digits on BOTH sides so "Series 1" in OCR
+    // matches "Series One" in DB (and vice-versa). Without this, the
+    // tiebreak failed for Topps 2021 Judge #99 — the Series One back text
+    // says "Series 1" but the DB row's set is "Series One", so neither
+    // collection scored OCR points and the alphabetical fallback wrongly
+    // picked Opening Day.
+    // Collapse all whitespace (newlines, tabs, multiple spaces) into a single
+    // space so multi-word names like "Flagship Collection" still match when
+    // the OCR returns them on separate lines (raw backOCRText is newline-
+    // delimited per detected text block — a card showing
+    //   FLAGSHIP\nCOLLECTION
+    // would otherwise fail to match the DB row "Flagship Collection" via
+    // the literal-space regex below, and the alphabetical fallback would
+    // wrongly pick "Spotlight" for Topps 2024 Pete Alonso #29.
+    const ocrTextNorm = normalizeOrdinals((ocrText || '').toLowerCase()).replace(/\s+/g, ' ');
+    // NOTE: do NOT add "series" here. We match the full phrase
+    // ("Series One" / "Series 1" / "Series Two") against the OCR text via
+    // a word-boundary regex, so the danger of "series" alone matching
+    // unrelated cards doesn't apply. Adding it caused Series One to be
+    // rejected as "not meaningful" (only "one" left after stripping +
+    // length filter), so the OCR-vocab tiebreak scored 0 for both
+    // Series One and Opening Day on Topps 2021 Judge #99 → alphabetical
+    // fallback wrongly picked Opening Day.
+    const stripWords = new Set(['set', 'cards', 'card', 'the', 'and', 'of', 'a', 'an', 'edition', 'baseball', 'basketball', 'football', 'hockey']);
+    const isMeaningfulName = (name: string): boolean => {
+      const tokens = name.toLowerCase().split(/\s+/).filter(t => t.length > 0);
+      const meaningful = tokens.filter(t => !stripWords.has(t) && t.length >= 3);
+      // Need at least one meaningful token of length >= 4, OR multiple
+      // meaningful tokens — avoids matching trivial words like "Base".
+      return meaningful.some(t => t.length >= 4) || meaningful.length >= 2;
+    };
+    const ocrContainsName = (name: string): boolean => {
+      if (!ocrTextNorm || !name) return false;
+      const norm = normalizeOrdinals(name.toLowerCase().trim());
+      if (!norm || !isMeaningfulName(norm)) return false;
+      // Word-boundary match against OCR text.
+      const escaped = norm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      return new RegExp(`\\b${escaped}\\b`).test(ocrTextNorm);
+    };
+    const ocrMatchScore = (row: { collection: string; set: string | null }): number => {
+      const colMatch = ocrContainsName(row.collection) ? 1 : 0;
+      const setMatch = row.set ? (ocrContainsName(row.set) ? 1 : 0) : 0;
+      return colMatch + setMatch;
+    };
+
+    /**
+     * Sort candidate rows in place using the standard tiebreak ladder:
+     * player-name match → OCR-vocab score → insert/specialty deprioritisation
+     * → base-set / flagship-set preference → shortest collection name.
+     * Logs the OCR-vocab winners and the final top pick under the given label.
+     */
+    const sortCandidatesByPreference = (rows: typeof cardRows, label: string) => {
+      if (rows.length <= 1) return;
       // Pre-compute scores so we can log which row(s) won on OCR evidence.
       if (ocrTextNorm) {
-        const scored = cardRows.map(r => ({ row: r, score: ocrMatchScore(r) }));
+        const scored = rows.map(r => ({ row: r, score: ocrMatchScore(r) }));
         const maxScore = Math.max(...scored.map(s => s.score));
         if (maxScore > 0) {
           const winners = scored.filter(s => s.score === maxScore).map(s => `"${s.row.collection}"${s.row.set ? ` / "${s.row.set}"` : ''}`);
-          console.log(`[CardDB] OCR-text vocabulary match: top score=${maxScore}, ${winners.length} row(s) tied → ${winners.slice(0, 3).join(', ')}${winners.length > 3 ? ` (+${winners.length - 3} more)` : ''}`);
+          console.log(`[CardDB] OCR-text vocabulary match (${label}): top score=${maxScore}, ${winners.length} row(s) tied → ${winners.slice(0, 3).join(', ')}${winners.length > 3 ? ` (+${winners.length - 3} more)` : ''}`);
         }
       }
 
-      cardRows.sort((a, b) => {
+      rows.sort((a, b) => {
         // Primary: player name match (OCR is authoritative for who is on the card)
-        const aNameMatch = lastNameNorm && a.playerName.toLowerCase().includes(lastNameNorm) ? 1 : 0;
-        const bNameMatch = lastNameNorm && b.playerName.toLowerCase().includes(lastNameNorm) ? 1 : 0;
+        const aNameMatch = lastNameNormGlobal && a.playerName.toLowerCase().includes(lastNameNormGlobal) ? 1 : 0;
+        const bNameMatch = lastNameNormGlobal && b.playerName.toLowerCase().includes(lastNameNormGlobal) ? 1 : 0;
         if (aNameMatch !== bNameMatch) return bNameMatch - aNameMatch;
         // Secondary: OCR-text vocabulary match — rows whose collection/set
         // name appears in the printed card text are strongly preferred.
@@ -537,9 +546,14 @@ export async function lookupCard(input: CardLookupInput): Promise<CardLookupResu
         // Final tiebreak: prefer shorter (more general) collection names for non-specialty rows.
         return a.collection.length - b.collection.length;
       });
-      if (lastNameNorm) {
-        console.log(`[CardDB] Multiple matches (${cardRows.length}) — sorted by player name "${lastNameNorm}": top pick "${cardRows[0].playerName}" (${cardRows[0].set || cardRows[0].collection})`);
-      }
+      console.log(`[CardDB] Tiebreak (${label}) — ${rows.length} candidate(s), top pick "${rows[0].playerName}" (${rows[0].set || rows[0].collection})`);
+    };
+
+    // When still multiple hits, use the OCR player name to pick the best match.
+    // The same card number often maps to different players across sets (e.g.
+    // Bowman 2022 #91 = Scherzer in "Bowman Baseball", Turner in "Bowman Chrome Sapphire").
+    if (cardRows.length > 1) {
+      sortCandidatesByPreference(cardRows, 'card-number match');
     }
 
     // ── Step 1b: Prefix-match fallback ──────────────────────────────────
@@ -605,6 +619,13 @@ export async function lookupCard(input: CardLookupInput): Promise<CardLookupResu
         if (playerRows.length > 0) {
           console.log(`[CardDB] Autograph-parallel fallback: card number "${cardNumNorm}" not found; falling back to player "${playerLastName}" lookup → ${playerRows.length} candidate(s)`);
           cardRows = playerRows;
+          // Run the same OCR-vocab + base-set tiebreak we use for the
+          // multi-row card-number path. Without this, the player fallback
+          // returns rows in Postgres order and cardRows[0] picks an
+          // arbitrary set (e.g. Rookies & Stars #1) instead of the one
+          // whose collection/set name actually appears in the OCR text
+          // (e.g. Revolution from "PANINI-REVOLUTION FOOTBALL").
+          sortCandidatesByPreference(cardRows, 'autograph-parallel fallback');
         }
       }
     }
