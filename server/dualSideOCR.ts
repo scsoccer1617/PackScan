@@ -199,7 +199,7 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
         // Use dynamic analyzer that can handle all card types
         console.log(`Front text detection: ${frontOCRText.substring(0, 200)}`);
         console.log('Using dynamic analyzer for front image');
-        frontResult = await Promise.race([analyzeSportsCardImage(frontBase64), createTimeout()]);
+        frontResult = await Promise.race([analyzeSportsCardImage(frontBase64, 'front'), createTimeout()]);
         console.log('Front image analysis returned:', frontResult);
         console.log('Front image analysis complete');
       } catch (error) {
@@ -219,7 +219,7 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
         // Use dynamic analyzer that can handle all card types
         console.log(`Back text detection: ${backOCRText.substring(0, 200)}`);
         console.log('Using dynamic analyzer for back image');
-        backResult = await Promise.race([analyzeSportsCardImage(backBase64), createTimeout()]);
+        backResult = await Promise.race([analyzeSportsCardImage(backBase64, 'back'), createTimeout()]);
         console.log('Back image analysis returned:', backResult);
         console.log('Back image analysis complete');
       } catch (error) {

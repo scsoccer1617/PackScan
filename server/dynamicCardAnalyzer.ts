@@ -35,9 +35,12 @@ export async function getTextFromImage(base64Image: string): Promise<OCRResult> 
  * @param base64Image Base64 encoded image data
  * @returns Object with extracted card information
  */
-export async function analyzeSportsCardImage(base64Image: string): Promise<Partial<CardFormValues>> {
+export async function analyzeSportsCardImage(
+  base64Image: string,
+  side: 'front' | 'back' | 'unknown' = 'unknown'
+): Promise<Partial<CardFormValues>> {
   try {
-    console.log('=== STARTING DYNAMIC CARD ANALYSIS ===');
+    console.log(`=== STARTING DYNAMIC CARD ANALYSIS (side=${side}) ===`);
     // Extract the text from the image
     const { fullText, textAnnotations } = await getTextFromImage(base64Image);
     
@@ -78,7 +81,10 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     // CARD NUMBER DETECTION - Extract card number using regex patterns
     // Pass textAnnotations so the detector can prefer top-of-card matches and
     // reject middle/bottom matches like graphic insert text (e.g. "CALL-UP").
-    extractCardNumber(cleanText, cardDetails, joinedText, textAnnotations);
+    // The `side` hint lets the detector log which face the chosen candidate
+    // came from and (eventually) lets the dual-side combiner rank back over
+    // front candidates without needing to re-derive the source.
+    extractCardNumber(cleanText, cardDetails, joinedText, textAnnotations, side);
     
     // COLLECTION, BRAND & YEAR DETECTION - Extract using pattern recognition
     extractCardMetadata(cleanText, cardDetails, joinedText);
@@ -613,29 +619,94 @@ function buildCardNumberPositionMap(textAnnotations?: TextAnnotation[]): CardNum
 
 /**
  * Look up the normalized Y position (0 = top, 1 = bottom) of a candidate
- * card-number string. Returns the topmost Y of any token that matches the
- * candidate (full-string or hyphen/space/# split parts). Returns null if no
- * matching token can be located in the position map.
+ * card-number string by anchoring it to a SPATIALLY CONTIGUOUS group of
+ * source tokens. This avoids artificially top-biased Y when a hyphenated
+ * candidate's parts each appear in unrelated places on the card (e.g. the
+ * digits "119" appearing both at the top as the card number AND in a stats
+ * row at the bottom — we don't want the bottom occurrence to "borrow" the
+ * top occurrence's Y just because the parts share text).
+ *
+ * Strategy:
+ *   1) If the entire candidate matches a single token verbatim, use that
+ *      token's minY (multiple verbatim hits → return them all and pick
+ *      the contiguous group by minY span).
+ *   2) Otherwise split the candidate by [-\s#.]+ and find the combination
+ *      of tokens (one per part) whose bounding boxes form the tightest
+ *      cluster (min span across X+Y). Reject if no part can be matched
+ *      or if the tightest cluster spans more than ~15% of the image
+ *      height (i.e. parts aren't actually next to each other on the card).
+ *   3) Fallback: any token whose text contains the full upper match.
+ *
+ * Returns the topmost (min) Y of the chosen contiguous group divided by
+ * imageHeight, or null if no acceptable anchoring exists.
  */
 function getCardNumNormalizedY(matched: string, posMap: CardNumPosMap): number | null {
   const upper = matched.toUpperCase();
-  // 1) Full-string token match
-  let hits = posMap.tokens.filter(t => t.text === upper);
-  // 2) Hyphen/space/# split — every part must match some token (in any order)
-  if (hits.length === 0) {
-    const parts = upper.split(/[-\s#.]+/).filter(p => p.length > 0);
-    if (parts.length === 0) return null;
-    const partHits = parts.map(p => posMap.tokens.filter(t => t.text === p));
-    if (partHits.some(arr => arr.length === 0)) {
-      // 3) Last-resort: any token that contains the full match (handles tokens that include extra punctuation)
-      hits = posMap.tokens.filter(t => t.text.includes(upper));
-      if (hits.length === 0) return null;
-    } else {
-      hits = partHits.flat();
-    }
+
+  // 1) Full-string verbatim match — use topmost occurrence
+  const fullHits = posMap.tokens.filter(t => t.text === upper);
+  if (fullHits.length > 0) {
+    return Math.min(...fullHits.map(t => t.minY)) / posMap.imageHeight;
   }
-  const minY = Math.min(...hits.map(t => t.minY));
-  return minY / posMap.imageHeight;
+
+  // 2) Multi-part contiguous anchoring
+  const parts = upper.split(/[-\s#.]+/).filter(p => p.length > 0);
+  if (parts.length === 0) return null;
+
+  const partHits = parts.map(p => posMap.tokens.filter(t => t.text === p));
+  if (parts.length > 1 && partHits.every(arr => arr.length > 0)) {
+    // Find the (one-per-part) combination with the smallest total Y span.
+    // For 2-part candidates this is exhaustive; for 3+ we use a greedy
+    // anchor-on-first-part approach to keep cost bounded.
+    const MAX_CLUSTER_SPAN_FRACTION = 0.15; // 15% of image height
+    const heightThreshold = posMap.imageHeight * MAX_CLUSTER_SPAN_FRACTION;
+    let bestSpan = Infinity;
+    let bestMinY: number | null = null;
+    for (const anchor of partHits[0]) {
+      // Greedy: for each remaining part, pick the token closest in Y to anchor
+      let groupMinY = anchor.minY;
+      let groupMaxY = anchor.maxY;
+      let usable = true;
+      for (let p = 1; p < partHits.length; p++) {
+        let nearest: { minY: number; maxY: number } | null = null;
+        let nearestDist = Infinity;
+        for (const cand of partHits[p]) {
+          const dist = Math.abs(cand.minY - anchor.minY);
+          if (dist < nearestDist) {
+            nearestDist = dist;
+            nearest = cand;
+          }
+        }
+        if (!nearest) { usable = false; break; }
+        groupMinY = Math.min(groupMinY, nearest.minY);
+        groupMaxY = Math.max(groupMaxY, nearest.maxY);
+      }
+      if (!usable) continue;
+      const span = groupMaxY - groupMinY;
+      if (span <= heightThreshold && span < bestSpan) {
+        bestSpan = span;
+        bestMinY = groupMinY;
+      }
+    }
+    if (bestMinY !== null) {
+      return bestMinY / posMap.imageHeight;
+    }
+    // No contiguous combination found → don't trust isolated part matches
+    return null;
+  }
+
+  // Single-part fallback (e.g. "#119" → ["119"])
+  if (parts.length === 1 && partHits[0].length > 0) {
+    return Math.min(...partHits[0].map(t => t.minY)) / posMap.imageHeight;
+  }
+
+  // 3) Last-resort substring match
+  const containsHits = posMap.tokens.filter(t => t.text.includes(upper));
+  if (containsHits.length > 0) {
+    return Math.min(...containsHits.map(t => t.minY)) / posMap.imageHeight;
+  }
+
+  return null;
 }
 
 /**
@@ -652,32 +723,34 @@ function extractCardNumber(
   text: string,
   cardDetails: Partial<CardFormValues>,
   originalText?: string,
-  textAnnotations?: TextAnnotation[]
+  textAnnotations?: TextAnnotation[],
+  side: 'front' | 'back' | 'unknown' = 'unknown'
 ): void {
   const posMap = buildCardNumberPositionMap(textAnnotations);
+  const sideTag = `side=${side}`;
 
   const runPass = (strictMode: boolean) => {
     const acceptCandidate = (matched: string, source: string): boolean => {
       if (!posMap) {
-        console.log(`[CardNum] Accepting "${matched}" via ${source} (no positional data)`);
+        console.log(`[CardNum] Accepting "${matched}" via ${source} (${sideTag}, no positional data)`);
         return true;
       }
       const ny = getCardNumNormalizedY(matched, posMap);
       const region = ny == null ? 'UNKNOWN' : ny < 0.40 ? 'TOP' : ny < 0.65 ? 'MIDDLE' : 'BOTTOM';
       const nyStr = ny == null ? 'n/a' : ny.toFixed(2);
       if (!strictMode) {
-        console.log(`[CardNum] Accepting "${matched}" via ${source} (relaxed pass, normY=${nyStr}, ${region})`);
+        console.log(`[CardNum] Accepting "${matched}" via ${source} (${sideTag}, relaxed pass, normY=${nyStr}, ${region})`);
         return true;
       }
       if (ny == null) {
-        console.log(`[CardNum-pos] Skipping "${matched}" via ${source} — no token position (strict pass)`);
+        console.log(`[CardNum-pos] Skipping "${matched}" via ${source} (${sideTag}) — no contiguous token position (strict pass)`);
         return false;
       }
       if (ny < 0.40) {
-        console.log(`[CardNum-pos] Accepting "${matched}" via ${source} at normY=${nyStr} (${region})`);
+        console.log(`[CardNum-pos] Accepting "${matched}" via ${source} (${sideTag}) at normY=${nyStr} (${region})`);
         return true;
       }
-      console.log(`[CardNum-pos] Rejecting "${matched}" via ${source} at normY=${nyStr} (${region}) — not in top 40%`);
+      console.log(`[CardNum-pos] Rejecting "${matched}" via ${source} (${sideTag}) at normY=${nyStr} (${region}) — not in top 40%`);
       return false;
     };
 
@@ -685,10 +758,10 @@ function extractCardNumber(
   };
 
   if (posMap) {
-    console.log(`[CardNum-pos] Position-aware strict pass: imageHeight=${posMap.imageHeight}, tokens=${posMap.tokens.length}`);
+    console.log(`[CardNum-pos] Position-aware strict pass (${sideTag}): imageHeight=${posMap.imageHeight}, tokens=${posMap.tokens.length}`);
     runPass(true);
     if (cardDetails.cardNumber) return;
-    console.log(`[CardNum-pos] No top-region card number found — falling back to text-only relaxed pass`);
+    console.log(`[CardNum-pos] No top-region card number found (${sideTag}) — falling back to text-only relaxed pass`);
   }
   runPass(false);
 }
