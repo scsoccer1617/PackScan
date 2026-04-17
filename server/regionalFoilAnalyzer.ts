@@ -156,20 +156,52 @@ function dominantHue(stats: RegionStats): { hue: HueBucket; coverage: number; av
 }
 
 /** Compute centerRainbow score: 0..1 based on how many distinct vivid hues
- *  exceed a small coverage floor. ≥3 hues each at ≥3% center coverage gives
- *  a strong signal; <2 hues gives 0. */
+ *  exceed a small coverage floor AND how far apart they sit on the colour
+ *  wheel. A real holographic/foil surface scatters light across the wheel
+ *  (e.g. red+green+blue, or cyan+magenta+yellow). A photograph of a player
+ *  in an orange jersey on a red wall produces 3 hues — but they're all
+ *  adjacent (red+orange+yellow), which is NOT a rainbow.
+ *
+ *  We measure spread as the max circular distance between any two
+ *  qualifying hue buckets (8 buckets around the wheel, so max distance=4).
+ *  Adjacent-only clusters (spread ≤ 2) are downgraded to a base-card
+ *  signal regardless of hue count. */
 function rainbowScore(centerStats: RegionStats): { score: number; hueCount: number; perHue: Partial<Record<HueBucket, number>> } {
   if (centerStats.totalCounted === 0) return { score: 0, hueCount: 0, perHue: {} };
   const HUE_FLOOR = 0.03; // 3% of analyzed center pixels
   const perHue: Partial<Record<HueBucket, number>> = {};
   let hits = 0;
+  // Bucket order matches the HueBucket enum and represents adjacency around
+  // the colour wheel. Used below to compute circular hue spread.
+  const HUE_ORDER: HueBucket[] = ['red', 'orange', 'yellow', 'green', 'aqua', 'blue', 'purple', 'pink'];
+  const hitIndices: number[] = [];
   for (const hue of Object.keys(centerStats.hueCounts) as HueBucket[]) {
     const cov = centerStats.hueCounts[hue] / centerStats.totalCounted;
     if (cov >= HUE_FLOOR) {
       perHue[hue] = cov;
       hits++;
+      hitIndices.push(HUE_ORDER.indexOf(hue));
     }
   }
+
+  // Compute max circular distance between any two qualifying hue indices.
+  // Wheel size = 8, so max possible circular distance = 4.
+  let maxSpread = 0;
+  for (let i = 0; i < hitIndices.length; i++) {
+    for (let j = i + 1; j < hitIndices.length; j++) {
+      const a = hitIndices[i], b = hitIndices[j];
+      const linear = Math.abs(a - b);
+      const circular = Math.min(linear, HUE_ORDER.length - linear);
+      if (circular > maxSpread) maxSpread = circular;
+    }
+  }
+
+  // Adjacent-only clusters (a single warm or cool palette) are not foil
+  // evidence, no matter how many adjacent buckets they fill.
+  if (hits >= 2 && maxSpread <= 2) {
+    return { score: 0, hueCount: hits, perHue };
+  }
+
   // Map hits → score: 0 hues=0, 1=0, 2=0.35, 3=0.7, 4+=1.0
   const score = hits <= 1 ? 0 : hits === 2 ? 0.35 : hits === 3 ? 0.7 : 1.0;
   return { score, hueCount: hits, perHue };
