@@ -34,7 +34,22 @@ export function detectSerialNumber(fullText: string, textAnnotations: any[]): Se
     console.log(`Serial number found via pattern detection: ${patternBasedResult.serialNumber}`);
     return patternBasedResult;
   }
-  
+
+  // Third try: Fuzzy fallback for hand-stamped / handwritten serials where OCR
+  // mangled the numerator (e.g. "041/150" read as "DA1/150", "010/199" as
+  // "OIO/199"). Accept when the denominator is a clean 2–4 digit number that
+  // looks like a print-run limit AND the numerator is a short token with at
+  // least one digit (so we know we're looking at a serial, not arbitrary
+  // text). The numerator can't be reconstructed reliably, so we report the
+  // limit-only form (e.g. "/150") and let the user edit if they care about
+  // the exact position. The card still gets correctly flagged as numbered
+  // and the right /150 parallel can be picked.
+  const fuzzyResult = detectSerialNumberFuzzy(fullText);
+  if (fuzzyResult.isNumbered) {
+    console.log(`Serial number found via fuzzy fallback: ${fuzzyResult.serialNumber} (raw OCR token preserved as numerator was unreadable)`);
+    return fuzzyResult;
+  }
+
   console.log('No serial number detected');
   return {
     serialNumber: '',
@@ -308,4 +323,73 @@ function isValidSerialNumber(serialNumber: string, requirePosition: boolean = fa
     total >= minDenominator &&
     total <= 10000
   );
+}
+
+/**
+ * Fuzzy fallback: catch handwritten / hand-stamped serials whose numerator
+ * was OCR'd as letters (e.g. "041/150" → "DA1/150", "010/199" → "OIO/199").
+ * The numerator is unreliable so we report only the limit ("/150"), which is
+ * enough for the parallel picker to find the right /150 variation.
+ *
+ * Heuristics (kept conservative to avoid false positives):
+ *   - Token shape: 1–4 chars (letters and/or digits), then "/", then 2–4 digits
+ *   - Denominator must look like a print run (10–9999) and not be a date
+ *   - Numerator must contain at least one letter that's a known OCR
+ *     confusion for a digit (O, D, Q, I, L, S, B, Z, G, A) — pure-letter
+ *     "AB/12" is rejected; "DA1/150" is accepted because D and A are common
+ *     misreads of 0
+ *   - Skip lines that look like bio/stat text
+ */
+function detectSerialNumberFuzzy(fullText: string): SerialNumberResult {
+  try {
+    // Letters that the Vision API regularly returns instead of digits when
+    // reading low-contrast hand-stamped serials. Anything in this set counts
+    // as "could be a digit".
+    const digitLikeLetters = /[ODQIULSBZGA]/i;
+
+    const fuzzyPattern = /\b([A-Z0-9]{1,4})\s*\/\s*(\d{2,4})\b/g;
+
+    const lines = fullText.split('\n');
+    for (const line of lines) {
+      // Skip obvious bio/stat lines (same filter the strict pattern uses).
+      if (/TRADED|ACQUIRED|CONTRACT|BORN|STATS|RECORD|CAREER|HIGHLIGHTS|PERFORMANCE|DRAFTED/i.test(line)) {
+        continue;
+      }
+
+      fuzzyPattern.lastIndex = 0;
+      const matches = Array.from(line.matchAll(fuzzyPattern));
+
+      for (const match of matches) {
+        const numerator = match[1];
+        const denominator = match[2];
+
+        // If the numerator is already pure digits, the strict pattern would
+        // have caught it — skip here to avoid duplicating that path.
+        if (/^\d+$/.test(numerator)) continue;
+
+        // Require at least one digit-like letter in the numerator, so we
+        // don't accept random short tokens like "OF/100" or "AB/50".
+        if (!digitLikeLetters.test(numerator)) continue;
+
+        const denomNum = parseInt(denominator, 10);
+        if (isNaN(denomNum) || denomNum < 10 || denomNum > 9999) continue;
+
+        // Reject if the surrounding context is clearly bio/date-like for
+        // small denominators.
+        const limitOnly = `/${denomNum}`;
+        if (denomNum < 50 && isSerialNumberInBioContext(`1/${denomNum}`, fullText)) continue;
+
+        return {
+          serialNumber: limitOnly,
+          isNumbered: true,
+          detectionMethod: 'fuzzy-handstamped',
+        };
+      }
+    }
+
+    return { serialNumber: '', isNumbered: false, detectionMethod: 'fuzzy' };
+  } catch (error) {
+    console.error('Error in fuzzy serial number detection:', error);
+    return { serialNumber: '', isNumbered: false, detectionMethod: 'fuzzy-error' };
+  }
 }
