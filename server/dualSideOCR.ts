@@ -421,32 +421,35 @@ async function combineCardResults(
     }
   });
 
-  // Year combination — back is normally authoritative, BUT if the back's year
-  // came from a Leaf-imprint copyright line ("© 1990 LEAF, INC." on the back of
-  // a 1991 Donruss card), prefer the front's year if the front detected one.
-  // The downstream DB lookup also has a ±1-year fallback that handles the case
-  // where front had no year — see lookupCard().
+  // Year combination — per the user-confirmed rule, the FRONT of the card
+  // determines the year. The back is unreliable for year because:
+  //   • The copyright line frequently pre-dates the card (Leaf/Donruss
+  //     publisher imprint, late-year prints, etc.).
+  //   • Stat tables on vintage card backs span multiple seasons, so a
+  //     "year+team" pattern like "1986 METS" can pick a stat-line year
+  //     instead of the production year.
+  // So: prefer the front year. Only fall back to the back year if the front
+  // has none — and in that case mark it back-derived so the DB lookup can
+  // search neighboring years more aggressively.
   const frontYearFromCopyright = !!(frontResult as any)._yearFromCopyright;
   const backYearFromCopyright  = !!(backResult  as any)._yearFromCopyright;
   const frontHasYear = hasValue(frontResult.year);
   const backHasYear  = hasValue(backResult.year);
 
-  if (backHasYear && !backYearFromCopyright) {
-    combined.year = backResult.year;
-  } else if (frontHasYear && !frontYearFromCopyright) {
+  if (frontHasYear) {
     combined.year = frontResult.year;
-    if (backHasYear && backYearFromCopyright && backResult.year !== frontResult.year) {
-      console.log(`[Year] Front year ${frontResult.year} preferred over back year ${backResult.year} (back's year is from a Leaf/Donruss publisher imprint, which can be off by ±1).`);
+    (combined as any)._yearFromCopyright = frontYearFromCopyright;
+    if (backHasYear && backResult.year !== frontResult.year) {
+      console.log(`[Year] Front year ${frontResult.year} preferred over back year ${backResult.year} (front is the authoritative source; back stats and copyright lines are unreliable for year).`);
     }
   } else if (backHasYear) {
     combined.year = backResult.year;
+    // Mark as low-confidence — front had no year, so this came entirely from
+    // the back (stats / copyright / publisher imprint). DB lookup should
+    // search neighboring years.
+    (combined as any)._yearFromBackOnly = true;
     (combined as any)._yearFromCopyright = backYearFromCopyright;
-    if (backYearFromCopyright) {
-      console.log(`[Year] Using back year ${backResult.year} (from Leaf/Donruss copyright imprint, low-confidence — DB lookup will allow ±1 fallback).`);
-    }
-  } else if (frontHasYear) {
-    combined.year = frontResult.year;
-    (combined as any)._yearFromCopyright = frontYearFromCopyright;
+    console.log(`[Year] Using back year ${backResult.year} as fallback (front had no year). Marked low-confidence — DB lookup will widen the year search window.`);
   }
 
   // Log when back has no card number
@@ -758,7 +761,19 @@ async function combineCardResults(
       // collection), corrupting the year, set, collection, AND player name.
       if (!found && backNum) {
         const yr = combined.year as number;
-        for (const delta of [1, -1]) {
+        // Default ±1 window. Widen to ±5 when the year came entirely from the
+        // back of the card (no front year), because back stat tables can pick
+        // a stat-line year (e.g. "1986 METS") that is years off from the
+        // production year. The name-match guard prevents widening from
+        // landing on the wrong player at the same brand/#.
+        const yearLowConfidence = !!(combined as any)._yearFromBackOnly || !!(combined as any)._yearFromCopyright;
+        const window = yearLowConfidence ? 5 : 1;
+        const deltas: number[] = [];
+        for (let d = 1; d <= window; d++) { deltas.push(d, -d); }
+        if (yearLowConfidence) {
+          console.log(`[CardDB] Year ${yr} is back-derived/low-confidence — widening fallback search to ±${window} years.`);
+        }
+        for (const delta of deltas) {
           console.log(`[CardDB] Retrying with year=${yr + delta} cardNumber="${backNum}"`);
           found = await tryLookup(combined.brand, yr + delta, backNum, combined.collection, { requireNameMatch: true });
           if (found) break;
