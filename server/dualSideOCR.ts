@@ -6,7 +6,7 @@ import { detectFoilVariant } from './foilVariantDetector';
 import { lookupCard } from './cardDatabaseService';
 import { batchExtractTextFromImages, clearOcrCache } from './googleVisionFetch';
 import { db } from '@db';
-import { cardVariations } from '@shared/schema';
+import { cardVariations, cardDatabase } from '@shared/schema';
 import { and, eq, sql } from 'drizzle-orm';
 
 /**
@@ -585,6 +585,44 @@ async function combineCardResults(
       }
     } catch (err) {
       console.error('Catalog-based player name validation failed:', err);
+    }
+  }
+
+  // Catalog-driven player check: when the front name doesn't appear in
+  // card_database for this brand+year but the back name does, the back is
+  // the real player and the front is OCR garbage (e.g. "Jent Im" picked up
+  // from the jersey-number area). Driven entirely by the player_name catalog
+  // — no hardcoded names. Front-side wins all ties; we only override when
+  // the catalog clearly confirms the back name and disconfirms the front.
+  if (!frontNameBogus && !backNameBogus &&
+      combined.brand && combined.year &&
+      backResult.playerFirstName && backResult.playerLastName &&
+      combined.playerFirstName && combined.playerLastName &&
+      (combined.playerFirstName.toLowerCase() !== backResult.playerFirstName.toLowerCase() ||
+       combined.playerLastName.toLowerCase() !== backResult.playerLastName.toLowerCase())) {
+    try {
+      const frontFull = `${combined.playerFirstName} ${combined.playerLastName}`.trim().toLowerCase();
+      const backFull = `${backResult.playerFirstName} ${backResult.playerLastName}`.trim().toLowerCase();
+      const brandLower = String(combined.brand).toLowerCase();
+      const yearVal = combined.year as number;
+      const [frontRows, backRows] = await Promise.all([
+        db.select({ id: cardDatabase.id }).from(cardDatabase).where(and(
+          sql`LOWER(${cardDatabase.brand}) = ${brandLower}`,
+          eq(cardDatabase.year, yearVal),
+          sql`LOWER(${cardDatabase.playerName}) = ${frontFull}`
+        )).limit(1),
+        db.select({ id: cardDatabase.id }).from(cardDatabase).where(and(
+          sql`LOWER(${cardDatabase.brand}) = ${brandLower}`,
+          eq(cardDatabase.year, yearVal),
+          sql`LOWER(${cardDatabase.playerName}) = ${backFull}`
+        )).limit(1),
+      ]);
+      if (backRows.length > 0 && frontRows.length === 0) {
+        console.log(`Catalog player check: back name "${backResult.playerFirstName} ${backResult.playerLastName}" exists in card_database for ${combined.brand} ${combined.year}; front name "${combined.playerFirstName} ${combined.playerLastName}" does not — preferring back`);
+        frontNameBogus = true;
+      }
+    } catch (err) {
+      console.error('Catalog-based player name lookup failed:', err);
     }
   }
 
