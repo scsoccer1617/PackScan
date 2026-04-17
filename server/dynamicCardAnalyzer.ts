@@ -76,7 +76,9 @@ export async function analyzeSportsCardImage(base64Image: string): Promise<Parti
     extractPlayerName(cleanText, cardDetails, joinedText);
     
     // CARD NUMBER DETECTION - Extract card number using regex patterns
-    extractCardNumber(cleanText, cardDetails, joinedText);
+    // Pass textAnnotations so the detector can prefer top-of-card matches and
+    // reject middle/bottom matches like graphic insert text (e.g. "CALL-UP").
+    extractCardNumber(cleanText, cardDetails, joinedText, textAnnotations);
     
     // COLLECTION, BRAND & YEAR DETECTION - Extract using pattern recognition
     extractCardMetadata(cleanText, cardDetails, joinedText);
@@ -574,12 +576,137 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
 }
 
 /**
- * Extract card number using regex patterns for common formats
+ * Position helper: build a map of token text → bounding-box Y positions and the
+ * overall image height, so card-number candidates can be ranked by where they
+ * physically appear on the card. Real card numbers live in the top portion of
+ * the back; mid/bottom matches (e.g. graphic insert text like "CALL-UP") are
+ * almost always false positives.
  */
-function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, originalText?: string): void {
+type CardNumPosMap = {
+  imageHeight: number;
+  tokens: Array<{ text: string; minY: number; maxY: number }>;
+};
+
+function buildCardNumberPositionMap(textAnnotations?: TextAnnotation[]): CardNumPosMap | null {
+  if (!textAnnotations || textAnnotations.length < 2) return null;
+  const tokens: CardNumPosMap['tokens'] = [];
+  let imageHeight = 0;
+  // Annotation[0] is the full-page text block; per-token annotations follow.
+  const a0 = textAnnotations[0];
+  const v0 = a0?.boundingPoly?.vertices;
+  if (v0 && v0.length > 0) {
+    imageHeight = Math.max(imageHeight, ...v0.map(p => p.y || 0));
+  }
+  for (let i = 1; i < textAnnotations.length; i++) {
+    const a = textAnnotations[i];
+    const v = a.boundingPoly?.vertices;
+    if (!v || v.length === 0) continue;
+    const ys = v.map(p => p.y || 0);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+    if (maxY > imageHeight) imageHeight = maxY;
+    tokens.push({ text: (a.description || '').toUpperCase(), minY, maxY });
+  }
+  if (imageHeight === 0 || tokens.length === 0) return null;
+  return { imageHeight, tokens };
+}
+
+/**
+ * Look up the normalized Y position (0 = top, 1 = bottom) of a candidate
+ * card-number string. Returns the topmost Y of any token that matches the
+ * candidate (full-string or hyphen/space/# split parts). Returns null if no
+ * matching token can be located in the position map.
+ */
+function getCardNumNormalizedY(matched: string, posMap: CardNumPosMap): number | null {
+  const upper = matched.toUpperCase();
+  // 1) Full-string token match
+  let hits = posMap.tokens.filter(t => t.text === upper);
+  // 2) Hyphen/space/# split — every part must match some token (in any order)
+  if (hits.length === 0) {
+    const parts = upper.split(/[-\s#.]+/).filter(p => p.length > 0);
+    if (parts.length === 0) return null;
+    const partHits = parts.map(p => posMap.tokens.filter(t => t.text === p));
+    if (partHits.some(arr => arr.length === 0)) {
+      // 3) Last-resort: any token that contains the full match (handles tokens that include extra punctuation)
+      hits = posMap.tokens.filter(t => t.text.includes(upper));
+      if (hits.length === 0) return null;
+    } else {
+      hits = partHits.flat();
+    }
+  }
+  const minY = Math.min(...hits.map(t => t.minY));
+  return minY / posMap.imageHeight;
+}
+
+/**
+ * Extract card number using regex patterns for common formats.
+ *
+ * Position-aware behavior: when textAnnotations are available, the detector
+ * runs a STRICT pass that only accepts candidates whose source token sits in
+ * the top 40% of the image (where real card numbers are physically printed).
+ * If no top-region candidate is found, it falls back to a RELAXED pass that
+ * matches the original text-only behavior so callers without positional data
+ * (or images where no top match exists) keep working.
+ */
+function extractCardNumber(
+  text: string,
+  cardDetails: Partial<CardFormValues>,
+  originalText?: string,
+  textAnnotations?: TextAnnotation[]
+): void {
+  const posMap = buildCardNumberPositionMap(textAnnotations);
+
+  const runPass = (strictMode: boolean) => {
+    const acceptCandidate = (matched: string, source: string): boolean => {
+      if (!posMap) {
+        console.log(`[CardNum] Accepting "${matched}" via ${source} (no positional data)`);
+        return true;
+      }
+      const ny = getCardNumNormalizedY(matched, posMap);
+      const region = ny == null ? 'UNKNOWN' : ny < 0.40 ? 'TOP' : ny < 0.65 ? 'MIDDLE' : 'BOTTOM';
+      const nyStr = ny == null ? 'n/a' : ny.toFixed(2);
+      if (!strictMode) {
+        console.log(`[CardNum] Accepting "${matched}" via ${source} (relaxed pass, normY=${nyStr}, ${region})`);
+        return true;
+      }
+      if (ny == null) {
+        console.log(`[CardNum-pos] Skipping "${matched}" via ${source} — no token position (strict pass)`);
+        return false;
+      }
+      if (ny < 0.40) {
+        console.log(`[CardNum-pos] Accepting "${matched}" via ${source} at normY=${nyStr} (${region})`);
+        return true;
+      }
+      console.log(`[CardNum-pos] Rejecting "${matched}" via ${source} at normY=${nyStr} (${region}) — not in top 40%`);
+      return false;
+    };
+
+    extractCardNumberPass(text, cardDetails, originalText, acceptCandidate);
+  };
+
+  if (posMap) {
+    console.log(`[CardNum-pos] Position-aware strict pass: imageHeight=${posMap.imageHeight}, tokens=${posMap.tokens.length}`);
+    runPass(true);
+    if (cardDetails.cardNumber) return;
+    console.log(`[CardNum-pos] No top-region card number found — falling back to text-only relaxed pass`);
+  }
+  runPass(false);
+}
+
+/**
+ * Inner pass that runs the existing pattern chain. Each accept site is gated
+ * by the supplied acceptCandidate(matchedText, source) callback so the strict
+ * top-region filter can be applied uniformly across all patterns.
+ */
+function extractCardNumberPass(
+  text: string,
+  cardDetails: Partial<CardFormValues>,
+  originalText: string | undefined,
+  acceptCandidate: (matched: string, source: string) => boolean
+): void {
   try {
     // Look for known card number formats
-    
+
     // Filter out birthday/date formats first
     // Common date formats to avoid: MM-DD-YY, M-D-YY, MM-DD, M-D
     const isDOBFormat = (text: string): boolean => {
@@ -632,10 +759,13 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
     const allStarMatch = text.match(allStarCardPattern);
     
     if (allStarMatch && allStarMatch[0]) {
-      cardDetails.cardNumber = allStarMatch[0].toUpperCase();
-      cardDetails.collection = "1989 All-Star";
-      console.log(`Detected All-Star card number: ${cardDetails.cardNumber}`);
-      return;
+      const candidate = allStarMatch[0].toUpperCase();
+      if (acceptCandidate(candidate, 'all-star')) {
+        cardDetails.cardNumber = candidate;
+        cardDetails.collection = "1989 All-Star";
+        console.log(`Detected All-Star card number: ${cardDetails.cardNumber}`);
+        return;
+      }
     }
     
     // Format: 89B2-32, 89B-2 (year-digit prefix then letters then dash then digits)
@@ -648,6 +778,7 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
       const lineWithMatch = lines.find(line => line.toLowerCase().includes(fullMatch.toLowerCase()));
       if (lineWithMatch && isDOBFormat(lineWithMatch)) continue;
       if (lineWithMatch && /\b(DRAFTED|DRAFT|BORN|SIGNED|OVERALL|ROUND|PICK|AGENT|FREE)\b/i.test(lineWithMatch)) continue;
+      if (!acceptCandidate(fullMatch, 'year-prefixed')) continue;
       cardDetails.cardNumber = fullMatch;
       console.log(`Detected year-prefixed card number: ${cardDetails.cardNumber}`);
       return;
@@ -671,6 +802,7 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
         console.log(`Skipping pattern "${matchedText}" in biographical context`);
         continue;
       }
+      if (!acceptCandidate(matchedText, 'dash-number')) continue;
       cardDetails.cardNumber = matchedText;
       console.log(`Detected card number with dash: ${cardDetails.cardNumber}`);
       // 35th Anniversary cards have format like 89B-2
@@ -693,7 +825,7 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
       
       if (lineWithMatch && isDOBFormat(lineWithMatch)) {
         console.log(`Skipping date-like pattern "${matchedText}" that appears to be a birthdate/date`);
-      } else {
+      } else if (acceptCandidate(matchedText, 'number-letter')) {
         cardDetails.cardNumber = matchedText;
         console.log(`Detected number-letter card number: ${cardDetails.cardNumber}`);
         return;
@@ -720,6 +852,7 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
       // Require the line to be short (autograph card # lines are typically standalone or near player info)
       // or appear on a line that isn't a long bio paragraph
       if (lineWithMatch.length > 120) continue;
+      if (!acceptCandidate(fullMatch, 'autograph-letter-letter')) continue;
       cardDetails.cardNumber = fullMatch;
       console.log(`Detected autograph-format card number (letter-letter): ${fullMatch}`);
       return;
@@ -743,6 +876,7 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
         console.log(`Skipping plain number "${candidate}" — matched # is part of a CODE# legal token`);
         continue;
       }
+      if (!acceptCandidate(candidate, 'plain-number')) continue;
       if (candidate.length === 1) {
         cardDetails.cardNumber = candidate;
         break;
@@ -759,17 +893,21 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
     const firstLineEarly = lines[0]?.trim() ?? '';
     const earlyCodePrefixSkip = new Set(['CMP', 'CODE', 'WWW', 'INC', 'MLB', 'NFL', 'NBA', 'NHL']);
     if (/^\d+$/.test(firstLineEarly) && parseInt(firstLineEarly) > 0 && parseInt(firstLineEarly) < 10000) {
-      cardDetails.cardNumber = firstLineEarly;
-      console.log(`Detected standalone card number at very top of text (highest priority): ${firstLineEarly}`);
-      return;
+      if (acceptCandidate(firstLineEarly, 'first-line-digit')) {
+        cardDetails.cardNumber = firstLineEarly;
+        console.log(`Detected standalone card number at very top of text (highest priority): ${firstLineEarly}`);
+        return;
+      }
     }
     // Alphanumeric first-line check: e.g. "US56", "RC12", "BDP42", "B24-YC"
     // The optional (-[A-Z]{1,4}) suffix captures formats like "B24-YC" (Bowman prospect cards).
     const alphaNumFirstLine = firstLineEarly.match(/^([A-Z]{1,4})(\d{1,4})(-[A-Z]{1,4})?$/);
     if (alphaNumFirstLine && !earlyCodePrefixSkip.has(alphaNumFirstLine[1]) && parseInt(alphaNumFirstLine[2]) > 0 && parseInt(alphaNumFirstLine[2]) < 10000) {
-      cardDetails.cardNumber = firstLineEarly;
-      console.log(`Detected alphanumeric card number at very top of text (highest priority): ${firstLineEarly}`);
-      return;
+      if (acceptCandidate(firstLineEarly, 'first-line-alphanum')) {
+        cardDetails.cardNumber = firstLineEarly;
+        console.log(`Detected alphanumeric card number at very top of text (highest priority): ${firstLineEarly}`);
+        return;
+      }
     }
 
     // HIGH PRIORITY: Look for a number near the brand name - most card numbers are physically near the brand
@@ -802,9 +940,11 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
             }
             console.log(`Number ${number} after brand "${brandWithNumberMatch[1]}" is a year (${fullYear}), not a card number`);
           } else if (numVal > 0 && numVal < 1000) {
-            cardDetails.cardNumber = number;
-            console.log(`Detected card number ${number} immediately after brand "${brandWithNumberMatch[1]}" - highest confidence`);
-            return;
+            if (acceptCandidate(number, 'brand+number')) {
+              cardDetails.cardNumber = number;
+              console.log(`Detected card number ${number} immediately after brand "${brandWithNumberMatch[1]}" - highest confidence`);
+              return;
+            }
           }
         }
         
@@ -826,9 +966,11 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
               continue;
             }
             if (numVal > 0 && numVal < 1000) {
-              cardDetails.cardNumber = number;
-              console.log(`Detected card number ${number} in same line as brand - high confidence`);
-              return;
+              if (acceptCandidate(number, 'brand-line-number')) {
+                cardDetails.cardNumber = number;
+                console.log(`Detected card number ${number} in same line as brand - high confidence`);
+                return;
+              }
             }
           }
         }
@@ -850,9 +992,11 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
           // These have an alphanumeric prefix ending in digit + hyphen + letter suffix
           const nearbyAlphaDigitLetter = nearbyLine.match(/^([A-Z][A-Z0-9]*\d)-([A-Z]{1,4})$/);
           if (nearbyAlphaDigitLetter) {
-            cardDetails.cardNumber = nearbyAlphaDigitLetter[0];
-            console.log(`Detected alphanumeric+letter card number near brand: ${nearbyAlphaDigitLetter[0]}`);
-            return;
+            if (acceptCandidate(nearbyAlphaDigitLetter[0], 'nearby-alpha-digit-letter')) {
+              cardDetails.cardNumber = nearbyAlphaDigitLetter[0];
+              console.log(`Detected alphanumeric+letter card number near brand: ${nearbyAlphaDigitLetter[0]}`);
+              return;
+            }
           }
           // Check for hyphenated alphanumeric card numbers (BD-7, HRC-42)
           const nearbyHyphenMatch = nearbyLine.match(/\b([A-Z]{1,4})-(\d{1,4})\b/);
@@ -863,9 +1007,11 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
               console.log(`Skipping hyphenated match "${nearbyHyphenMatch[0]}" near brand — digit value ${nearbyHyphenDigits} looks like a year`);
               continue;
             }
-            cardDetails.cardNumber = nearbyHyphenMatch[0];
-            console.log(`Detected hyphenated card number ${nearbyHyphenMatch[0]} near brand line - high confidence`);
-            return;
+            if (acceptCandidate(nearbyHyphenMatch[0], 'nearby-hyphen')) {
+              cardDetails.cardNumber = nearbyHyphenMatch[0];
+              console.log(`Detected hyphenated card number ${nearbyHyphenMatch[0]} near brand line - high confidence`);
+              return;
+            }
           }
           // Check for non-hyphenated alphanumeric card numbers (T119, TC12, BDP5)
           const nearbyAlphaNumMatch = nearbyLine.match(/^([A-Z]{1,3})(\d{1,4})$/);
@@ -873,18 +1019,22 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
             const prefix = nearbyAlphaNumMatch[1];
             const digits = nearbyAlphaNumMatch[2];
             if (parseInt(digits) <= 999 && !/^(OF|IN|AT|TO|BY|OR|ON|IS|IT|AS|IF|UP|NO|SO|DO|AN|AM|BE|HE|WE|MY|US|THE|AND|FOR|ARE|BUT|NOT|YOU|ALL|HAS|HIS|HOW|ITS|MAY|OUR|OUT|WAY|WHO|DID|GET|HIM|LET|SAY|SHE|TOO|USE|MLB|NFL|NBA|NHL|MLS|USA|NL|AL|FT|LB|HR|AB|BB|SO|IP|ER|GS|SV|WL|GP|GF|RS|BA|HT|WT|ACQ|PPG|RPG|APG|FGP|FTP|TD|YDS|ATT|QBR|INT|SOG|PIM|SHG|GWG|PKS)$/i.test(prefix)) {
-              cardDetails.cardNumber = nearbyAlphaNumMatch[0];
-              console.log(`Detected alphanumeric card number ${nearbyAlphaNumMatch[0]} near brand line - high confidence`);
-              return;
+              if (acceptCandidate(nearbyAlphaNumMatch[0], 'nearby-alphanum')) {
+                cardDetails.cardNumber = nearbyAlphaNumMatch[0];
+                console.log(`Detected alphanumeric card number ${nearbyAlphaNumMatch[0]} near brand line - high confidence`);
+                return;
+              }
             }
           }
           const nearbyNumberMatch = nearbyLine.match(/\b(\d{1,3})\b/);
           if (nearbyNumberMatch && nearbyNumberMatch[1]) {
             const number = nearbyNumberMatch[1];
             if (parseInt(number) > 0 && parseInt(number) < 1000 && !isDOBFormat(nearbyLine)) {
-              cardDetails.cardNumber = number;
-              console.log(`Detected card number ${number} near brand line - high confidence`);
-              return;
+              if (acceptCandidate(number, 'nearby-number')) {
+                cardDetails.cardNumber = number;
+                console.log(`Detected card number ${number} near brand line - high confidence`);
+                return;
+              }
             }
           }
         }
@@ -903,6 +1053,7 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
       if (/\b(DRAFTED|DRAFT|BORN|SIGNED|OVERALL|ROUND|PICK|AGENT|FREE|RIGHTS|RESERVED|LICENSED|TRADEMARK|COMPANY|VISIT)\b/i.test(lineWithMatch)) continue;
       if (/CODE#/i.test(lineWithMatch)) continue;
       if (lineWithMatch.length > 120) continue;
+      if (!acceptCandidate(fullMatch, 'alpha-digit-letter')) continue;
       cardDetails.cardNumber = fullMatch;
       console.log(`Detected alphanumeric+letter card number (e.g. B24-YC): ${fullMatch}`);
       return;
@@ -920,6 +1071,7 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
       if (nonCardCodePrefixes.has(prefix)) continue;
       if (text.includes('CODE ' + fullMatch)) continue;
       if (parseInt(digits) > 999) continue;
+      if (!acceptCandidate(fullMatch, 'hyphen-alphanum-early')) continue;
       cardDetails.cardNumber = fullMatch;
       console.log(`Detected hyphenated card number: ${cardDetails.cardNumber}`);
       return;
@@ -947,6 +1099,7 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
       // Skip if match appears in a DRAFTED/DRAFT/BORN/SIGNED biographical line
       if (lineWithAlphaNum && /\b(DRAFTED|DRAFT|BORN|SIGNED|OVERALL|ROUND|PICK|AGENT|FREE)\b/i.test(lineWithAlphaNum)) continue;
       
+      if (!acceptCandidate(fullMatch, 'alphanum-early')) continue;
       cardDetails.cardNumber = fullMatch;
       console.log(`Detected Alphanumeric card number (early check): ${cardDetails.cardNumber}`);
       return;
@@ -956,9 +1109,11 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
     // This is also a reliable way to detect card numbers at the top of a card
     const firstLine = lines[0].trim();
     if (/^\d+$/.test(firstLine) && parseInt(firstLine) > 0 && parseInt(firstLine) < 10000) {
-      cardDetails.cardNumber = firstLine;
-      console.log(`Detected standalone card number at top of card: ${cardDetails.cardNumber}`);
-      return;
+      if (acceptCandidate(firstLine, 'first-line-number')) {
+        cardDetails.cardNumber = firstLine;
+        console.log(`Detected standalone card number at top of card: ${cardDetails.cardNumber}`);
+        return;
+      }
     }
     
     // Second attempt: Try to extract a number from the beginning of the first line
@@ -967,9 +1122,11 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
       const number = firstLineMatch[1];
       // Make sure it's a reasonable card number (1-9999)
       if (parseInt(number) > 0 && parseInt(number) < 10000) {
-        cardDetails.cardNumber = number;
-        console.log(`Detected card number at very beginning of OCR text: ${cardDetails.cardNumber}`);
-        return;
+        if (acceptCandidate(number, 'first-line-leading-digit')) {
+          cardDetails.cardNumber = number;
+          console.log(`Detected card number at very beginning of OCR text: ${cardDetails.cardNumber}`);
+          return;
+        }
       }
     }
     
@@ -978,9 +1135,11 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
       const trimmedLine = lines[i].trim();
       // If the line is just a number and it's a reasonable card number (1-999)
       if (/^\d{1,3}$/.test(trimmedLine) && parseInt(trimmedLine) > 0 && parseInt(trimmedLine) < 1000) {
-        cardDetails.cardNumber = trimmedLine;
-        console.log(`Detected top card number: ${cardDetails.cardNumber}`);
-        return;
+        if (acceptCandidate(trimmedLine, 'top-3-lines')) {
+          cardDetails.cardNumber = trimmedLine;
+          console.log(`Detected top card number: ${cardDetails.cardNumber}`);
+          return;
+        }
       }
     }
     
@@ -994,9 +1153,11 @@ function extractCardNumber(text: string, cardDetails: Partial<CardFormValues>, o
       // Make sure it's a reasonable card number (not too large)
       const number = standaloneNumberMatch[1];
       if (parseInt(number) < 1000) {
-        cardDetails.cardNumber = number;
-        console.log(`Detected standalone card number: ${cardDetails.cardNumber}`);
-        return;
+        if (acceptCandidate(number, 'standalone-line-number')) {
+          cardDetails.cardNumber = number;
+          console.log(`Detected standalone card number: ${cardDetails.cardNumber}`);
+          return;
+        }
       }
     }
     
