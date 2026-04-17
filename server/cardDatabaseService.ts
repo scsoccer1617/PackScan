@@ -351,24 +351,29 @@ export async function lookupCard(input: CardLookupInput): Promise<CardLookupResu
       }
     }
 
+    // Normalize ordinal words to digits so "Series Two" == "Series 2" etc.
+    // Pulled up here so both the collection-scoring pass below AND the OCR-text
+    // vocabulary tiebreak (further down) can use the same normalisation —
+    // otherwise a Topps Series 1 back ("@TOPPS Series 1") fails to match the
+    // DB row whose set is "Series One", and ties get broken alphabetically
+    // (Opening Day winning over Series One for Judge 2021 #99).
+    const normalizeOrdinals = (s: string) =>
+      s.replace(/\bone\b/gi, '1')
+       .replace(/\btwo\b/gi, '2')
+       .replace(/\bthree\b/gi, '3')
+       .replace(/\bfour\b/gi, '4')
+       .replace(/\bfive\b/gi, '5')
+       .replace(/\bsix\b/gi, '6')
+       .replace(/\bseven\b/gi, '7')
+       .replace(/\beight\b/gi, '8')
+       .replace(/\bnine\b/gi, '9');
+
     // If collection provided, score and filter by collection + set similarity.
     // The OCR text from the back of a card (e.g. "SERIES TWO", "SAPPHIRE") often
     // maps directly to the DB `set` column rather than `collection`. Scoring both
     // columns and taking the max ensures e.g. "SERIES TWO" correctly prefers
     // "Series Two" over "Topps Chrome Sapphire" rows.
     if (cardRows.length > 1 && collection) {
-      // Normalize ordinal words to digits so "Series Two" == "Series 2" etc.
-      const normalizeOrdinals = (s: string) =>
-        s.replace(/\bone\b/gi, '1')
-         .replace(/\btwo\b/gi, '2')
-         .replace(/\bthree\b/gi, '3')
-         .replace(/\bfour\b/gi, '4')
-         .replace(/\bfive\b/gi, '5')
-         .replace(/\bsix\b/gi, '6')
-         .replace(/\bseven\b/gi, '7')
-         .replace(/\beight\b/gi, '8')
-         .replace(/\bnine\b/gi, '9');
-
       const collectionNorm = normalizeOrdinals(collection.trim().toLowerCase());
 
       const matchScore = (dbStr: string): number => {
@@ -434,7 +439,13 @@ export async function lookupCard(input: CardLookupInput): Promise<CardLookupResu
       // verbatim in the OCR text. The DB itself is the vocabulary, so we
       // never need to maintain a hand-curated list of subset names — any
       // label printed on the card that matches a real DB collection wins.
-      const ocrTextNorm = (ocrText || '').toLowerCase();
+      // Normalize ordinal words to digits on BOTH sides so "Series 1" in OCR
+      // matches "Series One" in DB (and vice-versa). Without this, the
+      // tiebreak failed for Topps 2021 Judge #99 — the Series One back text
+      // says "Series 1" but the DB row's set is "Series One", so neither
+      // collection scored OCR points and the alphabetical fallback wrongly
+      // picked Opening Day.
+      const ocrTextNorm = normalizeOrdinals((ocrText || '').toLowerCase());
       const stripWords = new Set(['set', 'cards', 'card', 'the', 'and', 'of', 'a', 'an', 'series', 'edition', 'baseball', 'basketball', 'football', 'hockey']);
       const isMeaningfulName = (name: string): boolean => {
         const tokens = name.toLowerCase().split(/\s+/).filter(t => t.length > 0);
@@ -445,7 +456,7 @@ export async function lookupCard(input: CardLookupInput): Promise<CardLookupResu
       };
       const ocrContainsName = (name: string): boolean => {
         if (!ocrTextNorm || !name) return false;
-        const norm = name.toLowerCase().trim();
+        const norm = normalizeOrdinals(name.toLowerCase().trim());
         if (!norm || !isMeaningfulName(norm)) return false;
         // Word-boundary match against OCR text.
         const escaped = norm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
