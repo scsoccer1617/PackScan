@@ -60,6 +60,23 @@ function filterBySerialStatus(options: ParallelOption[], isNumbered: boolean): P
   return options.filter(o => !o.serialNumber || o.serialNumber.trim() === "");
 }
 
+// Merge a "primary" list (keyword-matched parallels) with a broader "all" list
+// (everything else with the same serial-status), keeping primary entries first
+// and deduplicating. This is used when showing the picker so the user can find
+// the correct parallel even if the visual foil detector mis-classified the
+// color (e.g. detected "Aqua Foil" when the card is actually a Sandglitter).
+function mergePreferringPrimary(primary: ParallelOption[], all: ParallelOption[]): ParallelOption[] {
+  const seen = new Set<string>();
+  const merged: ParallelOption[] = [];
+  for (const o of [...primary, ...all]) {
+    if (!seen.has(o.variationOrParallel)) {
+      seen.add(o.variationOrParallel);
+      merged.push(o);
+    }
+  }
+  return merged;
+}
+
 // Extract the serial limit (denominator) from detected serial strings.
 // "487/499" → "499",  "/499" → "499",  "499" → "499"
 function extractSerialLimit(serial: string): string {
@@ -162,8 +179,10 @@ export default function PriceLookup() {
             return;
           }
           if (narrowed.length >= 2) {
-            // Still ambiguous after both filters — ask the user, but only show the narrowed set
-            setParallelOptions(narrowed);
+            // Still ambiguous after both filters — show the narrowed set first,
+            // followed by every other serial-status-matching parallel so the
+            // user can override if the visual foil keyword was wrong.
+            setParallelOptions(mergePreferringPrimary(narrowed, bySerial));
             setDetectedKeyword(extractKeyword(detected));
             setShowParallelPicker(true);
             return;
@@ -205,11 +224,33 @@ export default function PriceLookup() {
       }
 
       if (filtered.length >= 2) {
-        // Multiple parallels match the same color/keyword — ask the user to disambiguate
-        setParallelOptions(filtered);
+        // Multiple parallels match the same color/keyword — ask the user to
+        // disambiguate. Show keyword matches first, then every other parallel
+        // for the same serial-status so the user can correct the visual
+        // detector (e.g. detected "Aqua Foil" but card is actually a
+        // Sandglitter, which has no "aqua" in the name).
+        const allForStatus = filterBySerialStatus(allOptions, !!data.isNumbered);
+        setParallelOptions(mergePreferringPrimary(filtered, allForStatus));
         setDetectedKeyword(extractKeyword(detected));
         setShowParallelPicker(true);
         return;
+      }
+
+      // STEP 3 — Detected foil keyword had 0 or 1 DB hit but visual/eBay
+      // detection asserted "this is a parallel". When 0 keyword matches but
+      // the card is non-numbered with a detected parallel, give the user the
+      // full list of non-serialized parallels rather than silently using a
+      // wrong/unverifiable foil name. Sandglitter is exactly this case —
+      // visual detector said "Aqua Foil" (0 keyword overlap with Sandglitter)
+      // but the card is actually a non-numbered Sandglitter parallel.
+      if (filtered.length === 0 && detected) {
+        const allForStatus = filterBySerialStatus(allOptions, !!data.isNumbered);
+        if (allForStatus.length >= 2) {
+          setParallelOptions(allForStatus);
+          setDetectedKeyword(extractKeyword(detected));
+          setShowParallelPicker(true);
+          return;
+        }
       }
     }
 

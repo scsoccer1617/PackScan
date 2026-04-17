@@ -628,12 +628,31 @@ async function combineCardResults(
   // dbVariation is stashed here and applied AFTER visual/text foil detection as a fallback.
   let dbVariation: string | null = null;
 
-  const applyDbResult = (dbResult: any, label: string) => {
+  const applyDbResult = (dbResult: any, label: string): boolean => {
     console.log(`[CardDB] ${label} — ${dbResult.playerFirstName} ${dbResult.playerLastName}, team: ${dbResult.team}, collection: ${dbResult.collection}, cardNumber: ${dbResult.cardNumber}`);
     const ocrName = `${combined.playerFirstName || ''} ${combined.playerLastName || ''}`.trim();
     const dbName  = `${dbResult.playerFirstName || ''} ${dbResult.playerLastName || ''}`.trim();
     if (ocrName.toLowerCase() !== dbName.toLowerCase()) {
-      console.log(`[CardDB] OCR name "${ocrName}" differs from DB "${dbName}" — trusting DB (brand+year+cardNumber match is authoritative)`);
+      // Reject DB hit when OCR clearly read a *different* last name. The most common
+      // cause is a mis-read card number on the back — for example John Franco's 1990
+      // Leaf back was OCR'd with cardNumber=322 (the actual Franco is #356), and the
+      // DB legitimately has Rob Deer at Leaf 1990 #322. Trusting the DB in that
+      // situation overwrites correctly-read OCR fields with a totally different
+      // player. We allow partial overlap (substrings, e.g. OCR "Mike Trout Jr" vs
+      // DB "Mike Trout") so legitimate name-cleanup still works.
+      const ocrLast = (combined.playerLastName || '').trim().toLowerCase();
+      const dbLast  = (dbResult.playerLastName || '').trim().toLowerCase();
+      const lastNamesOverlap = !!ocrLast && !!dbLast && (
+        ocrLast === dbLast ||
+        ocrLast.includes(dbLast) ||
+        dbLast.includes(ocrLast)
+      );
+      const ocrHasNoName = !ocrLast;
+      if (!lastNamesOverlap && !ocrHasNoName) {
+        console.log(`[CardDB] DB row REJECTED — OCR last name "${combined.playerLastName}" disagrees with DB "${dbResult.playerLastName}". OCR card number is likely wrong; falling back to OCR-only data to avoid corrupting player identity.`);
+        return false;
+      }
+      console.log(`[CardDB] OCR name "${ocrName}" differs from DB "${dbName}" — trusting DB (last names overlap or OCR had no name)`);
     }
     if (dbResult.playerFirstName) combined.playerFirstName = dbResult.playerFirstName;
     if (dbResult.playerLastName)  combined.playerLastName  = dbResult.playerLastName;
@@ -684,8 +703,9 @@ async function combineCardResults(
           return false;
         }
       }
-      applyDbResult(result, `DB hit`);
-      return true;
+      // applyDbResult returns false if it rejects the row (e.g. last name disagrees
+      // with OCR). Propagate that so the caller can try fallback lookups.
+      return applyDbResult(result, `DB hit`);
     }
     return false;
   };
