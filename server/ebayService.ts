@@ -22,6 +22,35 @@ function normalizeSetForSearch(set: string, brand: string): string {
   return normalizeCollectionForSearch(s);
 }
 
+const NUMBER_WORD_TO_DIGIT: Record<string, string> = {
+  one: '1', two: '2', three: '3', four: '4', five: '5',
+  six: '6', seven: '7', eight: '8', nine: '9', ten: '10',
+};
+
+function normalizeProductLineText(s: string): string {
+  return (s || '')
+    .toLowerCase()
+    .split(/\s+/)
+    .map(w => NUMBER_WORD_TO_DIGIT[w] || w)
+    .join(' ');
+}
+
+function indicatorBelongsToOurCard(
+  indicator: string,
+  collection?: string,
+  set?: string
+): boolean {
+  const ind = normalizeProductLineText(indicator);
+  const coll = normalizeProductLineText(collection || '');
+  const st   = normalizeProductLineText(set || '');
+  if (!ind) return false;
+  const indWords = ind.split(/\s+/).filter(Boolean);
+  if (indWords.length === 0) return false;
+  const hasInCollection = !!coll && indWords.every(w => coll.split(/\s+/).includes(w));
+  const hasInSet        = !!st   && indWords.every(w => st.split(/\s+/).includes(w));
+  return hasInCollection || hasInSet;
+}
+
 function discoverVariantFromListings(titles: string[], detectedColor: string | null): string | null {
   if (!detectedColor) return null;
   
@@ -213,7 +242,8 @@ function prioritizeListingsByCardMatch(
   collection?: string,
   foilType?: string,
   isAutographed?: boolean,
-  serialNumber?: string
+  serialNumber?: string,
+  set?: string
 ): EbaySearchResult[] {
   return results.map(result => {
     const title = result.title.toLowerCase();
@@ -286,11 +316,12 @@ function prioritizeListingsByCardMatch(
         '1st edition', 'first edition', 'mega box', 'holiday',
         'bowman chrome', 'topps chrome', 'bowman draft', 'bowman sterling',
       ];
-      const collWords = collLower.split(/\s+/);
       for (const indicator of COLLECTION_INDICATORS) {
-        const indicatorWords = indicator.split(/\s+/);
-        const isPartOfOurCollection = indicatorWords.every(w => collWords.includes(w));
-        if (isPartOfOurCollection) continue;
+        // Skip indicators that describe OUR card's product line (collection OR set).
+        // E.g. card collection="Baseball Stars Autographs" set="Series Two" should NOT
+        // treat "series 2" in a listing title as a wrong-collection signal — that's
+        // exactly the product set this card lives in.
+        if (indicatorBelongsToOurCard(indicator, collection, set)) continue;
         const re = new RegExp(`\\b${indicator.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+')}\\b`, 'i');
         if (re.test(title)) {
           score -= 80;
@@ -713,7 +744,8 @@ export async function searchCardValues(
       collection,
       foilType,
       isAutographed,
-      serialNumber
+      serialNumber,
+      set
     );
 
     // ── Hard post-filter ─────────────────────────────────────────────────────
@@ -816,10 +848,11 @@ export async function searchCardValues(
           'national treasures', 'immaculate', 'clearly authentic',
           '1st edition', 'bowman chrome', 'topps chrome', 'bowman draft',
         ];
-        const collLowerWords = rawCollection.toLowerCase().split(/\s+/);
         for (const indicator of HARD_COLLECTION_INDICATORS) {
-          const indWords = indicator.split(/\s+/);
-          if (indWords.every(w => collLowerWords.includes(w))) continue;
+          // Skip indicators that describe OUR card's own product line (collection OR set).
+          // E.g. when collection="Baseball Stars Autographs" and set="Series Two", the
+          // indicator "series 2" is OUR card's set, not a foreign collection.
+          if (indicatorBelongsToOurCard(indicator, rawCollection, set)) continue;
           const re = new RegExp(`\\b${indicator.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+')}\\b`, 'i');
           if (re.test(t)) {
             console.log(`  ↳ Hard-filtered (wrong collection): searching "${rawCollection}" but title has "${indicator}" → "${r.title}"`);
