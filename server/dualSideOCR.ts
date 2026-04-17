@@ -698,11 +698,17 @@ async function combineCardResults(
 
       // Fallback: try ±1 year (OCR often gets copyright year wrong by one)
       // Only uses the back card number — front numbers are unreliable (jersey numbers etc.)
+      // requireNameMatch=true: a ±1-year hit on the same brand+cardNumber is
+      // a different release entirely if the player names disagree. Without
+      // this guard, scanning a Topps 2022 Opening Day Mascots Mr. Met (#M-14)
+      // — which isn't in the DB — would land on Topps 2023 Big League
+      // Mascots "Card 14" (also #M-14, but a totally different card and
+      // collection), corrupting the year, set, collection, AND player name.
       if (!found && backNum) {
         const yr = combined.year as number;
         for (const delta of [1, -1]) {
           console.log(`[CardDB] Retrying with year=${yr + delta} cardNumber="${backNum}"`);
-          found = await tryLookup(combined.brand, yr + delta, backNum, combined.collection);
+          found = await tryLookup(combined.brand, yr + delta, backNum, combined.collection, { requireNameMatch: true });
           if (found) break;
         }
       }
