@@ -47,6 +47,7 @@ Preferred communication style: Simple, everyday language.
 - Route: `/admin/card-database` (database icon in header)
 - API: `GET /api/card-database/stats`, `POST /api/card-database/import-cards`, `POST /api/card-database/import-variations`, `DELETE /api/card-database/clear`
 - Seeding script: `npx tsx db/seedCardDatabase.ts` (skips if tables already populated)
+- **Push Dev → Prod**: `POST /api/card-database/push-to-prod` + `GET /api/card-database/push-to-prod-status/:jobId` stream `card_database` and `card_variations` from this app's DB into the database pointed at by the `PROD_DATABASE_URL` secret using Postgres `COPY ... (FORMAT binary)`. Each table is replaced inside its own transaction (`TRUNCATE ... RESTART IDENTITY CASCADE` then `COPY FROM`), so a mid-copy failure leaves prod untouched. Refuses to run if `PROD_DATABASE_URL` equals `DATABASE_URL`. Triggered from a "Push to Production" button on the admin page; runs as a background job with per-table progress polling. Implementation lives in `server/pushToProd.ts`.
 
 ## External Dependencies
 

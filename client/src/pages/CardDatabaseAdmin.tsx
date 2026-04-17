@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
-import { Database, Upload, Trash2, RefreshCw, CheckCircle, AlertCircle, Lock, LogOut } from "lucide-react";
+import { Database, Upload, Trash2, RefreshCw, CheckCircle, AlertCircle, Lock, LogOut, CloudUpload } from "lucide-react";
 
 const SESSION_KEY = "admin_session_password";
 
@@ -28,6 +28,22 @@ interface ImportJobStatus {
   type: 'cards' | 'variations';
   progress: { processed: number; total: number };
   result?: { imported: number; replaced: number; errorCount: number; errors: string[] };
+  error?: string;
+}
+
+interface PushTableProgress {
+  table: 'card_database' | 'card_variations';
+  status: 'pending' | 'copying' | 'done' | 'error';
+  sourceRows: number;
+  copiedRows: number;
+  error?: string;
+}
+
+interface PushJobStatus {
+  status: 'queued' | 'running' | 'done' | 'error';
+  startedAt: number;
+  finishedAt?: number;
+  tables: PushTableProgress[];
   error?: string;
 }
 
@@ -118,6 +134,8 @@ function AdminPanel({ password, onLock }: { password: string; onLock: () => void
   const [variationsJobId, setVariationsJobId] = useState<string | null>(null);
   const [cardsJob, setCardsJob] = useState<ImportJobStatus | null>(null);
   const [variationsJob, setVariationsJob] = useState<ImportJobStatus | null>(null);
+  const [pushJobId, setPushJobId] = useState<string | null>(null);
+  const [pushJob, setPushJob] = useState<PushJobStatus | null>(null);
 
   const authHeader = { "x-admin-password": password };
 
@@ -166,6 +184,57 @@ function AdminPanel({ password, onLock }: { password: string; onLock: () => void
     const id = setInterval(() => pollJob(variationsJobId, false), 2000);
     return () => clearInterval(id);
   }, [variationsJobId, pollJob]);
+
+  // ── Poll push-to-prod job ────────────────────────────────────────────────
+  const pollPush = useCallback(async (jobId: string) => {
+    try {
+      const res = await fetch(`/api/card-database/push-to-prod-status/${jobId}`, { headers: authHeader });
+      if (res.status === 401) { onLock(); return; }
+      if (!res.ok) return;
+      const job: PushJobStatus = await res.json();
+      setPushJob(job);
+      if (job.status === 'done') {
+        setPushJobId(null);
+        const totalRows = job.tables.reduce((s, t) => s + t.copiedRows, 0);
+        toast({ title: "Push to Production complete", description: `${totalRows.toLocaleString()} rows copied.` });
+      } else if (job.status === 'error') {
+        setPushJobId(null);
+        toast({ title: "Push failed", description: job.error || "Unknown error", variant: "destructive" });
+      }
+    } catch { /* transient */ }
+  }, [password]);
+
+  useEffect(() => {
+    if (!pushJobId) return;
+    pollPush(pushJobId);
+    const id = setInterval(() => pollPush(pushJobId), 2000);
+    return () => clearInterval(id);
+  }, [pushJobId, pollPush]);
+
+  const pushMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/card-database/push-to-prod", { method: "POST", headers: authHeader });
+      if (res.status === 401) throw new Error("Unauthorized");
+      if (!res.ok) {
+        let msg = `Server error (${res.status})`;
+        try { const j = await res.json(); msg = j.error || msg; } catch {}
+        throw new Error(msg);
+      }
+      return res.json() as Promise<{ jobId: string }>;
+    },
+    onSuccess: ({ jobId }) => {
+      setPushJob(null);
+      setPushJobId(jobId);
+    },
+    onError: (err: Error) => {
+      if (err.message === "Unauthorized") {
+        toast({ title: "Session expired", description: "Please re-enter your password.", variant: "destructive" });
+        onLock();
+      } else {
+        toast({ title: "Push failed", description: err.message, variant: "destructive" });
+      }
+    },
+  });
 
   // ── Upload mutation — returns {jobId} immediately ────────────────────────
   const uploadMutation = useMutation({
@@ -362,6 +431,40 @@ function AdminPanel({ password, onLock }: { password: string; onLock: () => void
         </CardContent>
       </Card>
 
+      {/* Push to Production */}
+      <Card className="border-emerald-100">
+        <CardHeader className="pb-2 pt-4 px-4">
+          <CardTitle className="text-sm font-semibold text-emerald-700 flex items-center gap-1.5">
+            <CloudUpload className="w-4 h-4" />
+            Push to Production
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="px-4 pb-4 space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Copy the current cards and variations from this database into the production database.
+            Production will be wiped and replaced with what is in Dev right now. Each table is
+            replaced atomically — if anything fails, prod is left untouched.
+          </p>
+          <Button
+            onClick={() => {
+              if (confirm("Replace the entire production card database with this Dev database? Prod data for these two tables will be overwritten.")) {
+                pushMutation.mutate();
+              }
+            }}
+            disabled={!!pushJobId || pushMutation.isPending}
+            size="sm"
+            className="w-full bg-emerald-600 hover:bg-emerald-700 text-white"
+          >
+            {pushJobId || pushMutation.isPending ? (
+              <><RefreshCw className="w-3.5 h-3.5 mr-1.5 animate-spin" /> {pushMutation.isPending ? "Starting…" : "Pushing to Prod…"}</>
+            ) : (
+              <><CloudUpload className="w-3.5 h-3.5 mr-1.5" /> Push Dev → Prod</>
+            )}
+          </Button>
+          {pushJob && <PushProgress job={pushJob} />}
+        </CardContent>
+      </Card>
+
       {/* Clear */}
       <Card className="border-red-100">
         <CardHeader className="pb-2 pt-4 px-4">
@@ -387,6 +490,50 @@ function AdminPanel({ password, onLock }: { password: string; onLock: () => void
           </Button>
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+// ── Progress shown while a Dev → Prod push job is running ────────────────────
+function PushProgress({ job }: { job: PushJobStatus }) {
+  return (
+    <div className="space-y-2 pt-1">
+      {job.tables.map((t) => {
+        const pct = t.sourceRows > 0 ? Math.round((t.copiedRows / t.sourceRows) * 100) : 0;
+        const label = t.table === 'card_database' ? 'Cards' : 'Variations';
+        const dotColor =
+          t.status === 'done' ? 'bg-emerald-500' :
+          t.status === 'error' ? 'bg-red-500' :
+          t.status === 'copying' ? 'bg-blue-500 animate-pulse' :
+          'bg-slate-300';
+        return (
+          <div key={t.table} className="space-y-1">
+            <div className="flex items-center justify-between text-xs">
+              <span className="flex items-center gap-1.5">
+                <span className={`w-2 h-2 rounded-full ${dotColor}`} />
+                <span className="font-medium text-slate-700">{label}</span>
+                <span className="text-muted-foreground">
+                  {t.status === 'pending' && 'queued'}
+                  {t.status === 'copying' && `copying… ${pct}%`}
+                  {t.status === 'done' && `${t.copiedRows.toLocaleString()} rows copied`}
+                  {t.status === 'error' && (t.error || 'failed')}
+                </span>
+              </span>
+              {t.sourceRows > 0 && t.status !== 'done' && (
+                <span className="text-muted-foreground">{t.sourceRows.toLocaleString()} rows</span>
+              )}
+            </div>
+            {t.status !== 'pending' && t.status !== 'error' && (
+              <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-emerald-500 rounded-full transition-all duration-500"
+                  style={{ width: `${t.status === 'done' ? 100 : pct}%` }}
+                />
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

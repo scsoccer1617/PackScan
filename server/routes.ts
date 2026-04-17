@@ -28,6 +28,8 @@ import { cardDatabase, cardVariations } from '../shared/schema';
 import { join } from 'path';
 import fs from 'fs';
 import { gunzipSync } from 'zlib';
+import { pool as sourcePool } from '../db';
+import { runPushToProdJob, makeInitialJobState, type PushJobState } from './pushToProd';
 
 // Configure multer for handling file uploads
 const upload = multer({
@@ -47,11 +49,16 @@ interface ImportJobState {
   startedAt: number;
 }
 const importJobs = new Map<string, ImportJobState>();
+// Push-to-prod jobs share a similar lifecycle but a different shape.
+const pushJobs = new Map<string, PushJobState>();
 // Evict completed jobs older than 2 hours every 30 minutes
 setInterval(() => {
   const cutoff = Date.now() - 7_200_000;
   for (const [id, job] of importJobs.entries()) {
     if (job.startedAt < cutoff) importJobs.delete(id);
+  }
+  for (const [id, job] of pushJobs.entries()) {
+    if (job.startedAt < cutoff) pushJobs.delete(id);
   }
 }, 1_800_000).unref();
 
@@ -1655,6 +1662,52 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (!job) return res.status(404).json({ error: 'Job not found or expired' });
     return res.json(job);
   });
+
+  // ── Push Dev → Prod ─────────────────────────────────────────────────────────
+  // Streams the contents of card_database + card_variations from this app's DB
+  // into the database pointed at by PROD_DATABASE_URL using Postgres COPY. The
+  // job runs in the background; the client polls for progress.
+
+  // POST /api/card-database/push-to-prod — start a push job
+  app.post(
+    `${apiPrefix}/card-database/push-to-prod`,
+    requireAdminPassword,
+    async (_req, res) => {
+      const prodUrl = process.env.PROD_DATABASE_URL;
+      if (!prodUrl) {
+        return res.status(400).json({
+          error: 'PROD_DATABASE_URL is not configured. Add it as a secret to enable Dev → Prod sync.',
+        });
+      }
+      if (prodUrl === process.env.DATABASE_URL) {
+        return res.status(400).json({
+          error: 'PROD_DATABASE_URL is identical to DATABASE_URL — refusing to truncate the same database we are reading from.',
+        });
+      }
+
+      const jobId = randomUUID();
+      const job = makeInitialJobState();
+      pushJobs.set(jobId, job);
+
+      // Fire and forget — errors are captured into job.status / job.error
+      runPushToProdJob(job, prodUrl, sourcePool).catch((err) => {
+        console.error('[PushToProd] Unexpected error in push job:', err);
+      });
+
+      return res.json({ jobId });
+    }
+  );
+
+  // GET /api/card-database/push-to-prod-status/:jobId — poll for progress
+  app.get(
+    `${apiPrefix}/card-database/push-to-prod-status/:jobId`,
+    requireAdminPassword,
+    (req, res) => {
+      const job = pushJobs.get(req.params.jobId);
+      if (!job) return res.status(404).json({ error: 'Job not found or expired' });
+      return res.json(job);
+    }
+  );
 
   // DELETE /api/card-database/clear — wipe and re-import (admin utility)
   app.delete(`${apiPrefix}/card-database/clear`, requireAdminPassword, async (_req, res) => {
