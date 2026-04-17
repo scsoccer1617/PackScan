@@ -387,13 +387,29 @@ export async function detectFoilFromImage(
       const baseVividCoverage = 0.05;
       const regionalRelaxedCoverage = (hasBorderTintEvidence || hasCenterRainbowEvidence) ? 0.06 : baseHighCoverage;
       const hasHighCoverageEvidence = hasStrongSimilarTints && sameTintCoverage > regionalRelaxedCoverage;
-      const hasVividColorEvidence   = hasStrongSimilarTints && sameTintCoverage > baseVividCoverage && sameTintAvgSaturation > 100;
+
+      // Vivid printed colors (a red team-color panel, a blue jersey, a
+      // yellow team logo) look identical to vivid foil colors when judged
+      // by saturation alone. The ONLY thing that distinguishes them is
+      // reflectiveness — foil shimmers across multiple hues, prints don't.
+      // So vivid-color evidence on its own is not enough: it must be
+      // backed up by at least one independent reflective signal:
+      //   • Vision API foil/reflective/holographic labels, OR
+      //   • Regional border-strip agreement with high saturation, OR
+      //   • Center rainbow score (multiple hues in middle of card), OR
+      //   • Numbered-card context (parallels are usually serial-numbered).
+      // Without any of these, "high saturation" is just bold ink, not foil.
+      const hasReflectiveSupport = hasStrongFoilIndicators || hasReflectiveLabels ||
+                                    hasBorderTintEvidence || hasCenterRainbowEvidence;
+      const hasVividColorEvidence  = hasStrongSimilarTints && sameTintCoverage > baseVividCoverage &&
+                                     sameTintAvgSaturation > 100 && hasReflectiveSupport;
       // Border agreement alone is enough when its hue lines up with the
       // global tint OR when the center is unambiguously rainbow.
       const hasBorderConfirmedColor = hasBorderTintEvidence && (
         regionalColorName === detectedColorTint || hasCenterRainbowEvidence
       );
       const hasStrongColorEvidence = hasHighCoverageEvidence || hasVividColorEvidence || hasBorderConfirmedColor;
+      indicators.push(`Reflective support: labels=${hasStrongFoilIndicators || hasReflectiveLabels}, borderTint=${hasBorderTintEvidence}, centerRainbow=${hasCenterRainbowEvidence} → ${hasReflectiveSupport ? 'YES' : 'NO (vivid color alone insufficient)'}`);
       const hasModestSimilarTints = similarTintCount >= 2 && totalTintCoverage > 0.20;
 
       indicators.push(`Label support: strongFoil=${hasStrongFoilIndicators}, reflective=${hasReflectiveLabels} (centerRainbow=${hasCenterRainbowEvidence})`);
