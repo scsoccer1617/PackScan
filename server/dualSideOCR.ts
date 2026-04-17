@@ -377,9 +377,13 @@ async function combineCardResults(
     'isRookieCard', 'brand', 'collection', 'variant'
   ];
   
-  // Fields where back image has priority (CMP codes, year, etc. are most reliably found on the back)
+  // Fields where back image has priority (CMP codes, etc. are most reliably found on the back).
+  // NOTE: `year` used to live here but is now handled separately below — see the
+  // "year combination" block. The Leaf/Donruss publisher imprint on backs of
+  // 1981–1993 cards prints a copyright year that can be off by ±1 from the
+  // actual card year, so we need the front year to win in that specific case.
   const backPriorityFields: (keyof CardFormValues)[] = [
-    'year', 'sport', 'serialNumber', 'cmpNumber'
+    'sport', 'serialNumber', 'cmpNumber'
   ];
 
   // Card number is EXCLUSIVELY from the back — never use front
@@ -416,6 +420,34 @@ async function combineCardResults(
       combined[field] = backResult[field];
     }
   });
+
+  // Year combination — back is normally authoritative, BUT if the back's year
+  // came from a Leaf-imprint copyright line ("© 1990 LEAF, INC." on the back of
+  // a 1991 Donruss card), prefer the front's year if the front detected one.
+  // The downstream DB lookup also has a ±1-year fallback that handles the case
+  // where front had no year — see lookupCard().
+  const frontYearFromCopyright = !!(frontResult as any)._yearFromCopyright;
+  const backYearFromCopyright  = !!(backResult  as any)._yearFromCopyright;
+  const frontHasYear = hasValue(frontResult.year);
+  const backHasYear  = hasValue(backResult.year);
+
+  if (backHasYear && !backYearFromCopyright) {
+    combined.year = backResult.year;
+  } else if (frontHasYear && !frontYearFromCopyright) {
+    combined.year = frontResult.year;
+    if (backHasYear && backYearFromCopyright && backResult.year !== frontResult.year) {
+      console.log(`[Year] Front year ${frontResult.year} preferred over back year ${backResult.year} (back's year is from a Leaf/Donruss publisher imprint, which can be off by ±1).`);
+    }
+  } else if (backHasYear) {
+    combined.year = backResult.year;
+    (combined as any)._yearFromCopyright = backYearFromCopyright;
+    if (backYearFromCopyright) {
+      console.log(`[Year] Using back year ${backResult.year} (from Leaf/Donruss copyright imprint, low-confidence — DB lookup will allow ±1 fallback).`);
+    }
+  } else if (frontHasYear) {
+    combined.year = frontResult.year;
+    (combined as any)._yearFromCopyright = frontYearFromCopyright;
+  }
 
   // Log when back has no card number
   if (!hasValue(backResult.cardNumber)) {

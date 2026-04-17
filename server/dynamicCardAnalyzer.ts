@@ -1326,7 +1326,17 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>,
     const brandLines = brandDetectionText.toUpperCase().split(/\r?\n/);
     const legalLinePattern = /(?:REGISTERED\s+)?TRADEMARK|ALL\s+RIGHTS\s+RESERVED|©|\(C\)|OFFICIALLY\s+LICENSED|THE\s+TOPPS\s+COMPANY|WWW\.\w+\.COM|CODE#|\b(?:TOPPS|BOWMAN|FLEER|DONRUSS|SCORE|LEAF|UPPER DECK|PANINI|PLAYOFF|PACIFIC|SKYBOX|PINNACLE)\b.*?\b(?:INC|LTD|CORP|LLC)\b|\b\d{4}\s+\w+.*?\b(?:INC|LTD|CORP|LLC)\b/i;
     
-    // First pass: look for brand mentions in non-legal lines (high confidence)
+    // Brands whose name appears in the legal/copyright line of OTHER brands' cards
+    // and therefore can't be trusted as a legal-text fallback. The classic case is
+    // "LEAF": Leaf, Inc. produced every Donruss baseball card from 1981–1993, so
+    // the back of every Donruss card from that era reads "© [year] LEAF, INC." —
+    // not Donruss. Without this exclusion, a Donruss card whose front-side OCR
+    // fails to read the "DONRUSS" wordmark would be incorrectly classified as a
+    // Leaf card based on the publisher imprint alone (and then matched to a
+    // totally different player at the same #/year in the Leaf set). Real Leaf
+    // cards still resolve fine because their fronts (and usually their non-legal
+    // back text) say "LEAF" outside the copyright line.
+    const legalFallbackBlocklist = new Set(['Leaf']);
     let brandFromLegal: string | null = null;
     for (const brand of brands) {
       let foundInNonLegal = false;
@@ -1348,8 +1358,10 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>,
         console.log(`Detected brand: ${cardDetails.brand} (from non-legal text)`);
         break;
       }
-      if (foundInLegal && !brandFromLegal) {
+      if (foundInLegal && !brandFromLegal && !legalFallbackBlocklist.has(brand.display)) {
         brandFromLegal = brand.display;
+      } else if (foundInLegal && legalFallbackBlocklist.has(brand.display)) {
+        console.log(`Skipping legal-text brand fallback for "${brand.display}" — appears in publisher imprint of other brands' cards (e.g. Leaf, Inc. printed all Donruss 1981–1993).`);
       }
     }
     
@@ -1479,13 +1491,30 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>,
     // that broke the stricter `\s+` version.
     const brandYearPattern = /(\d{4})[\s,.;:]+(?:THE\s+)?(TOPPS|LEAF|BOWMAN|FLEER|DONRUSS|SCORE|UPPER\s+DECK|PANINI)(?:[\s,.]+(?:CHEWING\s+GUM|COMPANY|INC\.?|LTD|CORP|LLC))?/i;
     const brandYearMatch = text.match(brandYearPattern);
-    
+
+    // Brands whose printed copyright year is unreliable as the card's release year.
+    // The Leaf, Inc. publisher imprint on every Donruss card 1981–1993 commonly
+    // pre-dates the actual card year by one (1991 Donruss prints "© 1990 LEAF,
+    // INC." because production began in late 1990). DONRUSS is included for the
+    // same publisher relationship — the copyright line on these eras can be off
+    // by a year in either direction. We still record the year as a tentative
+    // value (it's usually correct), but mark it as low-confidence so the
+    // dual-side combine step can prefer a year detected from the front.
+    const unreliableCopyrightBrands = /^(LEAF|DONRUSS)$/i;
+    const isUnreliableBrandYear = (matchedBrand: string | undefined): boolean =>
+      !!matchedBrand && unreliableCopyrightBrands.test(matchedBrand.replace(/\s+/g, ' ').trim());
+
     if (brandYearMatch && brandYearMatch[1]) {
       const year = parseInt(brandYearMatch[1], 10);
       if (year >= 1900 && year <= new Date().getFullYear()) {
         cardDetails.year = year;
-        console.log(`Using brand year as card date: ${cardDetails.year} (from "${brandYearMatch[0]}")`);
-        return;
+        if (isUnreliableBrandYear(brandYearMatch[2])) {
+          (cardDetails as any)._yearFromCopyright = true;
+          console.log(`Using brand year as card date: ${cardDetails.year} (from "${brandYearMatch[0]}") — flagged low-confidence (Leaf/Donruss publisher imprint can be off by 1 year).`);
+        } else {
+          console.log(`Using brand year as card date: ${cardDetails.year} (from "${brandYearMatch[0]}")`);
+          return;
+        }
       }
     }
     
@@ -1497,8 +1526,13 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>,
       const year = parseInt(brandThenYearMatch[2], 10);
       if (year >= 1900 && year <= new Date().getFullYear()) {
         cardDetails.year = year;
-        console.log(`Using brand-then-year pattern as card date: ${cardDetails.year} (from "${brandThenYearMatch[0]}")`);
-        return;
+        if (isUnreliableBrandYear(brandThenYearMatch[1])) {
+          (cardDetails as any)._yearFromCopyright = true;
+          console.log(`Using brand-then-year pattern as card date: ${cardDetails.year} (from "${brandThenYearMatch[0]}") — flagged low-confidence (Leaf/Donruss publisher imprint can be off by 1 year).`);
+        } else {
+          console.log(`Using brand-then-year pattern as card date: ${cardDetails.year} (from "${brandThenYearMatch[0]}")`);
+          return;
+        }
       }
     }
     
