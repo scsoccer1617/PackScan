@@ -1299,25 +1299,35 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>,
     // by specificity (most specific first) lets the compound brand win
     // on Chrome cards while still falling through to plain "Topps" on
     // flagship cards that never print "CHROME" anywhere.
-    const brands = [
+    // `fuzzy` is an optional secondary regex matched only after the strict
+    // exact-word pass fails to find a brand. It covers common Vision OCR
+    // misreads of stylized front-of-card wordmarks (e.g. the "D" in
+    // "DONRUSS" being read as "J"/"O"/"Q"/"U" because of the 'D' glyph's
+    // open shape on a busy background; the double-S being collapsed to
+    // single-S; "FLEER" reading "ELEER"; etc.). The fuzzy pass is still
+    // gated on the same legal-line / blocklist logic, so it can't be
+    // hijacked by publisher-imprint text.
+    const brands: Array<{ search: string; display: string; fuzzy?: RegExp }> = [
       { search: 'TOPPS CHROME', display: 'Topps Chrome' },
       { search: 'BOWMAN CHROME', display: 'Bowman Chrome' },
-      { search: 'BOWMAN', display: 'Bowman' },
-      { search: 'TOPPS', display: 'Topps' },
-      { search: 'UPPER DECK', display: 'Upper Deck' },
-      { search: 'PANINI', display: 'Panini' },
-      { search: 'DONRUSS', display: 'Donruss' },
-      { search: 'FLEER', display: 'Fleer' },
-      { search: 'SCORE', display: 'Score' },
-      { search: 'PLAYOFF', display: 'Playoff' },
-      { search: 'LEAF', display: 'Leaf' },
-      { search: 'PACIFIC', display: 'Pacific' },
-      { search: 'SKYBOX', display: 'Skybox' },
-      { search: 'SAGE', display: 'Sage' },
-      { search: 'PRESS PASS', display: 'Press Pass' },
-      { search: 'CLASSIC', display: 'Classic' },
-      { search: 'PINNACLE', display: 'Pinnacle' },
-      { search: 'ULTRA', display: 'Ultra' }
+      { search: 'BOWMAN',       display: 'Bowman',       fuzzy: /\bB[O0Q]WM[A4]N\b/i },
+      { search: 'TOPPS',        display: 'Topps',        fuzzy: /\b[T7][O0Q]PP[S5]?\b/i },
+      { search: 'UPPER DECK',   display: 'Upper Deck' },
+      { search: 'PANINI',       display: 'Panini',       fuzzy: /\bP[A4]N[1I]N[1I]\b/i },
+      // DONRUSS: D often misreads as J/O/Q/U on stylized wordmarks (closed-loop
+      // glyph). N→W is also common. Allow optional trailing S (DONRUS).
+      { search: 'DONRUSS',      display: 'Donruss',      fuzzy: /\b[DJOQU0][O0Q][NW]RU[S5]{1,2}\b/i },
+      { search: 'FLEER',        display: 'Fleer',        fuzzy: /\b[FE]LEER\b/i },
+      { search: 'SCORE',        display: 'Score',        fuzzy: /\b[S5]C[O0Q]RE\b/i },
+      { search: 'PLAYOFF',      display: 'Playoff' },
+      { search: 'LEAF',         display: 'Leaf',         fuzzy: /\bLE[A4]F\b/i },
+      { search: 'PACIFIC',      display: 'Pacific' },
+      { search: 'SKYBOX',       display: 'Skybox' },
+      { search: 'SAGE',         display: 'Sage' },
+      { search: 'PRESS PASS',   display: 'Press Pass' },
+      { search: 'CLASSIC',      display: 'Classic' },
+      { search: 'PINNACLE',     display: 'Pinnacle' },
+      { search: 'ULTRA',        display: 'Ultra' }
     ];
     
     // Use original text with newlines for brand detection to distinguish
@@ -1365,6 +1375,27 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>,
       }
     }
     
+    // Fuzzy pass — only runs if strict matching found nothing in non-legal text.
+    // This catches OCR-mangled stylized wordmarks (e.g. "JONRUSS" on a Donruss
+    // front, "ELEER" on a Fleer front) WITHOUT changing behavior on cards whose
+    // wordmark OCR'd cleanly. Same legal-line filtering applies — we only
+    // accept fuzzy hits in non-legal text, so the publisher imprint can never
+    // win via fuzzy match either.
+    if (!cardDetails.brand) {
+      for (const brand of brands) {
+        if (!brand.fuzzy) continue;
+        for (const line of brandLines) {
+          if (legalLinePattern.test(line)) continue;
+          if (brand.fuzzy.test(line)) {
+            cardDetails.brand = brand.display;
+            console.log(`Detected brand: ${cardDetails.brand} (fuzzy non-legal match against "${line.trim()}")`);
+            break;
+          }
+        }
+        if (cardDetails.brand) break;
+      }
+    }
+
     // Fallback: use brand found only in legal text if no non-legal brand found
     if (!cardDetails.brand && brandFromLegal) {
       cardDetails.brand = brandFromLegal;
