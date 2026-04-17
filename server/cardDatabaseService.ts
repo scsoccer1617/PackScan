@@ -325,7 +325,7 @@ export async function lookupCard(input: CardLookupInput): Promise<CardLookupResu
           sql`lower(${cardDatabase.cardNumberRaw}) = lower(${cardNumNorm})`
         )
       )
-      .limit(10);
+      .limit(200);
 
     // ── Step 1a: Off-by-one year fallback (vintage copyright convention) ──
     // Vintage Topps/Fleer/Donruss cards (pre-1987) were printed with the previous
