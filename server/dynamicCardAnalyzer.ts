@@ -1350,6 +1350,45 @@ function extractCardNumberPass(
     // Look for standalone numbers that might be card numbers
     // This catches single numbers like "206" on their own line (common in Opening Day cards)
     const textForStandalone = originalText || text;
+
+    // ALPHANUMERIC standalone line first (US323, BD42, RC9, HC150, etc.).
+    // Lettered card numbers are far more distinctive than bare digits — when
+    // a card back has BOTH a letter-prefixed number on its own line AND
+    // raw stat numbers on their own lines, the letter-prefixed one is
+    // virtually always the real card number. Accepting it here prevents the
+    // detector from grabbing a stat-table digit (e.g. "12" or "9") when the
+    // true card number (e.g. "US323") sits a few lines further down.
+    const standaloneAlphaNumPattern = /(?:^|\n)\s*([A-Z]{1,4})(\d{1,4})\s*(?:\n|$)/;
+    const standaloneAlphaNumMatch = textForStandalone.match(standaloneAlphaNumPattern);
+    if (standaloneAlphaNumMatch) {
+      const prefix = standaloneAlphaNumMatch[1];
+      const digits = standaloneAlphaNumMatch[2];
+      const fullToken = `${prefix}${digits}`;
+      const codePrefixSkip = new Set(['CMP', 'CODE', 'WWW', 'INC', 'MLB', 'NFL', 'NBA', 'NHL', 'MLS', 'USA', 'PSA', 'BGS', 'SGC']);
+      // Reuse the same prefix stoplist as the brand-adjacent alphanum
+      // detector so common stat/measurement abbreviations (HT, WT, AB,
+      // HR, IP, etc.) and short English words don't masquerade as card
+      // numbers when they happen to land on a line of their own.
+      const stopPrefixRe = /^(OF|IN|AT|TO|BY|OR|ON|IS|IT|AS|IF|UP|NO|SO|DO|AN|AM|BE|HE|WE|MY|US|THE|AND|FOR|ARE|BUT|NOT|YOU|ALL|HAS|HIS|HOW|ITS|MAY|OUR|OUT|WAY|WHO|DID|GET|HIM|LET|SAY|SHE|TOO|USE|MLB|NFL|NBA|NHL|MLS|USA|NL|AL|FT|LB|HR|AB|BB|SO|IP|ER|GS|SV|WL|GP|GF|RS|BA|HT|WT|ACQ|PPG|RPG|APG|FGP|FTP|TD|YDS|ATT|QBR|INT|SOG|PIM|SHG|GWG|PKS)$/i;
+      const digitsVal = parseInt(digits);
+      // "US" is a legitimate Topps Update Series card-number prefix even
+      // though it appears in the generic stoplist as a short word — allow
+      // it explicitly. Other multi-letter prefixes that happen to be
+      // common abbreviations (HT, WT, etc.) stay blocked.
+      const allowDespiteStop = prefix.toUpperCase() === 'US';
+      if (
+        !codePrefixSkip.has(prefix.toUpperCase()) &&
+        (allowDespiteStop || !stopPrefixRe.test(prefix)) &&
+        digitsVal > 0 && digitsVal < 10000
+      ) {
+        if (acceptCandidate(fullToken, 'standalone-line-alphanum')) {
+          cardDetails.cardNumber = fullToken;
+          console.log(`Detected standalone alphanumeric card number: ${cardDetails.cardNumber}`);
+          return;
+        }
+      }
+    }
+
     const standaloneNumberPattern = /(?:^|\n)\s*(\d{1,3})\s*(?:\n|$)/;
     const standaloneNumberMatch = textForStandalone.match(standaloneNumberPattern);
     
