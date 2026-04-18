@@ -11,10 +11,10 @@ interface CardCameraCaptureProps {
 
 const CARD_ASPECT = 2.5 / 3.5;
 
-const STABILITY_THRESHOLD = 6;
-const STABILITY_FRAMES_REQUIRED = 8;
-const STABILITY_WARMUP_MS = 1500;
-const SAMPLE_INTERVAL_MS = 150;
+const STABILITY_THRESHOLD = 14;
+const STABILITY_FRAMES_REQUIRED = 5;
+const STABILITY_WARMUP_MS = 800;
+const SAMPLE_INTERVAL_MS = 120;
 const SAMPLE_W = 64;
 const SAMPLE_H = Math.round(SAMPLE_W / CARD_ASPECT);
 
@@ -294,16 +294,32 @@ export default function CardCameraCapture({
                 aspectRatio: '2.5 / 3.5',
               }}
             >
-              <div className="absolute inset-0 border-2 border-white/40 rounded-md" />
-              <CornerBracket pos="tl" />
-              <CornerBracket pos="tr" />
-              <CornerBracket pos="bl" />
-              <CornerBracket pos="br" />
+              <div
+                className="absolute inset-0 rounded-md transition-colors duration-150"
+                style={{
+                  borderWidth: 2,
+                  borderStyle: 'solid',
+                  borderColor: stability > 0.5
+                    ? 'rgba(52, 211, 153, 0.9)'
+                    : 'rgba(255,255,255,0.4)',
+                  boxShadow: stability >= 1
+                    ? '0 0 0 4px rgba(52,211,153,0.6)'
+                    : 'none',
+                }}
+              />
+              <CornerBracket pos="tl" active={stability > 0.3} />
+              <CornerBracket pos="tr" active={stability > 0.3} />
+              <CornerBracket pos="bl" active={stability > 0.3} />
+              <CornerBracket pos="br" active={stability > 0.3} />
               <div className="absolute -top-7 left-0 right-0 text-center text-white text-xs drop-shadow">
-                Align card inside the brackets
+                {stabilityPct >= 100
+                  ? 'Capturing…'
+                  : stabilityPct > 30
+                    ? 'Hold steady…'
+                    : 'Align card inside the brackets'}
               </div>
               <div
-                className="absolute -bottom-2 left-0 h-1 bg-emerald-400 rounded-full transition-[width] duration-150"
+                className="absolute -bottom-3 left-0 h-1.5 bg-emerald-400 rounded-full transition-[width] duration-150 shadow-[0_0_6px_rgba(52,211,153,0.8)]"
                 style={{ width: `${stabilityPct}%` }}
               />
             </div>
@@ -389,8 +405,9 @@ export default function CardCameraCapture({
   );
 }
 
-function CornerBracket({ pos }: { pos: 'tl' | 'tr' | 'bl' | 'br' }) {
-  const base = 'absolute h-6 w-6 border-emerald-400';
+function CornerBracket({ pos, active }: { pos: 'tl' | 'tr' | 'bl' | 'br'; active?: boolean }) {
+  const color = active ? 'border-emerald-300' : 'border-emerald-400';
+  const base = `absolute h-7 w-7 transition-all duration-150 ${color} ${active ? 'scale-110' : ''}`;
   const map: Record<typeof pos, string> = {
     tl: 'top-0 left-0 border-t-4 border-l-4 rounded-tl-md',
     tr: 'top-0 right-0 border-t-4 border-r-4 rounded-tr-md',
