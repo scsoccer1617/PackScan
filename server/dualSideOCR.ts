@@ -741,6 +741,7 @@ async function combineCardResults(
       // player. We allow partial overlap (substrings, e.g. OCR "Mike Trout Jr" vs
       // DB "Mike Trout") so legitimate name-cleanup still works.
       const ocrLast = (combined.playerLastName || '').trim().toLowerCase();
+      const ocrFirst = (combined.playerFirstName || '').trim().toLowerCase();
       const dbLast  = (dbResult.playerLastName || '').trim().toLowerCase();
       const lastNamesOverlap = !!ocrLast && !!dbLast && (
         ocrLast === dbLast ||
@@ -748,7 +749,25 @@ async function combineCardResults(
         dbLast.includes(ocrLast)
       );
       const ocrHasNoName = !ocrLast;
-      if (!lastNamesOverlap && !ocrHasNoName) {
+      // Treat OCR names made entirely of common English stopwords as bogus
+      // (e.g. "Is No" pulled from "JERSEY NUMBER IS NO. 00" on a Mr. Met
+      // card back). When the OCR "name" is junk like this, trust the DB
+      // match instead of rejecting it. Real player names virtually never
+      // consist of nothing but common short English words.
+      const englishStopwordNameParts = new Set([
+        'is', 'no', 'in', 'on', 'at', 'to', 'by', 'it', 'he', 'as', 'or', 'an',
+        'if', 'so', 'up', 'us', 'we', 'my', 'me', 'am', 'go', 'do', 'be', 'his',
+        'her', 'has', 'had', 'but', 'who', 'why', 'how', 'our', 'out', 'not',
+        'yes', 'yet', 'all', 'any', 'now', 'too', 'was', 'are', 'when', 'where',
+        'what', 'been', 'have', 'will', 'the', 'and', 'for', 'with', 'from',
+        'that', 'this',
+      ]);
+      const isBogusOcrWord = (w: string) => !w || englishStopwordNameParts.has(w);
+      const ocrNameLooksBogus = !!ocrLast && !!ocrFirst &&
+        isBogusOcrWord(ocrFirst) && isBogusOcrWord(ocrLast);
+      if (ocrNameLooksBogus) {
+        console.log(`[CardDB] OCR name "${combined.playerFirstName} ${combined.playerLastName}" looks like English prose, not a real name — trusting DB match "${dbResult.playerFirstName} ${dbResult.playerLastName}".`);
+      } else if (!lastNamesOverlap && !ocrHasNoName) {
         console.log(`[CardDB] DB row REJECTED — OCR last name "${combined.playerLastName}" disagrees with DB "${dbResult.playerLastName}". OCR card number is likely wrong; falling back to OCR-only data to avoid corrupting player identity.`);
         return false;
       }
