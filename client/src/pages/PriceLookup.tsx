@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import SimpleImageUploader from "@/components/SimpleImageUploader";
 import { Button } from "@/components/ui/button";
 import { ScanSearch } from "lucide-react";
@@ -177,6 +177,16 @@ export default function PriceLookup() {
   const { toast } = useToast();
   
   const { loading: ocrLoading, error: ocrError, data: ocrData } = useOCR();
+
+  // When the parallel-confirm card or picker first appears, the page is
+  // often still scrolled to wherever the user left it (typically below the
+  // upload buttons), which leaves the prompt's title clipped above the
+  // viewport. Snap back to the top so the whole prompt is visible.
+  useEffect(() => {
+    if (showParallelConfirm || showParallelPicker) {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, [showParallelConfirm, showParallelPicker]);
 
   // Called after scan completes — decides whether to show picker or go straight to eBay
   const processCardData = async (data: Partial<CardFormValues>) => {
