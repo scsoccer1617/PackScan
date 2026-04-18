@@ -476,9 +476,13 @@ export default function PriceLookup() {
               <div>
                 <h3 className="font-medium mb-2">Front of Card</h3>
                 <SimpleImageUploader
-                  onImageCaptured={(img) => {
+                  onImageCaptured={(img, source) => {
                     setFrontImage(img);
-                    if (!backImage) {
+                    // Only auto-chain into the back-of-card camera if the user
+                    // captured the front via the live camera. If they uploaded
+                    // from their photo library, they almost certainly want to
+                    // upload the back the same way.
+                    if (!backImage && source === 'camera') {
                       setBackCameraSignal((n) => n + 1);
                     }
                   }}

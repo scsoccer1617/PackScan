@@ -1050,16 +1050,23 @@ function extractCardNumberPass(
       // and bypass body-text / long-line heuristics that exist to filter out
       // accidental hits inside bio paragraphs.
       const hasCardNumberMarker = /(?:^|[\s(])(?:NO\.?|#)\s*$/i.test(before);
+      const lineWithMatch = lines.find(line => line.toLowerCase().includes(fullMatch.toLowerCase()));
+      if (!lineWithMatch) continue;
+      // Strong positive signal: the match sits essentially alone on its own
+      // short line (e.g. front-of-card identifiers like "CC-WCO" or
+      // "RPA-JD"). Treat that the same as a "#" / "NO." marker — bio-text
+      // heuristics are meant for matches embedded in paragraphs, not for
+      // standalone tokens.
+      const lineWithoutMatch = lineWithMatch.replace(fullMatch, '').replace(/[\s\W_]+/g, '');
+      const isStandaloneOnLine = lineWithMatch.length <= 40 && lineWithoutMatch.length <= 6;
+      const trustedPosition = hasCardNumberMarker || isStandaloneOnLine;
       const wordTokenCount = (s: string) => (s.match(/\b[A-Z]{2,}\b/g) || []).length;
       const beforeWords = wordTokenCount(before);
       const afterWords = wordTokenCount(after);
-      if (!hasCardNumberMarker && (beforeWords >= 4 || afterWords >= 4)) {
+      if (!trustedPosition && (beforeWords >= 4 || afterWords >= 4)) {
         console.log(`Skipping autograph candidate "${fullMatch}" — embedded in body text (before=${beforeWords} words, after=${afterWords} words)`);
         continue;
       }
-
-      const lineWithMatch = lines.find(line => line.toLowerCase().includes(fullMatch.toLowerCase()));
-      if (!lineWithMatch) continue;
       // Skip if this appears in a biographical/legal line
       if (!hasCardNumberMarker && /\b(DRAFTED|DRAFT|BORN|SIGNED|OVERALL|ROUND|PICK|AGENT|FREE|RIGHTS|RESERVED|LICENSED|TRADEMARK|COMPANY|VISIT|HOMERED|SLUGGED|PROMOTED|MONSTER|PITCHED|BATTED|FIELDED|SCORED)\b/i.test(lineWithMatch)) continue;
       if (/CODE#/i.test(lineWithMatch)) continue;

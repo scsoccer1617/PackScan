@@ -3,8 +3,10 @@ import { Button } from '@/components/ui/button';
 import { Camera, Upload } from 'lucide-react';
 import CardCameraCapture from './CardCameraCapture';
 
+export type ImageSource = 'camera' | 'file';
+
 interface SimpleImageUploaderProps {
-  onImageCaptured: (imageData: string) => void;
+  onImageCaptured: (imageData: string, source: ImageSource) => void;
   label: string;
   existingImage?: string;
   cameraTitle?: string;
@@ -42,7 +44,7 @@ export default function SimpleImageUploader({
     const reader = new FileReader();
     reader.onload = (e) => {
       const imageData = e.target?.result as string;
-      onImageCaptured(imageData);
+      onImageCaptured(imageData, 'file');
     };
     reader.readAsDataURL(file);
   };
@@ -106,7 +108,7 @@ export default function SimpleImageUploader({
         open={cameraOpen}
         title={cameraTitle || label}
         onCapture={(dataUrl) => {
-          onImageCaptured(dataUrl);
+          onImageCaptured(dataUrl, 'camera');
           setCameraOpen(false);
         }}
         onClose={() => setCameraOpen(false)}
