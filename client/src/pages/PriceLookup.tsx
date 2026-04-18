@@ -188,6 +188,22 @@ export default function PriceLookup() {
     }
   }, [showParallelConfirm, showParallelPicker]);
 
+  // Surface the result of a "connect-and-add" Google sheet flow on return.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.has('sheetAdded')) {
+      toast({ title: 'Saved to Google Sheet', description: 'Your card was added after connecting Google.' });
+      params.delete('sheetAdded');
+      const search = params.toString();
+      window.history.replaceState({}, '', window.location.pathname + (search ? `?${search}` : ''));
+    } else if (params.has('sheetAddFailed')) {
+      toast({ title: 'Could not save card after connecting', description: 'Please try Add to Google Sheet again.', variant: 'destructive' });
+      params.delete('sheetAddFailed');
+      const search = params.toString();
+      window.history.replaceState({}, '', window.location.pathname + (search ? `?${search}` : ''));
+    }
+  }, [toast]);
+
   // Called after scan completes — decides whether to show picker or go straight to eBay
   const processCardData = async (data: Partial<CardFormValues>) => {
     setCardData(data);

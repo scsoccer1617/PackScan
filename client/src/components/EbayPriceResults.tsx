@@ -9,6 +9,7 @@ import { CardFormValues } from "@shared/schema";
 import { apiRequest } from "@/lib/queryClient";
 import VariantCombobox from "@/components/VariantCombobox";
 import FoilTypeSelect from "@/components/FoilTypeSelect";
+import AddToSheetButton from "@/components/AddToSheetButton";
 
 interface EbaySearchResult {
   title: string;
@@ -634,6 +635,15 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
           </CardContent>
         </Card>
       )}
+
+      <AddToSheetButton
+        cardData={cardData}
+        averageValue={averageValue}
+        searchUrl={searchUrl || undefined}
+        frontImage={frontImage}
+        backImage={backImage}
+      />
+
 
       <Card>
         <CardHeader>

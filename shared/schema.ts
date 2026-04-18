@@ -5,8 +5,17 @@ import { relations } from "drizzle-orm";
 
 export const users = pgTable("users", {
   id: serial("id").primaryKey(),
-  username: text("username").notNull().unique(),
-  password: text("password").notNull(),
+  username: text("username").unique(),
+  password: text("password"),
+  email: text("email").unique(),
+  passwordHash: text("password_hash"),
+  googleId: text("google_id").unique(),
+  displayName: text("display_name"),
+  emailVerifiedAt: timestamp("email_verified_at"),
+  googleAccessToken: text("google_access_token"),
+  googleRefreshToken: text("google_refresh_token"),
+  googleTokenExpiresAt: timestamp("google_token_expires_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
 export const insertUserSchema = createInsertSchema(users).pick({
@@ -16,6 +25,42 @@ export const insertUserSchema = createInsertSchema(users).pick({
 
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
+
+export const authTokens = pgTable("auth_tokens", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").references(() => users.id, { onDelete: 'cascade' }).notNull(),
+  kind: text("kind", { enum: ['verify_email', 'reset_password'] }).notNull(),
+  tokenHash: text("token_hash").notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  usedAt: timestamp("used_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("auth_tokens_token_hash_idx").on(table.tokenHash),
+  index("auth_tokens_user_kind_idx").on(table.userId, table.kind),
+]);
+export type AuthToken = typeof authTokens.$inferSelect;
+
+export const userSheets = pgTable("user_sheets", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").references(() => users.id, { onDelete: 'cascade' }).notNull(),
+  googleSheetId: text("google_sheet_id").notNull(),
+  title: text("title").notNull(),
+  isDefault: boolean("is_default").default(false).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("user_sheets_user_idx").on(table.userId),
+]);
+export type UserSheet = typeof userSheets.$inferSelect;
+
+// Postgres-backed session storage table for connect-pg-simple.
+// Schema matches the default expected by connect-pg-simple.
+export const sessionsTable = pgTable("session", {
+  sid: text("sid").primaryKey(),
+  sess: jsonb("sess").notNull(),
+  expire: timestamp("expire", { precision: 6 }).notNull(),
+}, (table) => [
+  index("session_expire_idx").on(table.expire),
+]);
 
 // Sports cards table
 export const sports = pgTable("sports", {
