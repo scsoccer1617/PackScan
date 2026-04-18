@@ -833,7 +833,13 @@ export async function searchCardValues(
       'fire', 'electric', 'neon', 'fluorescent', 'frost', 'arctic',
       'sapphire', 'ruby', 'emerald', 'diamond', 'platinum', 'titanium',
       'border', 'refractor', 'xfractor', 'leaf', 'vintage', 'retro',
-      'candy', 'holiday', 'independence'
+      'candy', 'holiday', 'independence',
+      // Foil/parallel family keywords commonly used in eBay titles. When the
+      // user's selected parallel doesn't include these words, any listing
+      // that does is a different parallel and should be filtered.
+      'rainbow', 'diamante', 'holo', 'holographic', 'foilboard',
+      'sandglitter', 'sapphire', 'prizm', 'optic', 'chromium',
+      'sepia', 'negative', 'superfractor'
     ];
 
     const hardFilter = (r: EbaySearchResult): boolean => {
