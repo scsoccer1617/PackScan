@@ -1059,7 +1059,18 @@ function extractCardNumberPass(
       // standalone tokens.
       const lineWithoutMatch = lineWithMatch.replace(fullMatch, '').replace(/[\s\W_]+/g, '');
       const isStandaloneOnLine = lineWithMatch.length <= 40 && lineWithoutMatch.length <= 6;
-      const trustedPosition = hasCardNumberMarker || isStandaloneOnLine;
+      // Strong positive signal: a serial-number print-run pattern ("06/50",
+      // "/499", "1/1") sits immediately next to the match. Copyright /
+      // biographical text never has print-run markers adjacent to a token,
+      // so this is a very high-confidence card-identifier position. This
+      // catches front-of-card identifiers like "CC-WCO 06/50" that share a
+      // line with the player name and team text.
+      const serialNumberAdjacentPattern = /(?:\b\d{1,4}\s*\/\s*\d{1,4}\b|#\s*\/\s*\d{1,4}\b)/;
+      const nearAfter = text.slice(matchStart + fullMatch.length, matchStart + fullMatch.length + 12);
+      const nearBefore = text.slice(Math.max(0, matchStart - 12), matchStart);
+      const hasAdjacentSerial =
+        serialNumberAdjacentPattern.test(nearAfter) || serialNumberAdjacentPattern.test(nearBefore);
+      const trustedPosition = hasCardNumberMarker || isStandaloneOnLine || hasAdjacentSerial;
       const wordTokenCount = (s: string) => (s.match(/\b[A-Z]{2,}\b/g) || []).length;
       const beforeWords = wordTokenCount(before);
       const afterWords = wordTokenCount(after);
