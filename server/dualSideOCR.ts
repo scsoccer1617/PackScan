@@ -985,7 +985,13 @@ async function combineCardResults(
           } else if (colorMatchFound && (hasStrongIndicators || isVividFoilColor)) {
             combined.foilType = null;
             combined.isFoil = false;
-            console.log(`[FoilDB] Visual foil "${visualFoilResult.foilType}" rejected — color exists in DB but no corroborating evidence (no serial detected and color name not in OCR text). Treating as base card; user can override via parallel picker if needed.`);
+            // Visual detector saw a genuine foil signal that maps to a known
+            // parallel colour for this set, but we can't pin down which one
+            // without corroboration. Surface a "suspected parallel" hint so
+            // the UI prompts the user to choose from the catalog instead of
+            // silently treating the card as base.
+            (combined as any).parallelSuspected = true;
+            console.log(`[FoilDB] Visual foil "${visualFoilResult.foilType}" rejected — color exists in DB but no corroborating evidence (no serial detected and color name not in OCR text). Flagging parallelSuspected so UI can prompt for parallel selection.`);
           } else if (colorMatchFound) {
             combined.foilType = null;
             combined.isFoil = false;
@@ -993,7 +999,16 @@ async function combineCardResults(
           } else {
             combined.foilType = null;
             combined.isFoil = false;
-            console.log(`[FoilDB] Visual foil "${visualFoilResult.foilType}" rejected — color keywords [${colorKeywords.join(', ')}] not found in ${setVariations.length} known variations for ${brand} ${year} "${collection}"`);
+            // Detector named a colour that doesn't appear anywhere in the DB
+            // parallel list for this set, but it still saw foil-like signal.
+            // The colour name is wrong, not the foil-ness — let the user
+            // pick the right parallel from the catalog.
+            if (visualFoilResult.confidence >= 0.55) {
+              (combined as any).parallelSuspected = true;
+              console.log(`[FoilDB] Visual foil "${visualFoilResult.foilType}" rejected — color keywords [${colorKeywords.join(', ')}] not found in ${setVariations.length} known variations for ${brand} ${year} "${collection}". Flagging parallelSuspected (visual confidence ${visualFoilResult.confidence.toFixed(2)} ≥ 0.55).`);
+            } else {
+              console.log(`[FoilDB] Visual foil "${visualFoilResult.foilType}" rejected — color keywords [${colorKeywords.join(', ')}] not found in ${setVariations.length} known variations for ${brand} ${year} "${collection}"`);
+            }
           }
         } else {
           // No variations in DB for this set — require higher confidence before accepting,

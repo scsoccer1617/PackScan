@@ -175,9 +175,14 @@ export default function PriceLookup() {
     const detected = data.foilType?.trim() || "";
     const detectedSerial = data.serialNumber?.trim() || "";
     const isNumberedCard = !!data.isNumbered || /\d+\/\d+/.test(detectedSerial);
+    // Server flag: visual foil detector saw genuine foil/parallel signal but
+    // FoilDB couldn't confirm a specific colour. We still want to prompt the
+    // user to pick from the catalog rather than silently treating as base.
+    const parallelSuspected = !!(data as any).parallelSuspected;
 
-    // No parallel detected AND no serial number — go straight to eBay as a base card
-    if (!detected && !isNumberedCard) {
+    // No parallel detected AND no serial number AND no suspected parallel —
+    // go straight to eBay as a base card
+    if (!detected && !isNumberedCard && !parallelSuspected) {
       setShowPriceResults(true);
       return;
     }
@@ -296,6 +301,21 @@ export default function PriceLookup() {
         if (allForStatus.length >= 2) {
           setParallelOptions(allForStatus);
           setDetectedKeyword(extractKeyword(detected));
+          setShowParallelPicker(true);
+          return;
+        }
+      }
+
+      // STEP 4 — Visual detector saw foil-like signal but couldn't pin down a
+      // specific colour (parallelSuspected). No keyword to filter on, so show
+      // every non-numbered parallel for this set and let the user pick.
+      // Triggers the picker in cases like "Rainbow Foil / Shimmer" where the
+      // colour detector sees lots of hues but FoilDB rejects the named colour.
+      if (parallelSuspected && !detected && !detectedSerial) {
+        const allForStatus = filterBySerialStatus(allOptions, !!data.isNumbered);
+        if (allForStatus.length >= 1) {
+          setParallelOptions(allForStatus);
+          setDetectedKeyword("");
           setShowParallelPicker(true);
           return;
         }
