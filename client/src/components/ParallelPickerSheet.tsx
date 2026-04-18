@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
@@ -29,11 +29,23 @@ export default function ParallelPickerSheet({
 }: ParallelPickerSheetProps) {
   const [selected, setSelected] = useState<string>(() => options[0]?.variationOrParallel ?? CUSTOM_VALUE);
   const [customText, setCustomText] = useState("");
+  const scrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (open && options.length > 0) {
       setSelected(options[0].variationOrParallel);
       setCustomText("");
+      // Force the picker list back to the top whenever the sheet opens.
+      // Without this, Radix's focus management inside the Sheet (and any
+      // prior scroll position the container kept from a previous open)
+      // could leave the user staring at the bottom of the option list,
+      // hiding the highlighted default selection. Two rAF ticks gives
+      // Radix time to apply its own focus before we override the scroll.
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (scrollRef.current) scrollRef.current.scrollTop = 0;
+        });
+      });
     }
   }, [open, options]);
 
@@ -73,7 +85,7 @@ export default function ParallelPickerSheet({
           <SheetDescription className="text-sm">{cardDescription}</SheetDescription>
         </SheetHeader>
 
-        <div className="flex-1 overflow-y-auto py-2 space-y-1 min-h-0">
+        <div ref={scrollRef} className="flex-1 overflow-y-auto py-2 space-y-1 min-h-0">
           {options.map(opt => (
             <PickerRow
               key={opt.variationOrParallel}
