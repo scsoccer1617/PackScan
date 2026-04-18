@@ -96,7 +96,7 @@ export default function SimpleImageUploader({
         type="file"
         ref={fileInputRef}
         onChange={handleFileSelect}
-        accept="image/*"
+        accept="image/jpeg,image/png,image/heic,image/heif,image/webp"
         className="hidden"
       />
 
