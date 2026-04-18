@@ -954,10 +954,30 @@ async function combineCardResults(
             ? parseInt(satMatch.match(/Same-color avg saturation:\s*(\d+)/i)?.[1] || '0', 10)
             : 0;
           const isVividFoilColor = avgSaturation >= 90;
-          if (colorMatchFound && (hasStrongIndicators || isVividFoilColor)) {
+
+          // Numbered/colored DB parallels (e.g. "Red /5", "Blue /150") almost
+          // always have their serial number stamped on the card. If we can
+          // visually see a colour AND the DB lists that colour as a parallel
+          // BUT we never detected a serial number on either side AND the
+          // parallel name doesn't appear in the OCR text either, we're almost
+          // certainly looking at a base card whose design just happens to
+          // include that colour (e.g. Yankees red borders → "Red /5"
+          // false-positive on a base Aaron Judge). Require corroborating
+          // evidence — a serial number, OR the colour name appearing in the
+          // OCR text — before claiming the visual colour is the parallel.
+          const ocrTextLower = (combinedOcrText || '').toLowerCase();
+          const colorNameAppearsInOcr = colorKeywords.length > 0 &&
+            colorKeywords.some(kw => ocrTextLower.includes(kw));
+          const hasCorroboratingEvidence = !!combined.isNumbered || colorNameAppearsInOcr;
+
+          if (colorMatchFound && (hasStrongIndicators || isVividFoilColor) && hasCorroboratingEvidence) {
             combined.foilType = visualFoilResult.foilType;
             combined.isFoil = true;
-            console.log(`[FoilDB] Visual foil "${visualFoilResult.foilType}" validated against set variations (keywords: ${colorKeywords.join(', ')}, confidence: ${visualFoilResult.confidence.toFixed(2)}, avgSat: ${avgSaturation})`);
+            console.log(`[FoilDB] Visual foil "${visualFoilResult.foilType}" validated against set variations (keywords: ${colorKeywords.join(', ')}, confidence: ${visualFoilResult.confidence.toFixed(2)}, avgSat: ${avgSaturation}, corroboration: isNumbered=${!!combined.isNumbered}, colorInOcr=${colorNameAppearsInOcr})`);
+          } else if (colorMatchFound && (hasStrongIndicators || isVividFoilColor)) {
+            combined.foilType = null;
+            combined.isFoil = false;
+            console.log(`[FoilDB] Visual foil "${visualFoilResult.foilType}" rejected — color exists in DB but no corroborating evidence (no serial detected and color name not in OCR text). Treating as base card; user can override via parallel picker if needed.`);
           } else if (colorMatchFound) {
             combined.foilType = null;
             combined.isFoil = false;
