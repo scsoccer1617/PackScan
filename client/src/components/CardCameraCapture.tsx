@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
-import { Camera, X, Image as ImageIcon, RotateCcw, Check } from 'lucide-react';
+import { X, Image as ImageIcon, RotateCcw, Check } from 'lucide-react';
 
 interface CardCameraCaptureProps {
   open: boolean;
@@ -10,17 +10,6 @@ interface CardCameraCaptureProps {
 }
 
 const CARD_ASPECT = 2.5 / 3.5;
-
-const STABILITY_THRESHOLD = 14;
-const STABILITY_FRAMES_REQUIRED = 5;
-const STABILITY_WARMUP_MS = 1400;
-const SAMPLE_INTERVAL_MS = 120;
-const SAMPLE_W = 96;
-const SAMPLE_H = Math.round(SAMPLE_W / CARD_ASPECT);
-// Minimum mean absolute horizontal-neighbour difference, computed on
-// the grayscale crop. Higher = more in-focus edges. Empirically a
-// well-focused card sits around 15-30; a blurry one is < 6.
-const SHARPNESS_THRESHOLD = 8;
 
 export default function CardCameraCapture({
   open,
@@ -32,26 +21,15 @@ export default function CardCameraCapture({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const sampleCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const prevSampleRef = useRef<Uint8ClampedArray | null>(null);
-  const stableCountRef = useRef(0);
-  const sampleTimerRef = useRef<number | null>(null);
-  const warmupAtRef = useRef<number>(0);
   const streamRef = useRef<MediaStream | null>(null);
   const capturedRef = useRef(false);
 
   const [error, setError] = useState<string | null>(null);
-  const [stability, setStability] = useState(0);
   const [preview, setPreview] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [focusing, setFocusing] = useState(false);
-  const focusTapRef = useRef<{ x: number; y: number } | null>(null);
 
   const stopStream = useCallback(() => {
-    if (sampleTimerRef.current !== null) {
-      window.clearInterval(sampleTimerRef.current);
-      sampleTimerRef.current = null;
-    }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(t => t.stop());
       streamRef.current = null;
@@ -59,9 +37,6 @@ export default function CardCameraCapture({
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
-    prevSampleRef.current = null;
-    stableCountRef.current = 0;
-    setStability(0);
   }, []);
 
   const startStream = useCallback(async () => {
@@ -82,7 +57,6 @@ export default function CardCameraCapture({
         videoRef.current.srcObject = stream;
         await videoRef.current.play().catch(() => {});
       }
-      warmupAtRef.current = performance.now() + STABILITY_WARMUP_MS;
     } catch (err: any) {
       console.error('Camera error:', err);
       setError(
@@ -141,76 +115,8 @@ export default function CardCameraCapture({
     );
     const dataUrl = out.toDataURL('image/jpeg', 0.95);
     capturedRef.current = true;
-    if (sampleTimerRef.current !== null) {
-      window.clearInterval(sampleTimerRef.current);
-      sampleTimerRef.current = null;
-    }
     setPreview(dataUrl);
   }, [computeOverlayRectInVideo]);
-
-  const sampleStability = useCallback(() => {
-    if (capturedRef.current) return;
-    const video = videoRef.current;
-    if (!video || !video.videoWidth) return;
-    const rect = computeOverlayRectInVideo();
-    if (!rect) return;
-    if (!sampleCanvasRef.current) {
-      sampleCanvasRef.current = document.createElement('canvas');
-      sampleCanvasRef.current.width = SAMPLE_W;
-      sampleCanvasRef.current.height = SAMPLE_H;
-    }
-    const c = sampleCanvasRef.current;
-    const ctx = c.getContext('2d', { willReadFrequently: true });
-    if (!ctx) return;
-    ctx.drawImage(
-      video,
-      rect.srcX, rect.srcY, rect.srcW, rect.srcH,
-      0, 0, SAMPLE_W, SAMPLE_H
-    );
-    const data = ctx.getImageData(0, 0, SAMPLE_W, SAMPLE_H).data;
-
-    // Compute sharpness on this frame: mean absolute horizontal-neighbour
-    // difference of the grayscale crop. Camera autofocus produces a
-    // characteristic ramp from low → high values as it locks focus.
-    let sharpSum = 0;
-    let sharpCount = 0;
-    for (let y = 0; y < SAMPLE_H; y++) {
-      for (let x = 1; x < SAMPLE_W; x++) {
-        const i = (y * SAMPLE_W + x) * 4;
-        const ip = i - 4;
-        const g = (data[i] + data[i + 1] + data[i + 2]) / 3;
-        const gp = (data[ip] + data[ip + 1] + data[ip + 2]) / 3;
-        sharpSum += Math.abs(g - gp);
-        sharpCount++;
-      }
-    }
-    const sharpness = sharpCount ? sharpSum / sharpCount : 0;
-    const isSharp = sharpness >= SHARPNESS_THRESHOLD;
-
-    const prev = prevSampleRef.current;
-    if (prev && prev.length === data.length) {
-      let diffSum = 0;
-      let count = 0;
-      for (let i = 0; i < data.length; i += 4) {
-        const g1 = (data[i] + data[i + 1] + data[i + 2]) / 3;
-        const g2 = (prev[i] + prev[i + 1] + prev[i + 2]) / 3;
-        diffSum += Math.abs(g1 - g2);
-        count++;
-      }
-      const meanDiff = diffSum / count;
-      const isWarm = performance.now() >= warmupAtRef.current;
-      if (isWarm && meanDiff < STABILITY_THRESHOLD && isSharp) {
-        stableCountRef.current += 1;
-      } else {
-        stableCountRef.current = 0;
-      }
-      setStability(Math.min(1, stableCountRef.current / STABILITY_FRAMES_REQUIRED));
-      if (stableCountRef.current >= STABILITY_FRAMES_REQUIRED) {
-        captureFrame();
-      }
-    }
-    prevSampleRef.current = new Uint8ClampedArray(data);
-  }, [computeOverlayRectInVideo, captureFrame]);
 
   useEffect(() => {
     if (!open) {
@@ -223,17 +129,6 @@ export default function CardCameraCapture({
       stopStream();
     };
   }, [open, startStream, stopStream]);
-
-  useEffect(() => {
-    if (!open || preview || error) return;
-    sampleTimerRef.current = window.setInterval(sampleStability, SAMPLE_INTERVAL_MS);
-    return () => {
-      if (sampleTimerRef.current !== null) {
-        window.clearInterval(sampleTimerRef.current);
-        sampleTimerRef.current = null;
-      }
-    };
-  }, [open, preview, error, sampleStability]);
 
   // When the user hits "Retake", the <video> element is unmounted (it's
   // hidden while preview is shown) and re-mounted with no srcObject. Re-
@@ -269,7 +164,6 @@ export default function CardCameraCapture({
     const rect = container.getBoundingClientRect();
     const x = (e.clientX - rect.left) / rect.width;
     const y = (e.clientY - rect.top) / rect.height;
-    focusTapRef.current = { x, y };
     setFocusing(true);
     try {
       await track.applyConstraints({
@@ -280,11 +174,6 @@ export default function CardCameraCapture({
       });
     } catch {}
     window.setTimeout(() => setFocusing(false), 700);
-    // Reset stability counter so a focus shift doesn't trigger an
-    // immediate auto-capture on a half-focused frame.
-    stableCountRef.current = 0;
-    setStability(0);
-    warmupAtRef.current = performance.now() + 600;
   }, []);
 
   const handleConfirm = () => {
@@ -297,9 +186,6 @@ export default function CardCameraCapture({
   const handleRetake = () => {
     setPreview(null);
     capturedRef.current = false;
-    stableCountRef.current = 0;
-    setStability(0);
-    warmupAtRef.current = performance.now() + STABILITY_WARMUP_MS;
   };
 
   const handleLibrary = () => {
@@ -319,8 +205,6 @@ export default function CardCameraCapture({
   };
 
   if (!open) return null;
-
-  const stabilityPct = Math.round(stability * 100);
 
   return (
     <div className="fixed inset-0 z-50 bg-black flex flex-col">
@@ -370,11 +254,7 @@ export default function CardCameraCapture({
           >
             {focusing
               ? 'Focusing…'
-              : stabilityPct >= 100
-                ? 'Capturing…'
-                : stabilityPct > 30
-                  ? 'Hold steady…'
-                  : 'Align card inside the brackets · tap to focus'}
+              : 'Align card inside the brackets · tap to focus'}
           </div>
         )}
 
@@ -389,26 +269,17 @@ export default function CardCameraCapture({
               }}
             >
               <div
-                className="absolute inset-0 rounded-md transition-colors duration-150"
+                className="absolute inset-0 rounded-md"
                 style={{
                   borderWidth: 2,
                   borderStyle: 'solid',
-                  borderColor: stability > 0.5
-                    ? 'rgba(52, 211, 153, 0.9)'
-                    : 'rgba(255,255,255,0.4)',
-                  boxShadow: stability >= 1
-                    ? '0 0 0 4px rgba(52,211,153,0.6)'
-                    : 'none',
+                  borderColor: 'rgba(255,255,255,0.4)',
                 }}
               />
-              <CornerBracket pos="tl" active={stability > 0.3} />
-              <CornerBracket pos="tr" active={stability > 0.3} />
-              <CornerBracket pos="bl" active={stability > 0.3} />
-              <CornerBracket pos="br" active={stability > 0.3} />
-              <div
-                className="absolute left-0 right-0 -bottom-4 h-1.5 bg-emerald-400 rounded-full transition-[width] duration-150 shadow-[0_0_6px_rgba(52,211,153,0.8)]"
-                style={{ width: `${stabilityPct}%` }}
-              />
+              <CornerBracket pos="tl" />
+              <CornerBracket pos="tr" />
+              <CornerBracket pos="bl" />
+              <CornerBracket pos="br" />
             </div>
           </div>
         )}
@@ -449,13 +320,7 @@ export default function CardCameraCapture({
             </button>
 
             <div className="w-[72px] text-center text-[11px] text-white/70 leading-tight">
-              {error
-                ? 'Use Library'
-                : stabilityPct >= 100
-                  ? 'Capturing…'
-                  : stabilityPct > 0
-                    ? `Hold steady ${stabilityPct}%`
-                    : 'Auto-capture ready'}
+              {error ? 'Use Library' : 'Tap to capture'}
             </div>
           </>
         ) : (
@@ -492,9 +357,8 @@ export default function CardCameraCapture({
   );
 }
 
-function CornerBracket({ pos, active }: { pos: 'tl' | 'tr' | 'bl' | 'br'; active?: boolean }) {
-  const color = active ? 'border-emerald-300' : 'border-emerald-400';
-  const base = `absolute h-7 w-7 transition-all duration-150 ${color} ${active ? 'scale-110' : ''}`;
+function CornerBracket({ pos }: { pos: 'tl' | 'tr' | 'bl' | 'br' }) {
+  const base = 'absolute h-7 w-7 border-emerald-400';
   const map: Record<typeof pos, string> = {
     tl: 'top-0 left-0 border-t-4 border-l-4 rounded-tl-md',
     tr: 'top-0 right-0 border-t-4 border-r-4 rounded-tr-md',
