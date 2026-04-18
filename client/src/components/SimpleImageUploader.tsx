@@ -88,7 +88,7 @@ export default function SimpleImageUploader({
           className="flex-1"
         >
           <Upload className="h-4 w-4 mr-1" />
-          Library
+          Photo Library
         </Button>
       </div>
 
