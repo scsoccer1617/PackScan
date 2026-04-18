@@ -161,6 +161,7 @@ export default function PriceLookup() {
   const [cardData, setCardData] = useState<Partial<CardFormValues> | null>(null);
   const [showPriceResults, setShowPriceResults] = useState<boolean>(false);
   const [showParallelPicker, setShowParallelPicker] = useState<boolean>(false);
+  const [showParallelConfirm, setShowParallelConfirm] = useState<boolean>(false);
   const [parallelOptions, setParallelOptions] = useState<ParallelOption[]>([]);
   const [detectedKeyword, setDetectedKeyword] = useState<string>("");
   const [analyzing, setAnalyzing] = useState<boolean>(false);
@@ -220,20 +221,20 @@ export default function PriceLookup() {
             // user can override if the visual foil keyword was wrong.
             setParallelOptions(mergePreferringPrimary(narrowed, bySerial));
             setDetectedKeyword(extractKeyword(detected));
-            setShowParallelPicker(true);
+            setShowParallelConfirm(true);
             return;
           }
           // narrowed to 0 (foil keyword matched nothing in serial set) — show all serial matches
           setParallelOptions(bySerial);
           setDetectedKeyword(extractKeyword(detected));
-          setShowParallelPicker(true);
+          setShowParallelConfirm(true);
           return;
         }
         if (bySerial.length >= 2) {
           // Serial matches but no foil type detected — ask with those options
           setParallelOptions(bySerial);
           setDetectedKeyword("");
-          setShowParallelPicker(true);
+          setShowParallelConfirm(true);
           return;
         }
         // 0 serial matches — fall through to keyword matching below
@@ -272,7 +273,7 @@ export default function PriceLookup() {
         // Multiple non-numbered parallels exist — show picker with keyword match first.
         setParallelOptions(mergePreferringPrimary(filtered, allForStatus));
         setDetectedKeyword(extractKeyword(detected));
-        setShowParallelPicker(true);
+        setShowParallelConfirm(true);
         return;
       }
 
@@ -285,7 +286,7 @@ export default function PriceLookup() {
         const allForStatus = filterBySerialStatus(allOptions, !!data.isNumbered);
         setParallelOptions(mergePreferringPrimary(filtered, allForStatus));
         setDetectedKeyword(extractKeyword(detected));
-        setShowParallelPicker(true);
+        setShowParallelConfirm(true);
         return;
       }
 
@@ -301,7 +302,7 @@ export default function PriceLookup() {
         if (allForStatus.length >= 2) {
           setParallelOptions(allForStatus);
           setDetectedKeyword(extractKeyword(detected));
-          setShowParallelPicker(true);
+          setShowParallelConfirm(true);
           return;
         }
       }
@@ -316,7 +317,7 @@ export default function PriceLookup() {
         if (allForStatus.length >= 1) {
           setParallelOptions(allForStatus);
           setDetectedKeyword("");
-          setShowParallelPicker(true);
+          setShowParallelConfirm(true);
           return;
         }
       }
@@ -406,8 +407,27 @@ export default function PriceLookup() {
     setShowOCRResults(false);
     setShowPriceResults(false);
     setShowParallelPicker(false);
+    setShowParallelConfirm(false);
     setParallelOptions([]);
     setCardData(null);
+  };
+
+  // User said "Yes, this is a parallel" → show the picker
+  const handleParallelConfirmYes = () => {
+    setShowParallelConfirm(false);
+    setShowParallelPicker(true);
+  };
+
+  // User said "No, not a parallel" → clear any detected foil and price as base
+  const handleParallelConfirmNo = () => {
+    setCardData((prev) => {
+      if (!prev) return prev;
+      return { ...prev, foilType: "" };
+    });
+    setShowParallelConfirm(false);
+    setParallelOptions([]);
+    setDetectedKeyword("");
+    setShowPriceResults(true);
   };
 
   const cardDescription = cardData
@@ -424,7 +444,7 @@ export default function PriceLookup() {
 
   return (
     <div className="p-4 space-y-6">
-      {!showOCRResults && !showPriceResults && !showParallelPicker && (
+      {!showOCRResults && !showPriceResults && !showParallelPicker && !showParallelConfirm && (
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -491,6 +511,42 @@ export default function PriceLookup() {
           onApply={handleApplyOCRResults}
           onCancel={() => setShowOCRResults(false)}
         />
+      )}
+
+      {/* Confirmation prompt — shown before the picker so the user can dismiss
+          a false-positive parallel detection without scrolling through options. */}
+      {showParallelConfirm && cardData && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <ScanSearch className="h-5 w-5" />
+              Potential Parallel Detected
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {cardDescription && (
+              <p className="text-sm text-muted-foreground">{cardDescription}</p>
+            )}
+            {detectedKeyword && (
+              <p className="text-sm">
+                Detected: <span className="font-medium">{detectedKeyword}</span>
+              </p>
+            )}
+            <p>Is this a parallel?</p>
+            <div className="grid grid-cols-2 gap-3">
+              <Button onClick={handleParallelConfirmYes} size="lg">
+                Yes
+              </Button>
+              <Button
+                onClick={handleParallelConfirmNo}
+                variant="outline"
+                size="lg"
+              >
+                No
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       {/* Parallel picker — only shown when 2+ matching variants exist */}
