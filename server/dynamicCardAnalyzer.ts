@@ -104,7 +104,19 @@ export async function analyzeSportsCardImage(
       const initialSerial = (cardDetails.serialNumber || '').trim();
       const haveCompleteSerial =
         initialSerial.length > 0 && !initialSerial.startsWith('/');
-      if (!haveCompleteSerial) {
+
+      // Only run the (expensive, ~2 extra Vision API calls) focused-serial
+      // recovery pass when we have positive evidence the card IS numbered:
+      //   • we already extracted a limit-only serial like "/150" — definitely
+      //     a numbered card, just couldn't read the numerator, OR
+      //   • another detector flagged isNumbered (text mentions "/N", etc.).
+      // Without this gate, every base card with no serial would burn ~3-5 s
+      // of extra Vision time looking for a serial that isn't there.
+      const limitOnlySerial = initialSerial.startsWith('/');
+      const numberedSignal = !!cardDetails.isNumbered || limitOnlySerial;
+      const shouldRunFocused = !haveCompleteSerial && numberedSignal;
+
+      if (shouldRunFocused) {
         try {
           const { runFocusedSerialOCR } = await import('./focusedSerialOCR');
           const focused = await runFocusedSerialOCR(base64Image);

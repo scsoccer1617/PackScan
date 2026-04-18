@@ -18,10 +18,12 @@ import { CardFormValues } from "@shared/schema";
 // silently destroyed small foil/hand-stamped serial numbers: at 1200 px on
 // the long edge a 5 mm foil stamp shrinks to ~15 px tall, well below
 // Vision API's reliable text-recovery threshold, and quality 0.82 then
-// smears what little detail remains. Bumping to 2400 px @ q=0.92 roughly
-// quadruples the pixel area available for tiny features without making
-// uploads painful (typical scan now ~1.5 MB instead of ~370 KB).
-async function compressImage(dataUrl: string, maxPx = 2400, quality = 0.92): Promise<Blob> {
+// smears what little detail remains. We initially bumped to 2400 px @ q=0.92
+// for foil-serial recovery but uploads ballooned to ~1.5 MB and total scan
+// time grew noticeably. 1800 px @ q=0.88 is the middle ground: still
+// ~2.25× the pixel area of the original 1200 px setting (plenty for serials),
+// uploads typically ~700-900 KB, and Vision processes ~40% faster.
+async function compressImage(dataUrl: string, maxPx = 1800, quality = 0.88): Promise<Blob> {
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
