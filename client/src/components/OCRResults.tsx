@@ -242,8 +242,16 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
       </CardHeader>
       <CardContent>
         {editMode ? (
+          // Field order (per UX preference):
+          //   Sport · First Name · Last Name · Year · Brand · Card # ·
+          //   Set · Collection · Parallel · Serial # · Variant · Rookie Card
+          // Most fields are full-width so Set is unambiguously ABOVE Collection
+          // (and similarly Parallel above Serial #). First/Last Name and the
+          // remaining Autographed/Numbered/Condition/Notes fields are kept
+          // grouped where they were previously since the user didn't call them
+          // out in the new ordering.
           <div className="form-grid">
-            {/* Sport Dropdown */}
+            {/* Sport */}
             <div className="space-y-2 col-span-1 md:col-span-2">
               <Label htmlFor="sport">Sport</Label>
               <Select
@@ -263,7 +271,7 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
               </Select>
             </div>
 
-            {/* First row - Player Name */}
+            {/* First Name + Last Name */}
             <div className="space-y-2">
               <Label htmlFor="playerFirstName">First Name</Label>
               <Input
@@ -283,8 +291,20 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
               />
             </div>
 
-            {/* Second row - Brand and Collection */}
-            <div className="space-y-2">
+            {/* Year */}
+            <div className="space-y-2 col-span-1 md:col-span-2">
+              <Label htmlFor="year">Year</Label>
+              <Input
+                id="year"
+                type="number"
+                value={editedData.year || ''}
+                onChange={(e) => handleInputChange('year', parseInt(e.target.value) || '')}
+                placeholder="Card Year"
+              />
+            </div>
+
+            {/* Brand */}
+            <div className="space-y-2 col-span-1 md:col-span-2">
               <Label htmlFor="brand">Brand</Label>
               <Select
                 value={editedData.brand || ''}
@@ -300,34 +320,9 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="collection">Collection</Label>
-              {collectionOptions.length > 0 ? (
-                <Select
-                  value={editedData.collection || ''}
-                  onValueChange={(v) => handleInputChange('collection', v)}
-                >
-                  <SelectTrigger id="collection">
-                    <SelectValue placeholder="Select collection" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {collectionOptions.map((c) => (
-                      <SelectItem key={c} value={c}>{c}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              ) : (
-                <Input
-                  id="collection"
-                  value={editedData.collection || ''}
-                  onChange={(e) => handleInputChange('collection', e.target.value)}
-                  placeholder={editedData.brand && editedData.year ? "No matches — type a collection" : "Pick brand & year first"}
-                />
-              )}
-            </div>
 
-            {/* Third row - Card Number and Year */}
-            <div className="space-y-2">
+            {/* Card Number */}
+            <div className="space-y-2 col-span-1 md:col-span-2">
               <Label htmlFor="cardNumber">Card Number</Label>
               <Input
                 id="cardNumber"
@@ -336,18 +331,8 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
                 placeholder="Card Number"
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="year">Year</Label>
-              <Input
-                id="year"
-                type="number"
-                value={editedData.year || ''}
-                onChange={(e) => handleInputChange('year', parseInt(e.target.value) || '')}
-                placeholder="Card Year"
-              />
-            </div>
 
-            {/* Set field — DB-driven, filtered by Brand + Year (+ Collection) */}
+            {/* Set — DB-driven, filtered by Brand + Year */}
             <div className="space-y-2 col-span-1 md:col-span-2">
               <Label htmlFor="set">Set</Label>
               {setOptions.length > 0 ? (
@@ -374,24 +359,53 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
               )}
             </div>
 
-            {/* Fourth row - Variant and Serial Number */}
-            <div className="space-y-2">
-              <Label>Variant / Parallel</Label>
-              <VariantCombobox
+            {/* Collection — DB-driven */}
+            <div className="space-y-2 col-span-1 md:col-span-2">
+              <Label htmlFor="collection">Collection</Label>
+              {collectionOptions.length > 0 ? (
+                <Select
+                  value={editedData.collection || ''}
+                  onValueChange={(v) => handleInputChange('collection', v)}
+                >
+                  <SelectTrigger id="collection">
+                    <SelectValue placeholder="Select collection" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {collectionOptions.map((c) => (
+                      <SelectItem key={c} value={c}>{c}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Input
+                  id="collection"
+                  value={editedData.collection || ''}
+                  onChange={(e) => handleInputChange('collection', e.target.value)}
+                  placeholder={editedData.brand && editedData.year ? "No matches — type a collection" : "Pick brand & year first"}
+                />
+              )}
+            </div>
+
+            {/* Parallel — only shows parallels matching the card's
+                serial-status (defaults to non-serialized when not numbered) */}
+            <div className="space-y-2 col-span-1 md:col-span-2">
+              <Label>Parallel</Label>
+              <FoilTypeSelect
                 brand={editedData.brand}
                 year={editedData.year}
                 collection={editedData.collection}
-                value={editedData.variant || ''}
-                onChange={(variant, serialNumber) => {
-                  handleInputChange('variant', variant);
-                  if (serialNumber) {
-                    handleInputChange('serialNumber', serialNumber);
-                    handleInputChange('isNumbered', true);
-                  }
+                set={editedData.set}
+                value={editedData.foilType || ''}
+                isNumbered={!!editedData.isNumbered}
+                onChange={(foilType) => {
+                  handleInputChange('foilType', foilType);
+                  handleInputChange('isFoil', !!foilType);
                 }}
               />
             </div>
-            <div className="space-y-2">
+
+            {/* Serial Number */}
+            <div className="space-y-2 col-span-1 md:col-span-2">
               <Label htmlFor="serialNumber">Serial Number</Label>
               <Input
                 id="serialNumber"
@@ -401,23 +415,18 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
               />
             </div>
 
-            {/* Fifth row - Parallel */}
+            {/* Variant — free-text only (e.g. SSP, Image Variation, Photo Variation) */}
             <div className="space-y-2 col-span-1 md:col-span-2">
-              <Label>Parallel</Label>
-              <FoilTypeSelect
-                brand={editedData.brand}
-                year={editedData.year}
-                collection={editedData.collection}
-                set={editedData.set}
-                value={editedData.foilType || ''}
-                onChange={(foilType) => {
-                  handleInputChange('foilType', foilType);
-                  handleInputChange('isFoil', !!foilType);
-                }}
+              <Label htmlFor="variant">Variant</Label>
+              <Input
+                id="variant"
+                value={editedData.variant || ''}
+                onChange={(e) => handleInputChange('variant', e.target.value)}
+                placeholder="e.g. SSP, Photo Variation"
               />
             </div>
 
-            {/* Sixth row - Condition */}
+            {/* Condition */}
             <div className="space-y-2 col-span-1 md:col-span-2">
               <Label htmlFor="condition">Condition</Label>
               <Select

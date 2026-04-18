@@ -1897,7 +1897,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Queries with decreasing specificity so the most targeted match wins.
   app.get(`${apiPrefix}/card-variations/options`, async (req, res) => {
     try {
-      const { brand, year: yearStr, collection, set } = req.query as Record<string, string | undefined>;
+      const { brand, year: yearStr, collection, set, serialStatus } = req.query as Record<string, string | undefined>;
       if (!brand || !yearStr) {
         return res.status(400).json({ error: 'brand and year are required' });
       }
@@ -1906,10 +1906,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: 'Invalid year' });
       }
 
-      const base = and(
-        sql`lower(${cardVariations.brand}) = lower(${brand.trim()})`,
-        eq(cardVariations.year, year)
-      );
+      // Optional serial-status filter:
+      //   serialStatus=none      → only non-serialized parallels (serial_number is null/empty)
+      //   serialStatus=numbered  → only serialized parallels
+      // Anything else (or omitted) returns both.
+      const serialFilter = serialStatus === 'none'
+        ? sql`(${cardVariations.serialNumber} is null or trim(${cardVariations.serialNumber}) = '')`
+        : serialStatus === 'numbered'
+          ? sql`(${cardVariations.serialNumber} is not null and trim(${cardVariations.serialNumber}) <> '')`
+          : undefined;
+
+      const base = serialFilter
+        ? and(
+            sql`lower(${cardVariations.brand}) = lower(${brand.trim()})`,
+            eq(cardVariations.year, year),
+            serialFilter,
+          )
+        : and(
+            sql`lower(${cardVariations.brand}) = lower(${brand.trim()})`,
+            eq(cardVariations.year, year),
+          );
 
       const runQuery = (extra?: any) =>
         db

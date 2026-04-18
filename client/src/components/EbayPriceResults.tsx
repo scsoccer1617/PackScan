@@ -310,8 +310,15 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
         </CardHeader>
         <CardContent>
           {editMode ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-3">
+            // Field order:
+            //   Sport · First Name · Last Name · Year · Brand · Card # ·
+            //   Set · Collection · Parallel · Serial # · Variant · Rookie Card
+            <div className="space-y-3">
+              <div>
+                <Label htmlFor="edit-sport">Sport</Label>
+                <Input id="edit-sport" value={editData.sport || ''} onChange={e => updateEditField('sport', e.target.value)} />
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <Label htmlFor="edit-firstName">First Name</Label>
                   <Input id="edit-firstName" value={editData.playerFirstName || ''} onChange={e => updateEditField('playerFirstName', e.target.value)} />
@@ -320,108 +327,96 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
                   <Label htmlFor="edit-lastName">Last Name</Label>
                   <Input id="edit-lastName" value={editData.playerLastName || ''} onChange={e => updateEditField('playerLastName', e.target.value)} />
                 </div>
-                <div>
-                  <Label htmlFor="edit-brand">Brand</Label>
-                  <Input id="edit-brand" value={editData.brand || ''} onChange={e => updateEditField('brand', e.target.value)} />
-                </div>
-                <div>
-                  <Label htmlFor="edit-cardNumber">Card #</Label>
-                  <Input id="edit-cardNumber" value={editData.cardNumber || ''} onChange={e => updateEditField('cardNumber', e.target.value)} />
-                </div>
-                <div>
-                  <Label htmlFor="edit-year">Year</Label>
-                  <Input id="edit-year" type="number" value={editData.year || ''} onChange={e => updateEditField('year', parseInt(e.target.value) || 0)} />
-                </div>
               </div>
-              <div className="space-y-3">
-                <div>
-                  <Label htmlFor="edit-collection">Collection</Label>
-                  {collectionOptions.length > 0 ? (
-                    <Select
-                      value={editData.collection || ''}
-                      onValueChange={(v) => updateEditField('collection', v)}
-                    >
-                      <SelectTrigger id="edit-collection">
-                        <SelectValue placeholder="Select collection" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {collectionOptions.map((c) => (
-                          <SelectItem key={c} value={c}>{c}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  ) : (
-                    <Input id="edit-collection" value={editData.collection || ''} onChange={e => updateEditField('collection', e.target.value)} />
-                  )}
-                </div>
-                <div>
-                  <Label htmlFor="edit-set">Set</Label>
-                  {setOptions.length > 0 ? (
-                    <Select
-                      value={editData.set || ''}
-                      onValueChange={(v) => updateEditField('set', v)}
-                    >
-                      <SelectTrigger id="edit-set">
-                        <SelectValue placeholder="Select set" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {setOptions.map((s) => (
-                          <SelectItem key={s} value={s}>{s}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  ) : (
-                    <Input id="edit-set" value={editData.set || ''} onChange={e => updateEditField('set', e.target.value)} />
-                  )}
-                </div>
-                <div>
-                  <Label>Variant / Parallel</Label>
-                  <VariantCombobox
-                    brand={editData.brand}
-                    year={editData.year}
-                    collection={editData.collection}
-                    value={editData.variant || ''}
-                    onChange={(variant, serialNumber) => {
-                      updateEditField('variant', variant);
-                      if (serialNumber) {
-                        updateEditField('serialNumber', serialNumber);
-                        updateEditField('isNumbered', true);
-                      }
-                    }}
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="edit-serialNumber">Serial #</Label>
-                  <Input id="edit-serialNumber" value={editData.serialNumber || ''} onChange={e => updateEditField('serialNumber', e.target.value)} />
-                </div>
-                <div>
-                  <Label>Parallel</Label>
-                  <FoilTypeSelect
-                    brand={editData.brand}
-                    year={editData.year}
-                    collection={editData.collection}
-                    set={editData.set}
-                    value={editData.foilType || ''}
-                    onChange={(foilType) => {
-                      updateEditField('foilType', foilType || null);
-                      updateEditField('isFoil', !!foilType);
-                    }}
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="edit-sport">Sport</Label>
-                  <Input id="edit-sport" value={editData.sport || ''} onChange={e => updateEditField('sport', e.target.value)} />
-                </div>
-                <div className="flex items-center gap-2 pt-1">
-                  <input
-                    type="checkbox"
-                    id="edit-rookieCard"
-                    checked={!!editData.isRookieCard}
-                    onChange={e => updateEditField('isRookieCard', e.target.checked)}
-                    className="h-4 w-4 rounded border-slate-300 accent-blue-600"
-                  />
-                  <Label htmlFor="edit-rookieCard" className="cursor-pointer">Rookie Card</Label>
-                </div>
+              <div>
+                <Label htmlFor="edit-year">Year</Label>
+                <Input id="edit-year" type="number" value={editData.year || ''} onChange={e => updateEditField('year', parseInt(e.target.value) || 0)} />
+              </div>
+              <div>
+                <Label htmlFor="edit-brand">Brand</Label>
+                <Input id="edit-brand" value={editData.brand || ''} onChange={e => updateEditField('brand', e.target.value)} />
+              </div>
+              <div>
+                <Label htmlFor="edit-cardNumber">Card #</Label>
+                <Input id="edit-cardNumber" value={editData.cardNumber || ''} onChange={e => updateEditField('cardNumber', e.target.value)} />
+              </div>
+              <div>
+                <Label htmlFor="edit-set">Set</Label>
+                {setOptions.length > 0 ? (
+                  <Select
+                    value={editData.set || ''}
+                    onValueChange={(v) => updateEditField('set', v)}
+                  >
+                    <SelectTrigger id="edit-set">
+                      <SelectValue placeholder="Select set" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {setOptions.map((s) => (
+                        <SelectItem key={s} value={s}>{s}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <Input id="edit-set" value={editData.set || ''} onChange={e => updateEditField('set', e.target.value)} />
+                )}
+              </div>
+              <div>
+                <Label htmlFor="edit-collection">Collection</Label>
+                {collectionOptions.length > 0 ? (
+                  <Select
+                    value={editData.collection || ''}
+                    onValueChange={(v) => updateEditField('collection', v)}
+                  >
+                    <SelectTrigger id="edit-collection">
+                      <SelectValue placeholder="Select collection" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {collectionOptions.map((c) => (
+                        <SelectItem key={c} value={c}>{c}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <Input id="edit-collection" value={editData.collection || ''} onChange={e => updateEditField('collection', e.target.value)} />
+                )}
+              </div>
+              <div>
+                <Label>Parallel</Label>
+                <FoilTypeSelect
+                  brand={editData.brand}
+                  year={editData.year}
+                  collection={editData.collection}
+                  set={editData.set}
+                  value={editData.foilType || ''}
+                  isNumbered={!!editData.isNumbered}
+                  onChange={(foilType) => {
+                    updateEditField('foilType', foilType || null);
+                    updateEditField('isFoil', !!foilType);
+                  }}
+                />
+              </div>
+              <div>
+                <Label htmlFor="edit-serialNumber">Serial #</Label>
+                <Input id="edit-serialNumber" value={editData.serialNumber || ''} onChange={e => updateEditField('serialNumber', e.target.value)} />
+              </div>
+              <div>
+                <Label htmlFor="edit-variant">Variant</Label>
+                <Input
+                  id="edit-variant"
+                  value={editData.variant || ''}
+                  onChange={e => updateEditField('variant', e.target.value)}
+                  placeholder="e.g. SSP, Photo Variation"
+                />
+              </div>
+              <div className="flex items-center gap-2 pt-1">
+                <input
+                  type="checkbox"
+                  id="edit-rookieCard"
+                  checked={!!editData.isRookieCard}
+                  onChange={e => updateEditField('isRookieCard', e.target.checked)}
+                  className="h-4 w-4 rounded border-slate-300 accent-blue-600"
+                />
+                <Label htmlFor="edit-rookieCard" className="cursor-pointer">Rookie Card</Label>
               </div>
             </div>
           ) : (

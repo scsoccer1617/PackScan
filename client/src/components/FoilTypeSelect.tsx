@@ -9,12 +9,17 @@ interface FoilTypeSelectProps {
   set?: string;
   value: string;
   onChange: (value: string) => void;
+  // When provided, restricts the dropdown to parallels matching the card's
+  // serialization status. `false` (or undefined → defaults to false here when
+  // the consumer wires it up) shows only non-serialized parallels — the
+  // user-confirmed expectation when the scanned card has no /xxx serial.
+  isNumbered?: boolean;
 }
 
 const CUSTOM_VALUE = "__custom__";
 const NONE_VALUE   = "__none__";
 
-export default function FoilTypeSelect({ brand, year, collection, set, value, onChange }: FoilTypeSelectProps) {
+export default function FoilTypeSelect({ brand, year, collection, set, value, onChange, isNumbered }: FoilTypeSelectProps) {
   const [options, setOptions] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [fetched, setFetched] = useState(false);
@@ -34,6 +39,10 @@ export default function FoilTypeSelect({ brand, year, collection, set, value, on
         const params = new URLSearchParams({ brand, year: year.toString() });
         if (collection) params.set("collection", collection);
         if (set) params.set("set", set);
+        // Default: when isNumbered is unspecified or false, only show
+        // non-serialized parallels. Numbered cards explicitly opt in via
+        // serialStatus=numbered so the dropdown shows /xxx options.
+        params.set("serialStatus", isNumbered ? "numbered" : "none");
         const resp = await fetch(`/api/card-variations/options?${params}`);
         if (resp.ok) {
           const data = await resp.json();

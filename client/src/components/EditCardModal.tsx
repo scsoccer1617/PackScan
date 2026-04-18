@@ -14,6 +14,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import EbayValueLookup from "./EbayValueLookup";
 import ServerEbayLookup from "./ServerEbayLookup";
+import FoilTypeSelect from "./FoilTypeSelect";
 
 interface EditCardModalProps {
   card?: CardWithRelations | null;
@@ -248,7 +249,13 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
         
         <Form {...form}>
           <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-6">
-            {/* Sport Field */}
+            {/* Field order (per UX preference):
+                  Sport · First Name · Last Name · Year · Brand · Card # ·
+                  Set · Collection · Parallel · Serial # · Variant · Rookie Card
+                Each field is on its own row (full-width) so Set is unambiguously
+                ABOVE Collection and Parallel ABOVE Serial #. */}
+
+            {/* Sport */}
             <div className="form-grid">
               <FormField
                 control={form.control}
@@ -277,8 +284,8 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
                 )}
               />
             </div>
-            
-            {/* Player Name Fields */}
+
+            {/* First Name + Last Name (kept side-by-side as a natural pair) */}
             <div className="form-grid">
               <FormField
                 control={form.control}
@@ -293,7 +300,7 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
                   </FormItem>
                 )}
               />
-              
+
               <FormField
                 control={form.control}
                 name="playerLastName"
@@ -308,8 +315,30 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
                 )}
               />
             </div>
-            
-            {/* Brand Field */}
+
+            {/* Year */}
+            <div className="form-grid">
+              <FormField
+                control={form.control}
+                name="year"
+                render={({ field }) => (
+                  <FormItem className="col-span-1 md:col-span-2">
+                    <FormLabel>Year <span className="text-red-500">*</span></FormLabel>
+                    <FormControl>
+                      <Input
+                        type="number"
+                        placeholder="e.g. 2024"
+                        {...field}
+                        onChange={(e) => field.onChange(parseInt(e.target.value) || '')}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+
+            {/* Brand */}
             <div className="form-grid">
               <FormField
                 control={form.control}
@@ -338,12 +367,26 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
                 )}
               />
             </div>
-            
-            {/* Set and Collection Fields (DB-driven, filtered by Brand + Year + Player).
-                Set is shown ABOVE Collection per UX preference: most users know
-                the product set name (e.g. "Topps Series 1") and pick collection
-                second. Both dropdowns include an "Other" option that reveals a
-                free-text input for values not in the catalogue. */}
+
+            {/* Card Number */}
+            <div className="form-grid">
+              <FormField
+                control={form.control}
+                name="cardNumber"
+                render={({ field }) => (
+                  <FormItem className="col-span-1 md:col-span-2">
+                    <FormLabel>Card Number</FormLabel>
+                    <FormControl>
+                      <Input placeholder="e.g. 42, BP-12" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+
+            {/* Set (DB-driven, filtered by Brand + Year + Player). Includes
+                an "Other" option that reveals a free-text input. */}
             <div className="form-grid">
               <FormField
                 control={form.control}
@@ -352,7 +395,7 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
                   const showInput = setOther || setOptions.length === 0
                     || (!!field.value && !setOptions.includes(field.value));
                   return (
-                    <FormItem>
+                    <FormItem className="col-span-1 md:col-span-2">
                       <FormLabel>Set</FormLabel>
                       {!showInput ? (
                         <Select
@@ -392,7 +435,10 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
                   );
                 }}
               />
+            </div>
 
+            {/* Collection (DB-driven). Includes "Other". */}
+            <div className="form-grid">
               <FormField
                 control={form.control}
                 name="collection"
@@ -400,7 +446,7 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
                   const showInput = collectionOther || collectionOptions.length === 0
                     || (!!field.value && !collectionOptions.includes(field.value));
                   return (
-                    <FormItem>
+                    <FormItem className="col-span-1 md:col-span-2">
                       <FormLabel>Collection</FormLabel>
                       {!showInput ? (
                         <Select
@@ -442,70 +488,93 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
               />
             </div>
 
-            {/* Card Number Field */}
+            {/* Parallel — only shows parallels matching the card's serialization
+                status (defaults to non-serialized when not numbered) */}
             <div className="form-grid">
               <FormField
                 control={form.control}
-                name="cardNumber"
+                name="foilType"
                 render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Card Number</FormLabel>
+                  <FormItem className="col-span-1 md:col-span-2">
+                    <FormLabel>Parallel</FormLabel>
                     <FormControl>
-                      <Input placeholder="e.g. 42, BP-12" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
-            
-            {/* Year and Variant Fields */}
-            <div className="form-grid">
-              <FormField
-                control={form.control}
-                name="year"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Year <span className="text-red-500">*</span></FormLabel>
-                    <FormControl>
-                      <Input 
-                        type="number" 
-                        placeholder="e.g. 2024" 
-                        {...field} 
-                        onChange={(e) => field.onChange(parseInt(e.target.value) || '')}
+                      <FoilTypeSelect
+                        brand={watchedBrand}
+                        year={watchedYear as number | undefined}
+                        collection={watchedCollection}
+                        set={watchedSet}
+                        value={(field.value as string) || ''}
+                        isNumbered={!!form.watch('isNumbered')}
+                        onChange={(foilType) => {
+                          field.onChange(foilType);
+                          form.setValue('isFoil' as any, !!foilType);
+                        }}
                       />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
               />
-              
+            </div>
+
+            {/* Serial Number */}
+            <div className="form-grid">
               <FormField
                 control={form.control}
-                name="variant"
+                name="serialNumber"
                 render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Variant</FormLabel>
+                  <FormItem className="col-span-1 md:col-span-2">
+                    <FormLabel>Serial Number</FormLabel>
                     <FormControl>
-                      <Input placeholder="e.g. Refractor, Parallel" {...field} />
+                      <Input placeholder="e.g. 42/100" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
               />
             </div>
-            
-            {/* Serial Number and Condition Fields */}
+
+            {/* Variant (free-text only) */}
             <div className="form-grid">
               <FormField
                 control={form.control}
-                name="serialNumber"
+                name="variant"
                 render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Serial Number</FormLabel>
+                  <FormItem className="col-span-1 md:col-span-2">
+                    <FormLabel>Variant</FormLabel>
                     <FormControl>
-                      <Input placeholder="e.g. 42/100" {...field} />
+                      <Input placeholder="e.g. SSP, Photo Variation" {...field} />
                     </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+
+            {/* Condition */}
+            <div className="form-grid">
+              <FormField
+                control={form.control}
+                name="condition"
+                render={({ field }) => (
+                  <FormItem className="col-span-1 md:col-span-2">
+                    <FormLabel>Condition <span className="text-red-500">*</span></FormLabel>
+                    <Select
+                      onValueChange={field.onChange}
+                      defaultValue={field.value}
+                      value={field.value}
+                    >
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select condition" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {["PSA 10", "PSA 9", "PSA 8", "PSA 7", "PSA 6", "PSA 5", "Raw-Mint", "Raw-Good", "Raw-Poor"].map((condition) => (
+                          <SelectItem key={condition} value={condition}>{condition}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                     <FormMessage />
                   </FormItem>
                 )}
