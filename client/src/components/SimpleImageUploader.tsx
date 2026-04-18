@@ -69,26 +69,28 @@ export default function SimpleImageUploader({
         )}
       </div>
 
-      <div className="mt-2 flex space-x-2">
+      <div className="mt-2 grid grid-cols-2 gap-2">
         <Button
           type="button"
           onClick={() => setCameraOpen(true)}
           variant="default"
           size="sm"
-          className="flex-1 bg-slate-800 hover:bg-slate-900 active:bg-black text-white"
+          className="min-w-0 bg-slate-800 hover:bg-slate-900 active:bg-black text-white"
         >
-          <Camera className="h-4 w-4 mr-1" />
-          {existingImage ? `Retake ${replaceLabel}` : 'Take Photo'}
+          <Camera className="h-4 w-4 mr-1 shrink-0" />
+          <span className="truncate">
+            {existingImage ? `Retake ${replaceLabel}` : 'Take Photo'}
+          </span>
         </Button>
         <Button
           type="button"
           onClick={() => fileInputRef.current?.click()}
           variant="outline"
           size="sm"
-          className="flex-1"
+          className="min-w-0"
         >
-          <Upload className="h-4 w-4 mr-1" />
-          Photo Library
+          <Upload className="h-4 w-4 mr-1 shrink-0" />
+          <span className="truncate">Photo Library</span>
         </Button>
       </div>
 
