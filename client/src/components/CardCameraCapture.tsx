@@ -13,10 +13,14 @@ const CARD_ASPECT = 2.5 / 3.5;
 
 const STABILITY_THRESHOLD = 14;
 const STABILITY_FRAMES_REQUIRED = 5;
-const STABILITY_WARMUP_MS = 800;
+const STABILITY_WARMUP_MS = 1400;
 const SAMPLE_INTERVAL_MS = 120;
-const SAMPLE_W = 64;
+const SAMPLE_W = 96;
 const SAMPLE_H = Math.round(SAMPLE_W / CARD_ASPECT);
+// Minimum mean absolute horizontal-neighbour difference, computed on
+// the grayscale crop. Higher = more in-focus edges. Empirically a
+// well-focused card sits around 15-30; a blurry one is < 6.
+const SHARPNESS_THRESHOLD = 8;
 
 export default function CardCameraCapture({
   open,
@@ -40,6 +44,8 @@ export default function CardCameraCapture({
   const [stability, setStability] = useState(0);
   const [preview, setPreview] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
+  const [focusing, setFocusing] = useState(false);
+  const focusTapRef = useRef<{ x: number; y: number } | null>(null);
 
   const stopStream = useCallback(() => {
     if (sampleTimerRef.current !== null) {
@@ -163,6 +169,24 @@ export default function CardCameraCapture({
     );
     const data = ctx.getImageData(0, 0, SAMPLE_W, SAMPLE_H).data;
 
+    // Compute sharpness on this frame: mean absolute horizontal-neighbour
+    // difference of the grayscale crop. Camera autofocus produces a
+    // characteristic ramp from low → high values as it locks focus.
+    let sharpSum = 0;
+    let sharpCount = 0;
+    for (let y = 0; y < SAMPLE_H; y++) {
+      for (let x = 1; x < SAMPLE_W; x++) {
+        const i = (y * SAMPLE_W + x) * 4;
+        const ip = i - 4;
+        const g = (data[i] + data[i + 1] + data[i + 2]) / 3;
+        const gp = (data[ip] + data[ip + 1] + data[ip + 2]) / 3;
+        sharpSum += Math.abs(g - gp);
+        sharpCount++;
+      }
+    }
+    const sharpness = sharpCount ? sharpSum / sharpCount : 0;
+    const isSharp = sharpness >= SHARPNESS_THRESHOLD;
+
     const prev = prevSampleRef.current;
     if (prev && prev.length === data.length) {
       let diffSum = 0;
@@ -175,7 +199,7 @@ export default function CardCameraCapture({
       }
       const meanDiff = diffSum / count;
       const isWarm = performance.now() >= warmupAtRef.current;
-      if (isWarm && meanDiff < STABILITY_THRESHOLD) {
+      if (isWarm && meanDiff < STABILITY_THRESHOLD && isSharp) {
         stableCountRef.current += 1;
       } else {
         stableCountRef.current = 0;
@@ -210,6 +234,58 @@ export default function CardCameraCapture({
       }
     };
   }, [open, preview, error, sampleStability]);
+
+  // When the user hits "Retake", the <video> element is unmounted (it's
+  // hidden while preview is shown) and re-mounted with no srcObject. Re-
+  // attach the existing live stream so the viewfinder doesn't go black.
+  useEffect(() => {
+    if (!open || preview) return;
+    const video = videoRef.current;
+    const stream = streamRef.current;
+    if (video && stream && video.srcObject !== stream) {
+      video.srcObject = stream;
+      video.play().catch(() => {});
+    }
+  }, [open, preview]);
+
+  const handleTapFocus = useCallback(async (e: React.MouseEvent<HTMLDivElement>) => {
+    const stream = streamRef.current;
+    if (!stream) return;
+    const track = stream.getVideoTracks()[0];
+    if (!track) return;
+    const caps: any = track.getCapabilities ? track.getCapabilities() : {};
+    if (!caps.focusMode || !caps.focusMode.includes('single-shot')) {
+      // Best-effort focus nudge: brief pause + resume often re-triggers AF
+      // on iOS Safari (which doesn't support pointsOfInterest yet).
+      setFocusing(true);
+      try {
+        await track.applyConstraints({ advanced: [{ focusMode: 'continuous' } as any] });
+      } catch {}
+      window.setTimeout(() => setFocusing(false), 700);
+      return;
+    }
+    const container = containerRef.current;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / rect.width;
+    const y = (e.clientY - rect.top) / rect.height;
+    focusTapRef.current = { x, y };
+    setFocusing(true);
+    try {
+      await track.applyConstraints({
+        advanced: [{
+          focusMode: 'single-shot',
+          pointsOfInterest: [{ x, y }],
+        } as any],
+      });
+    } catch {}
+    window.setTimeout(() => setFocusing(false), 700);
+    // Reset stability counter so a focus shift doesn't trigger an
+    // immediate auto-capture on a half-focused frame.
+    stableCountRef.current = 0;
+    setStability(0);
+    warmupAtRef.current = performance.now() + 600;
+  }, []);
 
   const handleConfirm = () => {
     if (preview) {
@@ -266,7 +342,11 @@ export default function CardCameraCapture({
         </Button>
       </div>
 
-      <div ref={containerRef} className="relative flex-1 overflow-hidden bg-black">
+      <div
+        ref={containerRef}
+        className="relative flex-1 overflow-hidden bg-black"
+        onClick={!preview ? handleTapFocus : undefined}
+      >
         {!preview && (
           <video
             ref={videoRef}
@@ -285,12 +365,26 @@ export default function CardCameraCapture({
         )}
 
         {!preview && (
+          <div
+            className="absolute left-0 right-0 top-2 text-center text-white text-xs px-4 z-10 drop-shadow pointer-events-none"
+          >
+            {focusing
+              ? 'Focusing…'
+              : stabilityPct >= 100
+                ? 'Capturing…'
+                : stabilityPct > 30
+                  ? 'Hold steady…'
+                  : 'Align card inside the brackets · tap to focus'}
+          </div>
+        )}
+
+        {!preview && (
           <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
             <div
               ref={overlayRef}
               className="relative"
               style={{
-                width: 'min(80vw, calc((100vh - 220px) * (2.5 / 3.5)))',
+                width: 'min(78vw, calc((100vh - 240px) * (2.5 / 3.5)))',
                 aspectRatio: '2.5 / 3.5',
               }}
             >
@@ -311,15 +405,8 @@ export default function CardCameraCapture({
               <CornerBracket pos="tr" active={stability > 0.3} />
               <CornerBracket pos="bl" active={stability > 0.3} />
               <CornerBracket pos="br" active={stability > 0.3} />
-              <div className="absolute -top-7 left-0 right-0 text-center text-white text-xs drop-shadow">
-                {stabilityPct >= 100
-                  ? 'Capturing…'
-                  : stabilityPct > 30
-                    ? 'Hold steady…'
-                    : 'Align card inside the brackets'}
-              </div>
               <div
-                className="absolute -bottom-3 left-0 h-1.5 bg-emerald-400 rounded-full transition-[width] duration-150 shadow-[0_0_6px_rgba(52,211,153,0.8)]"
+                className="absolute left-0 right-0 -bottom-4 h-1.5 bg-emerald-400 rounded-full transition-[width] duration-150 shadow-[0_0_6px_rgba(52,211,153,0.8)]"
                 style={{ width: `${stabilityPct}%` }}
               />
             </div>
