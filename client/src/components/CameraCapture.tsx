@@ -18,11 +18,18 @@ export default function CameraCapture({ onImageCapture, side }: CameraCapturePro
   const startCamera = async () => {
     try {
       setErrorMessage(null);
-      const mediaStream = await navigator.mediaDevices.getUserMedia({ 
-        video: { 
+      // Request the highest practical resolution the device's rear camera
+      // can deliver. 1280×720 was far too small to OCR small foil/hand-stamped
+      // serial numbers — by the time the JPEG reached the server (≈900 px wide)
+      // a 5 mm foil stamp was only ~15 px tall, well below Vision API's text
+      // recovery threshold. Asking for 4K lets modern phones return their full
+      // sensor resolution; lower-end devices fall back automatically thanks to
+      // `ideal` (not `min`).
+      const mediaStream = await navigator.mediaDevices.getUserMedia({
+        video: {
           facingMode: 'environment',
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
+          width: { ideal: 3840 },
+          height: { ideal: 2160 }
         },
         audio: false
       });
@@ -63,7 +70,9 @@ export default function CameraCapture({ onImageCapture, side }: CameraCapturePro
       const ctx = canvas.getContext('2d');
       if (ctx) {
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        const imageData = canvas.toDataURL('image/jpeg');
+        // Encode at quality 0.95 (vs default ~0.92) so JPEG compression
+        // doesn't smear small foil characters.
+        const imageData = canvas.toDataURL('image/jpeg', 0.95);
         onImageCapture(imageData);
         setHasCapture(true);
         stopCamera();
@@ -104,7 +113,10 @@ export default function CameraCapture({ onImageCapture, side }: CameraCapturePro
           const ctx = canvas.getContext('2d');
           if (ctx) {
             ctx.drawImage(img, 0, 0);
-            const optimizedImageData = canvas.toDataURL('image/jpeg', 0.8);
+            // Re-encode at 0.95 (was 0.8). Quality 0.8 was destroying small
+            // foil/hand-stamped details on uploaded photos before they ever
+            // reached Vision OCR.
+            const optimizedImageData = canvas.toDataURL('image/jpeg', 0.95);
             onImageCapture(optimizedImageData);
             setHasCapture(true);
           }
