@@ -11,6 +11,41 @@ interface CardCameraCaptureProps {
 
 const CARD_ASPECT = 2.5 / 3.5;
 
+// Shared MediaStream cached at module scope so reopening the camera (e.g.
+// front → back capture chain) reuses the same hardware stream and the
+// browser never has to re-prompt for permission within a session.
+let sharedStream: MediaStream | null = null;
+let sharedStreamReleaseTimer: number | null = null;
+
+function isStreamLive(stream: MediaStream | null): stream is MediaStream {
+  if (!stream) return false;
+  const tracks = stream.getVideoTracks();
+  return tracks.length > 0 && tracks.every(t => t.readyState === 'live');
+}
+
+function releaseSharedStreamSoon() {
+  if (sharedStreamReleaseTimer !== null) {
+    window.clearTimeout(sharedStreamReleaseTimer);
+  }
+  // Hold the stream for a couple of minutes so the user can take front and
+  // back without hitting another camera-init delay. After that we stop the
+  // tracks to release the camera light/hardware.
+  sharedStreamReleaseTimer = window.setTimeout(() => {
+    if (sharedStream) {
+      sharedStream.getTracks().forEach(t => t.stop());
+      sharedStream = null;
+    }
+    sharedStreamReleaseTimer = null;
+  }, 120000);
+}
+
+function cancelSharedStreamRelease() {
+  if (sharedStreamReleaseTimer !== null) {
+    window.clearTimeout(sharedStreamReleaseTimer);
+    sharedStreamReleaseTimer = null;
+  }
+}
+
 export default function CardCameraCapture({
   open,
   title = 'Take Photo',
@@ -29,20 +64,36 @@ export default function CardCameraCapture({
   const [starting, setStarting] = useState(false);
   const [focusing, setFocusing] = useState(false);
 
-  const stopStream = useCallback(() => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(t => t.stop());
-      streamRef.current = null;
-    }
+  const detachStream = useCallback(() => {
+    // Keep the shared stream alive — just detach it from the <video> so the
+    // next open re-attaches without another getUserMedia call (which is what
+    // makes some browsers re-prompt for permission).
     if (videoRef.current) {
       videoRef.current.srcObject = null;
+    }
+    streamRef.current = null;
+    if (isStreamLive(sharedStream)) {
+      releaseSharedStreamSoon();
     }
   }, []);
 
   const startStream = useCallback(async () => {
     setError(null);
-    setStarting(true);
     capturedRef.current = false;
+    cancelSharedStreamRelease();
+
+    // Reuse the cached stream if it's still live — avoids the OS prompt and
+    // the "Starting camera…" delay between front and back capture.
+    if (isStreamLive(sharedStream)) {
+      streamRef.current = sharedStream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = sharedStream;
+        await videoRef.current.play().catch(() => {});
+      }
+      return;
+    }
+
+    setStarting(true);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
@@ -52,6 +103,7 @@ export default function CardCameraCapture({
         },
         audio: false,
       });
+      sharedStream = stream;
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
@@ -61,8 +113,8 @@ export default function CardCameraCapture({
       console.error('Camera error:', err);
       setError(
         err?.name === 'NotAllowedError'
-          ? 'Camera permission denied. Allow camera access or use "Upload from library".'
-          : 'Could not access camera. You can still upload from your library.'
+          ? 'We need camera access to scan your card. Tap the camera icon in your browser’s address bar to allow it, or use “Library” to upload a photo instead.'
+          : 'We couldn’t turn on your camera. Try “Library” to upload a photo of your card instead.'
       );
     } finally {
       setStarting(false);
@@ -120,15 +172,15 @@ export default function CardCameraCapture({
 
   useEffect(() => {
     if (!open) {
-      stopStream();
+      detachStream();
       setPreview(null);
       return;
     }
     startStream();
     return () => {
-      stopStream();
+      detachStream();
     };
-  }, [open, startStream, stopStream]);
+  }, [open, startStream, detachStream]);
 
   // When the user hits "Retake", the <video> element is unmounted (it's
   // hidden while preview is shown) and re-mounted with no srcObject. Re-
@@ -216,7 +268,7 @@ export default function CardCameraCapture({
           size="icon"
           className="text-white hover:bg-white/10"
           onClick={() => {
-            stopStream();
+            detachStream();
             setPreview(null);
             onClose();
           }}

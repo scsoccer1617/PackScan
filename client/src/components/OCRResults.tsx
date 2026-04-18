@@ -526,6 +526,7 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
                   <span className="text-slate-700">{data.cmpNumber}</span>
                 </div>
               )}
+              <hr className="border-t border-slate-200 my-2" />
               <div className="text-lg">
                 <span className="font-semibold text-slate-800">Set: </span>
                 <span className="text-slate-700">{data.set || 'Not detected'}</span>

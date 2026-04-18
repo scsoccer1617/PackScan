@@ -459,6 +459,7 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
                     <span className="text-slate-700">{cardData.cmpNumber}</span>
                   </div>
                 )}
+                <hr className="border-t border-slate-200 my-2" />
                 <div className="text-base">
                   <span className="font-semibold text-slate-800">Set: </span>
                   <span className="text-slate-700">{cardData.set || 'Not detected'}</span>
