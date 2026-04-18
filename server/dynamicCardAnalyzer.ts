@@ -288,6 +288,25 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
       'REGISTERED', 'COMPANY', 'INC', 'VISIT', 'CODE', 'WWW', 'COM',
       'THE', 'AND', 'FOR', 'WITH', 'FROM', 'THAT', 'THIS', 'WAS', 'OVER', 'WENT',
       'KEPT', 'GOING', 'REACHED', 'BASE', 'CLIP', 'THOSE', 'MONTHS', 'PLAYERS',
+      // Common short English stopwords — block bogus 2-word "names" pulled
+      // from biographical prose on the card back (e.g. "IS NO" from
+      // "JERSEY NUMBER IS NO. 00", "HE WAS", "IT IS", "AS A").
+      'IS', 'NO', 'IN', 'ON', 'AT', 'TO', 'BY', 'IT', 'HE', 'AS', 'OR', 'AN',
+      'IF', 'SO', 'UP', 'US', 'WE', 'MY', 'ME', 'AM', 'GO', 'DO', 'BE', 'HIS',
+      'HER', 'HAS', 'HAD', 'BUT', 'WHO', 'WHY', 'HOW', 'OUR', 'OUT', 'NOT',
+      'YES', 'YET', 'ALL', 'ANY', 'NOW', 'TOO', 'WAS', 'ARE', 'WHEN', 'WHERE',
+      'WHAT', 'BEEN', 'BEING', 'HAVE', 'HAVING', 'WILL', 'WOULD', 'COULD',
+      'SHOULD', 'WHILE', 'BECAUSE', 'AFTER', 'BEFORE', 'DURING', 'INTO',
+      // Biographical / narrative words that commonly appear in card-back
+      // prose — generic enough to not collide with real player names.
+      'PREFERRED', 'JERSEY', 'NUMBER', 'OPTED', 'JOINED', 'MADE', 'SWITCH',
+      'RESPECT', 'DONS', 'DIGITS', 'FRANCHISE', 'ICONIC', 'HEADED', 'HUMANOID',
+      'EARNED', 'INDUCTED', 'MASCOT', 'HALL', 'FAME', 'INTENTIONALLY', 'WALKED',
+      'RECEIVED', 'KIND', 'TREATMENT', 'GAME', 'RECENTLY', 'TALK', 'ABOUT',
+      'PLAYED', 'PLAYING', 'BECAME', 'NAMED', 'WINNING', 'WINNER', 'AWARD',
+      'CAREER', 'SEASON', 'TEAM', 'TEAMS', 'TIMES', 'YEAR', 'YEARS', 'MOST',
+      'ONLY', 'FIVE', 'FOUR', 'NINE', 'EIGHT', 'SEVEN', 'TEN', 'HUNDRED',
+      'THOUSAND', 'MILLION', 'AGAINST', 'SINCE', 'UNTIL', 'THROUGH',
       'JUNE', 'JULY', 'MAY', 'AUGUST', 'SEPTEMBER', 'OCTOBER',
       'HUGE', 'PART', 'LEADOFF', 'MAN', 'OBP', 'ERA', 'AVG', 'RBI', 'WAR',
       'CHOICE', 'WEB', 'PLAYERA', 'TAPPS', 'XTOPPS', 'ITALICS', 'LEADER', 'TIE',
