@@ -965,9 +965,17 @@ async function combineCardResults(
           // false-positive on a base Aaron Judge). Require corroborating
           // evidence — a serial number, OR the colour name appearing in the
           // OCR text — before claiming the visual colour is the parallel.
+          // Word-boundary match — `ocrTextLower.includes('red')` would
+          // false-positive on common card-back boilerplate like
+          // "REGISTERED TRADEMARK" (contains "red" inside "REGISTERED"),
+          // "CREDIT", "PREDICTED", etc. Require the color keyword to
+          // appear as a standalone word.
           const ocrTextLower = (combinedOcrText || '').toLowerCase();
           const colorNameAppearsInOcr = colorKeywords.length > 0 &&
-            colorKeywords.some(kw => ocrTextLower.includes(kw));
+            colorKeywords.some(kw => {
+              const safe = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+              return new RegExp(`\\b${safe}\\b`, 'i').test(ocrTextLower);
+            });
           const hasCorroboratingEvidence = !!combined.isNumbered || colorNameAppearsInOcr;
 
           if (colorMatchFound && (hasStrongIndicators || isVividFoilColor) && hasCorroboratingEvidence) {
