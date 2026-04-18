@@ -74,7 +74,7 @@ export default function ParallelPickerSheet({
     <Sheet open={open}>
       <SheetContent
         side="bottom"
-        className="max-h-[85vh] flex flex-col rounded-t-2xl"
+        className="max-h-[85dvh] flex flex-col rounded-t-2xl"
         onInteractOutside={() => {}}
       >
         <SheetHeader className="shrink-0 pb-2">

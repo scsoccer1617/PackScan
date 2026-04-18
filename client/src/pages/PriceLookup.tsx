@@ -134,17 +134,26 @@ async function fetchParallels(
   if (collection) preciseParams.collection = collection;
   if (set) preciseParams.set = set;
 
-  const empty: { variationOrParallel: string; serialNumber: string | null }[] = [];
-  const [precise, broad] = await Promise.all([
-    Object.keys(preciseParams).length > 0 ? fetchOne(preciseParams) : Promise.resolve(empty),
-    fetchOne({}), // brand+year only — picks up cross-collection parallels
-  ]);
+  // Prefer the collection/set-precise parallels. The broad brand+year query
+  // is ONLY a fallback for when the catalog has no entries for the precise
+  // collection/set combo (e.g. cross-collection parallels like Topps "Holiday
+  // Polka Dots" filed under a different collection than the base card).
+  // Mixing them unconditionally drags in every Topps 2025 parallel from
+  // Chrome / Allen & Ginter / Heritage / etc., which is exactly what we
+  // don't want when the picker is asking "which Stars of MLB parallel is
+  // this?".
+  let raw: { variationOrParallel: string; serialNumber: string | null }[] = [];
+  if (Object.keys(preciseParams).length > 0) {
+    raw = await fetchOne(preciseParams);
+  }
+  if (raw.length === 0) {
+    raw = await fetchOne({}); // brand+year only — last-resort fallback
+  }
 
-  // Deduplicate by parallel name, keeping the precise list first so it
-  // appears at the top of the picker.
+  // Deduplicate by parallel name.
   const seen = new Set<string>();
   const merged: ParallelOption[] = [];
-  for (const o of [...precise, ...broad]) {
+  for (const o of raw) {
     if (!seen.has(o.variationOrParallel)) {
       seen.add(o.variationOrParallel);
       merged.push({ variationOrParallel: o.variationOrParallel, serialNumber: o.serialNumber });
