@@ -14,6 +14,7 @@ interface UserSheet { id: number; googleSheetId: string; title: string; isDefaul
 interface SheetsResponse { sheets: UserSheet[]; activeSheetId: number | null; }
 
 interface AppendCardPayload {
+  sport?: string | null;
   year?: number | string | null;
   brand?: string | null;
   collection?: string | null;
@@ -41,16 +42,9 @@ interface Props {
   backImage?: string;
 }
 
-// Sheets cells are capped at 50,000 chars. Captured card photos are base64
-// "data:" URIs hundreds of KB long, which blow past that limit. Only forward
-// the image when it's a real hosted URL we can drop into the sheet.
-function asHostedUrl(value?: string): string | undefined {
-  if (!value) return undefined;
-  return /^https?:\/\//i.test(value) ? value : undefined;
-}
-
 function buildAppendPayload(cardData: Partial<CardFormValues>, averageValue: number, searchUrl?: string, frontImage?: string, backImage?: string): AppendCardPayload {
   return {
+    sport: cardData.sport ?? null,
     year: cardData.year ?? null,
     brand: cardData.brand ?? null,
     collection: cardData.collection ?? null,
@@ -65,8 +59,11 @@ function buildAppendPayload(cardData: Partial<CardFormValues>, averageValue: num
     isNumbered: cardData.isNumbered ?? null,
     foilType: cardData.foilType ?? null,
     averagePrice: averageValue || null,
-    frontImageUrl: asHostedUrl(frontImage),
-    backImageUrl: asHostedUrl(backImage),
+    // Forward the captured images as-is — the server will persist any
+    // "data:" URIs to /uploads and write the resulting hosted URL into the
+    // sheet. Real http(s) URLs pass through unchanged.
+    frontImageUrl: frontImage,
+    backImageUrl: backImage,
     ebaySearchUrl: searchUrl,
   };
 }

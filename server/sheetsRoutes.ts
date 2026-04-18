@@ -6,6 +6,7 @@ import {
   renameSheet, unlinkSheet, appendCardRow, NotConnectedError,
 } from './googleSheets';
 import { getEbaySearchUrl } from './ebayService';
+import { storage } from './storage';
 
 export function registerSheetRoutes(app: Express) {
   app.get('/api/sheets', requireAuth, async (req, res) => {
@@ -73,6 +74,7 @@ export function registerSheetRoutes(app: Express) {
   const appendSchema = z.object({
     sheetId: z.number().optional(),
     card: z.object({
+      sport: z.string().optional().nullable(),
       year: z.union([z.number(), z.string()]).optional().nullable(),
       brand: z.string().optional().nullable(),
       collection: z.string().optional().nullable(),
@@ -94,6 +96,25 @@ export function registerSheetRoutes(app: Express) {
       ebaySearchUrl: z.string().optional().nullable(),
     }),
   });
+
+  // The client may hand us captured photos as raw "data:image/...;base64,..."
+  // URIs. Persist them to /uploads so we can write a real, openable link into
+  // the spreadsheet (and avoid the 50,000 char-per-cell ceiling).
+  async function persistDataUriIfNeeded(
+    value: string | null | undefined,
+    label: 'front' | 'back',
+  ): Promise<string | null | undefined> {
+    if (!value || !value.startsWith('data:')) return value;
+    try {
+      const m = /^data:image\/([a-zA-Z0-9+.-]+);base64,/i.exec(value);
+      const ext = (m?.[1] || 'jpg').toLowerCase().replace('jpeg', 'jpg');
+      const filename = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${label}.${ext}`;
+      return await storage.saveImage(value, filename);
+    } catch (err) {
+      console.error(`[sheets] failed to persist ${label} image:`, err);
+      return null;
+    }
+  }
 
   app.post('/api/sheets/append', requireAuth, async (req, res) => {
     const userId = (req.user as any).id as number;
@@ -117,7 +138,10 @@ export function registerSheetRoutes(app: Express) {
         player, c.cardNumber || '', c.brand || '', yr, c.collection || '', '',
         !!c.isNumbered, c.foilType || '', c.serialNumber || '',
       ) : '');
+      const frontStored = await persistDataUriIfNeeded(c.frontImageUrl, 'front');
+      const backStored = await persistDataUriIfNeeded(c.backImageUrl, 'back');
       const result = await appendCardRow(userId, {
+        sport: c.sport ?? null,
         year: c.year ?? null,
         brand: c.brand ?? null,
         collection: c.collection ?? null,
@@ -131,8 +155,8 @@ export function registerSheetRoutes(app: Express) {
         isNumbered: c.isNumbered ?? false,
         foilType: c.foilType ?? null,
         averagePrice: c.averagePrice ?? null,
-        frontImageUrl: absolutize(c.frontImageUrl),
-        backImageUrl: absolutize(c.backImageUrl),
+        frontImageUrl: absolutize(frontStored),
+        backImageUrl: absolutize(backStored),
         ebaySearchUrl: ebayUrl,
       }, parsed.sheetId);
       res.json({ ok: true, sheet: result.sheet, sheetUrl: result.sheetUrl });

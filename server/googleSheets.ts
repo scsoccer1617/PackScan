@@ -7,9 +7,12 @@ import { users, userSheets, type User, type UserSheet } from '../shared/schema';
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_OAUTH_CLIENT_ID;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
 
+// Column order mirrors the on-screen "Card Information" panel so the sheet
+// reads the same way the app does. Keep buildRow() in lock-step.
 export const SHEET_HEADERS = [
-  'Date scanned', 'Year', 'Brand', 'Collection', 'Set', 'Card #', 'Player',
-  'Variation', 'Serial #', 'Rookie', 'Auto', 'Numbered', 'Foil type',
+  'Date scanned', 'Sport', 'Player', 'Year', 'Brand', 'Card #',
+  'Set', 'Collection', 'Parallel', 'Serial #', 'Variant',
+  'Rookie', 'Auto', 'Numbered',
   'Average eBay price', 'Front image link', 'Back image link', 'eBay search URL',
 ];
 
@@ -64,25 +67,33 @@ async function createSheetWithHeader(
     valueInputOption: 'RAW',
     requestBody: { values: [SHEET_HEADERS] },
   });
-  // Bold the header row
-  await sheets.spreadsheets.batchUpdate({
-    spreadsheetId,
-    requestBody: {
-      requests: [{
-        repeatCell: {
-          range: { sheetId: 0, startRowIndex: 0, endRowIndex: 1 },
-          cell: { userEnteredFormat: { textFormat: { bold: true } } },
-          fields: 'userEnteredFormat.textFormat.bold',
-        },
-      }, {
-        updateSheetProperties: {
-          properties: { sheetId: 0, gridProperties: { frozenRowCount: 1 } },
-          fields: 'gridProperties.frozenRowCount',
-        },
-      }],
-    },
-  });
+  // Header is intentionally left unformatted (no bold, no freeze) per user
+  // preference — they want a plain sheet they can style however they like.
   return { spreadsheetId, title: create.data.properties?.title || title };
+}
+
+// Idempotently ensure row 1 of an existing sheet matches SHEET_HEADERS. Run
+// before every append so legacy sheets created under an older column order
+// re-align to the current layout (otherwise data rows would land in the
+// wrong columns after we change the header).
+async function syncHeaderRow(oauth: OAuth2Client, spreadsheetId: string) {
+  const sheets = sheetsFor(oauth);
+  try {
+    const got = await sheets.spreadsheets.values.get({ spreadsheetId, range: '1:1' });
+    const current = (got.data.values?.[0] || []) as string[];
+    const matches =
+      current.length === SHEET_HEADERS.length &&
+      SHEET_HEADERS.every((h, i) => current[i] === h);
+    if (matches) return;
+    await sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: 'A1',
+      valueInputOption: 'RAW',
+      requestBody: { values: [SHEET_HEADERS] },
+    });
+  } catch (err) {
+    console.error('[googleSheets] syncHeaderRow failed:', err);
+  }
 }
 
 export async function ensureDefaultSheetForUser(userId: number) {
@@ -164,6 +175,7 @@ export async function unlinkSheet(userId: number, sheetRowId: number): Promise<b
 }
 
 export interface CardRowInput {
+  sport?: string | null;
   year?: number | string | null;
   brand?: string | null;
   collection?: string | null;
@@ -202,20 +214,22 @@ export function buildRow(input: CardRowInput): (string | number)[] {
     : (typeof input.averagePrice === 'number'
       ? input.averagePrice.toFixed(2)
       : String(input.averagePrice));
+  // Order MUST match SHEET_HEADERS exactly.
   return [
     dateScanned,
+    input.sport ?? '',
+    input.player ?? '',
     input.year ?? '',
     input.brand ?? '',
-    input.collection ?? '',
-    input.set ?? '',
     input.cardNumber ?? '',
-    input.player ?? '',
-    input.variation ?? '',
+    input.set ?? '',
+    input.collection ?? '',
+    input.foilType ?? '',
     input.serialNumber ?? '',
+    input.variation ?? '',
     fmtBool(input.isRookieCard),
     fmtBool(input.isAutographed),
     fmtBool(input.isNumbered),
-    input.foilType ?? '',
     price,
     safeCellValue(input.frontImageUrl),
     safeCellValue(input.backImageUrl),
@@ -243,6 +257,7 @@ export async function appendCardRow(
   }
   const { oauth } = await getOAuthClient(userId);
   const sheets = sheetsFor(oauth);
+  await syncHeaderRow(oauth, sheet.googleSheetId);
   const row = buildRow(card);
   await sheets.spreadsheets.values.append({
     spreadsheetId: sheet.googleSheetId,
