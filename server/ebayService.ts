@@ -760,6 +760,22 @@ export async function searchCardValues(
       'parallel', 'refractor', 'xfractor', 'rainbow', 'mojo', 'holo', 'holographic',
       'foilboard', 'sparkle', 'glitter', 'prizm', 'laser', 'atomic', 'crackle', 'shimmer',
       'foil',
+      // One-word foil compounds — `\bfoil\b` does NOT match "Holofoil" because
+      // it's a single token. Add the common compounds explicitly so titles like
+      // "2026 Topps Series 1 ... Holofoil & Confetti" get hard-filtered out of
+      // a base-card search instead of slipping through with just a -60 penalty.
+      'holofoil', 'foilfractor', 'superfractor',
+      // Topps "theme" parallels — these names are essentially never used on
+      // base cards, only on the holiday/event-themed parallel inserts
+      // (Easter, Spring Training, Mother's/Father's Day, Halloween, Holiday,
+      // 4th of July, Memorial Day, Independence Day, Black Friday, Cyber
+      // Monday, Pride). Confetti / Pattern are texture-named parallels that
+      // similarly only ever appear on parallel printings.
+      'easter', 'confetti', 'holiday', 'spring training',
+      'mothers day', "mother's day", 'fathers day', "father's day",
+      'memorial day', 'independence day', 'halloween',
+      '4th of july', 'fourth of july', 'black friday', 'cyber monday',
+      'pride', 'foil pattern', 'pattern foil',
       'gold refractor', 'black refractor', 'blue refractor', 'red refractor',
       'montgomery club'
     ];
