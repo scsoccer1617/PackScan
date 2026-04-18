@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
-import { Upload } from 'lucide-react';
+import { Camera, Upload } from 'lucide-react';
 import CardCameraCapture from './CardCameraCapture';
 
 interface SimpleImageUploaderProps {
