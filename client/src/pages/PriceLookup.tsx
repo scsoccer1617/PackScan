@@ -12,9 +12,16 @@ import { CardFormValues } from "@shared/schema";
 
 // Resize + JPEG-compress a dataURL before upload.
 // Caps the longer edge at maxPx and encodes at the given quality.
-// Google Vision reads text accurately from 1200px images; sending full-res
-// camera shots (often 3-8 MB) wastes upload time and Vision API bandwidth.
-async function compressImage(dataUrl: string, maxPx = 1200, quality = 0.82): Promise<Blob> {
+//
+// Previous limits (1200 px @ q=0.82) worked fine for the large foreground
+// text on a card (player name, brand banner, card number on the back) but
+// silently destroyed small foil/hand-stamped serial numbers: at 1200 px on
+// the long edge a 5 mm foil stamp shrinks to ~15 px tall, well below
+// Vision API's reliable text-recovery threshold, and quality 0.82 then
+// smears what little detail remains. Bumping to 2400 px @ q=0.92 roughly
+// quadruples the pixel area available for tiny features without making
+// uploads painful (typical scan now ~1.5 MB instead of ~370 KB).
+async function compressImage(dataUrl: string, maxPx = 2400, quality = 0.92): Promise<Blob> {
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
