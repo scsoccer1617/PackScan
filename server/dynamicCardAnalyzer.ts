@@ -823,6 +823,17 @@ function extractCardNumber(
         console.log(`[CardNum] Accepting "${matched}" via ${source} (${sideTag}, relaxed pass, normY=${nyStr}, ${region})`);
         return true;
       }
+      // Alphanumeric standalone tokens (e.g. US323, BD42, RC9, HC150) carry a
+      // letter prefix that statistically never appears in stat-table digits or
+      // jersey numbers. Trust them anywhere on the card — many sets (Topps
+      // Update, Bowman Draft, Heritage High Number, etc.) print the card
+      // number along the bottom edge of the back, where the strict top-40%
+      // rule would wrongly reject them.
+      const isAlphanumSource = source === 'standalone-line-alphanum';
+      if (isAlphanumSource) {
+        console.log(`[CardNum-pos] Accepting "${matched}" via ${source} (${sideTag}) at normY=${nyStr} (${region}) — alphanumeric token bypasses position gate`);
+        return true;
+      }
       if (ny == null) {
         console.log(`[CardNum-pos] Skipping "${matched}" via ${source} (${sideTag}) — no contiguous token position (strict pass)`);
         return false;

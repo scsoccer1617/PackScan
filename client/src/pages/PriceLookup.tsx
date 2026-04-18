@@ -244,7 +244,7 @@ export default function PriceLookup() {
       // Used when no serial number was detected, or the serial matched nothing in the DB.
       // Only prompt if OCR found a color/keyword AND multiple parallels share it.
       const byKeyword = filterByKeyword(allOptions, detected);
-      const filtered = filterBySerialStatus(byKeyword, !!data.isNumbered);
+      const filtered = filterBySerialStatus(byKeyword, !!detectedSerial && !!data.isNumbered);
 
       if (filtered.length === 1) {
         // Exactly one keyword match. Auto-select ONLY when there are no other
@@ -253,7 +253,7 @@ export default function PriceLookup() {
         // the user can correct an OCR misread — e.g. visual detector said
         // "Red Crackle Foil" and DB has one non-numbered "Red Bordered" but
         // the card is actually a non-red Sandglitter parallel.
-        const allForStatus = filterBySerialStatus(allOptions, !!data.isNumbered);
+        const allForStatus = filterBySerialStatus(allOptions, !!detectedSerial && !!data.isNumbered);
         if (allForStatus.length <= 1) {
           const match = filtered[0];
           const updated: Partial<CardFormValues> = { ...data, foilType: match.variationOrParallel };
@@ -283,7 +283,7 @@ export default function PriceLookup() {
         // for the same serial-status so the user can correct the visual
         // detector (e.g. detected "Aqua Foil" but card is actually a
         // Sandglitter, which has no "aqua" in the name).
-        const allForStatus = filterBySerialStatus(allOptions, !!data.isNumbered);
+        const allForStatus = filterBySerialStatus(allOptions, !!detectedSerial && !!data.isNumbered);
         setParallelOptions(mergePreferringPrimary(filtered, allForStatus));
         setDetectedKeyword(extractKeyword(detected));
         setShowParallelConfirm(true);
@@ -298,7 +298,7 @@ export default function PriceLookup() {
       // visual detector said "Aqua Foil" (0 keyword overlap with Sandglitter)
       // but the card is actually a non-numbered Sandglitter parallel.
       if (filtered.length === 0 && detected) {
-        const allForStatus = filterBySerialStatus(allOptions, !!data.isNumbered);
+        const allForStatus = filterBySerialStatus(allOptions, !!detectedSerial && !!data.isNumbered);
         if (allForStatus.length >= 2) {
           setParallelOptions(allForStatus);
           setDetectedKeyword(extractKeyword(detected));
@@ -313,7 +313,7 @@ export default function PriceLookup() {
       // Triggers the picker in cases like "Rainbow Foil / Shimmer" where the
       // colour detector sees lots of hues but FoilDB rejects the named colour.
       if (parallelSuspected && !detected && !detectedSerial) {
-        const allForStatus = filterBySerialStatus(allOptions, !!data.isNumbered);
+        const allForStatus = filterBySerialStatus(allOptions, !!detectedSerial && !!data.isNumbered);
         if (allForStatus.length >= 1) {
           setParallelOptions(allForStatus);
           setDetectedKeyword("");

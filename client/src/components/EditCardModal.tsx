@@ -174,9 +174,18 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
   const watchedBrand = form.watch('brand');
   const watchedYear = form.watch('year');
   const watchedCollection = form.watch('collection');
+  const watchedSet = form.watch('set');
+  const watchedPlayerLastName = form.watch('playerLastName');
 
   const [collectionOptions, setCollectionOptions] = useState<string[]>([]);
   const [setOptions, setSetOptions] = useState<string[]>([]);
+  // "Other" mode lets the user free-type a value not present in the DB list.
+  const [collectionOther, setCollectionOther] = useState(false);
+  const [setOther, setSetOther] = useState(false);
+
+  // Sentinel select value used for the "Other / not listed" choice. Selecting
+  // it switches the field over to a free-text Input.
+  const OTHER_VALUE = '__other__';
 
   useEffect(() => {
     if (!watchedBrand || !watchedYear) {
@@ -187,12 +196,16 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
       brand: String(watchedBrand),
       year: String(watchedYear),
     });
+    if (watchedPlayerLastName) params.set('playerLastName', String(watchedPlayerLastName));
     fetch(`/api/card-database/collections?${params.toString()}`)
       .then(r => r.json())
       .then(data => { if (Array.isArray(data)) setCollectionOptions(data); })
       .catch(() => setCollectionOptions([]));
-  }, [watchedBrand, watchedYear]);
+  }, [watchedBrand, watchedYear, watchedPlayerLastName]);
 
+  // Sets are scoped to brand+year+player. We deliberately do NOT cascade the
+  // selected Collection here because Set is now displayed ABOVE Collection —
+  // the user picks Set first and Collection narrows from there.
   useEffect(() => {
     if (!watchedBrand || !watchedYear) {
       setSetOptions([]);
@@ -202,12 +215,19 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
       brand: String(watchedBrand),
       year: String(watchedYear),
     });
-    if (watchedCollection) params.set('collection', String(watchedCollection));
+    if (watchedPlayerLastName) params.set('playerLastName', String(watchedPlayerLastName));
     fetch(`/api/card-database/sets?${params.toString()}`)
       .then(r => r.json())
       .then(data => { if (Array.isArray(data)) setSetOptions(data); })
       .catch(() => setSetOptions([]));
-  }, [watchedBrand, watchedYear, watchedCollection]);
+  }, [watchedBrand, watchedYear, watchedPlayerLastName]);
+
+  // When the upstream brand/year/player changes, reset the "Other" toggles so
+  // the user sees the refreshed dropdown rather than being stuck in free-text.
+  useEffect(() => {
+    setCollectionOther(false);
+    setSetOther(false);
+  }, [watchedBrand, watchedYear, watchedPlayerLastName]);
 
   return (
     <Dialog 
@@ -319,78 +339,106 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
               />
             </div>
             
-            {/* Collection and Set Fields (DB-driven, filtered by Brand + Year) */}
+            {/* Set and Collection Fields (DB-driven, filtered by Brand + Year + Player).
+                Set is shown ABOVE Collection per UX preference: most users know
+                the product set name (e.g. "Topps Series 1") and pick collection
+                second. Both dropdowns include an "Other" option that reveals a
+                free-text input for values not in the catalogue. */}
             <div className="form-grid">
               <FormField
                 control={form.control}
-                name="collection"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Collection</FormLabel>
-                    {collectionOptions.length > 0 ? (
-                      <Select
-                        onValueChange={(v) => field.onChange(v)}
-                        value={field.value || ''}
-                      >
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select collection" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {collectionOptions.map((c) => (
-                            <SelectItem key={c} value={c}>{c}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    ) : (
-                      <FormControl>
-                        <Input
-                          placeholder={watchedBrand && watchedYear ? "No matches — type a collection" : "Pick brand & year first"}
-                          {...field}
+                name="set"
+                render={({ field }) => {
+                  const showInput = setOther || setOptions.length === 0
+                    || (!!field.value && !setOptions.includes(field.value));
+                  return (
+                    <FormItem>
+                      <FormLabel>Set</FormLabel>
+                      {!showInput ? (
+                        <Select
+                          onValueChange={(v) => {
+                            if (v === OTHER_VALUE) {
+                              setSetOther(true);
+                              field.onChange('');
+                            } else {
+                              field.onChange(v);
+                            }
+                          }}
                           value={field.value || ''}
-                        />
-                      </FormControl>
-                    )}
-                    <FormMessage />
-                  </FormItem>
-                )}
+                        >
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select set" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {setOptions.map((s) => (
+                              <SelectItem key={s} value={s}>{s}</SelectItem>
+                            ))}
+                            <SelectItem value={OTHER_VALUE}>Other…</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <FormControl>
+                          <Input
+                            placeholder={watchedBrand && watchedYear ? "Type a set name" : "Pick brand & year first"}
+                            {...field}
+                            value={field.value || ''}
+                          />
+                        </FormControl>
+                      )}
+                      <FormMessage />
+                    </FormItem>
+                  );
+                }}
               />
 
               <FormField
                 control={form.control}
-                name="set"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Set</FormLabel>
-                    {setOptions.length > 0 ? (
-                      <Select
-                        onValueChange={(v) => field.onChange(v)}
-                        value={field.value || ''}
-                      >
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select set" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {setOptions.map((s) => (
-                            <SelectItem key={s} value={s}>{s}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    ) : (
-                      <FormControl>
-                        <Input
-                          placeholder={watchedBrand && watchedYear ? "No matches — type a set" : "Pick brand & year first"}
-                          {...field}
+                name="collection"
+                render={({ field }) => {
+                  const showInput = collectionOther || collectionOptions.length === 0
+                    || (!!field.value && !collectionOptions.includes(field.value));
+                  return (
+                    <FormItem>
+                      <FormLabel>Collection</FormLabel>
+                      {!showInput ? (
+                        <Select
+                          onValueChange={(v) => {
+                            if (v === OTHER_VALUE) {
+                              setCollectionOther(true);
+                              field.onChange('');
+                            } else {
+                              field.onChange(v);
+                            }
+                          }}
                           value={field.value || ''}
-                        />
-                      </FormControl>
-                    )}
-                    <FormMessage />
-                  </FormItem>
-                )}
+                        >
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select collection" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {collectionOptions.map((c) => (
+                              <SelectItem key={c} value={c}>{c}</SelectItem>
+                            ))}
+                            <SelectItem value={OTHER_VALUE}>Other…</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <FormControl>
+                          <Input
+                            placeholder={watchedBrand && watchedYear ? "Type a collection name" : "Pick brand & year first"}
+                            {...field}
+                            value={field.value || ''}
+                          />
+                        </FormControl>
+                      )}
+                      <FormMessage />
+                    </FormItem>
+                  );
+                }}
               />
             </div>
 

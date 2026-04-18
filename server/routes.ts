@@ -1755,7 +1755,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const brand = req.query.brand ? String(req.query.brand) : '';
       const yearStr = req.query.year ? String(req.query.year) : '';
       const year = yearStr ? parseInt(yearStr, 10) : 0;
-      const cacheKey = `${brand.toLowerCase()}|${year || ''}`;
+      const playerLastName = req.query.playerLastName ? String(req.query.playerLastName).trim() : '';
+      const cacheKey = `${brand.toLowerCase()}|${year || ''}|${playerLastName.toLowerCase()}`;
       const now = Date.now();
       const cached = collectionsCache.get(cacheKey);
       if (cached && (now - cached.timestamp) < AUTOCOMPLETE_CACHE_TTL) {
@@ -1764,6 +1765,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const conditions: any[] = [];
       if (brand) conditions.push(sql`lower(${cardDatabase.brand}) = lower(${brand})`);
       if (year) conditions.push(eq(cardDatabase.year, year));
+      if (playerLastName) conditions.push(sql`lower(${cardDatabase.playerName}) like ${'%' + playerLastName.toLowerCase() + '%'}`);
       const whereExpr = conditions.length ? and(...conditions) : undefined;
       const rows = await db
         .select({ collection: cardDatabase.collection })
@@ -1788,7 +1790,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const yearStr = req.query.year ? String(req.query.year) : '';
       const collection = req.query.collection ? String(req.query.collection) : '';
       const year = yearStr ? parseInt(yearStr, 10) : 0;
-      const cacheKey = `${brand.toLowerCase()}|${year || ''}|${collection.toLowerCase()}`;
+      const playerLastName = req.query.playerLastName ? String(req.query.playerLastName).trim() : '';
+      const cacheKey = `${brand.toLowerCase()}|${year || ''}|${collection.toLowerCase()}|${playerLastName.toLowerCase()}`;
       const now = Date.now();
       const cached = setsCache.get(cacheKey);
       if (cached && (now - cached.timestamp) < AUTOCOMPLETE_CACHE_TTL) {
@@ -1798,6 +1801,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (brand) conditions.push(sql`lower(${cardDatabase.brand}) = lower(${brand})`);
       if (year) conditions.push(eq(cardDatabase.year, year));
       if (collection) conditions.push(sql`lower(${cardDatabase.collection}) = lower(${collection})`);
+      if (playerLastName) conditions.push(sql`lower(${cardDatabase.playerName}) like ${'%' + playerLastName.toLowerCase() + '%'}`);
       const whereExpr = conditions.length ? and(...conditions) : undefined;
       const rows = await db
         .select({ set: cardDatabase.set })
