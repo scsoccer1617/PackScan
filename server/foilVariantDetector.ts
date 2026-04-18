@@ -24,6 +24,7 @@ const FOIL_KEYWORDS = [
   'certified autograph', 'jersey autograph', 'patch autograph',
   'aqua foil', 'blue foil', 'teal foil', 'green foil', 'silver foil', 'gold foil',
   'red foil', 'purple foil', 'orange foil', 'black foil', 'pink foil',
+  'diamante foil', 'diamante',
   'parallel'
 ];
 
@@ -51,6 +52,8 @@ const FOIL_VARIANTS: Record<string, string> = {
   'orange foil': 'Orange Foil',
   'black foil': 'Black Foil',
   'pink foil': 'Pink Foil',
+  'diamante foil': 'Diamante Foil',
+  'diamante': 'Diamante Foil',
   'platinum': 'Platinum',
   'mirror': 'Mirror',
   'prism': 'Prism',
@@ -344,6 +347,7 @@ export function getFoilSearchTerm(foilType: string | null): string {
     'Numbered Foil': 'foil',
     'Prizm': 'prizm',
     'Aqua Foil': 'aqua foil',
+    'Diamante Foil': 'diamante foil',
     'Blue Foil': 'blue foil',
     'Teal Foil': 'teal foil',
     'Green Foil': 'green foil',

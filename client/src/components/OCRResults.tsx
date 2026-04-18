@@ -41,11 +41,12 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
       brand: String(editedData.brand),
       year: String(editedData.year),
     });
+    if (editedData.playerLastName) params.set('playerLastName', String(editedData.playerLastName));
     fetch(`/api/card-database/collections?${params.toString()}`)
       .then(r => r.json())
       .then(d => { if (Array.isArray(d)) setCollectionOptions(d); })
       .catch(() => setCollectionOptions([]));
-  }, [editMode, editedData.brand, editedData.year]);
+  }, [editMode, editedData.brand, editedData.year, editedData.playerLastName]);
 
   useEffect(() => {
     if (!editMode || !editedData.brand || !editedData.year) {
@@ -57,11 +58,12 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
       year: String(editedData.year),
     });
     if (editedData.collection) params.set('collection', String(editedData.collection));
+    if (editedData.playerLastName) params.set('playerLastName', String(editedData.playerLastName));
     fetch(`/api/card-database/sets?${params.toString()}`)
       .then(r => r.json())
       .then(d => { if (Array.isArray(d)) setSetOptions(d); })
       .catch(() => setSetOptions([]));
-  }, [editMode, editedData.brand, editedData.year, editedData.collection]);
+  }, [editMode, editedData.brand, editedData.year, editedData.collection, editedData.playerLastName]);
   
   // Debug log to check if isRookieCard is properly set
   useEffect(() => {
@@ -497,116 +499,60 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
           </div>
         ) : (
           <div className="space-y-6">
-            {/* Clean formatted display matching the user's preferred layout */}
-            <div className="space-y-4">
-              {/* Sport */}
+            <div className="space-y-3">
               <div className="text-lg">
                 <span className="font-semibold text-slate-800">Sport: </span>
                 <span className="text-slate-700">{data.sport || 'Not detected'}</span>
               </div>
-
-              {/* Player */}
               <div className="text-lg">
                 <span className="font-semibold text-slate-800">Player: </span>
                 <span className="text-slate-700">{data.playerFirstName || ''} {data.playerLastName || 'Not detected'}</span>
               </div>
-
-              {/* Two-column layout for card details */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
-                <div className="space-y-4">
-                  {/* Brand */}
-                  <div className="text-lg">
-                    <span className="font-semibold text-slate-800">Brand: </span>
-                    <span className="text-slate-700">{data.brand || 'Not detected'}</span>
-                  </div>
-
-                  {/* Card Number */}
-                  <div className="text-lg">
-                    <span className="font-semibold text-slate-800">Card #: </span>
-                    <span className="text-slate-700">{data.cardNumber || 'Not detected'}</span>
-                  </div>
-
-                  {/* Variant */}
-                  <div className="text-lg">
-                    <span className="font-semibold text-slate-800">Variant: </span>
-                    <span className="text-slate-700">{data.variant || 'Not detected'}</span>
-                  </div>
-
-                  {/* CMP Code */}
-                  {data.cmpNumber && (
-                    <div className="text-lg">
-                      <span className="font-semibold text-slate-800">CMP Code: </span>
-                      <span className="text-slate-700">{data.cmpNumber}</span>
-                    </div>
-                  )}
-                </div>
-
-                <div className="space-y-4">
-                  {/* Set */}
-                  {data.set && (
-                    <div className="text-lg">
-                      <span className="font-semibold text-slate-800">Set: </span>
-                      <span className="text-slate-700">{data.set}</span>
-                    </div>
-                  )}
-
-                  {/* Collection */}
-                  <div className="text-lg">
-                    <span className="font-semibold text-slate-800">Collection: </span>
-                    <span className="text-slate-700">{data.collection || 'Not detected'}</span>
-                  </div>
-
-                  {/* Year */}
-                  <div className="text-lg">
-                    <span className="font-semibold text-slate-800">Year: </span>
-                    <span className="text-slate-700">{data.year && data.year > 0 ? data.year : 'Not detected'}</span>
-                  </div>
-
-                  {/* Serial Number */}
-                  <div className="text-lg">
-                    <span className="font-semibold text-slate-800">Serial #: </span>
-                    <span className="text-slate-700">{data.serialNumber || 'None'}</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Condition */}
               <div className="text-lg">
-                <span className="font-semibold text-slate-800">Condition: </span>
-                <span className="text-slate-700">{data.condition || 'Not detected'}</span>
+                <span className="font-semibold text-slate-800">Year: </span>
+                <span className="text-slate-700">{data.year && data.year > 0 ? data.year : 'Not detected'}</span>
               </div>
-
-              {/* Card Features */}
-              <div className="mt-6">
-                <div className="text-lg mb-3">
-                  <span className="font-semibold text-slate-800">Card Features:</span>
-                </div>
-                <div className="ml-0">
-                  {data.isRookieCard === true || data.isAutographed === true || data.isNumbered === true ? (
-                    <div className="flex flex-wrap gap-3">
-                      {data.isRookieCard === true && (
-                        <span className="inline-flex items-center rounded-full bg-green-100 px-3 py-1 text-sm font-medium text-green-800">
-                          Rookie Card
-                        </span>
-                      )}
-                      {data.isAutographed === true && (
-                        <span className="inline-flex items-center rounded-full bg-blue-100 px-3 py-1 text-sm font-medium text-blue-800">
-                          Autographed
-                        </span>
-                      )}
-                      {data.isNumbered === true && (
-                        <span className="inline-flex items-center rounded-full bg-purple-100 px-3 py-1 text-sm font-medium text-purple-800">
-                          Numbered
-                        </span>
-                      )}
-                    </div>
-                  ) : (
-                    <span className="text-slate-500 text-lg">None detected</span>
-                  )}
-                </div>
+              <div className="text-lg">
+                <span className="font-semibold text-slate-800">Brand: </span>
+                <span className="text-slate-700">{data.brand || 'Not detected'}</span>
               </div>
+              <div className="text-lg">
+                <span className="font-semibold text-slate-800">Card #: </span>
+                <span className="text-slate-700">{data.cardNumber || 'Not detected'}</span>
+              </div>
+              {data.cmpNumber && (
+                <div className="text-lg">
+                  <span className="font-semibold text-slate-800">CMP Code: </span>
+                  <span className="text-slate-700">{data.cmpNumber}</span>
+                </div>
+              )}
+              <div className="text-lg">
+                <span className="font-semibold text-slate-800">Set: </span>
+                <span className="text-slate-700">{data.set || 'Not detected'}</span>
+              </div>
+              <div className="text-lg">
+                <span className="font-semibold text-slate-800">Collection: </span>
+                <span className="text-slate-700">{data.collection || 'Not detected'}</span>
+              </div>
+              <div className="text-lg">
+                <span className="font-semibold text-slate-800">Parallel: </span>
+                <span className="text-slate-700">{data.foilType || 'None detected'}</span>
+              </div>
+              <div className="text-lg">
+                <span className="font-semibold text-slate-800">Serial #: </span>
+                <span className="text-slate-700">{data.serialNumber || 'None'}</span>
+              </div>
+              <div className="text-lg">
+                <span className="font-semibold text-slate-800">Variant: </span>
+                <span className="text-slate-700">{data.variant || 'Not detected'}</span>
+              </div>
+              <div className="text-lg">
+                <span className="font-semibold text-slate-800">Rookie Card: </span>
+                <span className="text-slate-700">{data.isRookieCard ? 'Yes' : 'No'}</span>
+              </div>
+            </div>
 
-              {/* Correct info? feedback */}
+            <div className="space-y-4">
               <div className="flex items-center justify-end gap-2 mt-4">
                 {confirmStatus === 'confirmed' ? (
                   <span className="text-sm text-green-600 font-medium flex items-center gap-1">

@@ -59,11 +59,12 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
       brand: String(editData.brand),
       year: String(editData.year),
     });
+    if (editData.playerLastName) params.set('playerLastName', String(editData.playerLastName));
     fetch(`/api/card-database/collections?${params.toString()}`)
       .then(r => r.json())
       .then(d => { if (Array.isArray(d)) setCollectionOptions(d); })
       .catch(() => setCollectionOptions([]));
-  }, [editMode, editData.brand, editData.year]);
+  }, [editMode, editData.brand, editData.year, editData.playerLastName]);
 
   useEffect(() => {
     if (!editMode || !editData.brand || !editData.year) {
@@ -75,11 +76,12 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
       year: String(editData.year),
     });
     if (editData.collection) params.set('collection', String(editData.collection));
+    if (editData.playerLastName) params.set('playerLastName', String(editData.playerLastName));
     fetch(`/api/card-database/sets?${params.toString()}`)
       .then(r => r.json())
       .then(d => { if (Array.isArray(d)) setSetOptions(d); })
       .catch(() => setSetOptions([]));
-  }, [editMode, editData.brand, editData.year, editData.collection]);
+  }, [editMode, editData.brand, editData.year, editData.collection, editData.playerLastName]);
 
   const handleConfirmCard = async () => {
     if (!cardData || confirmStatus === 'confirming' || confirmStatus === 'confirmed') return;
@@ -290,21 +292,11 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
         <CardHeader>
           <div className="flex justify-between items-center">
             <CardTitle className="text-lg">Card Information</CardTitle>
-            {!editMode ? (
+            {!editMode && (
               <Button variant="outline" size="sm" onClick={handleStartEdit}>
                 <Pencil className="h-3.5 w-3.5 mr-1.5" />
                 Edit & Re-lookup
               </Button>
-            ) : (
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={handleCancelEdit}>
-                  Cancel
-                </Button>
-                <Button size="sm" onClick={handleSaveAndRelookup}>
-                  <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
-                  Re-lookup Prices
-                </Button>
-              </div>
             )}
           </div>
         </CardHeader>
@@ -418,65 +410,68 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
                 />
                 <Label htmlFor="edit-rookieCard" className="cursor-pointer">Rookie Card</Label>
               </div>
+              <div className="flex justify-end gap-2 pt-3 mt-2 border-t border-slate-100">
+                <Button variant="outline" size="sm" onClick={handleCancelEdit}>
+                  Cancel
+                </Button>
+                <Button size="sm" onClick={handleSaveAndRelookup}>
+                  <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
+                  Re-lookup Prices
+                </Button>
+              </div>
             </div>
           ) : (
             <>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                <div className="space-y-4">
-                  <div className="text-base">
-                    <span className="font-semibold text-slate-800">Sport: </span>
-                    <span className="text-slate-700">{cardData.sport || 'Not detected'}</span>
-                  </div>
-                  <div className="text-base">
-                    <span className="font-semibold text-slate-800">Player: </span>
-                    <span className="text-slate-700">{cardData.playerFirstName || ''} {cardData.playerLastName || 'Not detected'}</span>
-                  </div>
-                  <div className="text-base">
-                    <span className="font-semibold text-slate-800">Brand: </span>
-                    <span className="text-slate-700">{cardData.brand || 'Not detected'}</span>
-                  </div>
-                  <div className="text-base">
-                    <span className="font-semibold text-slate-800">Card #: </span>
-                    <span className="text-slate-700">{cardData.cardNumber || 'Not detected'}</span>
-                  </div>
-                  <div className="text-base">
-                    <span className="font-semibold text-slate-800">Year: </span>
-                    <span className="text-slate-700">{cardData.year || 'Not detected'}</span>
-                  </div>
-                  {cardData.cmpNumber && (
-                    <div className="text-base">
-                      <span className="font-semibold text-slate-800">CMP Code: </span>
-                      <span className="text-slate-700">{cardData.cmpNumber}</span>
-                    </div>
-                  )}
+              <div className="space-y-3">
+                <div className="text-base">
+                  <span className="font-semibold text-slate-800">Sport: </span>
+                  <span className="text-slate-700">{cardData.sport || 'Not detected'}</span>
                 </div>
-                <div className="space-y-4">
-                  {cardData.set && (
-                    <div className="text-base">
-                      <span className="font-semibold text-slate-800">Set: </span>
-                      <span className="text-slate-700">{cardData.set}</span>
-                    </div>
-                  )}
+                <div className="text-base">
+                  <span className="font-semibold text-slate-800">Player: </span>
+                  <span className="text-slate-700">{cardData.playerFirstName || ''} {cardData.playerLastName || 'Not detected'}</span>
+                </div>
+                <div className="text-base">
+                  <span className="font-semibold text-slate-800">Year: </span>
+                  <span className="text-slate-700">{cardData.year || 'Not detected'}</span>
+                </div>
+                <div className="text-base">
+                  <span className="font-semibold text-slate-800">Brand: </span>
+                  <span className="text-slate-700">{cardData.brand || 'Not detected'}</span>
+                </div>
+                <div className="text-base">
+                  <span className="font-semibold text-slate-800">Card #: </span>
+                  <span className="text-slate-700">{cardData.cardNumber || 'Not detected'}</span>
+                </div>
+                {cardData.cmpNumber && (
                   <div className="text-base">
-                    <span className="font-semibold text-slate-800">Collection: </span>
-                    <span className="text-slate-700">{cardData.collection || 'Not detected'}</span>
+                    <span className="font-semibold text-slate-800">CMP Code: </span>
+                    <span className="text-slate-700">{cardData.cmpNumber}</span>
                   </div>
-                  <div className="text-base">
-                    <span className="font-semibold text-slate-800">Variant: </span>
-                    <span className="text-slate-700">{cardData.variant || 'Base/Standard'}</span>
-                  </div>
-                  <div className="text-base">
-                    <span className="font-semibold text-slate-800">Serial #: </span>
-                    <span className="text-slate-700">{cardData.serialNumber || 'None'}</span>
-                  </div>
-                  <div className="text-base">
-                    <span className="font-semibold text-slate-800">Parallel: </span>
-                    <span className="text-slate-700">{cardData.foilType || 'None detected'}</span>
-                  </div>
-                  <div className="text-base">
-                    <span className="font-semibold text-slate-800">Rookie Card: </span>
-                    <span className="text-slate-700">{cardData.isRookieCard ? 'Yes' : 'No'}</span>
-                  </div>
+                )}
+                <div className="text-base">
+                  <span className="font-semibold text-slate-800">Set: </span>
+                  <span className="text-slate-700">{cardData.set || 'Not detected'}</span>
+                </div>
+                <div className="text-base">
+                  <span className="font-semibold text-slate-800">Collection: </span>
+                  <span className="text-slate-700">{cardData.collection || 'Not detected'}</span>
+                </div>
+                <div className="text-base">
+                  <span className="font-semibold text-slate-800">Parallel: </span>
+                  <span className="text-slate-700">{cardData.foilType || 'None detected'}</span>
+                </div>
+                <div className="text-base">
+                  <span className="font-semibold text-slate-800">Serial #: </span>
+                  <span className="text-slate-700">{cardData.serialNumber || 'None'}</span>
+                </div>
+                <div className="text-base">
+                  <span className="font-semibold text-slate-800">Variant: </span>
+                  <span className="text-slate-700">{cardData.variant || 'Base/Standard'}</span>
+                </div>
+                <div className="text-base">
+                  <span className="font-semibold text-slate-800">Rookie Card: </span>
+                  <span className="text-slate-700">{cardData.isRookieCard ? 'Yes' : 'No'}</span>
                 </div>
               </div>
 

@@ -858,6 +858,27 @@ export async function searchCardValues(
           console.log(`  ↳ Hard-filtered (wrong parallel): searching "${foilSearchTermLower}" but title="${r.title}"`);
           return false;
         }
+
+        // Filter colour-qualified variants of the user's parallel that the user
+        // didn't ask for. e.g. user wants "Diamante Foil" → filter out
+        // "Pink Diamante Foil", "Blue Diamante Foil", etc. (sport-agnostic).
+        const COLOR_QUALIFIERS = [
+          'blue', 'green', 'red', 'gold', 'silver', 'purple', 'orange',
+          'pink', 'yellow', 'black', 'white', 'aqua', 'teal', 'rose',
+          'sky', 'royal', 'neon', 'hot', 'sapphire', 'ruby', 'emerald',
+          'platinum', 'rainbow', 'magenta', 'copper', 'burgundy'
+        ];
+        const firstFoilWord = foilSearchWords.find(w => !COLOR_QUALIFIERS.includes(w));
+        if (firstFoilWord) {
+          for (const color of COLOR_QUALIFIERS) {
+            if (foilSearchWords.includes(color)) continue;
+            const re = new RegExp(`\\b${color}\\s+${firstFoilWord}\\b`, 'i');
+            if (re.test(t)) {
+              console.log(`  ↳ Hard-filtered (colour-qualified parallel "${color} ${firstFoilWord}"): searching "${foilSearchTermLower}" but title="${r.title}"`);
+              return false;
+            }
+          }
+        }
       }
 
       // Filter wrong-collection listings when a specific collection is set.
