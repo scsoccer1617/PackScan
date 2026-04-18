@@ -111,11 +111,11 @@ export default function CardCameraCapture({
       }
     } catch (err: any) {
       console.error('Camera error:', err);
-      setError(
-        err?.name === 'NotAllowedError'
-          ? 'We need camera access to scan your card. Tap the camera icon in your browser’s address bar to allow it, or use “Library” to upload a photo instead.'
-          : 'We couldn’t turn on your camera. Try “Library” to upload a photo of your card instead.'
-      );
+      if (err?.name === 'NotAllowedError') {
+        setError(null);
+      } else {
+        setError('We couldn’t turn on your camera. Try “Library” to upload a photo of your card instead.');
+      }
     } finally {
       setStarting(false);
     }
