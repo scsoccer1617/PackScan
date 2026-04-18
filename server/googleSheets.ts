@@ -184,6 +184,17 @@ export interface CardRowInput {
 
 function fmtBool(b: boolean | null | undefined) { return b ? 'Yes' : 'No'; }
 
+// Sheets caps individual cells at 50,000 characters. Defensive guard so that
+// a stray base64 "data:" URI from the client (or any pasted huge string) can
+// never blow up an append call. Hosted http(s) URLs and short text pass
+// through unchanged.
+function safeCellValue(value: string | null | undefined): string {
+  if (!value) return '';
+  if (value.length <= 49000) return value;
+  if (/^data:/i.test(value)) return '';
+  return value.slice(0, 49000);
+}
+
 export function buildRow(input: CardRowInput): (string | number)[] {
   const dateScanned = new Date().toISOString().slice(0, 10);
   const price = input.averagePrice == null || input.averagePrice === ''
@@ -206,9 +217,9 @@ export function buildRow(input: CardRowInput): (string | number)[] {
     fmtBool(input.isNumbered),
     input.foilType ?? '',
     price,
-    input.frontImageUrl ?? '',
-    input.backImageUrl ?? '',
-    input.ebaySearchUrl ?? '',
+    safeCellValue(input.frontImageUrl),
+    safeCellValue(input.backImageUrl),
+    safeCellValue(input.ebaySearchUrl),
   ];
 }
 

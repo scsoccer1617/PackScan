@@ -41,6 +41,14 @@ interface Props {
   backImage?: string;
 }
 
+// Sheets cells are capped at 50,000 chars. Captured card photos are base64
+// "data:" URIs hundreds of KB long, which blow past that limit. Only forward
+// the image when it's a real hosted URL we can drop into the sheet.
+function asHostedUrl(value?: string): string | undefined {
+  if (!value) return undefined;
+  return /^https?:\/\//i.test(value) ? value : undefined;
+}
+
 function buildAppendPayload(cardData: Partial<CardFormValues>, averageValue: number, searchUrl?: string, frontImage?: string, backImage?: string): AppendCardPayload {
   return {
     year: cardData.year ?? null,
@@ -57,8 +65,8 @@ function buildAppendPayload(cardData: Partial<CardFormValues>, averageValue: num
     isNumbered: cardData.isNumbered ?? null,
     foilType: cardData.foilType ?? null,
     averagePrice: averageValue || null,
-    frontImageUrl: frontImage,
-    backImageUrl: backImage,
+    frontImageUrl: asHostedUrl(frontImage),
+    backImageUrl: asHostedUrl(backImage),
     ebaySearchUrl: searchUrl,
   };
 }
