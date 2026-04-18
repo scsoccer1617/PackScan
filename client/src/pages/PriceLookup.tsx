@@ -154,6 +154,7 @@ async function fetchParallels(
 export default function PriceLookup() {
   const [frontImage, setFrontImage] = useState<string>("");
   const [backImage, setBackImage] = useState<string>("");
+  const [backCameraSignal, setBackCameraSignal] = useState<number>(0);
   const [showOCRResults, setShowOCRResults] = useState<boolean>(false);
   const [cardData, setCardData] = useState<Partial<CardFormValues> | null>(null);
   const [showPriceResults, setShowPriceResults] = useState<boolean>(false);
@@ -414,8 +415,14 @@ export default function PriceLookup() {
               <div>
                 <h3 className="font-medium mb-2">Front of Card</h3>
                 <SimpleImageUploader
-                  onImageCaptured={setFrontImage}
+                  onImageCaptured={(img) => {
+                    setFrontImage(img);
+                    if (!backImage) {
+                      setBackCameraSignal((n) => n + 1);
+                    }
+                  }}
                   label="Upload front image"
+                  cameraTitle="Front of Card"
                   existingImage={frontImage}
                 />
               </div>
@@ -424,7 +431,9 @@ export default function PriceLookup() {
                 <SimpleImageUploader
                   onImageCaptured={setBackImage}
                   label="Upload back image"
+                  cameraTitle="Back of Card"
                   existingImage={backImage}
+                  openCameraSignal={backCameraSignal}
                 />
               </div>
             </div>
