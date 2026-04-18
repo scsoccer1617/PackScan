@@ -590,7 +590,20 @@ export default function PriceLookup() {
             frontImage={frontImage}
             backImage={backImage}
             onCardDataUpdate={(updatedData) => {
-              setCardData(updatedData);
+              // If the user added or changed the serial-number limit during
+              // edit (e.g. filled in "041/150" that OCR missed), re-run the
+              // parallel resolution flow so the picker can narrow options to
+              // the matching print run — or auto-select when only one
+              // parallel shares that limit. Otherwise just save and let the
+              // results pane re-fetch eBay with the edited fields.
+              const prevLimit = extractSerialLimit((cardData?.serialNumber || "").trim());
+              const nextLimit = extractSerialLimit((updatedData.serialNumber || "").trim());
+              if (nextLimit && nextLimit !== prevLimit) {
+                setShowPriceResults(false);
+                processCardData(updatedData);
+              } else {
+                setCardData(updatedData);
+              }
             }}
           />
           <Button 
