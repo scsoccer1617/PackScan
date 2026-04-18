@@ -175,6 +175,18 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
     fetchEbayData();
   }, [cardData]);
 
+  // NOTE: This effect must live above the `if (loading) return …` early
+  // return below — React requires hooks to be called in the same order on
+  // every render, and adding a hook after an early return causes a
+  // "Rendered more hooks than during the previous render" crash when
+  // loading flips from true → false.
+  useEffect(() => {
+    if (shouldScrollAfterRelookup.current && cardInfoRef.current) {
+      shouldScrollAfterRelookup.current = false;
+      cardInfoRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [cardData]);
+
   const formatPrice = (price: number, currency: string = 'USD') => {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
@@ -248,13 +260,6 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
       onCardDataUpdate({ ...editData });
     }
   };
-
-  useEffect(() => {
-    if (shouldScrollAfterRelookup.current && cardInfoRef.current) {
-      shouldScrollAfterRelookup.current = false;
-      cardInfoRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-  }, [cardData]);
 
   const updateEditField = (field: keyof CardFormValues, value: any) => {
     setEditData(prev => ({ ...prev, [field]: value }));
