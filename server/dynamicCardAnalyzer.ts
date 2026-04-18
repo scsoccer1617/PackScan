@@ -689,9 +689,22 @@ function buildCardNumberPositionMap(textAnnotations?: TextAnnotation[]): CardNum
  */
 function getCardNumNormalizedY(matched: string, posMap: CardNumPosMap): number | null {
   const upper = matched.toUpperCase();
+  // Vision often tokenises hyphenated card numbers like "T91-13" as two
+  // separate tokens "T91-" and "13" (the dash glues to the preceding token,
+  // not the following digits). Comparing token text verbatim would then
+  // miss BOTH the full-string match ("T91-13" ≠ "T91-") AND the per-part
+  // match ("T91" ≠ "T91-"). Normalising by stripping leading/trailing
+  // punctuation lets us anchor on the visually contiguous tokens that
+  // actually exist in the position map.
+  const stripPunct = (s: string) => s.replace(/^[^A-Z0-9]+|[^A-Z0-9]+$/g, '');
+  const upperNorm = stripPunct(upper);
 
-  // 1) Full-string verbatim match — use topmost occurrence
-  const fullHits = posMap.tokens.filter(t => t.text === upper);
+  // 1) Full-string verbatim match — use topmost occurrence (compare both
+  // raw and punctuation-stripped forms so "T91-13" matches a token whose
+  // raw text is "T91-13" OR "T91-13," etc.)
+  const fullHits = posMap.tokens.filter(t =>
+    t.text === upper || stripPunct(t.text) === upperNorm
+  );
   if (fullHits.length > 0) {
     return Math.min(...fullHits.map(t => t.minY)) / posMap.imageHeight;
   }
@@ -700,7 +713,9 @@ function getCardNumNormalizedY(matched: string, posMap: CardNumPosMap): number |
   const parts = upper.split(/[-\s#.]+/).filter(p => p.length > 0);
   if (parts.length === 0) return null;
 
-  const partHits = parts.map(p => posMap.tokens.filter(t => t.text === p));
+  const partHits = parts.map(p =>
+    posMap.tokens.filter(t => t.text === p || stripPunct(t.text) === p)
+  );
   if (parts.length > 1 && partHits.every(arr => arr.length > 0)) {
     // Find the (one-per-part) combination with the smallest total Y span.
     // For 2-part candidates this is exhaustive; for 3+ we use a greedy
