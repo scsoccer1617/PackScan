@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -49,6 +49,8 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
   // (Set additionally narrows by Collection). Falls back to free-text when empty.
   const [collectionOptions, setCollectionOptions] = useState<string[]>([]);
   const [setOptions, setSetOptions] = useState<string[]>([]);
+  const cardInfoRef = useRef<HTMLDivElement | null>(null);
+  const shouldScrollAfterRelookup = useRef(false);
 
   useEffect(() => {
     if (!editMode || !editData.brand || !editData.year) {
@@ -241,10 +243,18 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
       return;
     }
     setEditMode(false);
+    shouldScrollAfterRelookup.current = true;
     if (onCardDataUpdate) {
       onCardDataUpdate({ ...editData });
     }
   };
+
+  useEffect(() => {
+    if (shouldScrollAfterRelookup.current && cardInfoRef.current) {
+      shouldScrollAfterRelookup.current = false;
+      cardInfoRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [cardData]);
 
   const updateEditField = (field: keyof CardFormValues, value: any) => {
     setEditData(prev => ({ ...prev, [field]: value }));
@@ -288,7 +298,7 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
         </Card>
       )}
 
-      <Card>
+      <Card ref={cardInfoRef}>
         <CardHeader>
           <div className="flex justify-between items-center">
             <CardTitle className="text-lg">Card Information</CardTitle>
