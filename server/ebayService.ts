@@ -776,6 +776,17 @@ export async function searchCardValues(
       'memorial day', 'independence day', 'halloween',
       '4th of july', 'fourth of july', 'black friday', 'cyber monday',
       'pride', 'foil pattern', 'pattern foil',
+      // Visual / pattern parallels — these names only ever appear on the
+      // themed parallel printings, never on base cards.
+      'polka dot', 'polka dots', 'flowers foil', 'easter eggs',
+      // Team Color Border / Team Border are Topps parallels (border tinted to
+      // team colours). "Short Print" / "SSP" (super short print) likewise only
+      // appear on parallel/insert printings. We deliberately do NOT include
+      // bare "SP" — it's too short and collides with abbreviations in other
+      // contexts (Spring, Special, Sport). "SSP" is unambiguous.
+      'team border', 'team color border', 'team colour border',
+      'short print', 'ssp',
+      'golden mirror', 'mirror foil',
       'gold refractor', 'black refractor', 'blue refractor', 'red refractor',
       'montgomery club'
     ];
