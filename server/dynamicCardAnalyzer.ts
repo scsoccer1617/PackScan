@@ -867,9 +867,141 @@ function extractCardNumberPass(
   text: string,
   cardDetails: Partial<CardFormValues>,
   originalText: string | undefined,
-  acceptCandidate: (matched: string, source: string) => boolean
+  acceptRaw: (matched: string, source: string) => boolean
 ): void {
   try {
+    // ── Stat-block detection ──────────────────────────────────────────
+    // Identify OCR lines that belong to a player statistics table on the
+    // back of the card. Card numbers are never printed inside the stats
+    // grid, so any candidate whose ONLY occurrence is inside a stat-block
+    // line must be rejected — this prevents random column values (career
+    // hits, ".280" batting average, jersey number, etc.) from being
+    // promoted to the card number.
+    //
+    // Detection is fully sport-agnostic:
+    //   • Header rows: any line containing >= 3 known stat-column tokens
+    //     (AB, HR, RBI, ERA, YDS, TD, PPG, GP, etc.) anchors a block.
+    //   • Anchored block expands forward through stat-row lines (year-led
+    //     rows with multiple numerics, TOTALS/CAREER lines, dense numeric
+    //     rows) and through "cell" lines (short numeric/short-token lines
+    //     that result from Vision OCR'ing each column cell separately).
+    //   • Standalone clusters of >= 4 short numeric/cell lines also count
+    //     even without a recognisable header — covers cards whose stat
+    //     header OCR'd poorly but whose grid still came through.
+    const STAT_TOKENS = new Set([
+      // baseball batting
+      'G','AB','R','H','2B','3B','HR','RBI','BB','SO','SB','CS','AVG','OBP','SLG','OPS','TB','HBP','SF','SH',
+      // baseball pitching
+      'W','L','ERA','GS','CG','SHO','SV','IP','ER','WHIP','BAA','SVO',
+      // football passing
+      'CMP','ATT','PCT','YDS','TD','INT','RTG','QBR','SACK','SACKS','SCK',
+      // football rushing/receiving
+      'REC','RUSH','LNG','FUM',
+      // basketball
+      'PPG','RPG','APG','SPG','BPG','FG','FGM','FGA','FT','FTA','FTM','3P','3PA','3PM','MPG','MIN','PTS','REB','AST','STL','BLK','TO','TOV',
+      // hockey
+      'GP','GA','PIM','SOG','TOI','GWG','SHG','SAV','PP','PK',
+      // generic table
+      'YEAR','SEASON','SSN','TEAM','LEAGUE','LG','TOT','TOTAL','TOTALS','POS','CL','CLASS','OPP','CLUB'
+    ]);
+    const tokenize = (line: string) =>
+      line.toUpperCase().replace(/[.,]/g, '').split(/[\s|/]+/).filter(t => t.length > 0);
+    const statTokenHits = (line: string) => tokenize(line).filter(t => STAT_TOKENS.has(t)).length;
+    const numericTokenCount = (line: string) =>
+      (line.match(/\b\d+(?:\.\d+)?\b/g) || []).length;
+    const startsWithYear = (line: string) => /^\s*(?:19|20)\d{2}\b/.test(line);
+    const isTotalsLine = (line: string) =>
+      /\b(TOTALS?|MAJ\.?\s*LEA|CAREER|MAJORS?|MINORS?)\b/i.test(line);
+    const isStatRowLine = (line: string) => {
+      const n = numericTokenCount(line);
+      if (startsWithYear(line) && n >= 3) return true;
+      if (isTotalsLine(line) && n >= 1) return true;
+      if (n >= 5) return true;            // dense numeric row
+      if (statTokenHits(line) >= 3) return true;
+      return false;
+    };
+    const isShortStatCell = (line: string) => {
+      const t = line.trim();
+      if (t.length === 0 || t.length > 6) return false;
+      return /^\d+(?:\.\d+)?$/.test(t)    // plain number, possibly decimal
+          || /^\.\d+$/.test(t)            // batting avg ".280"
+          || /^[A-Z]{1,4}$/.test(t)       // team abbreviation cell
+          || /^\d+\.\d+$/.test(t);
+    };
+
+    const linesForStats = (originalText || text).split('\n').map(l => l.trim()).filter(l => l.length > 0);
+    const statBlockLines = new Set<number>();
+
+    // 1. Anchor on header rows and expand outward.
+    for (let i = 0; i < linesForStats.length; i++) {
+      if (statTokenHits(linesForStats[i]) >= 3) {
+        statBlockLines.add(i);
+        for (let j = i + 1; j < linesForStats.length; j++) {
+          if (isStatRowLine(linesForStats[j]) || isShortStatCell(linesForStats[j])) {
+            statBlockLines.add(j);
+          } else break;
+        }
+        for (let j = i - 1; j >= 0; j--) {
+          if (isStatRowLine(linesForStats[j])) statBlockLines.add(j); else break;
+        }
+      }
+    }
+    // 2. Standalone clusters of >= 4 short numeric/cell lines (covers
+    //    column-per-line OCR output where the header OCR'd poorly).
+    {
+      let i = 0;
+      while (i < linesForStats.length) {
+        if (isShortStatCell(linesForStats[i])) {
+          let j = i;
+          let numericLines = 0;
+          while (j < linesForStats.length && isShortStatCell(linesForStats[j])) {
+            if (/\d/.test(linesForStats[j])) numericLines++;
+            j++;
+          }
+          if (j - i >= 4 && numericLines >= 3) {
+            for (let k = i; k < j; k++) statBlockLines.add(k);
+          }
+          i = j;
+        } else i++;
+      }
+    }
+    // 3. Pure stat-row lines that didn't get caught by header expansion
+    //    (e.g. a single visible season row with no header in OCR).
+    for (let i = 0; i < linesForStats.length; i++) {
+      if (statBlockLines.has(i)) continue;
+      const ln = linesForStats[i];
+      if ((startsWithYear(ln) && numericTokenCount(ln) >= 4) || (isTotalsLine(ln) && numericTokenCount(ln) >= 2)) {
+        statBlockLines.add(i);
+      }
+    }
+    if (statBlockLines.size > 0) {
+      const preview = [...statBlockLines].sort((a, b) => a - b).slice(0, 8)
+        .map(i => `${i}:"${linesForStats[i].slice(0, 40)}"`).join(' | ');
+      console.log(`[CardNum] Stat-block lines: ${statBlockLines.size} flagged → ${preview}${statBlockLines.size > 8 ? ' …' : ''}`);
+    }
+
+    const isOnlyInStatBlock = (matched: string): boolean => {
+      if (statBlockLines.size === 0) return false;
+      const m = matched.toLowerCase();
+      let foundInAny = false;
+      let foundOutsideStats = false;
+      for (let i = 0; i < linesForStats.length; i++) {
+        if (linesForStats[i].toLowerCase().includes(m)) {
+          foundInAny = true;
+          if (!statBlockLines.has(i)) { foundOutsideStats = true; break; }
+        }
+      }
+      return foundInAny && !foundOutsideStats;
+    };
+
+    const acceptCandidate = (matched: string, source: string): boolean => {
+      if (isOnlyInStatBlock(matched)) {
+        console.log(`[CardNum] Rejecting "${matched}" via ${source} — only appears inside stats block`);
+        return false;
+      }
+      return acceptRaw(matched, source);
+    };
+
     // Look for known card number formats
 
     // Filter out birthday/date formats first
