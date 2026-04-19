@@ -605,7 +605,20 @@ async function combineCardResults(
       const backFull = `${backResult.playerFirstName} ${backResult.playerLastName}`.trim().toLowerCase();
       const brandLower = String(combined.brand).toLowerCase();
       const yearVal = combined.year as number;
-      const [frontRows, backRows] = await Promise.all([
+      // Pull just the LAST word of each detected last-name field so the
+      // catalog lookup tolerates middle names (back OCR may yield the
+      // player's full legal name, e.g. "Howard Bruce Sutter", while the
+      // catalog stores the common name "Bruce Sutter"). Last-name match
+      // alone is a strong signal — there is virtually never a case where
+      // two different real players with the same exact last name appear
+      // in the same brand+year and OCR would confuse them.
+      const lastWord = (s: string) => {
+        const tokens = s.trim().toLowerCase().split(/\s+/).filter(Boolean);
+        return tokens.length > 0 ? tokens[tokens.length - 1] : '';
+      };
+      const frontLast = lastWord(combined.playerLastName);
+      const backLast = lastWord(backResult.playerLastName);
+      const [frontExact, backExact, frontLastHits, backLastHits] = await Promise.all([
         db.select({ id: cardDatabase.id }).from(cardDatabase).where(and(
           sql`LOWER(${cardDatabase.brand}) = ${brandLower}`,
           eq(cardDatabase.year, yearVal),
@@ -616,9 +629,29 @@ async function combineCardResults(
           eq(cardDatabase.year, yearVal),
           sql`LOWER(${cardDatabase.playerName}) = ${backFull}`
         )).limit(1),
+        // Last-name LIKE fallback — only fires when the exact full-name
+        // match misses (e.g. middle-name mismatch). Require >=3 chars to
+        // avoid spurious matches on initials/very short surnames.
+        frontLast.length >= 3
+          ? db.select({ id: cardDatabase.id }).from(cardDatabase).where(and(
+              sql`LOWER(${cardDatabase.brand}) = ${brandLower}`,
+              eq(cardDatabase.year, yearVal),
+              sql`LOWER(${cardDatabase.playerName}) LIKE ${'%' + frontLast + '%'}`
+            )).limit(1)
+          : Promise.resolve([] as { id: number }[]),
+        backLast.length >= 3
+          ? db.select({ id: cardDatabase.id }).from(cardDatabase).where(and(
+              sql`LOWER(${cardDatabase.brand}) = ${brandLower}`,
+              eq(cardDatabase.year, yearVal),
+              sql`LOWER(${cardDatabase.playerName}) LIKE ${'%' + backLast + '%'}`
+            )).limit(1)
+          : Promise.resolve([] as { id: number }[]),
       ]);
-      if (backRows.length > 0 && frontRows.length === 0) {
-        console.log(`Catalog player check: back name "${backResult.playerFirstName} ${backResult.playerLastName}" exists in card_database for ${combined.brand} ${combined.year}; front name "${combined.playerFirstName} ${combined.playerLastName}" does not — preferring back`);
+      const frontInCatalog = frontExact.length > 0 || frontLastHits.length > 0;
+      const backInCatalog = backExact.length > 0 || backLastHits.length > 0;
+      if (backInCatalog && !frontInCatalog) {
+        const matchKind = backExact.length > 0 ? 'full-name' : `last-name "${backLast}"`;
+        console.log(`Catalog player check: back name "${backResult.playerFirstName} ${backResult.playerLastName}" found in card_database for ${combined.brand} ${combined.year} via ${matchKind}; front name "${combined.playerFirstName} ${combined.playerLastName}" not found — preferring back`);
         frontNameBogus = true;
       }
     } catch (err) {

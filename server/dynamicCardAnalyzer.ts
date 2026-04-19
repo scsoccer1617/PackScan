@@ -982,11 +982,16 @@ function extractCardNumberPass(
 
     const isOnlyInStatBlock = (matched: string): boolean => {
       if (statBlockLines.size === 0) return false;
-      const m = matched.toLowerCase();
+      // Word-boundary match — a candidate "52" must NOT be considered "outside
+      // the stats block" just because it appears as a substring inside a stat
+      // value like "1952", "7.52", or "152". Without this, the guard wrongly
+      // releases stat-cell numbers that share digits with unrelated stat values.
+      const escaped = matched.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const re = new RegExp(`(?:^|[^A-Za-z0-9])${escaped}(?:[^A-Za-z0-9]|$)`, 'i');
       let foundInAny = false;
       let foundOutsideStats = false;
       for (let i = 0; i < linesForStats.length; i++) {
-        if (linesForStats[i].toLowerCase().includes(m)) {
+        if (re.test(linesForStats[i])) {
           foundInAny = true;
           if (!statBlockLines.has(i)) { foundOutsideStats = true; break; }
         }
@@ -994,9 +999,23 @@ function extractCardNumberPass(
       return foundInAny && !foundOutsideStats;
     };
 
+    const hasStatBlock = statBlockLines.size > 0;
+
     const acceptCandidate = (matched: string, source: string): boolean => {
       if (isOnlyInStatBlock(matched)) {
         console.log(`[CardNum] Rejecting "${matched}" via ${source} — only appears inside stats block`);
+        return false;
+      }
+      // When a stats block is detected on this side, a bare-numeric candidate
+      // that ONLY survives because it appeared as a standalone line is
+      // almost certainly a stat-table cell that escaped block detection
+      // (e.g. a column value separated from the rest of the grid by an
+      // OCR newline). Legitimate "card # printed alone on the back" cards
+      // are still caught by higher-priority sources (first-line-digit,
+      // brand-near-number, plain-number "#nnn"); blocking only this single
+      // weak source removes the failure mode without losing real cards.
+      if (hasStatBlock && source === 'standalone-line-number' && /^\d{1,3}$/.test(matched)) {
+        console.log(`[CardNum] Rejecting "${matched}" via ${source} — bare numeric on a card with a detected stats block`);
         return false;
       }
       return acceptRaw(matched, source);
