@@ -593,6 +593,35 @@ export async function lookupCard(input: CardLookupInput): Promise<CardLookupResu
       }
     }
 
+    // ── Step 1b2: Cross-year fallback for letter-bearing card numbers ──
+    // Modern insert/parallel cards often encode a vintage design year in the
+    // card number itself (e.g. Topps 2022 "1987 Topps Baseball" #T87-31, Topps
+    // 2025 "1990 Topps Baseball" #T90-72). The OCR sees the printed design
+    // year (1987, 1990) and uses it as the lookup year, so the exact
+    // (brand, year, cardNumber) match fails. Card numbers that contain at
+    // least one letter (T87-31, MLM-CCO, RC-CCO) are unique enough across
+    // years that we can safely widen the search to all years for the same
+    // brand and let the existing tiebreak (player name + OCR-text vocabulary)
+    // pick the right row. Pure numeric card numbers (1, 100) are excluded —
+    // they collide across thousands of sets and would introduce ambiguity.
+    if (cardRows.length === 0 && /[A-Za-z]/.test(cardNumNorm) && cardNumNorm.length >= 3) {
+      const anyYearRows = await db
+        .select()
+        .from(cardDatabase)
+        .where(
+          and(
+            sql`lower(${cardDatabase.brand}) = lower(${brandNorm})`,
+            sql`lower(${cardDatabase.cardNumberRaw}) = lower(${cardNumNorm})`
+          )
+        )
+        .limit(50);
+      if (anyYearRows.length > 0) {
+        console.log(`[CardDB] Cross-year fallback: no match for ${brandNorm} year=${year} #${cardNumNorm}; found ${anyYearRows.length} match(es) across other years — letting tiebreak pick`);
+        cardRows = anyYearRows;
+        sortCandidatesByPreference(cardRows, 'cross-year fallback');
+      }
+    }
+
     // ── Step 1c: Autograph-parallel-code fallback ──────────────────────
     // Some card numbers are parallel-specific autograph codes (e.g.
     // "EZA-JHT" for the End Zone Autographs Justin Herbert) that don't
