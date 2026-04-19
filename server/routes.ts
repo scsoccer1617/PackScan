@@ -1763,19 +1763,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (cached && (now - cached.timestamp) < AUTOCOMPLETE_CACHE_TTL) {
         return res.json(cached.data);
       }
-      const conditions: any[] = [];
-      if (brand) conditions.push(sql`lower(${cardDatabase.brand}) = lower(${brand})`);
-      if (year) conditions.push(eq(cardDatabase.year, year));
-      if (set) conditions.push(sql`lower(${cardDatabase.set}) = lower(${set})`);
-      if (playerLastName) conditions.push(sql`lower(${cardDatabase.playerName}) like ${'%' + playerLastName.toLowerCase() + '%'}`);
-      const whereExpr = conditions.length ? and(...conditions) : undefined;
-      const rows = await db
-        .select({ collection: cardDatabase.collection })
-        .from(cardDatabase)
-        .where(whereExpr as any)
-        .groupBy(cardDatabase.collection)
-        .orderBy(cardDatabase.collection);
-      const data = rows.map(r => r.collection).filter(Boolean);
+      const baseConditions: any[] = [];
+      if (brand) baseConditions.push(sql`lower(${cardDatabase.brand}) = lower(${brand})`);
+      if (year) baseConditions.push(eq(cardDatabase.year, year));
+      if (set) baseConditions.push(sql`lower(${cardDatabase.set}) = lower(${set})`);
+      const runQuery = async (extraConditions: any[]) => {
+        const conds = [...baseConditions, ...extraConditions];
+        const whereExpr = conds.length ? and(...conds) : undefined;
+        const rows = await db
+          .select({ collection: cardDatabase.collection })
+          .from(cardDatabase)
+          .where(whereExpr as any)
+          .groupBy(cardDatabase.collection)
+          .orderBy(cardDatabase.collection);
+        return rows.map(r => r.collection).filter((c): c is string => !!c);
+      };
+      let data: string[] = playerLastName
+        ? await runQuery([sql`lower(${cardDatabase.playerName}) like ${'%' + playerLastName.toLowerCase() + '%'}`])
+        : await runQuery([]);
+      // If narrowing by player yielded no collections, fall back to the
+      // unfiltered brand+year list so the user always sees a dropdown when
+      // the catalog has SOME data for this brand+year. Otherwise the UI
+      // wrongly drops to a free-text input on edits where the OCR'd player
+      // last-name simply isn't present in the catalog for the new year.
+      if (data.length === 0 && playerLastName) data = await runQuery([]);
       collectionsCache.set(cacheKey, { data, timestamp: now });
       return res.json(data);
     } catch (error: any) {
@@ -1799,19 +1810,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (cached && (now - cached.timestamp) < AUTOCOMPLETE_CACHE_TTL) {
         return res.json(cached.data);
       }
-      const conditions: any[] = [];
-      if (brand) conditions.push(sql`lower(${cardDatabase.brand}) = lower(${brand})`);
-      if (year) conditions.push(eq(cardDatabase.year, year));
-      if (collection) conditions.push(sql`lower(${cardDatabase.collection}) = lower(${collection})`);
-      if (playerLastName) conditions.push(sql`lower(${cardDatabase.playerName}) like ${'%' + playerLastName.toLowerCase() + '%'}`);
-      const whereExpr = conditions.length ? and(...conditions) : undefined;
-      const rows = await db
-        .select({ set: cardDatabase.set })
-        .from(cardDatabase)
-        .where(whereExpr as any)
-        .groupBy(cardDatabase.set)
-        .orderBy(cardDatabase.set);
-      const data = rows.map(r => r.set).filter((s): s is string => !!s);
+      const baseConditions: any[] = [];
+      if (brand) baseConditions.push(sql`lower(${cardDatabase.brand}) = lower(${brand})`);
+      if (year) baseConditions.push(eq(cardDatabase.year, year));
+      if (collection) baseConditions.push(sql`lower(${cardDatabase.collection}) = lower(${collection})`);
+      const runQuery = async (extraConditions: any[]) => {
+        const conds = [...baseConditions, ...extraConditions];
+        const whereExpr = conds.length ? and(...conds) : undefined;
+        const rows = await db
+          .select({ set: cardDatabase.set })
+          .from(cardDatabase)
+          .where(whereExpr as any)
+          .groupBy(cardDatabase.set)
+          .orderBy(cardDatabase.set);
+        return rows.map(r => r.set).filter((s): s is string => !!s);
+      };
+      let data: string[] = playerLastName
+        ? await runQuery([sql`lower(${cardDatabase.playerName}) like ${'%' + playerLastName.toLowerCase() + '%'}`])
+        : await runQuery([]);
+      // Same fallback as collections — never hide the dropdown just because
+      // the OCR'd player name is missing from the catalog for this brand+year.
+      if (data.length === 0 && playerLastName) data = await runQuery([]);
       setsCache.set(cacheKey, { data, timestamp: now });
       return res.json(data);
     } catch (error: any) {
