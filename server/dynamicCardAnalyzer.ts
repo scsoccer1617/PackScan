@@ -1912,18 +1912,46 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>,
       }
     }
     
-    // Check for copyright year pattern next
-    // Also handles OCR-garbled copyright symbols like "LO2024", "IO2024", "O2024" which are common OCR misreads of "© 2024"
-    const copyrightYearPattern = /(?:©|\(C\)|\&copy;|\&\s*©|\&\s*\(C\)|[LlIi]?[OoQ])(?:\s*)(\d{4})/i;
-    const copyrightMatch = text.match(copyrightYearPattern);
-    
-    if (copyrightMatch && copyrightMatch[1]) {
-      const year = parseInt(copyrightMatch[1], 10);
-      if (year >= 1900 && year <= new Date().getFullYear()) {
-        cardDetails.year = year;
-        console.log(`Using copyright year as card date: ${cardDetails.year}`);
-        return;
-      }
+    // Check for copyright year pattern next.
+    //
+    // Two-tier approach so the relaxed/garbled fallback never beats a real ©:
+    //
+    // 1) STRICT: explicit copyright symbol "©" or "(C)" (or HTML entity).
+    //    Iterate ALL strict matches and pick the LATEST year. Vintage card
+    //    backs sometimes contain multiple © lines (Topps + MLBP + Players
+    //    Assoc.); the production year is always the most recent one.
+    //
+    // 2) RELAXED: OCR garbling of "©" frequently reads as "O", "Q", "LO",
+    //    "IO", etc. immediately followed by the 4-digit year (no space —
+    //    e.g. "O2024", "LO2024"). Requiring zero whitespace between the
+    //    letter prefix and the digits prevents real words like "SO 1980"
+    //    (strikeouts column header next to a stat-row year) from being
+    //    misread as a copyright marker. Only consult this when STRICT
+    //    finds nothing.
+    const strictCopyrightYearPattern = /(?:©|\(C\)|\&copy;|\&\s*©|\&\s*\(C\))\s*(\d{4})/gi;
+    const strictYears: number[] = [];
+    let scm: RegExpExecArray | null;
+    while ((scm = strictCopyrightYearPattern.exec(text)) !== null) {
+      const y = parseInt(scm[1], 10);
+      if (y >= 1900 && y <= new Date().getFullYear()) strictYears.push(y);
+    }
+    if (strictYears.length > 0) {
+      cardDetails.year = Math.max(...strictYears);
+      console.log(`Using copyright year as card date: ${cardDetails.year}${strictYears.length > 1 ? ` (latest of ${strictYears.length} © markers: ${strictYears.join(', ')})` : ''}`);
+      return;
+    }
+    // Relaxed garbled-© fallback — letter prefix immediately adjacent to digits.
+    const garbledCopyrightYearPattern = /(?:^|[^A-Za-z0-9])[LlIi]?[OoQ](\d{4})/g;
+    const garbledYears: number[] = [];
+    let gcm: RegExpExecArray | null;
+    while ((gcm = garbledCopyrightYearPattern.exec(text)) !== null) {
+      const y = parseInt(gcm[1], 10);
+      if (y >= 1900 && y <= new Date().getFullYear()) garbledYears.push(y);
+    }
+    if (garbledYears.length > 0) {
+      cardDetails.year = Math.max(...garbledYears);
+      console.log(`Using OCR-garbled copyright year as card date: ${cardDetails.year}`);
+      return;
     }
     
     // Check for "YEAR Team" pattern often used in older cards
