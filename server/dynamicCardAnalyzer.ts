@@ -1614,7 +1614,24 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>,
       { search: 'PRESS PASS',   display: 'Press Pass' },
       { search: 'CLASSIC',      display: 'Classic' },
       { search: 'PINNACLE',     display: 'Pinnacle' },
-      { search: 'ULTRA',        display: 'Ultra' }
+      { search: 'ULTRA',        display: 'Ultra' },
+      // Vintage / non-mainstream brands present in card_database. Without
+      // these, any card from these manufacturers (e.g. 1981 Kellogg's
+      // Bruce Sutter) falls through to brand = "Unknown" and the DB
+      // lookup short-circuits. Fuzzy patterns cover common OCR glitches
+      // on stylized vintage wordmarks.
+      // KELLOGG'S: apostrophe is often dropped or read as space by OCR;
+      // double-L sometimes collapses to single-L on lenticular 3D fronts.
+      { search: "KELLOGG'S",    display: "Kellogg's",     fuzzy: /\bKE?LL?[O0Q]GG?[' ]?S?\b/i },
+      { search: 'HOSTESS',      display: 'Hostess',       fuzzy: /\bH[O0Q][S5]TE[S5]{1,2}\b/i },
+      // O-Pee-Chee: hyphens often dropped/spaced by OCR (OPC, O PEE CHEE, OPEECHEE).
+      { search: 'O-PEE-CHEE',   display: 'O-Pee-Chee',    fuzzy: /\bO[\s-]?PEE[\s-]?CHEE\b|\bOPC\b/i },
+      { search: 'BERK ROSS',    display: 'Berk Ross' },
+      { search: 'RED HEART',    display: 'Red Heart' },
+      { search: 'RED MAN',      display: 'Red Man' },
+      { search: 'SSPC',         display: 'SSPC' },
+      { search: 'WILD CARD',    display: 'Wild Card' },
+      { search: 'WILSON FRANKS', display: 'Wilson Franks' }
     ];
     
     // Use original text with newlines for brand detection to distinguish
