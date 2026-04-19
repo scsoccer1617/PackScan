@@ -62,12 +62,15 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
       brand: String(editData.brand),
       year: String(editData.year),
     });
+    // Narrow Collection options to those that exist within the chosen Set,
+    // so the dropdown only shows collections actually associated with it.
+    if (editData.set) params.set('set', String(editData.set));
     if (editData.playerLastName) params.set('playerLastName', String(editData.playerLastName));
     fetch(`/api/card-database/collections?${params.toString()}`)
       .then(r => r.json())
       .then(d => { if (Array.isArray(d)) setCollectionOptions(d); })
       .catch(() => setCollectionOptions([]));
-  }, [editMode, editData.brand, editData.year, editData.playerLastName]);
+  }, [editMode, editData.brand, editData.year, editData.set, editData.playerLastName]);
 
   useEffect(() => {
     if (!editMode || !editData.brand || !editData.year) {
