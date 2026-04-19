@@ -1242,10 +1242,13 @@ function extractCardNumberPass(
       return;
     }
 
-    // Plain number format: #123 or No. 123
+    // Plain number format: #123 or No. 123 (also tolerates common OCR glitches:
+    // "N0." with a zero, "NO " without the dot, the superscript "Nº", and the
+    // old-style "No 123" with no period — all variations seen on vintage card
+    // backs where the marker is printed in small condensed type.)
     // Guard: must NOT be a CODE# token from the legal text (e.g. CODE#065939 → skip).
     // Use global iteration so a CODE# hit doesn't block a later valid #123 match.
-    const plainNumberPatternGlobal = /(?:#|No\.?\s*)(\d+)/g;
+    const plainNumberPatternGlobal = /(?:#|N[o0]\.?\s*|N[º°]\s*)(\d+)/gi;
     let plainNumberMatch;
     while ((plainNumberMatch = plainNumberPatternGlobal.exec(text)) !== null) {
       const candidate = plainNumberMatch[1];
@@ -1260,7 +1263,13 @@ function extractCardNumberPass(
         console.log(`Skipping plain number "${candidate}" — matched # is part of a CODE# legal token`);
         continue;
       }
-      if (!acceptCandidate(candidate, 'plain-number')) continue;
+      // Explicit-marker bypass: an explicit "#" or "No." prefix is an
+      // unambiguous card-number designator — it does not appear next to
+      // stat-table values. Bypass the stat-block guard for this source so
+      // a legitimate marker like "No. 56" printed at the bottom of the back
+      // is never rejected just because "56" also occurs as a stat cell.
+      if (!acceptRaw(candidate, 'plain-number')) continue;
+      console.log(`[CardNum] Accepting "${candidate}" via plain-number (explicit "${matchedToken}" marker bypasses stat-block guard)`);
       if (candidate.length === 1) {
         cardDetails.cardNumber = candidate;
         break;
