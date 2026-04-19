@@ -458,6 +458,30 @@ export async function searchCardValues(
   set?: string
 ): Promise<EbayResponse> {
   try {
+    // Strip middle names before any eBay query — sellers virtually always
+    // list cards with just "First Last" (e.g. "Bruce Sutter"), not the
+    // player's full legal name ("Howard Bruce Sutter"). Keeping the middle
+    // name in the keywords causes eBay to return zero matches even when
+    // the card is widely sold. We keep the first and last tokens; if the
+    // input is already 1 or 2 tokens we leave it alone.
+    const stripMiddleNames = (name: string): string => {
+      const tokens = (name || '').trim().split(/\s+/).filter(Boolean);
+      if (tokens.length <= 2) return tokens.join(' ');
+      // Generational suffixes (Jr, Sr, II, III, IV) belong with the last
+      // name on eBay listings — keep them attached. e.g.
+      // "Cal Joseph Ripken Jr" → "Cal Ripken Jr", not "Cal Jr".
+      const suffixRe = /^(jr|sr|ii|iii|iv|v)\.?$/i;
+      const last = tokens[tokens.length - 1];
+      if (suffixRe.test(last) && tokens.length >= 3) {
+        return `${tokens[0]} ${tokens[tokens.length - 2]} ${last}`;
+      }
+      return `${tokens[0]} ${last}`;
+    };
+    const originalPlayerName = playerName;
+    playerName = stripMiddleNames(playerName);
+    if (playerName !== originalPlayerName) {
+      console.log(`[eBay] Stripped middle name(s) for search: "${originalPlayerName}" → "${playerName}"`);
+    }
     // Create cache key from search parameters including foil type and serial number
     const cacheKey = `${playerName}-${cardNumber}-${brand}-${year}-${collection || ''}-${isNumbered || ''}-${foilType || ''}-${serialNumber || ''}-${variant || ''}`;
     const cached = searchCache.get(cacheKey);
