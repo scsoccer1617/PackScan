@@ -20,6 +20,7 @@ interface AppendCardPayload {
   collection?: string | null;
   set?: string | null;
   cardNumber?: string | null;
+  cmpNumber?: string | null;
   playerFirstName?: string | null;
   playerLastName?: string | null;
   variant?: string | null;
@@ -50,6 +51,7 @@ function buildAppendPayload(cardData: Partial<CardFormValues>, averageValue: num
     collection: cardData.collection ?? null,
     set: cardData.set ?? null,
     cardNumber: cardData.cardNumber ?? null,
+    cmpNumber: (cardData as { cmpNumber?: string | null }).cmpNumber ?? null,
     playerFirstName: cardData.playerFirstName ?? null,
     playerLastName: cardData.playerLastName ?? null,
     variant: cardData.variant ?? null,

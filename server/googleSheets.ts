@@ -10,7 +10,7 @@ const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
 // Column order mirrors the on-screen "Card Information" panel so the sheet
 // reads the same way the app does. Keep buildRow() in lock-step.
 export const SHEET_HEADERS = [
-  'Date scanned', 'Sport', 'Player', 'Year', 'Brand', 'Card #',
+  'Date scanned', 'Sport', 'Player', 'Year', 'Brand', 'Card #', 'CMP code',
   'Set', 'Collection', 'Parallel', 'Serial #', 'Variant',
   'Rookie', 'Auto', 'Numbered',
   'Average eBay price', 'Front image link', 'Back image link', 'eBay search URL',
@@ -181,6 +181,7 @@ export interface CardRowInput {
   collection?: string | null;
   set?: string | null;
   cardNumber?: string | null;
+  cmpNumber?: string | null;
   player?: string | null;
   variation?: string | null;
   serialNumber?: string | null;
@@ -222,6 +223,7 @@ export function buildRow(input: CardRowInput): (string | number)[] {
     input.year ?? '',
     input.brand ?? '',
     input.cardNumber ?? '',
+    input.cmpNumber ?? '',
     input.set ?? '',
     input.collection ?? '',
     input.foilType ?? '',
