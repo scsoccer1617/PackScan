@@ -1809,7 +1809,7 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>,
       { search: 'PANINI',       display: 'Panini',       fuzzy: /\bP[A4]N[1I]N[1I]\b/i },
       // DONRUSS: D often misreads as J/O/Q/U on stylized wordmarks (closed-loop
       // glyph). N→W is also common. Allow optional trailing S (DONRUS).
-      { search: 'DONRUSS',      display: 'Donruss',      fuzzy: /\b[DJOQU0][O0Q][NW]RU[S5]{1,2}\b/i },
+      { search: 'DONRUSS',      display: 'Donruss',      fuzzy: /\b[DJOQU0][O0Q][NWR]RU[S5]{1,2}\b/i },
       { search: 'FLEER',        display: 'Fleer',        fuzzy: /\b[FE]LEER\b/i },
       { search: 'SCORE',        display: 'Score',        fuzzy: /\b[S5]C[O0Q]RE\b/i },
       { search: 'PLAYOFF',      display: 'Playoff' },
@@ -1914,6 +1914,25 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>,
     if (!cardDetails.brand && brandFromLegal) {
       cardDetails.brand = brandFromLegal;
       console.log(`Detected brand: ${cardDetails.brand} (from legal text fallback)`);
+    }
+
+    // Special-case publisher imprint: "© YYYY LEAF, INC." (1981–1993).
+    // Leaf, Inc. printed every Donruss baseball card during this window and
+    // produced no Leaf-branded cards of its own until 1990. When the back
+    // text shows the LEAF, INC. imprint with a copyright year in 1981–1993
+    // and no other brand was detected anywhere on the card, the card is
+    // overwhelmingly a Donruss — the front DONRUSS wordmark just OCR'd too
+    // poorly to recognize (e.g. "JONRUSS", "JORRUSS", "OONRUSS").
+    if (!cardDetails.brand) {
+      const leafImprintMatch = brandDetectionText.match(/\b(?:©|\(C\)|COPYRIGHT)\s*(\d{4})\s+LEAF[,.\s]+INC\b/i)
+        ?? brandDetectionText.match(/\bLEAF[,.\s]+INC\b[^\n]{0,40}?\b(\d{4})\b/i);
+      if (leafImprintMatch) {
+        const imprintYear = parseInt(leafImprintMatch[1], 10);
+        if (imprintYear >= 1981 && imprintYear <= 1993) {
+          cardDetails.brand = 'Donruss';
+          console.log(`Detected brand: Donruss (from LEAF, INC. publisher imprint © ${imprintYear} — Leaf printed every Donruss baseball card 1981–1993)`);
+        }
+      }
     }
     
     // COLLECTION DETECTION - Look for common collections/sets
