@@ -45,8 +45,14 @@ export function extractAllYearCandidates(text: string): number[] {
   while ((m = garbled.exec(text)) !== null) accept(m[1]);
 
   // Publisher imprint: <year> <PUBLISHER> (with optional INC/CORP/etc.)
+  // The separator deliberately EXCLUDES `.` — a period almost always
+  // marks a sentence boundary in card-back prose, so allowing `.` lets
+  // junk like "AVERAGING OVER 20 LONGBALLS PER SEASON SINCE 1973.
+  // XOGRAPH®. 1981 VISUAL PANOGRAPHICS" pull 1973 in as a fake
+  // copyright-adjacent year. Real publisher imprints use space, comma,
+  // semicolon, or colon between the year and the publisher name.
   const publishers = '(?:THE\\s+)?(?:TOPPS|LEAF|BOWMAN|FLEER|DONRUSS|SCORE|UPPER\\s+DECK|PANINI|VISUAL\\s+PANOGRAPHICS|XOGRAPH|XOGRAPHO|KELLOGG)';
-  const yearThenPub = new RegExp(`(\\d{4})[\\s,.;:]+${publishers}`, 'gi');
+  const yearThenPub = new RegExp(`(\\d{4})[\\s,;:]{1,3}${publishers}`, 'gi');
   while ((m = yearThenPub.exec(text)) !== null) accept(m[1]);
 
   // Publisher imprint: <PUBLISHER> <year>

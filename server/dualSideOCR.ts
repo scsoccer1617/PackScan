@@ -935,13 +935,23 @@ async function combineCardResults(
         'red', 'white', 'blue', 'jays',
       ]);
       const isBogusOcrWord = (w: string) => !w || englishStopwordNameParts.has(w);
-      // ocrNameLooksBogus is true when EITHER name token is a known bogus
-      // word — looser than before (was AND), because phrases like
-      // "FRANCISCO GIANTS" or "OFFICIAL LICENSEL" each have one bogus
-      // token and shouldn't override a strong DB match.
+      // ocrNameLooksBogus is true when EITHER name token is a known
+      // bogus word OR is too short to be a real name token (≤ 2 chars
+      // catches stat-line fragments like "Nl" pulled from "1977 SAN
+      // DIEGO NL"). Real player full-name pairs virtually never have a
+      // 1-2 char surname.
       const ocrNameLooksBogus = !!ocrLast && !!ocrFirst &&
-        (isBogusOcrWord(ocrFirst) || isBogusOcrWord(ocrLast));
-      if (ocrNameLooksBogus) {
+        (isBogusOcrWord(ocrFirst) || isBogusOcrWord(ocrLast) ||
+         ocrFirst.length <= 2 || ocrLast.length <= 2);
+      // When the catalog probe already validated the exact
+      // (brand, year, cardNumber) triple exists in card_database, the
+      // DB hit on that same triple IS the correct card — the OCR name
+      // disagreement is irrelevant because the card number was
+      // catalog-confirmed, not jersey-numbered.
+      const catalogValidated = !!(combined as CardFormWithFlags)._yearFromCatalogProbe;
+      if (catalogValidated) {
+        console.log(`[CardDB] Catalog-probe validated (brand+year+cardNumber); trusting DB match "${dbResult.playerFirstName} ${dbResult.playerLastName}" over OCR "${combined.playerFirstName} ${combined.playerLastName}".`);
+      } else if (ocrNameLooksBogus) {
         console.log(`[CardDB] OCR name "${combined.playerFirstName} ${combined.playerLastName}" looks like English prose, not a real name — trusting DB match "${dbResult.playerFirstName} ${dbResult.playerLastName}".`);
       } else if (!lastNamesOverlap && !ocrHasNoName) {
         console.log(`[CardDB] DB row REJECTED — OCR last name "${combined.playerLastName}" disagrees with DB "${dbResult.playerLastName}". OCR card number is likely wrong; falling back to OCR-only data to avoid corrupting player identity.`);
