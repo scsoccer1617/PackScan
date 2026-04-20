@@ -558,6 +558,15 @@ async function combineCardResults(
     'SS', 'DH', 'SP', 'RP', 'CF', 'LF', 'RF', 'OF',
     'QB', 'WR', 'RB', 'TE', 'LB', 'CB', 'DE', 'DT',
     'SLG', 'OPS', 'AVG', 'WHIP', 'IP', 'AB',
+    // Legal/licensing/manufacturing text fragments commonly OCR'd off the
+    // bottom of vintage card backs. Added because the per-side analyser
+    // sometimes promotes phrases like "OFFICIAL LICENSEL" (a garbled
+    // "OFFICIALLY LICENSED") to the player-name field.
+    'OFFICIAL', 'OFFICIALLY', 'LICENSE', 'LICENSED', 'LICENSEL', 'LICENSEE',
+    'AUTHORIZED', 'COPYRIGHT', 'TRADEMARK', 'RESERVED', 'RIGHTS',
+    'INSIGNIA', 'PANOGRAPHIC', 'PANOGRAPHICS', 'XOGRAPH', 'XOGRAPHO',
+    'KELLOGG', 'KELLOGGS', 'VISUAL',
+    'NFLPA', 'NBAPA', 'NHLPA', 'PLAYERS', 'ASSN', 'ASS',
   ]);
   
   const stripTrademarkSuffix = (w: string): string => w.replace(/(?:TM|™|®|\.+)$/gi, '');
@@ -909,10 +918,29 @@ async function combineCardResults(
         'yes', 'yet', 'all', 'any', 'now', 'too', 'was', 'are', 'when', 'where',
         'what', 'been', 'have', 'will', 'the', 'and', 'for', 'with', 'from',
         'that', 'this',
+        // Legal/licensing/manufacturing words and team-name fragments —
+        // when these appear as the OCR'd "player name" the OCR clearly
+        // latched onto the bottom-of-card legal text or the team banner,
+        // so the DB hit on (brand+year+cardNumber) should be trusted
+        // rather than rejected.
+        'official', 'officially', 'license', 'licensed', 'licensel', 'licensee',
+        'authorized', 'copyright', 'trademark', 'reserved', 'rights',
+        'insignia', 'panographic', 'panographics', 'xograph', 'xographo',
+        'kellogg', 'kelloggs', 'visual', 'mlbpa', 'nflpa', 'nbapa', 'nhlpa',
+        'players', 'assn', 'san', 'francisco', 'giants', 'yankees', 'dodgers',
+        'mets', 'cubs', 'braves', 'astros', 'rangers', 'padres', 'cardinals',
+        'nationals', 'orioles', 'guardians', 'twins', 'rays', 'marlins',
+        'pirates', 'reds', 'brewers', 'tigers', 'royals', 'athletics',
+        'mariners', 'angels', 'rockies', 'diamondbacks', 'phillies', 'sox',
+        'red', 'white', 'blue', 'jays',
       ]);
       const isBogusOcrWord = (w: string) => !w || englishStopwordNameParts.has(w);
+      // ocrNameLooksBogus is true when EITHER name token is a known bogus
+      // word — looser than before (was AND), because phrases like
+      // "FRANCISCO GIANTS" or "OFFICIAL LICENSEL" each have one bogus
+      // token and shouldn't override a strong DB match.
       const ocrNameLooksBogus = !!ocrLast && !!ocrFirst &&
-        isBogusOcrWord(ocrFirst) && isBogusOcrWord(ocrLast);
+        (isBogusOcrWord(ocrFirst) || isBogusOcrWord(ocrLast));
       if (ocrNameLooksBogus) {
         console.log(`[CardDB] OCR name "${combined.playerFirstName} ${combined.playerLastName}" looks like English prose, not a real name — trusting DB match "${dbResult.playerFirstName} ${dbResult.playerLastName}".`);
       } else if (!lastNamesOverlap && !ocrHasNoName) {
@@ -1077,14 +1105,24 @@ async function combineCardResults(
               chosen = surnameHits[0];
               reason = `surname "${surname}" matched only ${chosen.year} among ${hits.length} catalog-confirmed candidates`;
             } else {
-              // Surname doesn't disambiguate (or matches none). Prefer the
-              // candidate that matches the existing per-side year detection
-              // result — it represents whatever heuristic priority the
-              // analyser already chose. If that's not in the hit list,
-              // fall back to the latest year.
+              // Surname doesn't disambiguate (or matches none). Prefer
+              // years extracted directly from the OCR text (via
+              // copyright/publisher proximity in
+              // extractAllYearCandidates) over the per-side picker's
+              // guess — the per-side picker sometimes lands on a year
+              // that doesn't appear on the card at all. Within that
+              // preferred set choose the EARLIEST year (vintage
+              // copyright lag almost always means the production year
+              // is the lowest © stamped on the card).
               const existing = Number(combined.year || 0);
-              chosen = hits.find(h => h.year === existing) ?? hits.reduce((a, b) => (b.year > a.year ? b : a));
-              reason = `latest among ${hits.length} catalog-confirmed candidates`;
+              const ocrGroundedHits = hits.filter(h => ocrCandidates.includes(h.year));
+              if (ocrGroundedHits.length > 0) {
+                chosen = ocrGroundedHits.reduce((a, b) => (b.year < a.year ? b : a));
+                reason = `earliest OCR-grounded year among ${hits.length} catalog-confirmed candidates (per-side picker guess ${existing} ${ocrCandidates.includes(existing) ? 'is' : 'is NOT'} OCR-grounded)`;
+              } else {
+                chosen = hits.find(h => h.year === existing) ?? hits.reduce((a, b) => (b.year > a.year ? b : a));
+                reason = `latest among ${hits.length} catalog-confirmed candidates (no OCR-grounded year hit)`;
+              }
             }
           }
           if (chosen.year !== Number(combined.year)) {
