@@ -433,10 +433,22 @@ async function combineCardResults(
   // search neighboring years more aggressively.
   const frontYearFromCopyright = !!(frontResult as any)._yearFromCopyright;
   const backYearFromCopyright  = !!(backResult  as any)._yearFromCopyright;
+  const frontYearFromBareFallback = !!(frontResult as any)._yearFromBareFallback;
   const frontHasYear = hasValue(frontResult.year);
   const backHasYear  = hasValue(backResult.year);
 
-  if (frontHasYear) {
+  // When the front year came from the bare-year fallback (i.e. just a 4-digit
+  // year buried in prose like "TRIPLE CROWN-1967") AND it disagrees with the
+  // back year by more than 2 years, the back year is more reliable. This
+  // handles commemorative/tribute cards where the front mentions a historical
+  // event year but the actual production year only appears on the back.
+  if (frontHasYear && backHasYear &&
+      frontYearFromBareFallback &&
+      Math.abs(Number(frontResult.year) - Number(backResult.year)) > 2) {
+    combined.year = backResult.year;
+    (combined as any)._yearFromCopyright = backYearFromCopyright;
+    console.log(`[Year] Back year ${backResult.year} preferred over front year ${frontResult.year} (front year was a bare-prose fallback and disagrees with back by >2 years — back is more authoritative for commemorative/tribute cards).`);
+  } else if (frontHasYear) {
     combined.year = frontResult.year;
     (combined as any)._yearFromCopyright = frontYearFromCopyright;
     if (backHasYear && backResult.year !== frontResult.year) {

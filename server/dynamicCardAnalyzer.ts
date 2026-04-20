@@ -2063,7 +2063,8 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>,
       const modernYears = yearCandidates.filter(y => y >= 1980 && y <= 2026);
       if (modernYears.length > 0) {
         cardDetails.year = Math.max(...modernYears);
-        console.log(`Selected latest modern year as most likely card date: ${cardDetails.year}`);
+        (cardDetails as any)._yearFromBareFallback = true;
+        console.log(`Selected latest modern year as most likely card date: ${cardDetails.year} (bare-year fallback — low confidence)`);
       } else {
         // Vintage card fallback — pick the LATEST year in the text, not the first.
         // Stats tables on vintage card backs span multiple years; the most recent
@@ -2071,7 +2072,8 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>,
         // yearCandidates[0] incorrectly selected early stat years (e.g. 1976 on
         // a 1978-copyright Topps card where the stats start in 1974).
         cardDetails.year = Math.max(...yearCandidates);
-        console.log(`Using latest detected year as card date (vintage fallback): ${cardDetails.year}`);
+        (cardDetails as any)._yearFromBareFallback = true;
+        console.log(`Using latest detected year as card date (vintage fallback): ${cardDetails.year} (bare-year fallback — low confidence)`);
       }
     }
   } catch (error) {
