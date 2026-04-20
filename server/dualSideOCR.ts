@@ -567,9 +567,26 @@ async function combineCardResults(
     'INSIGNIA', 'PANOGRAPHIC', 'PANOGRAPHICS', 'XOGRAPH', 'XOGRAPHO',
     'KELLOGG', 'KELLOGGS', 'VISUAL',
     'NFLPA', 'NBAPA', 'NHLPA', 'PLAYERS', 'ASSN', 'ASS',
+    // Generic set/marketing descriptors that frequently appear on the
+    // front of a card as the SET NAME (not the player). Added because
+    // TCMA / Topps / Panini etc. ship retrospective sets with names
+    // like "Baseball's Greatest Pitchers", "All-Time Stars", "Legends
+    // of the Game", "Hall of Fame Heroes" — when those banner phrases
+    // get OCR'd into playerFirstName/playerLastName the per-side
+    // analyser otherwise treats them as a real name. None of these are
+    // real human names, so dropping them is safe and sport-agnostic.
+    'GREATEST', 'GREAT', 'GREATS', 'BEST', 'STAR', 'LEGEND', 'LEGENDS',
+    'CLASSIC', 'CLASSICS', 'ESSENTIAL', 'ULTIMATE', 'MASTER', 'MASTERS',
+    'ALL-TIME', 'ALLTIME', 'HEROES', 'HALL', 'FAME',
+    'PITCHERS', 'CATCHERS', 'SLUGGERS', 'HITTERS',
   ]);
-  
-  const stripTrademarkSuffix = (w: string): string => w.replace(/(?:TM|™|®|\.+)$/gi, '');
+
+  // Strip trademark suffixes AND possessive 's so words like
+  // "BASEBALL'S" match the bogus word "BASEBALL". Order matters: strip
+  // trademark/period suffixes first, then strip a trailing possessive.
+  const stripTrademarkSuffix = (w: string): string =>
+    w.replace(/(?:TM|™|®|\.+)$/gi, '')
+     .replace(/['’\u2019]S$/i, '');
   
   const isBogusFn = (firstName?: string, lastName?: string): boolean => {
     if (!firstName || !lastName) return true;
