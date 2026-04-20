@@ -1972,6 +1972,12 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>,
       if (isCopyrightLike && isUnreliableBrandYear(best.brand)) {
         (cardDetails as any)._yearFromCopyright = true;
         console.log(`Using brand-year copyright line as card date: ${cardDetails.year} (from "${best.matchText}", ${allHits.length} candidate(s)) — flagged low-confidence (Leaf/Donruss publisher imprint can be off by 1 year).`);
+        // Still return — the publisher-imprint year is the strongest signal
+        // available on this side. The low-confidence flag lets the dual-side
+        // combine step swap in a stronger year from the other side if found,
+        // but we must not let weaker downstream fallbacks (bare-year prose,
+        // etc.) clobber it.
+        return;
       } else if (isCopyrightLike) {
         console.log(`Using brand-year copyright line as card date: ${cardDetails.year} (from "${best.matchText}", ${allHits.length} candidate(s))`);
         return;
