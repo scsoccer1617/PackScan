@@ -1891,9 +1891,6 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>,
     // `[\s,.;:]+` matches any combination of whitespace/punctuation between the
     // year and brand — vintage Topps cards print "© 1979, TOPPS" with a comma
     // that broke the stricter `\s+` version.
-    const brandYearPattern = /(\d{4})[\s,.;:]+(?:THE\s+)?(TOPPS|LEAF|BOWMAN|FLEER|DONRUSS|SCORE|UPPER\s+DECK|PANINI)(?:[\s,.]+(?:CHEWING\s+GUM|COMPANY|INC\.?|LTD|CORP|LLC))?/i;
-    const brandYearMatch = text.match(brandYearPattern);
-
     // Brands whose printed copyright year is unreliable as the card's release year.
     // The Leaf, Inc. publisher imprint on every Donruss card 1981–1993 commonly
     // pre-dates the actual card year by one (1991 Donruss prints "© 1990 LEAF,
@@ -1906,35 +1903,84 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>,
     const isUnreliableBrandYear = (matchedBrand: string | undefined): boolean =>
       !!matchedBrand && unreliableCopyrightBrands.test(matchedBrand.replace(/\s+/g, ' ').trim());
 
-    if (brandYearMatch && brandYearMatch[1]) {
-      const year = parseInt(brandYearMatch[1], 10);
-      if (year >= 1900 && year <= new Date().getFullYear()) {
-        cardDetails.year = year;
-        if (isUnreliableBrandYear(brandYearMatch[2])) {
-          (cardDetails as any)._yearFromCopyright = true;
-          console.log(`Using brand year as card date: ${cardDetails.year} (from "${brandYearMatch[0]}") — flagged low-confidence (Leaf/Donruss publisher imprint can be off by 1 year).`);
-        } else {
-          console.log(`Using brand year as card date: ${cardDetails.year} (from "${brandYearMatch[0]}")`);
-          return;
-        }
+    // Brand+year detection. Scan ALL matches in the text (not just the first)
+    // and prioritise ones that look like an actual copyright line:
+    //   • preceded by © / (C) / "&copy;" within a few chars, OR
+    //   • followed by a publisher suffix (INC / LLC / CORP / COMPANY / LTD /
+    //     "CHEWING GUM").
+    // A year buried in marketing prose like "THE 1990 DONRUSS HALL OF FAME
+    // PUZZLE FEATURES…" should never beat an explicit publisher imprint like
+    // "1989 LEAF, INC." that appears later in the same text.
+    const brandYearGlobalPattern = /(\d{4})[\s,.;:]+(?:THE\s+)?(TOPPS|LEAF|BOWMAN|FLEER|DONRUSS|SCORE|UPPER\s+DECK|PANINI)(?:[\s,.]+(CHEWING\s+GUM|COMPANY|INC\.?|LTD|CORP|LLC))?/gi;
+    const brandThenYearGlobalPattern = /(TOPPS|LEAF|BOWMAN|FLEER|DONRUSS|SCORE|UPPER\s+DECK|PANINI)(?:[\s,.]+(CHEWING\s+GUM|COMPANY|INC\.?|LTD|CORP|LLC))?[\s,.;:]+(\d{4})/gi;
+
+    type BrandYearHit = {
+      year: number;
+      brand: string;
+      hasPublisherSuffix: boolean;
+      hasCopyrightMarker: boolean;
+      matchText: string;
+    };
+    const collectHits = (): BrandYearHit[] => {
+      const hits: BrandYearHit[] = [];
+      let m: RegExpExecArray | null;
+      brandYearGlobalPattern.lastIndex = 0;
+      while ((m = brandYearGlobalPattern.exec(text)) !== null) {
+        const year = parseInt(m[1], 10);
+        if (year < 1900 || year > new Date().getFullYear()) continue;
+        const before = text.substring(Math.max(0, m.index - 8), m.index);
+        const hasCopyrightMarker = /(?:©|\(C\)|&copy;)\s*$/i.test(before);
+        hits.push({
+          year,
+          brand: m[2],
+          hasPublisherSuffix: !!m[3],
+          hasCopyrightMarker,
+          matchText: m[0],
+        });
       }
-    }
-    
-    // Reverse order: brand name followed by year, e.g. "TOPPS CHEWING GUM, INC. 1979",
-    // "TOPPS COMPANY 2024", or generally "<BRAND> ... <4-digit year>" within a short window.
-    const brandThenYearPattern = /(TOPPS|LEAF|BOWMAN|FLEER|DONRUSS|SCORE|UPPER\s+DECK|PANINI)(?:[\s,.]+(?:CHEWING\s+GUM|COMPANY|INC\.?|LTD|CORP|LLC))?[\s,.;:]+(\d{4})/i;
-    const brandThenYearMatch = text.match(brandThenYearPattern);
-    if (brandThenYearMatch && brandThenYearMatch[2]) {
-      const year = parseInt(brandThenYearMatch[2], 10);
-      if (year >= 1900 && year <= new Date().getFullYear()) {
-        cardDetails.year = year;
-        if (isUnreliableBrandYear(brandThenYearMatch[1])) {
-          (cardDetails as any)._yearFromCopyright = true;
-          console.log(`Using brand-then-year pattern as card date: ${cardDetails.year} (from "${brandThenYearMatch[0]}") — flagged low-confidence (Leaf/Donruss publisher imprint can be off by 1 year).`);
-        } else {
-          console.log(`Using brand-then-year pattern as card date: ${cardDetails.year} (from "${brandThenYearMatch[0]}")`);
-          return;
-        }
+      brandThenYearGlobalPattern.lastIndex = 0;
+      while ((m = brandThenYearGlobalPattern.exec(text)) !== null) {
+        const year = parseInt(m[3], 10);
+        if (year < 1900 || year > new Date().getFullYear()) continue;
+        const before = text.substring(Math.max(0, m.index - 8), m.index);
+        const hasCopyrightMarker = /(?:©|\(C\)|&copy;)\s*$/i.test(before);
+        hits.push({
+          year,
+          brand: m[1],
+          hasPublisherSuffix: !!m[2],
+          hasCopyrightMarker,
+          matchText: m[0],
+        });
+      }
+      return hits;
+    };
+
+    const allHits = collectHits();
+    if (allHits.length > 0) {
+      const scoreHit = (h: BrandYearHit) =>
+        (h.hasCopyrightMarker ? 100 : 0) + (h.hasPublisherSuffix ? 50 : 0);
+      // Pick the highest-scored hit; tiebreak by latest year (more recent
+      // copyright wins when several © lines coexist, e.g. Topps + MLBPA).
+      const best = allHits.reduce((a, b) => {
+        const sa = scoreHit(a), sb = scoreHit(b);
+        if (sb > sa) return b;
+        if (sb < sa) return a;
+        return b.year > a.year ? b : a;
+      });
+      cardDetails.year = best.year;
+      const isCopyrightLike = best.hasCopyrightMarker || best.hasPublisherSuffix;
+      if (isCopyrightLike && isUnreliableBrandYear(best.brand)) {
+        (cardDetails as any)._yearFromCopyright = true;
+        console.log(`Using brand-year copyright line as card date: ${cardDetails.year} (from "${best.matchText}", ${allHits.length} candidate(s)) — flagged low-confidence (Leaf/Donruss publisher imprint can be off by 1 year).`);
+      } else if (isCopyrightLike) {
+        console.log(`Using brand-year copyright line as card date: ${cardDetails.year} (from "${best.matchText}", ${allHits.length} candidate(s))`);
+        return;
+      } else {
+        // No copyright marker or publisher suffix on any candidate — this is
+        // a brand+year mention in body prose. Mark low-confidence so combine
+        // can prefer a stronger signal from the other side.
+        (cardDetails as any)._yearFromBareFallback = true;
+        console.log(`Using brand+year prose mention as card date: ${cardDetails.year} (from "${best.matchText}") — no copyright marker or publisher suffix nearby, low confidence.`);
       }
     }
     
