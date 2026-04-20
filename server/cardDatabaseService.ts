@@ -327,28 +327,46 @@ export async function lookupCard(input: CardLookupInput): Promise<CardLookupResu
       )
       .limit(200);
 
-    // ── Step 1a: Off-by-one year fallback (vintage copyright convention) ──
-    // Vintage Topps/Fleer/Donruss cards (pre-1987) were printed with the previous
-    // year's copyright (e.g. a 1979 Topps card has "© 1978" on the back, with stats
-    // ending in 1978). Collectors catalog these by release year (1979), so OCR of
-    // the back often yields copyright_year = release_year - 1. If we didn't find
-    // a match, try year+1 before falling back.
-    if (cardRows.length === 0 && year >= 1900 && year < 1990) {
-      const bumpedRows = await db
+    // ── Step 1a: Off-by-one year fallback (copyright→release convention) ──
+    // Several manufacturers consistently printed the prior-year copyright on
+    // the card back, even though the card was sold as the next year's set.
+    // Documented patterns:
+    //   • Vintage Topps/Fleer/Donruss (pre-1987): © year = release year - 1
+    //     (e.g. a 1979 Topps card shows "© 1978" with stats through 1978).
+    //   • Donruss 1984–1993: card says "© 1989 Donruss" but set = 1990.
+    //   • Score   1988–1992: card says "© 1988 Score"   but set = 1989.
+    //   • Fleer   early 1980s: occasional one-year lag.
+    // We approach this generically: if the exact-year lookup misses, try
+    // year+1, then year-1. Both retries are scoped to the same brand and
+    // card-number so they cannot leak across unrelated sets. The matched
+    // row's actual year is what we return downstream, so the eBay search
+    // will use the corrected release year automatically.
+    const tryYearShift = async (shifted: number, label: string) => {
+      if (shifted < 1900 || shifted > new Date().getFullYear() + 1) return;
+      if (cardRows.length > 0) return;
+      const shiftedRows = await db
         .select()
         .from(cardDatabase)
         .where(
           and(
             sql`lower(${cardDatabase.brand}) = lower(${brandNorm})`,
-            eq(cardDatabase.year, year + 1),
+            eq(cardDatabase.year, shifted),
             sql`lower(${cardDatabase.cardNumberRaw}) = lower(${cardNumNorm})`
           )
         )
         .limit(10);
-      if (bumpedRows.length > 0) {
-        console.log(`[CardDB] Off-by-one year fallback: no match for ${year} ${brandNorm} #${cardNumNorm}; found ${bumpedRows.length} match(es) at year ${year + 1} (copyright→release year convention)`);
-        cardRows = bumpedRows;
+      if (shiftedRows.length > 0) {
+        console.log(`[CardDB] ${label} year fallback: no match for ${year} ${brandNorm} #${cardNumNorm}; found ${shiftedRows.length} match(es) at year ${shifted}`);
+        cardRows = shiftedRows;
       }
+    };
+
+    if (cardRows.length === 0) {
+      // year+1 first (covers vintage Topps/Fleer/Donruss pre-1987 AND the
+      // Donruss/Score 1984-1993 copyright-lag rule).
+      await tryYearShift(year + 1, '+1');
+      // year-1 as final retry (catches the rarer reverse case).
+      await tryYearShift(year - 1, '-1');
     }
 
     // Normalize ordinal words to digits so "Series Two" == "Series 2" etc.
