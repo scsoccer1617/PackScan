@@ -374,7 +374,17 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
         }
         
         if (nameWords.length >= 2 && nameWords.length <= 3) {
-          const noNonNameWords = nameWords.every(w => !isNonNameWord(w));
+          // For 3-word names (first + middle + last) only require the FIRST
+          // and LAST tokens to be clean. Common middle names like "LOUIS",
+          // "JAMES", "JOHN", "LEE" appear in the non-name list because they
+          // double as city names ("ST. LOUIS") or stopwords — we don't want
+          // a middle token to disqualify a legitimate "First Middle Last"
+          // candidate (e.g. "LEE LOUIS MAZZILLI", "FRANK EDWIN MCGRAW").
+          // 2-word names still require both tokens clean (no middle to relax).
+          const noNonNameWords =
+            nameWords.length === 3
+              ? !isNonNameWord(nameWords[0]) && !isNonNameWord(nameWords[2])
+              : nameWords.every(w => !isNonNameWord(w));
           const noNumbers = nameWords.every(w => !/\d/.test(w));
           const eachWordLen = nameWords.every(w => w.length >= 2);
           
