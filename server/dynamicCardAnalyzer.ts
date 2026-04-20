@@ -1334,20 +1334,47 @@ function extractCardNumberPass(
     // We capture only the trailing card-number portion; the year side
     // of the compound is independently picked up by the year-extraction
     // pass (and by the surname catalog probe in dualSideOCR).
-    const yearCardCompoundPattern = /\b(?:19[0-9]{2}|20[0-2][0-9]|2030)\s*[-–—]\s*(\d{1,4})\b/;
-    const yearCardCompoundMatch = text.match(yearCardCompoundPattern);
-    if (yearCardCompoundMatch && yearCardCompoundMatch[1]) {
-      const candidate = yearCardCompoundMatch[1];
-      const matchedToken = yearCardCompoundMatch[0];
-      // Don't mistake a serial-number-like "/NN" or jersey range for
-      // a compound — the regex is already strict, but skip if the
-      // whole match is clearly part of a date range (e.g. "1982-1983").
-      if (!/^(?:19[0-9]{2}|20[0-2][0-9]|2030)\s*[-–—]\s*(?:19[0-9]{2}|20[0-2][0-9]|2030)\b/.test(matchedToken)) {
-        if (acceptRaw(candidate, 'year-cardnumber-compound')) {
-          cardDetails.cardNumber = candidate;
-          console.log(`[CardNum] Accepting "${candidate}" via year-cardnumber compound "${matchedToken}" (vintage <year>-<num> convention)`);
-          return;
-        }
+    const yearCardCompoundPattern = /\b(?:19[0-9]{2}|20[0-2][0-9]|2030)\s*[-–—]\s*(\d{1,4})\b/g;
+    const yearCardCompoundCandidates: Array<{ candidate: string; matched: string; idx: number; trusted: boolean }> = [];
+    let ycMatch: RegExpExecArray | null;
+    const dateRangeRe = /^(?:19[0-9]{2}|20[0-2][0-9]|2030)\s*[-–—]\s*(?:19[0-9]{2}|20[0-2][0-9]|2030)\b/;
+    // "Trusted" markers: copyright glyph, copyright/Ltd/Inc/Corp/©
+    // wordmark, or any of the registered brand strings appearing in the
+    // ~30 characters preceding the compound. These signal that the
+    // compound is the canonical "© BRAND YYYY-NN" identifier rather
+    // than a career-year range or some other prose token.
+    const trustedPrefixRe = /(?:©|\(C\)|COPYRIGHT|\bLTD\b\.?|\bINC\b\.?|\bCORP\b\.?|TCMA|SSPC|TOPPS|FLEER|DONRUSS|UPPER\s+DECK|PANINI|BOWMAN|SCORE|LEAF|KELLOGG|HOSTESS|O-?PEE-?CHEE)/i;
+    while ((ycMatch = yearCardCompoundPattern.exec(text)) !== null) {
+      const matchedToken = ycMatch[0];
+      const candidate = ycMatch[1];
+      const idx = ycMatch.index;
+      // Skip date ranges like "1982-1983".
+      if (dateRangeRe.test(matchedToken)) continue;
+      // Skip matches immediately preceded by "(" — these are
+      // parenthesized career-year ranges like "(1907-27)".
+      const prevChar = text.slice(Math.max(0, idx - 1), idx);
+      if (prevChar === '(') {
+        console.log(`[CardNum] Skipping year-cardnumber compound "${matchedToken}" — preceded by "(" (career-year range)`);
+        continue;
+      }
+      // Look back ~30 chars for trusted markers.
+      const lookback = text.slice(Math.max(0, idx - 30), idx);
+      const trusted = trustedPrefixRe.test(lookback);
+      yearCardCompoundCandidates.push({ candidate, matched: matchedToken, idx, trusted });
+    }
+    // Prefer trusted candidates first; otherwise take the LAST
+    // remaining match (vintage card identifiers are typically printed
+    // at the bottom of the back, after all prose / stat lines).
+    let chosenCompound = yearCardCompoundCandidates.find(c => c.trusted);
+    if (!chosenCompound && yearCardCompoundCandidates.length > 0) {
+      chosenCompound = yearCardCompoundCandidates[yearCardCompoundCandidates.length - 1];
+    }
+    if (chosenCompound) {
+      const { candidate, matched, trusted } = chosenCompound;
+      if (acceptRaw(candidate, 'year-cardnumber-compound')) {
+        cardDetails.cardNumber = candidate;
+        console.log(`[CardNum] Accepting "${candidate}" via year-cardnumber compound "${matched}" (vintage <year>-<num> convention${trusted ? ', trusted prefix' : ''})`);
+        return;
       }
     }
 
