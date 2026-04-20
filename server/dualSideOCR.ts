@@ -1319,6 +1319,30 @@ async function combineCardResults(
   }
 
   if (combined.brand && combined.year && combined.cardNumber) {
+    // If the OCR text contains the literal "<year>-<cardNumber>"
+    // compound (vintage convention printed in the © legal block,
+    // e.g. "© TCMA LTD. 1982-17"), then BOTH year and cardNumber
+    // were extracted from the same on-card identifier — this is
+    // even stronger validation than a separate catalog probe.
+    // Mark the catalog-probe trust flag so the rejection guard
+    // below trusts the DB hit even when the OCR player name is
+    // wrong (e.g. when the front-of-card "set name" got picked up
+    // as the player name).
+    {
+      const yr = String(combined.year).trim();
+      const num = String(combined.cardNumber).trim();
+      if (yr && num) {
+        const compoundRe = new RegExp(`\\b${yr}\\s*[-–—]\\s*${num.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}\\b`);
+        const allOcrText = `${frontOCRText}\n${backOCRText}`;
+        if (compoundRe.test(allOcrText)) {
+          const flagged = combined as CardFormWithFlags;
+          if (!flagged._yearFromCatalogProbe) {
+            flagged._yearFromCatalogProbe = true;
+            console.log(`[CardDB] On-card year-cardNumber compound "${yr}-${num}" detected in OCR — marking catalog-probe trust flag (DB hit will be trusted over OCR name).`);
+          }
+        }
+      }
+    }
     console.log(`[CardDB] Attempting lookup: brand="${combined.brand}" year=${combined.year} cardNumber="${combined.cardNumber}" collection="${combined.collection}"`);
     try {
       const backNum = String(combined.cardNumber || '').trim();
