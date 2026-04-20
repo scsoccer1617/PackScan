@@ -1033,6 +1033,32 @@ async function combineCardResults(
   // row for is the production year — regardless of which © the Math.max
   // picker chose. If no candidate year produces a hit, leave combined.year
   // alone so the existing ±1/±5 widening fallback in tryLookup runs.
+  // Extract clean surname candidates from the FRONT OCR text. The
+  // front of a card almost always shows the player's name in large
+  // type, often repeated (logo + nameplate). Even when the back-side
+  // OCR latches onto bottom-of-card legal text or stat-line prose,
+  // the front gives us a high-signal surname we can use to validate
+  // — or override — the catalog probe. Pure heuristic, no hardcoded
+  // names: take all-caps tokens of length ≥ 4 from the front, drop
+  // anything in our bogus-word set, dedupe, prefer tokens that
+  // appear ≥ 2 times.
+  const extractFrontSurnames = (frontText: string): string[] => {
+    const tokens = (frontText.toUpperCase().match(/[A-Z]{4,}/g) || [])
+      .map(t => t.replace(/(?:TM|™|®)$/g, ''));
+    const counts = new Map<string, number>();
+    for (const t of tokens) {
+      if (bogusNameWords.has(t)) continue;
+      counts.set(t, (counts.get(t) || 0) + 1);
+    }
+    // Prefer repeated tokens (player name on front nameplate +
+    // banner). If nothing repeats, take all single-occurrence
+    // tokens too — the front may print the name only once.
+    const repeated = Array.from(counts.entries()).filter(([, c]) => c >= 2).map(([t]) => t);
+    if (repeated.length > 0) return repeated;
+    return Array.from(counts.keys());
+  };
+  const frontSurnames = extractFrontSurnames(frontOCRText);
+
   if (combined.brand && combined.cardNumber) {
     try {
       const allOcrText = `${frontOCRText}\n${backOCRText}`;
@@ -1043,7 +1069,17 @@ async function combineCardResults(
       if (uniqueCandidates.length >= 2) {
         const brandLower = String(combined.brand).toLowerCase();
         const cardNumLower = String(combined.cardNumber).toLowerCase();
-        const surname = (combined.playerLastName || '').trim().toLowerCase();
+        // Use front-side surname when the back-side OCR didn't yield
+        // a usable last name (or yielded bogus legal/stat text).
+        const backSurname = (combined.playerLastName || '').trim().toLowerCase();
+        const backSurnameUsable = backSurname.length >= 3 &&
+          !bogusNameWords.has(backSurname.toUpperCase());
+        const surname = backSurnameUsable
+          ? backSurname
+          : (frontSurnames[0] || '').toLowerCase();
+        if (!backSurnameUsable && surname) {
+          console.log(`[Year] Using front-side surname "${surname}" for catalog probe disambiguation (back-side surname "${combined.playerLastName || '(none)'}" was bogus or missing).`);
+        }
         const probes = await Promise.all(uniqueCandidates.map(async (y) => {
           const rows = await db
             .select({ name: cardDatabase.playerName })
@@ -1153,6 +1189,77 @@ async function combineCardResults(
       }
     } catch (err) {
       console.error('[Year] Catalog-validated year resolution failed (non-fatal):', err);
+    }
+  }
+
+  // ─── Front-surname-driven catalog search ──────────────────────────────────
+  // The back-side card-number extractor sometimes latches onto prose
+  // numbers (e.g. "A FORMER NO. 1 DRAFT CHOICE OF THE OAKLAND A'S"
+  // → cardNumber="1") when the real card number is buried in trailing
+  // publisher text ("SERIES OF 66 - NO. 35"). When the front clearly
+  // shows the player's surname, we can search the catalog for that
+  // surname directly within candidate brand/year combos and recover
+  // the correct cardNumber. This is sport-/player-agnostic — it's a
+  // pure DB lookup using the front-OCR surname as the constraint.
+  //
+  // Only run when:
+  //   - we extracted a clean front surname (≥ 4 chars, not bogus)
+  //   - the back-side surname (combined.playerLastName) was bogus or
+  //     missing (otherwise we'd already have a strong DB match path)
+  //   - we have a brand and at least one candidate year
+  if (combined.brand && frontSurnames.length > 0) {
+    try {
+      const backSurname = (combined.playerLastName || '').trim().toLowerCase();
+      const backSurnameUsable = backSurname.length >= 3 &&
+        !bogusNameWords.has(backSurname.toUpperCase());
+      if (!backSurnameUsable) {
+        const allOcrText = `${frontOCRText}\n${backOCRText}`;
+        const yearCandidates = extractAllYearCandidates(allOcrText);
+        if (combined.year && Number(combined.year) > 0) yearCandidates.push(Number(combined.year));
+        const uniqueYears = Array.from(new Set(yearCandidates)).filter(y => y > 0);
+        if (uniqueYears.length > 0) {
+          const brandLower = String(combined.brand).toLowerCase();
+          // Try each front surname candidate. The first one that
+          // produces exactly one DB row across all candidate years
+          // wins — this avoids ambiguity (e.g. "RIGHT" "FIELD" tokens
+          // that might match multiple unrelated cards).
+          for (const fs of frontSurnames) {
+            const surnameLower = fs.toLowerCase();
+            const rows = await db
+              .select({
+                year: cardDatabase.year,
+                cardNumber: cardDatabase.cardNumberRaw,
+                playerName: cardDatabase.playerName,
+                team: cardDatabase.team,
+              })
+              .from(cardDatabase)
+              .where(and(
+                sql`lower(${cardDatabase.brand}) = ${brandLower}`,
+                sql`${cardDatabase.year} = ANY(${uniqueYears})`,
+                sql`lower(${cardDatabase.playerName}) LIKE ${'%' + surnameLower + '%'}`,
+              ))
+              .limit(5);
+            if (rows.length === 1) {
+              const row = rows[0];
+              const oldYear = combined.year;
+              const oldCardNum = combined.cardNumber;
+              combined.year = row.year;
+              combined.cardNumber = String(row.cardNumber);
+              const flagged = combined as CardFormWithFlags;
+              flagged._yearFromCatalogProbe = true;
+              flagged._yearFromBackOnly = false;
+              flagged._yearFromCopyright = false;
+              flagged._yearFromBareFallback = false;
+              console.log(`[CardDB] Front-surname catalog search: surname "${fs}" uniquely matched ${row.playerName} (${combined.brand} ${row.year} #${row.cardNumber}). Overriding year ${oldYear || '(none)'} → ${row.year} and cardNumber ${oldCardNum || '(none)'} → ${row.cardNumber}.`);
+              break;
+            } else if (rows.length > 1) {
+              console.log(`[CardDB] Front-surname "${fs}" matched ${rows.length} catalog rows across years [${uniqueYears.join(', ')}] — ambiguous, not overriding.`);
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[CardDB] Front-surname catalog search failed (non-fatal):', err);
     }
   }
 
