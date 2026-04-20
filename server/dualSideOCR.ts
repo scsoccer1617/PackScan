@@ -793,11 +793,21 @@ async function combineCardResults(
     }
     
     if (!nameRecovered) {
-      const nameLineMatch = allText.match(/^([A-Z][A-Z]+)\s+([A-Z][A-Z]+(?:\s+[A-Z][A-Z]+)?)\s*$/m);
+      // Apply the same legal-boundary + bio-label + garble guards as the
+      // primary recovery loop above. Without them this fallback can
+      // re-introduce known-bad lines like "POSITION CENTER FIELD" or
+      // lenticular garble from below the legal-text boundary.
+      const candidateLines = lines.slice(0, legalBoundary).join('\n');
+      const nameLineMatch = candidateLines.match(/^([A-Z][A-Z]+)\s+([A-Z][A-Z]+(?:\s+[A-Z][A-Z]+)?)\s*$/m);
       if (nameLineMatch) {
         const words = nameLineMatch[0].trim().split(/\s+/);
         const noBogusFn = words.every(w => !bogusNameWords.has(w));
-        if (noBogusFn && words.length >= 2 && words.length <= 3) {
+        const startsWithBioLabel = bioLabelStarts.has(words[0].replace(/[:.,]+$/, ''));
+        const hasColonLabel = /[A-Z]+:/.test(nameLineMatch[0]);
+        const allLookLikeNames = words.every(w => looksLikeNameToken(w));
+        const reasonableLength = words.every(w => w.length >= 2 && w.length <= 12);
+
+        if (noBogusFn && words.length >= 2 && words.length <= 3 && !startsWithBioLabel && !hasColonLabel && allLookLikeNames && reasonableLength) {
           combined.playerFirstName = words[0].charAt(0) + words[0].slice(1).toLowerCase();
           combined.playerLastName = words.slice(1).map(w => w.charAt(0) + w.slice(1).toLowerCase()).join(' ');
           console.log(`Recovered player name from OCR text (fallback): ${combined.playerFirstName} ${combined.playerLastName}`);
