@@ -783,6 +783,15 @@ async function combineCardResults(
       if (legalLineMarkers.some(m => u.includes(m))) { legalBoundary = i; break; }
     }
 
+    // Strip surrounding non-letter chars from a token so nickname
+    // wrappers — parens, single/double/curly quotes, asterisks — don't
+    // disqualify the line. Examples:
+    //   '"CATFISH"' → 'CATFISH'
+    //   '(CATFISH)' → 'CATFISH'
+    //   '*CATFISH*' → 'CATFISH'
+    const stripWrappers = (w: string): string =>
+      w.replace(/^[^A-Za-z]+|[^A-Za-z]+$/g, '');
+
     for (let i = 0; i < lines.length; i++) {
       // Skip everything from the legal-text boundary downward.
       if (i >= legalBoundary) break;
@@ -797,8 +806,22 @@ async function combineCardResults(
         nameCandidate = trimmed.substring(firstWord.length).trim();
       }
 
-      const words = nameCandidate.split(/\s+/).filter(w => w.length > 0);
-      if (words.length >= 2 && words.length <= 3) {
+      // Tokenise then strip wrappers from each token; drop any tokens
+      // that are entirely non-alphabetic after stripping (orphan
+      // punctuation, lone digits, etc).
+      const rawWords = nameCandidate.split(/\s+/).filter(w => w.length > 0);
+      const words = rawWords.map(stripWrappers).filter(w => w.length > 0);
+
+      // Allow 2-4 tokens. 4 tokens covers vintage nameplates that print
+      // a quoted nickname between first and last (e.g. JIM "CATFISH"
+      // HUNTER → 3 tokens after stripping; JAMES AUGUSTUS "CATFISH"
+      // HUNTER → 4 tokens after stripping). When >2 tokens we take the
+      // first as playerFirstName and the LAST as playerLastName,
+      // dropping the middle nickname/middle-name tokens — the catalog
+      // stores players under their primary first+last, and the
+      // downstream front-surname catalog search will still see the
+      // dropped nickname token via extractFrontSurnames.
+      if (words.length >= 2 && words.length <= 4) {
         const allAlpha = words.every(w => /^[A-Z]{2,}$/.test(w));
         const noBogus = words.every(w => !bogusNameWords.has(w));
         const noNumbers = words.every(w => !/\d/.test(w));
@@ -813,9 +836,15 @@ async function combineCardResults(
         const reasonableLength = words.every(w => w.length >= 2 && w.length <= 12);
 
         if (allAlpha && noBogus && noNumbers && !startsWithBioLabel && !hasColonLabel && allLookLikeNames && reasonableLength) {
-          combined.playerFirstName = words[0].charAt(0) + words[0].slice(1).toLowerCase();
-          combined.playerLastName = words.slice(1).map(w => w.charAt(0) + w.slice(1).toLowerCase()).join(' ');
-          console.log(`Recovered player name from OCR text: ${combined.playerFirstName} ${combined.playerLastName} (from line: "${trimmed}")`);
+          const firstTok = words[0];
+          const lastTok = words[words.length - 1];
+          combined.playerFirstName = firstTok.charAt(0) + firstTok.slice(1).toLowerCase();
+          combined.playerLastName = lastTok.charAt(0) + lastTok.slice(1).toLowerCase();
+          if (words.length > 2) {
+            console.log(`Recovered player name from OCR text: ${combined.playerFirstName} ${combined.playerLastName} (from line: "${trimmed}", dropped middle/nickname tokens: ${words.slice(1, -1).join(', ')})`);
+          } else {
+            console.log(`Recovered player name from OCR text: ${combined.playerFirstName} ${combined.playerLastName} (from line: "${trimmed}")`);
+          }
           nameRecovered = true;
           break;
         }
@@ -828,19 +857,29 @@ async function combineCardResults(
       // re-introduce known-bad lines like "POSITION CENTER FIELD" or
       // lenticular garble from below the legal-text boundary.
       const candidateLines = lines.slice(0, legalBoundary).join('\n');
-      const nameLineMatch = candidateLines.match(/^([A-Z][A-Z]+)\s+([A-Z][A-Z]+(?:\s+[A-Z][A-Z]+)?)\s*$/m);
+      // Allow nickname wrappers between/around tokens: "JIM "CATFISH" HUNTER",
+      // "JIM (CATFISH) HUNTER", etc. Tokens may carry surrounding non-letter
+      // chars; we strip them after matching.
+      const nameLineMatch = candidateLines.match(
+        /^[^A-Za-z\n]*([A-Z][A-Z]+)(?:[^A-Za-z\n]+([A-Z][A-Z]+)){1,3}[^A-Za-z\n]*$/m,
+      );
       if (nameLineMatch) {
-        const words = nameLineMatch[0].trim().split(/\s+/);
+        const rawWords = nameLineMatch[0].trim().split(/\s+/);
+        const words = rawWords
+          .map(w => w.replace(/^[^A-Za-z]+|[^A-Za-z]+$/g, ''))
+          .filter(w => w.length > 0);
         const noBogusFn = words.every(w => !bogusNameWords.has(w));
         const startsWithBioLabel = bioLabelStarts.has(words[0].replace(/[:.,]+$/, ''));
         const hasColonLabel = /[A-Z]+:/.test(nameLineMatch[0]);
         const allLookLikeNames = words.every(w => looksLikeNameToken(w));
         const reasonableLength = words.every(w => w.length >= 2 && w.length <= 12);
 
-        if (noBogusFn && words.length >= 2 && words.length <= 3 && !startsWithBioLabel && !hasColonLabel && allLookLikeNames && reasonableLength) {
-          combined.playerFirstName = words[0].charAt(0) + words[0].slice(1).toLowerCase();
-          combined.playerLastName = words.slice(1).map(w => w.charAt(0) + w.slice(1).toLowerCase()).join(' ');
-          console.log(`Recovered player name from OCR text (fallback): ${combined.playerFirstName} ${combined.playerLastName}`);
+        if (noBogusFn && words.length >= 2 && words.length <= 4 && !startsWithBioLabel && !hasColonLabel && allLookLikeNames && reasonableLength) {
+          const firstTok = words[0];
+          const lastTok = words[words.length - 1];
+          combined.playerFirstName = firstTok.charAt(0) + firstTok.slice(1).toLowerCase();
+          combined.playerLastName = lastTok.charAt(0) + lastTok.slice(1).toLowerCase();
+          console.log(`Recovered player name from OCR text (fallback): ${combined.playerFirstName} ${combined.playerLastName}${words.length > 2 ? ` (dropped middle/nickname tokens: ${words.slice(1, -1).join(', ')})` : ''}`);
         }
       }
     }
