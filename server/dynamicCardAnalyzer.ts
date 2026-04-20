@@ -844,6 +844,15 @@ function extractCardNumber(
         console.log(`[CardNum-pos] Accepting "${matched}" via ${source} (${sideTag}) at normY=${nyStr} (${region}) — alphanumeric token bypasses position gate`);
         return true;
       }
+      // SERIES-OF marker (e.g. "SERIES OF 66 - NO. 34") is by definition
+      // printed in the bottom legal block of the card back. The top-40%
+      // position gate doesn't apply — this marker is the canonical
+      // card-number designator for vintage issues (Kellogg's, Topps stamps,
+      // mini-issues, etc.).
+      if (source === 'series-of-marker') {
+        console.log(`[CardNum-pos] Accepting "${matched}" via ${source} (${sideTag}) at normY=${nyStr} (${region}) — vintage legal-text marker bypasses position gate`);
+        return true;
+      }
       if (ny == null) {
         console.log(`[CardNum-pos] Skipping "${matched}" via ${source} (${sideTag}) — no contiguous token position (strict pass)`);
         return false;
