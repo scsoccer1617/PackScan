@@ -1167,13 +1167,55 @@ function extractCardNumberPass(
     // Format: 89B-2, T91-13 (alphanumeric-with-digits prefix, dash, digits)
     // Loop through ALL matches so a skipped date pattern doesn't block later valid card numbers.
     const dashNumberPatternGlobal = /\b([A-Z][A-Z0-9]*\d[A-Z0-9]*|[A-Z]{1,4})-([0-9]{1,4})\b/g;
+    // English stop-words that show up in stat blurbs and biographical text
+    // and would otherwise produce bogus dash-number matches like "FOR-27"
+    // from "(9-FOR-27)" batting notation, "AT-BATS" abbreviations, etc.
+    // Card-number prefixes are always cryptic letter+digit codes (RC, BCP,
+    // 89B2, etc.) — never plain English words.
+    const dashStopWordPrefixes = new Set([
+      'FOR', 'OF', 'AT', 'IN', 'ON', 'BY', 'NO', 'TO', 'THE', 'AND',
+      'OR', 'IS', 'AS', 'AN', 'A', 'BE', 'WAS', 'ARE', 'WITH', 'FROM',
+      'OUT', 'OFF', 'UP', 'DOWN', 'NOT', 'BUT', 'ALL', 'WHO', 'HOW',
+      'PER', 'VS', 'VIA', 'INTO',
+    ]);
     let dashNumberMatch;
     let foundDashCardNumber = false;
     while ((dashNumberMatch = dashNumberPatternGlobal.exec(text)) !== null) {
       const matchedText = dashNumberMatch[0];
+      const prefix = dashNumberMatch[1];
       const digits = dashNumberMatch[2];
       if (parseInt(digits) > 999) continue;
-      const lineWithMatch = lines.find(line => line.toLowerCase().includes(matchedText.toLowerCase()));
+      // Skip when the letter prefix is a common English stop word — those
+      // never appear as real card-number prefixes and almost always come
+      // from prose/stat text (e.g. "FOR-27" inside "(9-FOR-27)").
+      if (dashStopWordPrefixes.has(prefix.toUpperCase())) {
+        console.log(`Skipping dash pattern "${matchedText}" — prefix "${prefix}" is an English stop word, not a card-number code`);
+        continue;
+      }
+      // Skip when the match is preceded by `<digit>-` — that's baseball
+      // batting notation like "9-FOR-27" (9 hits in 27 at-bats), not a
+      // card number.
+      const matchStart = dashNumberMatch.index;
+      const before = text.slice(Math.max(0, matchStart - 4), matchStart);
+      if (/\d-\s*$/.test(before)) {
+        console.log(`Skipping dash pattern "${matchedText}" — preceded by "${before.trim()}" (batting/stat notation)`);
+        continue;
+      }
+      // Skip when the match is inside a parenthesised aside — stat
+      // parentheticals like "(9-FOR-27)", "(3-OF-5)" are never card
+      // numbers (real card numbers sit on their own line at the top of
+      // the back, not inside prose parentheses).
+      const lineWithMatchEarly = lines.find(line => line.toLowerCase().includes(matchedText.toLowerCase()));
+      if (lineWithMatchEarly) {
+        const idx = lineWithMatchEarly.toLowerCase().indexOf(matchedText.toLowerCase());
+        const lastOpen = lineWithMatchEarly.lastIndexOf('(', idx);
+        const nextClose = lineWithMatchEarly.indexOf(')', idx + matchedText.length);
+        if (lastOpen !== -1 && nextClose !== -1 && lastOpen < idx && nextClose > idx) {
+          console.log(`Skipping dash pattern "${matchedText}" — inside parenthesised aside "${lineWithMatchEarly.slice(lastOpen, nextClose + 1)}"`);
+          continue;
+        }
+      }
+      const lineWithMatch = lineWithMatchEarly;
       if (lineWithMatch && isDOBFormat(lineWithMatch)) {
         console.log(`Skipping date-like pattern "${matchedText}" that appears to be a birthdate/date`);
         continue;
