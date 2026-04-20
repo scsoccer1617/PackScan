@@ -587,6 +587,27 @@ async function combineCardResults(
   let frontNameBogus = isBogusFn(combined.playerFirstName, combined.playerLastName);
   const backNameBogus = isBogusFn(backResult.playerFirstName, backResult.playerLastName);
 
+  // Collection-name overlap check: when every token of the front-detected
+  // player name appears in the collection name (after singular/plural
+  // normalisation), the OCR latched onto the collection banner instead of
+  // a real player. Example: collection="Diamond Kings", front-detected
+  // name="Diamond King" → bogus, fall back to back-side name. Fully
+  // dynamic — driven by the OCR'd collection field, no hardcoded names.
+  if (!frontNameBogus && combined.playerFirstName && combined.playerLastName && combined.collection) {
+    const stripPlural = (s: string) => s.toLowerCase().replace(/s$/i, '');
+    const collTokens = new Set(
+      combined.collection.split(/\s+/).map(stripPlural).filter(t => t.length >= 3),
+    );
+    const nameTokens = `${combined.playerFirstName} ${combined.playerLastName}`
+      .split(/\s+/)
+      .map(stripPlural)
+      .filter(t => t.length >= 3);
+    if (nameTokens.length > 0 && collTokens.size > 0 && nameTokens.every(t => collTokens.has(t))) {
+      console.log(`Front player name "${combined.playerFirstName} ${combined.playerLastName}" matches collection "${combined.collection}" — treating as bogus (collection text was misread as the player)`);
+      frontNameBogus = true;
+    }
+  }
+
   // Catalog-driven bogus check: if the front-detected "first last" string
   // appears verbatim as a known parallel/insert/variation name in the
   // card_variations catalog for the same brand+year (e.g. "End Zone" is a
