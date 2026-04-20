@@ -1367,11 +1367,16 @@ async function combineCardResults(
             }
             if (cardNumMatches.length > 1) {
               // Multiple years share this brand+surname+cardNumber.
-              // Pick the one closest to the OCR year (vintage rep
-              // sets often re-issue the same number across years).
-              const ocrYr = Number(oldYear || 0);
-              const chosen = cardNumMatches.reduce((a, b) =>
-                Math.abs(b.year - ocrYr) < Math.abs(a.year - ocrYr) ? b : a);
+              // The OCR year is known to be wrong here (the tuple
+              // missed the catalog), so don't trust proximity to it.
+              // Prefer a year that actually appears in the OCR text;
+              // otherwise fall back to the EARLIEST year (vintage
+              // copyright-lag heuristic — same convention used in
+              // the year-validation block above).
+              const ocrYears = new Set(extractAllYearCandidates(allOcrText));
+              const ocrGrounded = cardNumMatches.filter(r => ocrYears.has(r.year));
+              const pool = ocrGrounded.length > 0 ? ocrGrounded : cardNumMatches;
+              const chosen = pool.reduce((a, b) => (b.year < a.year ? b : a));
               combined.year = chosen.year;
               flagged._yearFromCatalogProbe = true;
               flagged._yearFromBackOnly = false;
