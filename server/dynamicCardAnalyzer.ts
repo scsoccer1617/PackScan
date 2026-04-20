@@ -18,6 +18,45 @@ interface OCRResult {
 }
 
 /**
+ * Extract every plausible 4-digit year that appears next to a copyright
+ * marker (©, (C), &copy;), an OCR-garbled copyright marker (LO/IO/O/Q
+ * immediately adjacent to the digits), or a publisher imprint
+ * (TOPPS/LEAF/BOWMAN/FLEER/DONRUSS/SCORE/UPPER DECK/PANINI/VISUAL
+ * PANOGRAPHICS/XOGRAPH/KELLOGG). Used by the dual-side combiner as the
+ * candidate set for catalog-validated year selection — the catalog tells
+ * us which of these candidates is actually the production year.
+ */
+export function extractAllYearCandidates(text: string): number[] {
+  const years = new Set<number>();
+  const currentYear = new Date().getFullYear();
+  const accept = (raw: string) => {
+    const y = parseInt(raw, 10);
+    if (y >= 1900 && y <= currentYear) years.add(y);
+  };
+  let m: RegExpExecArray | null;
+
+  // Strict copyright markers: ©, (C), &copy; (optionally with spaces between them)
+  const strict = /(?:©|\(C\)|&copy;|&\s*©|&\s*\(C\))\s*(\d{4})/gi;
+  while ((m = strict.exec(text)) !== null) accept(m[1]);
+
+  // Garbled copyright marker — letter prefix immediately adjacent to digits.
+  // OCR commonly reads © as O / Q / LO / IO / etc.
+  const garbled = /(?:^|[^A-Za-z0-9])[LlIi]?[OoQq](\d{4})/g;
+  while ((m = garbled.exec(text)) !== null) accept(m[1]);
+
+  // Publisher imprint: <year> <PUBLISHER> (with optional INC/CORP/etc.)
+  const publishers = '(?:THE\\s+)?(?:TOPPS|LEAF|BOWMAN|FLEER|DONRUSS|SCORE|UPPER\\s+DECK|PANINI|VISUAL\\s+PANOGRAPHICS|XOGRAPH|XOGRAPHO|KELLOGG)';
+  const yearThenPub = new RegExp(`(\\d{4})[\\s,.;:]+${publishers}`, 'gi');
+  while ((m = yearThenPub.exec(text)) !== null) accept(m[1]);
+
+  // Publisher imprint: <PUBLISHER> <year>
+  const pubThenYear = new RegExp(`${publishers}(?:[\\s,.]+(?:CHEWING\\s+GUM|COMPANY|INC\\.?|LTD|CORP|LLC))?[\\s,.;:]+(\\d{4})`, 'gi');
+  while ((m = pubThenYear.exec(text)) !== null) accept(m[1]);
+
+  return Array.from(years);
+}
+
+/**
  * Extract text from image using Google Cloud Vision API
  * @param base64Image Base64 encoded image
  * @returns Extracted text and text annotations

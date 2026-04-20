@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import sharp from 'sharp';
 import { CardFormValues } from '@shared/schema';
-import { analyzeSportsCardImage } from './dynamicCardAnalyzer';
+import { analyzeSportsCardImage, extractAllYearCandidates } from './dynamicCardAnalyzer';
 import { detectFoilVariant } from './foilVariantDetector';
 import { lookupCard } from './cardDatabaseService';
 import { batchExtractTextFromImages, clearOcrCache } from './googleVisionFetch';
@@ -692,25 +692,53 @@ async function combineCardResults(
   if (frontNameBogus && backNameBogus) {
     const allText = (frontOCRText + '\n' + backOCRText).toUpperCase();
     let nameRecovered = false;
-    
+
+    // Reject candidate name lines that are clearly biographical labels,
+    // legal/lenticular text, or obvious OCR garble. Without these guards
+    // the recovery loop on vintage Kellogg's 3-D backs was grabbing things
+    // like "POSITION CENTER FIELD" → "Position Center", "HOBBIES HUNTING
+    // FISHING" → "Hunting Fishing", or lenticular garble like "MAKING
+    // LIGLASE" / "ORLIGION LIGENSEL".
+    const bioLabelStarts = new Set([
+      'POSITION', 'POSITIONS', 'HOBBIES', 'HOBBY', 'BORN', 'BIRTHDATE',
+      'BATS', 'THROWS', 'HEIGHT', 'WEIGHT', 'MAJOR', 'LEAGUE', 'RECORD',
+      'TOTALS', 'CAREER', 'ACQUIRED', 'DRAFTED', 'SIGNED', 'ATTENDED',
+      'COLLEGE', 'HOMETOWN', 'BIRTHPLACE', 'NICKNAME', 'STATS',
+    ]);
+    const looksLikeNameToken = (w: string): boolean => {
+      // Real names virtually always contain a vowel and have a typical
+      // consonant/vowel mix. OCR garble like "LIGLASE", "LIGENSEL" tends to
+      // have abnormal letter patterns — long consonant runs, no real vowel
+      // sequence. Use a permissive heuristic: require >=1 vowel and not
+      // more than 4 consecutive consonants.
+      if (!/[AEIOUY]/.test(w)) return false;
+      if (/[BCDFGHJKLMNPQRSTVWXZ]{5,}/.test(w)) return false;
+      return true;
+    };
+
     const lines = allText.split('\n');
     for (const line of lines) {
       const trimmed = line.trim();
       if (!trimmed) continue;
-      
+
       let nameCandidate = trimmed;
       const firstWord = trimmed.split(/\s+/)[0];
       if (/^[A-Z0-9]+-\d+$/.test(firstWord) || /^\d+[A-Z]\d*-\d+$/.test(firstWord)) {
         nameCandidate = trimmed.substring(firstWord.length).trim();
       }
-      
+
       const words = nameCandidate.split(/\s+/).filter(w => w.length > 0);
       if (words.length >= 2 && words.length <= 3) {
         const allAlpha = words.every(w => /^[A-Z]{2,}$/.test(w));
         const noBogus = words.every(w => !bogusNameWords.has(w));
         const noNumbers = words.every(w => !/\d/.test(w));
-        
-        if (allAlpha && noBogus && noNumbers) {
+        // Reject lines that begin with a biographical label or contain a
+        // colon-separated label anywhere ("BATS: RIGHT", "POSITION: 3B").
+        const startsWithBioLabel = bioLabelStarts.has(words[0].replace(/[:.,]+$/, ''));
+        const hasColonLabel = /[A-Z]+:/.test(trimmed);
+        const allLookLikeNames = words.every(w => looksLikeNameToken(w));
+
+        if (allAlpha && noBogus && noNumbers && !startsWithBioLabel && !hasColonLabel && allLookLikeNames) {
           combined.playerFirstName = words[0].charAt(0) + words[0].slice(1).toLowerCase();
           combined.playerLastName = words.slice(1).map(w => w.charAt(0) + w.slice(1).toLowerCase()).join(' ');
           console.log(`Recovered player name from OCR text: ${combined.playerFirstName} ${combined.playerLastName} (from line: "${trimmed}")`);
@@ -878,6 +906,87 @@ async function combineCardResults(
     }
     return false;
   };
+
+  // ─── Catalog-validated year selection ──────────────────────────────────
+  // Vintage card backs frequently print multiple © markers — a publisher
+  // line (e.g. "©1981 VISUAL PANOGRAPHICS, INC.") plus a licensing-org
+  // line (e.g. "©1968 MLBPA ASS'N.", often OCR-misread as ©1988). The
+  // per-side year detection picks Math.max of those © years and lands on
+  // the wrong year, which then breaks the catalog lookup.
+  //
+  // Strategy: extract every plausible year-near-copyright candidate from
+  // both sides of the OCR text, then probe card_database with
+  // (brand, cardNumber, year). The year that the catalog actually has a
+  // row for is the production year — regardless of which © the Math.max
+  // picker chose. If no candidate year produces a hit, leave combined.year
+  // alone so the existing ±1/±5 widening fallback in tryLookup runs.
+  if (combined.brand && combined.cardNumber) {
+    try {
+      const allOcrText = `${frontOCRText}\n${backOCRText}`;
+      const ocrCandidates = extractAllYearCandidates(allOcrText);
+      const candidateSet = new Set<number>(ocrCandidates);
+      if (combined.year && Number(combined.year) > 0) candidateSet.add(Number(combined.year));
+      const uniqueCandidates = Array.from(candidateSet).filter(y => y > 0);
+      if (uniqueCandidates.length >= 2) {
+        const brandLower = String(combined.brand).toLowerCase();
+        const cardNumLower = String(combined.cardNumber).toLowerCase();
+        const surname = (combined.playerLastName || '').trim().toLowerCase();
+        const probes = await Promise.all(uniqueCandidates.map(async (y) => {
+          const rows = await db
+            .select({ name: cardDatabase.playerName })
+            .from(cardDatabase)
+            .where(and(
+              sql`lower(${cardDatabase.brand}) = ${brandLower}`,
+              eq(cardDatabase.year, y),
+              sql`lower(${cardDatabase.cardNumberRaw}) = ${cardNumLower}`,
+            ))
+            .limit(5);
+          return { year: y, rows };
+        }));
+        const hits = probes.filter(p => p.rows.length > 0);
+        const probeSummary = probes.map(p => `${p.year}=${p.rows.length}`).join(' ');
+        if (hits.length > 0) {
+          let chosen = hits[0];
+          let reason = '';
+          if (hits.length === 1) {
+            reason = `only catalog-confirmed candidate of [${uniqueCandidates.join(', ')}]`;
+          } else {
+            const surnameHits = surname.length >= 3
+              ? hits.filter(h => h.rows.some(r => r.name.toLowerCase().includes(surname)))
+              : [];
+            if (surnameHits.length === 1) {
+              chosen = surnameHits[0];
+              reason = `surname "${surname}" matched only ${chosen.year} among ${hits.length} catalog-confirmed candidates`;
+            } else {
+              // Surname doesn't disambiguate (or matches none). Prefer the
+              // candidate that matches the existing per-side year detection
+              // result — it represents whatever heuristic priority the
+              // analyser already chose. If that's not in the hit list,
+              // fall back to the latest year.
+              const existing = Number(combined.year || 0);
+              chosen = hits.find(h => h.year === existing) ?? hits.reduce((a, b) => (b.year > a.year ? b : a));
+              reason = `latest among ${hits.length} catalog-confirmed candidates`;
+            }
+          }
+          if (chosen.year !== Number(combined.year)) {
+            console.log(`[Year] Catalog-validated year override: ${combined.year || '(none)'} → ${chosen.year} (${reason}). Probes: ${probeSummary}`);
+            combined.year = chosen.year;
+            // Catalog probe is the strongest year signal we have — clear
+            // any low-confidence flags so downstream year-widening doesn't
+            // wander off-year.
+            (combined as any)._yearFromCatalogProbe = true;
+            (combined as any)._yearFromBackOnly = false;
+            (combined as any)._yearFromCopyright = false;
+            (combined as any)._yearFromBareFallback = false;
+          } else {
+            console.log(`[Year] Catalog-validated year confirms existing pick ${combined.year}. Probes: ${probeSummary}`);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[Year] Catalog-validated year resolution failed (non-fatal):', err);
+    }
+  }
 
   if (combined.brand && combined.year && combined.cardNumber) {
     console.log(`[CardDB] Attempting lookup: brand="${combined.brand}" year=${combined.year} cardNumber="${combined.cardNumber}" collection="${combined.collection}"`);
