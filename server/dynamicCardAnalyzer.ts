@@ -1326,6 +1326,31 @@ function extractCardNumberPass(
       }
     }
 
+    // VINTAGE YEAR-CARDNUMBER COMPOUND (e.g. "1982-17", "1979-23").
+    // Some vintage/reissue brands (TCMA, SSPC, etc.) print the card
+    // identifier as <year>-<cardNumber> on the front and/or back. The
+    // four-digit prefix is statistically only valid in the 1900-2030
+    // range, so this is an unambiguous high-confidence designator.
+    // We capture only the trailing card-number portion; the year side
+    // of the compound is independently picked up by the year-extraction
+    // pass (and by the surname catalog probe in dualSideOCR).
+    const yearCardCompoundPattern = /\b(?:19[0-9]{2}|20[0-2][0-9]|2030)\s*[-–—]\s*(\d{1,4})\b/;
+    const yearCardCompoundMatch = text.match(yearCardCompoundPattern);
+    if (yearCardCompoundMatch && yearCardCompoundMatch[1]) {
+      const candidate = yearCardCompoundMatch[1];
+      const matchedToken = yearCardCompoundMatch[0];
+      // Don't mistake a serial-number-like "/NN" or jersey range for
+      // a compound — the regex is already strict, but skip if the
+      // whole match is clearly part of a date range (e.g. "1982-1983").
+      if (!/^(?:19[0-9]{2}|20[0-2][0-9]|2030)\s*[-–—]\s*(?:19[0-9]{2}|20[0-2][0-9]|2030)\b/.test(matchedToken)) {
+        if (acceptRaw(candidate, 'year-cardnumber-compound')) {
+          cardDetails.cardNumber = candidate;
+          console.log(`[CardNum] Accepting "${candidate}" via year-cardnumber compound "${matchedToken}" (vintage <year>-<num> convention)`);
+          return;
+        }
+      }
+    }
+
     // Plain number format: #123 or No. 123 (also tolerates common OCR glitches:
     // "N0." with a zero, "NO " without the dot, the superscript "Nº", and the
     // old-style "No 123" with no period — all variations seen on vintage card
@@ -1743,7 +1768,11 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>,
       { search: 'RED MAN',      display: 'Red Man' },
       { search: 'SSPC',         display: 'SSPC' },
       { search: 'WILD CARD',    display: 'Wild Card' },
-      { search: 'WILSON FRANKS', display: 'Wilson Franks' }
+      { search: 'WILSON FRANKS', display: 'Wilson Franks' },
+      // TCMA (The Card Memorabilia Associates): vintage-reissue brand whose
+      // wordmark appears on both front and back. Catalog has TCMA cards
+      // (e.g. 1982 Baseball's Greatest Pitchers).
+      { search: 'TCMA',         display: 'TCMA',         fuzzy: /\bT[CG]M[A4]\b/i }
     ];
     
     // Use original text with newlines for brand detection to distinguish
