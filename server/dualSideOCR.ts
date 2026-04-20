@@ -1207,24 +1207,40 @@ async function combineCardResults(
   //   - the back-side surname (combined.playerLastName) was bogus or
   //     missing (otherwise we'd already have a strong DB match path)
   //   - we have a brand and at least one candidate year
-  if (combined.brand && frontSurnames.length > 0) {
+  if (combined.brand) {
     try {
-      const backSurname = (combined.playerLastName || '').trim().toLowerCase();
-      const backSurnameUsable = backSurname.length >= 3 &&
-        !bogusNameWords.has(backSurname.toUpperCase());
-      if (!backSurnameUsable) {
+      const backSurnameRaw = (combined.playerLastName || '').trim();
+      // Use the LAST token of playerLastName (handles "Jack Schmidt"
+      // → "schmidt"; the catalog stores "Mike Schmidt" / "Michael
+      // Jack Schmidt" so a LIKE %schmidt% query catches all).
+      const backSurnameLastToken = (backSurnameRaw.split(/\s+/).pop() || '').toLowerCase();
+      const backSurnameUsable = backSurnameLastToken.length >= 4 &&
+        !bogusNameWords.has(backSurnameLastToken.toUpperCase());
+
+      // Surname candidates to try, in priority order. Prefer
+      // back-side surname (more reliable when present and clean)
+      // then fall back to front-side tokens.
+      const surnameCandidates: string[] = [];
+      if (backSurnameUsable) surnameCandidates.push(backSurnameLastToken);
+      for (const fs of frontSurnames) {
+        const fsLower = fs.toLowerCase();
+        if (!surnameCandidates.includes(fsLower)) surnameCandidates.push(fsLower);
+      }
+
+      // Run this pass when EITHER cardNumber is missing (we need to
+      // recover it from the catalog) OR the back-side surname was
+      // bogus (we need the front-surname to find the right card).
+      const cardNumberMissing = !combined.cardNumber || String(combined.cardNumber).trim().length === 0;
+      const shouldRun = surnameCandidates.length > 0 && (cardNumberMissing || !backSurnameUsable);
+
+      if (shouldRun) {
         const allOcrText = `${frontOCRText}\n${backOCRText}`;
         const yearCandidates = extractAllYearCandidates(allOcrText);
         if (combined.year && Number(combined.year) > 0) yearCandidates.push(Number(combined.year));
         const uniqueYears = Array.from(new Set(yearCandidates)).filter(y => y > 0);
         if (uniqueYears.length > 0) {
           const brandLower = String(combined.brand).toLowerCase();
-          // Try each front surname candidate. The first one that
-          // produces exactly one DB row across all candidate years
-          // wins — this avoids ambiguity (e.g. "RIGHT" "FIELD" tokens
-          // that might match multiple unrelated cards).
-          for (const fs of frontSurnames) {
-            const surnameLower = fs.toLowerCase();
+          for (const fs of surnameCandidates) {
             const rows = await db
               .select({
                 year: cardDatabase.year,
@@ -1236,30 +1252,69 @@ async function combineCardResults(
               .where(and(
                 sql`lower(${cardDatabase.brand}) = ${brandLower}`,
                 sql`${cardDatabase.year} = ANY(${uniqueYears})`,
-                sql`lower(${cardDatabase.playerName}) LIKE ${'%' + surnameLower + '%'}`,
+                sql`lower(${cardDatabase.playerName}) LIKE ${'%' + fs + '%'}`,
               ))
-              .limit(5);
-            if (rows.length === 1) {
-              const row = rows[0];
+              .limit(10);
+
+              const flagged = combined as CardFormWithFlags;
               const oldYear = combined.year;
               const oldCardNum = combined.cardNumber;
+
+            if (rows.length === 1) {
+              // Unique match — override both year AND cardNumber.
+              const row = rows[0];
               combined.year = row.year;
               combined.cardNumber = String(row.cardNumber);
-              const flagged = combined as CardFormWithFlags;
               flagged._yearFromCatalogProbe = true;
               flagged._yearFromBackOnly = false;
               flagged._yearFromCopyright = false;
               flagged._yearFromBareFallback = false;
-              console.log(`[CardDB] Front-surname catalog search: surname "${fs}" uniquely matched ${row.playerName} (${combined.brand} ${row.year} #${row.cardNumber}). Overriding year ${oldYear || '(none)'} → ${row.year} and cardNumber ${oldCardNum || '(none)'} → ${row.cardNumber}.`);
+              console.log(`[CardDB] Surname catalog search: "${fs}" uniquely matched ${row.playerName} (${combined.brand} ${row.year} #${row.cardNumber}). Overriding year ${oldYear || '(none)'} → ${row.year} and cardNumber ${oldCardNum || '(none)'} → ${row.cardNumber}.`);
               break;
             } else if (rows.length > 1) {
-              console.log(`[CardDB] Front-surname "${fs}" matched ${rows.length} catalog rows across years [${uniqueYears.join(', ')}] — ambiguous, not overriding.`);
+              // Multiple matches. If they all share the same
+              // cardNumber, we can at least recover the cardNumber
+              // and let the downstream year-probe disambiguate the
+              // year via OCR-grounded tiebreakers.
+              const cardNums = Array.from(new Set(rows.map(r => String(r.cardNumber))));
+              const years = Array.from(new Set(rows.map(r => r.year)));
+              if (cardNums.length === 1 && cardNumberMissing) {
+                combined.cardNumber = cardNums[0];
+                console.log(`[CardDB] Surname catalog search: "${fs}" matched ${rows.length} rows across years [${years.join(', ')}] but all share cardNumber #${cardNums[0]}. Recovered cardNumber → ${cardNums[0]}.`);
+                // If all matches also share the same year, lock that in too.
+                if (years.length === 1) {
+                  combined.year = years[0];
+                  flagged._yearFromCatalogProbe = true;
+                  flagged._yearFromBackOnly = false;
+                  flagged._yearFromCopyright = false;
+                  flagged._yearFromBareFallback = false;
+                  console.log(`[CardDB] Surname catalog search: also locking year → ${years[0]} (single year across matches).`);
+                } else {
+                  // Re-run the year probe now that cardNumber is known.
+                  // Pick the earliest OCR-grounded year (vintage
+                  // copyright lag heuristic) — same logic as the
+                  // year-validation block uses when surname doesn't
+                  // disambiguate.
+                  const ocrGroundedYears = years.filter(y => extractAllYearCandidates(allOcrText).includes(y));
+                  const chosenYear = (ocrGroundedYears.length > 0 ? ocrGroundedYears : years)
+                    .reduce((a, b) => (b < a ? b : a));
+                  combined.year = chosenYear;
+                  flagged._yearFromCatalogProbe = true;
+                  flagged._yearFromBackOnly = false;
+                  flagged._yearFromCopyright = false;
+                  flagged._yearFromBareFallback = false;
+                  console.log(`[CardDB] Surname catalog search: locking year → ${chosenYear} (earliest ${ocrGroundedYears.length > 0 ? 'OCR-grounded ' : ''}year among matched rows).`);
+                }
+                break;
+              } else {
+                console.log(`[CardDB] Surname "${fs}" matched ${rows.length} catalog rows across years [${years.join(', ')}] / cardNumbers [${cardNums.join(', ')}] — ambiguous, not overriding.`);
+              }
             }
           }
         }
       }
     } catch (err) {
-      console.error('[CardDB] Front-surname catalog search failed (non-fatal):', err);
+      console.error('[CardDB] Surname catalog search failed (non-fatal):', err);
     }
   }
 
