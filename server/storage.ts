@@ -4,6 +4,11 @@ import { eq, and, desc, sql } from 'drizzle-orm';
 import { calculateEstimatedValue } from '../client/src/lib/utils';
 import fs from 'fs';
 import path from 'path';
+import { randomUUID } from 'crypto';
+import {
+  objectStorageClient,
+  setObjectAclPolicy,
+} from './replit_integrations/object_storage';
 
 // Storage functions for card management - database only
 export const storage = {
@@ -128,39 +133,62 @@ export const storage = {
     };
   },
 
-  // Save images to file system
+  // Save images to persistent App Storage (Google Cloud Storage backed).
+  //
+  // Returns a stable `/objects/uploads/<id>` URL that survives redeploys
+  // (the legacy implementation wrote to the local filesystem under
+  // `/uploads`, which Replit deployments wipe on every redeploy and broke
+  // every image link in the user's Google Sheet).
+  //
+  // The `filename` parameter is preserved in object metadata for debugging
+  // / human readability but the URL identifier itself is a fresh UUID so
+  // that nothing in the path is user-controlled.
   async saveImage(base64Data: string, filename: string): Promise<string> {
     try {
-      // Create uploads directory in both locations for compatibility 
-      // Main uploads dir
-      const uploadsDir = path.join(process.cwd(), 'uploads');
-      if (!fs.existsSync(uploadsDir)) {
-        fs.mkdirSync(uploadsDir, { recursive: true });
-      }
-      
-      // Also create the old directory structure for backward compatibility
-      const oldUploadsDir = path.join(process.cwd(), 'dist', 'public', 'uploads');
-      if (!fs.existsSync(oldUploadsDir)) {
-        fs.mkdirSync(oldUploadsDir, { recursive: true });
-      }
-      
-      // Extract the actual base64 data (remove the data:image/jpeg;base64, part)
+      const m = /^data:([^;]+);base64,/i.exec(base64Data);
+      const contentType = (m?.[1] || 'image/jpeg').toLowerCase();
       const base64Image = base64Data.split(';base64,').pop();
       if (!base64Image) {
         throw new Error('Invalid image data');
       }
-      
-      // Save to both locations for compatibility
-      const filePath = path.join(uploadsDir, filename);
-      fs.writeFileSync(filePath, base64Image, { encoding: 'base64' });
-      
-      const oldFilePath = path.join(oldUploadsDir, filename);
-      fs.writeFileSync(oldFilePath, base64Image, { encoding: 'base64' });
-      
-      // Return the relative URL for the image
-      return `/uploads/${filename}`;
+      const buffer = Buffer.from(base64Image, 'base64');
+
+      const privateDir = process.env.PRIVATE_OBJECT_DIR || '';
+      if (!privateDir) {
+        throw new Error('PRIVATE_OBJECT_DIR not set — App Storage not configured.');
+      }
+      // PRIVATE_OBJECT_DIR is shaped like `/<bucket>/<prefix>`.
+      const trimmed = privateDir.startsWith('/') ? privateDir.slice(1) : privateDir;
+      const slash = trimmed.indexOf('/');
+      if (slash === -1) {
+        throw new Error(`PRIVATE_OBJECT_DIR malformed: ${privateDir}`);
+      }
+      const bucketName = trimmed.slice(0, slash);
+      const prefix = trimmed.slice(slash + 1).replace(/\/$/, '');
+
+      const objectId = randomUUID();
+      const objectName = `${prefix}/uploads/${objectId}`;
+      const file = objectStorageClient.bucket(bucketName).file(objectName);
+
+      await file.save(buffer, {
+        contentType,
+        metadata: {
+          contentType,
+          metadata: { originalFilename: filename },
+        },
+        resumable: false,
+      });
+
+      // Mark as publicly readable so the `/objects/...` route streams it
+      // without requiring auth (sheet links are opened from a browser).
+      await setObjectAclPolicy(file, {
+        owner: 'system',
+        visibility: 'public',
+      });
+
+      return `/objects/uploads/${objectId}`;
     } catch (error: any) {
-      console.error('Error saving image:', error);
+      console.error('Error saving image to App Storage:', error);
       throw error;
     }
   },

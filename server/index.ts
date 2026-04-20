@@ -6,6 +6,7 @@ import { setupVite, serveStatic, log } from "./vite";
 import { autoSeedCardDatabaseIfEmpty } from "./cardDatabaseService";
 import { setupAuth } from "./auth";
 import { registerSheetRoutes } from "./sheetsRoutes";
+import { registerObjectStorageRoutes } from "./replit_integrations/object_storage";
 
 const app = express();
 app.use(express.json({ limit: '20mb' }));
@@ -107,6 +108,7 @@ app.use((req, res, next) => {
   // is in place when those routes (and the API in general) execute.
   setupAuth(app);
   registerSheetRoutes(app);
+  registerObjectStorageRoutes(app);
   const server = await registerRoutes(app);
 
   // Seed the card database from bundled CSVs if it's empty (runs in background)
