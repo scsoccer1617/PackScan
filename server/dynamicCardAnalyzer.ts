@@ -1252,6 +1252,26 @@ function extractCardNumberPass(
       return;
     }
 
+    // VINTAGE LEGAL-TEXT CARD-NUMBER MARKER (highest priority).
+    // Many vintage card backs (Kellogg's, Topps stamps, mini-issues, etc.) print
+    // the card number inside the bottom legal block as "SERIES OF NN-NO. XX"
+    // (or "SERIES OF NN NO XX", "SERIES OF NN — No. XX"). This marker is the
+    // canonical card-number designator and always sits at the very bottom of
+    // the back. It must beat any earlier "NO. X" hit in prose like
+    // "MAZZILLI WAS THE MET'S NO. 1 PICK" / "HIS NO. 7 JERSEY WAS RETIRED".
+    // Generic to all brands/sports — looks for "SERIES OF" + digits + "NO." +
+    // the card number, with tolerant separators between (dash, space, em-dash).
+    const seriesOfPattern = /SERIES\s+OF\s+\d{1,4}\s*[-–—\s]\s*N[o0O]\.?\s*(\d{1,4})/i;
+    const seriesOfMatch = text.match(seriesOfPattern);
+    if (seriesOfMatch && seriesOfMatch[1]) {
+      const candidate = seriesOfMatch[1];
+      if (acceptRaw(candidate, 'series-of-marker')) {
+        cardDetails.cardNumber = candidate;
+        console.log(`[CardNum] Accepting "${candidate}" via SERIES-OF legal-text marker (vintage card convention)`);
+        return;
+      }
+    }
+
     // Plain number format: #123 or No. 123 (also tolerates common OCR glitches:
     // "N0." with a zero, "NO " without the dot, the superscript "Nº", and the
     // old-style "No 123" with no period — all variations seen on vintage card
@@ -1996,6 +2016,40 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>,
       yearCandidates.push(y);
     }
     
+    // Vintage stat-row convention: when the back contains a sequence of
+    // consecutive year values (e.g. "1976 NEW YORK NL\n1977 NEW YORK NL\n
+    // 1978 NEW YORK NL\n1979 NEW YORK NL\n1980 NEW YORK NL"), those are
+    // last-season stat rows — the card itself was printed the FOLLOWING
+    // year. So the production year is max(stat year) + 1, not max(stat year).
+    // This convention only holds for vintage cards (pre-~1995); modern cards
+    // typically print same-season stats. Trigger when we find ≥3 consecutive
+    // ascending years all ≤ 1990.
+    {
+      const sorted = Array.from(new Set(yearCandidates)).sort((a, b) => a - b);
+      let bestRunStart = -1;
+      let bestRunEnd = -1;
+      let runStart = 0;
+      for (let i = 1; i <= sorted.length; i++) {
+        if (i === sorted.length || sorted[i] !== sorted[i - 1] + 1) {
+          const runLen = i - runStart;
+          if (runLen >= 3 && (bestRunEnd - bestRunStart) < runLen - 1) {
+            bestRunStart = runStart;
+            bestRunEnd = i - 1;
+          }
+          runStart = i;
+        }
+      }
+      if (bestRunStart >= 0) {
+        const lastStatYear = sorted[bestRunEnd];
+        if (lastStatYear <= 1990) {
+          cardDetails.year = lastStatYear + 1;
+          (cardDetails as any)._yearFromCopyright = false;
+          console.log(`Using vintage stat-row convention as card date: ${cardDetails.year} (last stat year ${lastStatYear} + 1; consecutive run ${sorted[bestRunStart]}–${lastStatYear})`);
+          return;
+        }
+      }
+    }
+
     if (yearCandidates.length > 0) {
       const modernYears = yearCandidates.filter(y => y >= 1980 && y <= 2026);
       if (modernYears.length > 0) {
