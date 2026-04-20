@@ -276,7 +276,7 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
       'PHILLIES', 'PHILLIE', 'YANKEES', 'DODGERS', 'METS', 'CUBS', 'RED', 'SOX', 'BRAVES',
       'ASTROS', 'RANGERS', 'PADRES', 'GIANTS', 'CARDINALS', 'NATIONALS', 'ORIOLES', 'GUARDIANS',
       'TWINS', 'RAYS', 'MARLINS', 'PIRATES', 'REDS', 'BREWERS', 'TIGERS', 'ROYALS', 'ATHLETICS',
-      'MARINERS', 'ANGELS', 'ROCKIES', 'DIAMONDBACKS', 'WHITE', 'INDIANS',
+      'MARINERS', 'ANGELS', 'ROCKIES', 'DIAMONDBACKS', 'INDIANS',
       'PHILADELPHIA', 'CHICAGO', 'BOSTON', 'ANGELES', 'YORK',
       'NEW', 'SAN', 'LOS', 'SAINT', 'LOUIS', 'KANSAS', 'CITY',
       'SLG', 'OPS', 'AVG', 'WHIP', 'IP', 'AB',
