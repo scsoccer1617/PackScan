@@ -9,6 +9,20 @@ import { db } from '@db';
 import { cardVariations, cardDatabase } from '@shared/schema';
 import { and, eq, sql } from 'drizzle-orm';
 
+// Internal year-confidence flags attached to per-side and combined OCR
+// results so the dual-side combiner and downstream lookup loop can reason
+// about how reliable the year is. These are not part of the persisted
+// CardFormValues schema — they exist only in-memory between the analyser
+// and the catalog lookup. Using a typed alias avoids ad-hoc `as any`
+// casts when reading or writing the flags.
+interface YearConfidenceFlags {
+  _yearFromCopyright?: boolean;
+  _yearFromBareFallback?: boolean;
+  _yearFromBackOnly?: boolean;
+  _yearFromCatalogProbe?: boolean;
+}
+type CardFormWithFlags = CardFormValues & YearConfidenceFlags;
+
 /**
  * Normalize an uploaded image buffer by physically applying its EXIF
  * orientation and stripping EXIF metadata. iOS/Android cameras save photos in
@@ -717,7 +731,33 @@ async function combineCardResults(
     };
 
     const lines = allText.split('\n');
-    for (const line of lines) {
+
+    // Find the first line that looks like legal / lenticular / copyright /
+    // manufacturer text. Player names virtually always appear ABOVE this
+    // marker on a card back; everything below it is bio stats, licensing,
+    // or 3-D/lenticular print garble. Anchoring to this boundary
+    // explicitly rejects garbled lines (LIGLASE / LIGENSEL / ORLIGION
+    // LIGENSEL / etc.) that would otherwise sneak past per-token checks.
+    const legalLineMarkers = [
+      'XOGRAPH', 'PANOGRAPH', 'VISUAL PANOGRAPHIC', 'LENTICULAR',
+      'OFFICIALLY LICENSED', 'OFFICIALLY AUTHORIZED', 'OFFICIAL LICENSE',
+      'MLBPA', 'NFLPA', 'NBAPA', 'NHLPA', "PLAYERS ASS", 'PLAYERS ASSN',
+      'MADE IN', 'LITHO IN', 'PRINTED IN', 'ALL RIGHTS RESERVED',
+      'COPYRIGHT', '©', 'MFG', 'MANUFACTURED', 'KELLOGG',
+      "COLLECTOR'S CARD", 'TRADING CARD',
+      'CARD NO.', 'CARD NO ', 'NO.', 'STK',
+    ];
+    let legalBoundary = lines.length;
+    for (let i = 0; i < lines.length; i++) {
+      const u = lines[i].toUpperCase();
+      if (legalLineMarkers.some(m => u.includes(m))) { legalBoundary = i; break; }
+    }
+
+    for (let i = 0; i < lines.length; i++) {
+      // Skip everything from the legal-text boundary downward.
+      if (i >= legalBoundary) break;
+
+      const line = lines[i];
       const trimmed = line.trim();
       if (!trimmed) continue;
 
@@ -737,8 +777,12 @@ async function combineCardResults(
         const startsWithBioLabel = bioLabelStarts.has(words[0].replace(/[:.,]+$/, ''));
         const hasColonLabel = /[A-Z]+:/.test(trimmed);
         const allLookLikeNames = words.every(w => looksLikeNameToken(w));
+        // Reject overlong tokens — real first/last name tokens on cards
+        // are almost always 3-12 letters. Lenticular-print garble from
+        // 3-D card backs frequently produces 13+ letter pseudo-words.
+        const reasonableLength = words.every(w => w.length >= 2 && w.length <= 12);
 
-        if (allAlpha && noBogus && noNumbers && !startsWithBioLabel && !hasColonLabel && allLookLikeNames) {
+        if (allAlpha && noBogus && noNumbers && !startsWithBioLabel && !hasColonLabel && allLookLikeNames && reasonableLength) {
           combined.playerFirstName = words[0].charAt(0) + words[0].slice(1).toLowerCase();
           combined.playerLastName = words.slice(1).map(w => w.charAt(0) + w.slice(1).toLowerCase()).join(' ');
           console.log(`Recovered player name from OCR text: ${combined.playerFirstName} ${combined.playerLastName} (from line: "${trimmed}")`);
@@ -945,6 +989,50 @@ async function combineCardResults(
         }));
         const hits = probes.filter(p => p.rows.length > 0);
         const probeSummary = probes.map(p => `${p.year}=${p.rows.length}`).join(' ');
+
+        // Non-catalog defensive fallback: if NO candidate year produces a
+        // catalog hit, we still have multiple © years on the card and the
+        // existing picker just took Math.max. Prefer the year that is
+        // adjacent to a publisher imprint (Topps/Bowman/Fleer/Donruss/
+        // Score/Upper Deck/Panini/Visual Panographics/Xograph/Kellogg/Leaf)
+        // over one adjacent only to a licensing organisation
+        // (MLBPA/NFLPA/NBAPA/NHLPA/players association). This is a
+        // deterministic, sport-agnostic heuristic — no hardcoded card or
+        // player rules.
+        if (hits.length === 0 && uniqueCandidates.length >= 2) {
+          const publisherRe = /(TOPPS|LEAF|BOWMAN|FLEER|DONRUSS|SCORE|UPPER\s+DECK|PANINI|VISUAL\s+PANOGRAPHIC|XOGRAPH|KELLOGG)/i;
+          const licensingRe = /(MLBPA|NFLPA|NBAPA|NHLPA|PLAYERS\s+ASS)/i;
+          const score = (y: number): { pub: boolean; lic: boolean } => {
+            // Look at a small window of characters around each occurrence
+            // of the year in the OCR text and check what brand-ish words
+            // appear nearby.
+            let pub = false, lic = false;
+            const re = new RegExp(`\\b${y}\\b`, 'g');
+            let m: RegExpExecArray | null;
+            while ((m = re.exec(allOcrText)) !== null) {
+              const start = Math.max(0, m.index - 40);
+              const end = Math.min(allOcrText.length, m.index + 4 + 40);
+              const window = allOcrText.slice(start, end);
+              if (publisherRe.test(window)) pub = true;
+              if (licensingRe.test(window)) lic = true;
+            }
+            return { pub, lic };
+          };
+          const scored = uniqueCandidates.map(y => ({ year: y, ...score(y) }));
+          const publisherOnly = scored.filter(s => s.pub && !s.lic);
+          if (publisherOnly.length > 0) {
+            const best = publisherOnly.reduce((a, b) => (b.year > a.year ? b : a));
+            const existing = Number(combined.year || 0);
+            if (best.year !== existing) {
+              console.log(`[Year] Publisher-adjacency override (no catalog hit): ${existing || '(none)'} → ${best.year}. Scored: ${scored.map(s => `${s.year}{pub:${s.pub},lic:${s.lic}}`).join(' ')}`);
+              combined.year = best.year;
+              const flagged = combined as CardFormWithFlags;
+              flagged._yearFromCopyright = true;
+              flagged._yearFromBareFallback = false;
+            }
+          }
+        }
+
         if (hits.length > 0) {
           let chosen = hits[0];
           let reason = '';
@@ -974,10 +1062,11 @@ async function combineCardResults(
             // Catalog probe is the strongest year signal we have — clear
             // any low-confidence flags so downstream year-widening doesn't
             // wander off-year.
-            (combined as any)._yearFromCatalogProbe = true;
-            (combined as any)._yearFromBackOnly = false;
-            (combined as any)._yearFromCopyright = false;
-            (combined as any)._yearFromBareFallback = false;
+            const flagged = combined as CardFormWithFlags;
+            flagged._yearFromCatalogProbe = true;
+            flagged._yearFromBackOnly = false;
+            flagged._yearFromCopyright = false;
+            flagged._yearFromBareFallback = false;
           } else {
             console.log(`[Year] Catalog-validated year confirms existing pick ${combined.year}. Probes: ${probeSummary}`);
           }
