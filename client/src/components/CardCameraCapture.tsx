@@ -20,7 +20,24 @@ let sharedStreamReleaseTimer: number | null = null;
 function isStreamLive(stream: MediaStream | null): stream is MediaStream {
   if (!stream) return false;
   const tracks = stream.getVideoTracks();
-  return tracks.length > 0 && tracks.every(t => t.readyState === 'live');
+  // A track may report readyState='live' even after the OS has
+  // suspended the camera (iOS Safari does this when the app is
+  // backgrounded). Also reject tracks that are muted (Safari sets
+  // .muted=true while the camera is suspended) or disabled.
+  return tracks.length > 0 && tracks.every(t =>
+    t.readyState === 'live' && !t.muted && t.enabled
+  );
+}
+
+function killSharedStream() {
+  if (sharedStream) {
+    try { sharedStream.getTracks().forEach(t => t.stop()); } catch {}
+    sharedStream = null;
+  }
+  if (sharedStreamReleaseTimer !== null) {
+    window.clearTimeout(sharedStreamReleaseTimer);
+    sharedStreamReleaseTimer = null;
+  }
 }
 
 function releaseSharedStreamSoon() {
@@ -63,6 +80,8 @@ export default function CardCameraCapture({
   const [preview, setPreview] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [focusing, setFocusing] = useState(false);
+  const watchdogRef = useRef<number | null>(null);
+  const startAttemptRef = useRef(0);
 
   const detachStream = useCallback(() => {
     // Keep the shared stream alive — just detach it from the <video> so the
@@ -77,10 +96,36 @@ export default function CardCameraCapture({
     }
   }, []);
 
+  const armWatchdog = useCallback((attempt: number) => {
+    if (watchdogRef.current !== null) {
+      window.clearTimeout(watchdogRef.current);
+      watchdogRef.current = null;
+    }
+    // After ~2.5s, verify the <video> is actually rendering frames.
+    // If the cached stream came back paused (iOS Safari after
+    // backgrounding) the video element stays black even though
+    // tracks report readyState='live'. In that case, drop the
+    // shared stream and re-acquire from scratch.
+    watchdogRef.current = window.setTimeout(() => {
+      // If a newer attempt has started, this watchdog is stale.
+      if (startAttemptRef.current !== attempt) return;
+      const v = videoRef.current;
+      const renderingFrames = !!v && v.readyState >= 2 && (v.videoWidth || 0) > 0;
+      if (!renderingFrames) {
+        console.warn('[Camera] Watchdog: no frames after 2.5s — refreshing stream');
+        killSharedStream();
+        streamRef.current = null;
+        // Trigger a fresh acquisition.
+        startStream();
+      }
+    }, 2500);
+  }, []);
+
   const startStream = useCallback(async () => {
     setError(null);
     capturedRef.current = false;
     cancelSharedStreamRelease();
+    const attempt = ++startAttemptRef.current;
 
     // Reuse the cached stream if it's still live — avoids the OS prompt and
     // the "Starting camera…" delay between front and back capture.
@@ -88,9 +133,19 @@ export default function CardCameraCapture({
       streamRef.current = sharedStream;
       if (videoRef.current) {
         videoRef.current.srcObject = sharedStream;
-        await videoRef.current.play().catch(() => {});
+        try {
+          await videoRef.current.play();
+        } catch (err) {
+          console.warn('[Camera] play() on cached stream rejected — refreshing', err);
+          killSharedStream();
+          streamRef.current = null;
+          // Fall through to fresh acquisition below.
+        }
       }
-      return;
+      if (isStreamLive(sharedStream)) {
+        armWatchdog(attempt);
+        return;
+      }
     }
 
     setStarting(true);
@@ -103,12 +158,22 @@ export default function CardCameraCapture({
         },
         audio: false,
       });
+      // If a newer attempt started while we awaited, discard this one.
+      if (startAttemptRef.current !== attempt) {
+        try { stream.getTracks().forEach(t => t.stop()); } catch {}
+        return;
+      }
       sharedStream = stream;
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        await videoRef.current.play().catch(() => {});
+        try {
+          await videoRef.current.play();
+        } catch (err) {
+          console.warn('[Camera] play() rejected after fresh getUserMedia', err);
+        }
       }
+      armWatchdog(attempt);
     } catch (err: any) {
       console.error('Camera error:', err);
       if (err?.name === 'NotAllowedError') {
@@ -119,7 +184,7 @@ export default function CardCameraCapture({
     } finally {
       setStarting(false);
     }
-  }, []);
+  }, [armWatchdog]);
 
   const computeOverlayRectInVideo = useCallback(() => {
     const video = videoRef.current;
@@ -174,10 +239,31 @@ export default function CardCameraCapture({
     if (!open) {
       detachStream();
       setPreview(null);
+      if (watchdogRef.current !== null) {
+        window.clearTimeout(watchdogRef.current);
+        watchdogRef.current = null;
+      }
       return;
     }
     startStream();
+    // When the page becomes visible again (iOS often suspends the
+    // camera while another app is foregrounded), refresh the stream
+    // so the viewfinder doesn't come back as a black rectangle.
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        if (!isStreamLive(sharedStream)) killSharedStream();
+        startStream();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('pageshow', onVisible);
     return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('pageshow', onVisible);
+      if (watchdogRef.current !== null) {
+        window.clearTimeout(watchdogRef.current);
+        watchdogRef.current = null;
+      }
       detachStream();
     };
   }, [open, startStream, detachStream]);
