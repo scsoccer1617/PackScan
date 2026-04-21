@@ -1,4 +1,5 @@
 import { GoogleGenAI, Type } from "@google/genai";
+import sharp from "sharp";
 
 const ai = new GoogleGenAI({
   apiKey: process.env.AI_INTEGRATIONS_GEMINI_API_KEY,
@@ -100,18 +101,63 @@ function toInlinePart(buffer: Buffer, mimeType: string) {
   };
 }
 
+// Max long-edge in pixels for images sent to Gemini. 1024px is plenty to read
+// printed card text (player name, card #, brand, fine print), but typically
+// 4-8x smaller payload than the original phone-camera capture, which cuts
+// Gemini latency dramatically.
+const GEMINI_IMAGE_MAX_DIMENSION = 1024;
+const GEMINI_IMAGE_JPEG_QUALITY = 85;
+
+async function downscaleForGemini(buffer: Buffer): Promise<{ buffer: Buffer; mimeType: string }> {
+  try {
+    const img = sharp(buffer, { failOn: "none" }).rotate(); // honour EXIF orientation
+    const meta = await img.metadata();
+    const longEdge = Math.max(meta.width || 0, meta.height || 0);
+    // Only downscale when meaningfully larger than the cap; re-encode as JPEG either way
+    // so we drop unnecessary metadata and benefit from compression.
+    const pipeline = (longEdge > GEMINI_IMAGE_MAX_DIMENSION
+      ? img.resize({
+          width: GEMINI_IMAGE_MAX_DIMENSION,
+          height: GEMINI_IMAGE_MAX_DIMENSION,
+          fit: "inside",
+          withoutEnlargement: true,
+        })
+      : img
+    ).jpeg({ quality: GEMINI_IMAGE_JPEG_QUALITY, mozjpeg: true });
+    const out = await pipeline.toBuffer();
+    return { buffer: out, mimeType: "image/jpeg" };
+  } catch (err: any) {
+    // If sharp fails for any reason, fall back to the original buffer/mime.
+    console.warn("[Gemini] image downscale failed, sending original:", err?.message);
+    return { buffer, mimeType: "image/jpeg" };
+  }
+}
+
 export async function analyzeCardWithGemini(
   frontImage: Buffer,
   backImage?: Buffer | null,
   frontMime: string = "image/jpeg",
   backMime: string = "image/jpeg",
 ): Promise<GeminiCardResult> {
+  // Run front + back downscale in parallel.
+  const [frontPrep, backPrep] = await Promise.all([
+    downscaleForGemini(frontImage),
+    backImage && backImage.length > 0 ? downscaleForGemini(backImage) : Promise.resolve(null),
+  ]);
+
+  const originalBytes = frontImage.length + (backImage?.length || 0);
+  const sentBytes = frontPrep.buffer.length + (backPrep?.buffer.length || 0);
+  console.log(
+    `[Gemini] image payload: ${(originalBytes / 1024).toFixed(0)}KB → ${(sentBytes / 1024).toFixed(0)}KB ` +
+    `(${(((originalBytes - sentBytes) / Math.max(originalBytes, 1)) * 100).toFixed(0)}% reduction)`,
+  );
+
   const parts: any[] = [{ text: PROMPT }];
   parts.push({ text: "FRONT IMAGE:" });
-  parts.push(toInlinePart(frontImage, frontMime));
-  if (backImage && backImage.length > 0) {
+  parts.push(toInlinePart(frontPrep.buffer, frontPrep.mimeType));
+  if (backPrep) {
     parts.push({ text: "BACK IMAGE:" });
-    parts.push(toInlinePart(backImage, backMime));
+    parts.push(toInlinePart(backPrep.buffer, backPrep.mimeType));
   }
 
   const response = await ai.models.generateContent({
