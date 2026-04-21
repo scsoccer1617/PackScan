@@ -60,7 +60,7 @@ export default function FoilTypeSelect({ brand, year, collection, set, value, on
       }
     };
     fetchOptions();
-  }, [brand, year, collection, set]);
+  }, [brand, year, collection, set, isNumbered]);
 
   // When value changes externally, check if it needs custom mode
   useEffect(() => {
