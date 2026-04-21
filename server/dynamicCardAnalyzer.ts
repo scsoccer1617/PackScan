@@ -444,7 +444,22 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
           const noNumbers = nameWords.every(w => !/\d/.test(w));
           const eachWordLen = nameWords.every(w => w.length >= 2);
           
-          if (noNonNameWords && noNumbers && eachWordLen) {
+          // Casing-consistency check: real player-name lines use a single
+          // casing convention across all tokens (all-caps "AARON GUIEL",
+          // all title-case "Aaron Guiel", or all lowercase). Mixed casing
+          // within a single line (e.g. "Mon arch" — title case + lowercase)
+          // is the signature of OCR splitting one stylized logo word into
+          // two tokens, never a real two-word player name.
+          const caseStyleOf = (w: string): 'upper' | 'title' | 'lower' | 'other' => {
+            if (/^[A-Z]+$/.test(w)) return 'upper';
+            if (/^[A-Z][a-z]+$/.test(w)) return 'title';
+            if (/^[a-z]+$/.test(w)) return 'lower';
+            return 'other';
+          };
+          const caseStyles = new Set(nameWords.map(caseStyleOf));
+          const consistentCasing = caseStyles.size === 1 && !caseStyles.has('other');
+
+          if (noNonNameWords && noNumbers && eachWordLen && consistentCasing) {
             const firstName = nameWords[0].charAt(0).toUpperCase() + nameWords[0].slice(1).toLowerCase();
             const lastName = nameWords.slice(1).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
             
@@ -455,6 +470,8 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
             
             console.log(`Line-based player name candidate: "${firstName} ${lastName}" (priority: ${priority}, line: ${i})`);
             potentialNames.push({ firstName, lastName, source: 'line', priority });
+          } else if (noNonNameWords && noNumbers && eachWordLen && !consistentCasing) {
+            console.log(`[Name] Rejected mixed-case line candidate: "${nameWords.join(' ')}" (line ${i}) — inconsistent token casing suggests OCR split a single logo word`);
           }
         }
       }
@@ -484,6 +501,48 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
       }
     }
     
+    // Multi-line player name detection: many card fronts print the first
+    // and last names on consecutive lines (e.g. "Aaron\nGuiel" or
+    // "AARON\nGUIEL"). Vision OCR returns each as its own line, so the
+    // single-line pass above never sees them combined. Collect adjacent
+    // single-word name-shaped lines as priority-1 candidates BEFORE the
+    // early-return so they compete with single-line picks under the
+    // existing tie-break rules. Sport-agnostic, no hardcoded names.
+    const isSingleNameWord = (w: string): boolean => {
+      if (!w) return false;
+      if (w.length < 2 || w.length > 15) return false;
+      if (!/^[A-Za-z][A-Za-z'\-]*$/.test(w)) return false;
+      if (isNonNameWord(w)) return false;
+      if (/^(II|III|IV|JR|SR)$/i.test(w)) return false;
+      return true;
+    };
+    const wordCaseStyle = (w: string): 'upper' | 'title' | 'lower' | 'other' => {
+      if (/^[A-Z]+$/.test(w)) return 'upper';
+      if (/^[A-Z][a-z]+$/.test(w)) return 'title';
+      if (/^[a-z]+$/.test(w)) return 'lower';
+      return 'other';
+    };
+    for (let i = 0; i < Math.min(rawLines.length - 1, 8); i++) {
+      const a = rawLines[i].trim();
+      const b = rawLines[i + 1].trim();
+      if (!a || !b) continue;
+      if (bioPrefixPattern.test(a) || bioPrefixPattern.test(b)) continue;
+      // Both lines must be a single name-shaped word with the same casing.
+      const aWords = a.split(/\s+/);
+      const bWords = b.split(/\s+/);
+      if (aWords.length !== 1 || bWords.length !== 1) continue;
+      if (!isSingleNameWord(aWords[0]) || !isSingleNameWord(bWords[0])) continue;
+      const aStyle = wordCaseStyle(aWords[0]);
+      const bStyle = wordCaseStyle(bWords[0]);
+      if (aStyle === 'other' || bStyle === 'other') continue;
+      if (aStyle !== bStyle) continue;
+      const firstName = aWords[0].charAt(0).toUpperCase() + aWords[0].slice(1).toLowerCase();
+      const lastName = bWords[0].charAt(0).toUpperCase() + bWords[0].slice(1).toLowerCase();
+      const priority = i < 5 ? 1 : 2;
+      console.log(`Multi-line player name candidate: "${firstName} ${lastName}" (priority: ${priority}, lines: ${i}+${i + 1})`);
+      potentialNames.push({ firstName, lastName, source: 'multiline' as any, priority });
+    }
+
     if (potentialNames.length === 0) {
       const upperText = text.toUpperCase();
       const twoWordNameRegex = /\b([A-Z][A-Z]+)\s+([A-Z][A-Z]+(?:\s+[A-Z][A-Z]+)?)\b/g;
@@ -1862,6 +1921,35 @@ function extractCardNumberPass(
 
     type NumCandidate = { number: string; lineIndex: number; score: number };
     const candidates: NumCandidate[] = [];
+
+    // Player-name proximity bonus: on the back of a card the printed
+    // card number is almost always immediately adjacent (above or below)
+    // to the player-name line. By the time card-number extraction runs,
+    // extractPlayerName has already populated cardDetails.playerLastName,
+    // so we can use it as an anchor. Generic — no hardcoded names.
+    const playerLastUpper =
+      typeof cardDetails.playerLastName === 'string' && cardDetails.playerLastName.trim()
+        ? cardDetails.playerLastName.trim().toUpperCase().split(/\s+/).filter(t => t.length >= 3)
+        : [];
+    const playerFirstUpper =
+      typeof cardDetails.playerFirstName === 'string' && cardDetails.playerFirstName.trim()
+        ? cardDetails.playerFirstName.trim().toUpperCase()
+        : '';
+    const lineHasPlayerName = (line: string): boolean => {
+      if (!line) return false;
+      const up = line.toUpperCase();
+      // Match if any last-name token appears as a whole word.
+      for (const tok of playerLastUpper) {
+        const re = new RegExp(`\\b${tok.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`);
+        if (re.test(up)) return true;
+      }
+      if (playerFirstUpper && playerFirstUpper.length >= 3) {
+        const re = new RegExp(`\\b${playerFirstUpper.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`);
+        if (re.test(up)) return true;
+      }
+      return false;
+    };
+
     for (let li = 0; li < standaloneLines.length; li++) {
       const ln = standaloneLines[li];
       const m = ln.match(/^(\d{1,3})$/);
@@ -1878,6 +1966,13 @@ function extractCardNumberPass(
         if (BRAND_WORDMARK.test(neighbour)) score += 2;
         if (SET_TOKEN.test(neighbour)) score += 2;
         if (PURE_NUMERIC_LINE.test(neighbour) && /\d{2,}/.test(neighbour)) score -= 2;
+        // Strong player-name proximity bonus — the card number is
+        // overwhelmingly printed right next to the player's name on
+        // the back. Weight immediate neighbours (±1) higher than
+        // 2-line neighbours.
+        if (lineHasPlayerName(neighbour)) {
+          score += Math.abs(offset) === 1 ? 4 : 2;
+        }
       }
       candidates.push({ number, lineIndex: li, score });
     }
