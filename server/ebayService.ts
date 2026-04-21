@@ -420,8 +420,19 @@ function prioritizeListingsByCardMatch(
         return re.test(title);
       });
       if (hasParallel) {
-        score -= 60;
-        console.log(`  ↳ Parallel penalty (-60): base card but title contains parallel/foil keyword`);
+        score -= 200;
+        console.log(`  ↳ Parallel penalty (-200): base card but title contains parallel/foil keyword`);
+      }
+
+      // "Chrome" is a parallel for many products (e.g. Stadium Club Chrome) but is a
+      // base product line for others (Topps Chrome, Bowman Chrome). Penalise dynamically:
+      // only if our card's set/brand isn't itself a *Chrome product line AND the title
+      // adds "chrome" on top of the set name.
+      const ownLine = `${(brand || '').toLowerCase()} ${(set || '').toLowerCase()} ${(collection || '').toLowerCase()}`;
+      const ownIsChromeLine = /\bchrome\b/.test(ownLine);
+      if (!ownIsChromeLine && /\bchrome\b/i.test(title)) {
+        score -= 200;
+        console.log(`  ↳ Chrome-parallel penalty (-200): our card isn't a Chrome product line but title contains "chrome"`);
       }
     }
 
