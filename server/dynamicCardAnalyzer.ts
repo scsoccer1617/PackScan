@@ -1100,6 +1100,17 @@ function extractCardNumberPass(
           return false;
         }
         console.log(`[CardNum] Allowing "${matched}" via ${source} at line ${lineIndex} — outside stat-block span [${statBlockMinLine}..${statBlockMaxLine}]`);
+        // A standalone numeric printed OUTSIDE the stat-block on the
+        // BACK side is virtually always the card # (Score, Donruss,
+        // Leaf, early Topps and many other 1990s sets place "#NNN" at
+        // the bottom edge of the back, well below the stats grid).
+        // Bypass the strict top-40% position gate for this case so a
+        // bottom-of-back card # like Score 1991 #715 isn't rejected by
+        // position alone.
+        if (side === 'back') {
+          console.log(`[CardNum] Bypassing position gate for "${matched}" via ${source} — back-side standalone # outside stat block`);
+          return true;
+        }
       }
       return acceptRaw(matched, source);
     };
@@ -1830,7 +1841,9 @@ function extractCardNumberPass(
       const m = ln.match(/^(\d{1,3})$/);
       if (!m) continue;
       const number = m[1];
-      if (parseInt(number) >= 1000) continue;
+      const numVal = parseInt(number);
+      if (numVal >= 1000) continue;
+      if (numVal <= 0) continue;
 
       let score = 0;
       for (const offset of [-2, -1, 1, 2]) {
