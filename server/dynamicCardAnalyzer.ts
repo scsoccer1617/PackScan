@@ -898,6 +898,17 @@ function extractCardNumber(
         console.log(`[CardNum-pos] Accepting "${matched}" via ${source} (${sideTag}) at normY=${nyStr} (${region}) — vintage legal-text marker bypasses position gate`);
         return true;
       }
+      // "X OF Y" card-position-in-set notation is, by virtue of the
+      // literal word "OF" between two integers, unambiguously a card
+      // number marker. Many sets (Score, Donruss, Leaf, modern inserts,
+      // etc.) print it at the bottom edge of the card — well outside
+      // the top-40% zone — so the strict position gate would wrongly
+      // reject it. Bypass the gate; the regex itself is specific
+      // enough that no false positive can sneak through.
+      if (source === 'x-of-y-insert-position') {
+        console.log(`[CardNum-pos] Accepting "${matched}" via ${source} (${sideTag}) at normY=${nyStr} (${region}) — "X OF Y" marker bypasses position gate`);
+        return true;
+      }
       if (ny == null) {
         console.log(`[CardNum-pos] Skipping "${matched}" via ${source} (${sideTag}) — no contiguous token position (strict pass)`);
         return false;
