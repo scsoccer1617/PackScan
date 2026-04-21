@@ -81,7 +81,7 @@ Extract these fields when visible:
    - If you can only see the denominator (e.g. "/2024" because the numerator is too blurry), still return "/2024".
 - parallel: A foil/refractor/colour-parallel name ONLY (e.g. "Gold", "Refractor", "X-Fractor", "Sky Blue", "Prizm Silver", "Mojo", "Holo"). These are alternate printings that differ visually (foil, color, texture). Leave null if the card is the base version.
 - variant: Non-parallel variations ONLY (e.g. "Short Print", "Photo Variation", "Pre-Production Sample", "Error", "Corrected", "Update", "Traded"). Things printed on the card that distinguish it from the base but are NOT a foil/colour parallel. Leave null if none.
-- cmpNumber: The internal product/CMP code printed on the back, usually labelled "CODE#" or "CMP" (e.g. "CMP1234", "CODE#TMP12...", "BCP123"). Capture the full code exactly as printed (letters + digits). Leave null if not visible.
+- cmpNumber: The internal product/CMP code printed on the back, usually labelled "CODE#" or "CMP" (e.g. "CMP1234", "CODE#TMP12...", "BCP123"). Capture the code as printed (letters + digits). If the prefix "CMP" appears as a label immediately before the code, include it ONCE — never duplicate it (return "CMP071002", NOT "CMPCMP071002"). Leave null if not visible.
 - confidence: 0.0–1.0 your overall confidence
 - notes: Any relevant observations (OCR ambiguity, unusual formatting, etc.)
 
@@ -131,6 +131,19 @@ async function downscaleForGemini(buffer: Buffer): Promise<{ buffer: Buffer; mim
     console.warn("[Gemini] image downscale failed, sending original:", err?.message);
     return { buffer, mimeType: "image/jpeg" };
   }
+}
+
+// Strip duplicated/leading prefix labels Gemini sometimes echoes back along
+// with the captured code, e.g. "CMPCMP071002" → "CMP071002",
+// "CMP CMP071002" → "CMP071002", "CODE#CODE#TMP12" → "CODE#TMP12".
+function normalizeCmpNumber(v: string | null): string | null {
+  if (!v) return null;
+  let s = String(v).trim();
+  // Collapse repeated CMP prefixes (case-insensitive), with optional whitespace.
+  s = s.replace(/^(?:CMP[\s:#-]*){2,}(?=[A-Za-z0-9])/i, "CMP");
+  // Collapse repeated CODE# prefixes the same way.
+  s = s.replace(/^(?:CODE\s*#?\s*){2,}(?=[A-Za-z0-9])/i, "CODE#");
+  return s || null;
 }
 
 export async function analyzeCardWithGemini(
@@ -207,7 +220,7 @@ export async function analyzeCardWithGemini(
     serialNumber: clean(parsed.serialNumber),
     parallel: clean(parsed.parallel),
     variant: clean(parsed.variant),
-    cmpNumber: clean(parsed.cmpNumber),
+    cmpNumber: normalizeCmpNumber(clean(parsed.cmpNumber)),
     confidence: parsed.confidence ?? null,
     notes: clean(parsed.notes),
   };
