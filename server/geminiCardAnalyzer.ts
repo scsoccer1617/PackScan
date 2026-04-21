@@ -21,6 +21,7 @@ export interface GeminiCardResult {
   isRookie?: boolean | null;
   isAutograph?: boolean | null;
   serialNumber?: string | null;
+  parallel?: string | null;
   variant?: string | null;
   confidence?: number | null;
   notes?: string | null;
@@ -41,6 +42,7 @@ const SCHEMA = {
     isRookie: { type: Type.BOOLEAN, nullable: true },
     isAutograph: { type: Type.BOOLEAN, nullable: true },
     serialNumber: { type: Type.STRING, nullable: true },
+    parallel: { type: Type.STRING, nullable: true },
     variant: { type: Type.STRING, nullable: true },
     confidence: { type: Type.NUMBER, nullable: true },
     notes: { type: Type.STRING, nullable: true },
@@ -61,7 +63,8 @@ Extract these fields when visible:
 - isRookie: true if "RC", "Rookie Card", or a rookie logo is visible
 - isAutograph: true if signed or marked "AUTO"
 - serialNumber: Serial number if numbered (e.g. "10/399", "/499")
-- variant: Parallel/variation name if visible (e.g. "Gold", "Refractor", "Sky Blue", "Short Print")
+- parallel: A foil/refractor/colour-parallel name ONLY (e.g. "Gold", "Refractor", "X-Fractor", "Sky Blue", "Prizm Silver", "Mojo", "Holo"). These are alternate printings that differ visually (foil, color, texture). Leave null if the card is the base version.
+- variant: Non-parallel variations ONLY (e.g. "Short Print", "Photo Variation", "Pre-Production Sample", "Error", "Corrected", "Update", "Traded"). Things printed on the card that distinguish it from the base but are NOT a foil/colour parallel. Leave null if none.
 - confidence: 0.0–1.0 your overall confidence
 - notes: Any relevant observations (OCR ambiguity, unusual formatting, etc.)
 
@@ -69,6 +72,7 @@ Rules:
 - Only return values you can actually see. Use null for fields you are not confident about.
 - Do NOT hallucinate card numbers, player names, or years.
 - For the card number, prefer the small printed number on the card (often on the back, sometimes in a circle). Never output jersey numbers or stat totals.
+- NEVER put a parallel name in "variant" or a variation in "parallel". When in doubt, leave both null.
 - Return ONLY the structured JSON; no prose outside it.`;
 
 function toInlinePart(buffer: Buffer, mimeType: string) {

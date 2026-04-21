@@ -270,8 +270,12 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
           isAutographed: gem.isAutograph ?? undefined,
           serialNumber: gem.serialNumber || undefined,
           isNumbered: !!seriallike,
-          foilType: gem.variant || undefined,
-          isFoil: !!gem.variant,
+          // Parallels (foil/refractor/colour) → foilType. Non-parallel
+          // variations (Short Print, Pre-Production Sample, Photo Variation,
+          // etc.) → variant. The Gemini schema enforces this split.
+          foilType: gem.parallel || undefined,
+          isFoil: !!gem.parallel,
+          variant: gem.variant || undefined,
         };
 
         // Per-field provenance tracker — `gemini` for values Gemini produced,
@@ -543,6 +547,14 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
           console.log('[Gemini] Set isAutograph=true');
         }
         fillIfEmpty('serialNumber' as any, gem.serialNumber ?? undefined);
+        // Parallels go into foilType (and flag isFoil); plain variations go
+        // into the variant field. Keeps the two concepts distinct so the
+        // Variant column doesn't get polluted with foil/refractor names.
+        if (gem.parallel && !(combinedResult as any).foilType) {
+          (combinedResult as any).foilType = gem.parallel;
+          (combinedResult as any).isFoil = true;
+          console.log(`[Gemini] Filled missing "foilType" (parallel) = "${gem.parallel}"`);
+        }
         fillIfEmpty('variant' as any, gem.variant ?? undefined);
 
         // If Gemini recovered a card number, clear the low-confidence flag so
