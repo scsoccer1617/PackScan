@@ -1793,6 +1793,47 @@ function extractCardNumberPass(
       return;
     }
     
+    // Digit-prefix + letter-suffix card numbers: 8T (Topps Traded), 15U (Fleer
+    // Update), 21R (Donruss Rookies), 42S (Score Rookie/Traded). These formats
+    // number update/traded/rookie-supplement sets. Must run BEFORE the
+    // standalone-number fallback so the set-suffix card # isn't lost when
+    // OCR pulls a bare "16" from the stats block.
+    const digitLetterPattern = /\b(\d{1,4})([A-Z]{1,2})\b/g;
+    const digitLetterSuffixBlacklist = new Set([
+      'ST', 'ND', 'RD', 'TH', // ordinals (1ST, 2ND, 3RD, 4TH)
+      'AM', 'PM', 'BC', 'AD', // time/era
+      'IN', 'FT', 'LB', 'OZ', 'KG', 'G', 'ML', 'CM', 'MM', // units
+      'MPH', 'KMH', 'KPH', 'MI', 'KM', 'YD', 'YDS', // measurements
+      'HR', 'RBI', 'BB', 'AB', 'SO', 'IP', 'ER', 'GS', 'SV', 'SB', 'CS', 'GP', 'SH', 'SF', 'PA', 'OPS', 'BA', 'SLG', 'OBP', 'ERA', // baseball stats
+      'TD', 'FG', 'XP', 'PAT', 'YD', 'QBR', 'PPG', 'RPG', 'APG', 'FGP', 'FTP', // other sports stats
+      'K', 'L', 'W', 'H', 'E', 'O', 'P', 'C', 'D', // single-letter stat codes
+    ]);
+    let digitLetterMatch;
+    while ((digitLetterMatch = digitLetterPattern.exec(text)) !== null) {
+      const digits = digitLetterMatch[1];
+      const suffix = digitLetterMatch[2];
+      const fullMatch = digitLetterMatch[0];
+      const digitsInt = parseInt(digits);
+      // Reject years
+      if (digitsInt >= 1900 && digitsInt <= 2099) continue;
+      // Reject too-large digits (>999 likely phone/zip/etc.)
+      if (digitsInt > 999 || digitsInt < 1) continue;
+      // Reject unit/ordinal/stat suffixes
+      if (digitLetterSuffixBlacklist.has(suffix.toUpperCase())) continue;
+      // Reject if adjacent to measurement keywords in the same line
+      const lineWithDL = lines.find(line => line.includes(fullMatch));
+      if (lineWithDL && /\b(HEIGHT|WEIGHT|HT|WT|BORN|BIRTH|AGE|YRS|OZ|LBS?|INCHES?|TALL|WEIGH|PHONE|ZIP|EXT)\b/i.test(lineWithDL)) continue;
+      // Reject if the match appears inside a stats row (long line with many numeric tokens)
+      if (lineWithDL) {
+        const numTokens = lineWithDL.split(/\s+/).filter(t => /^\d+(\.\d+)?$/.test(t));
+        if (numTokens.length >= 4) continue;
+      }
+      if (!acceptCandidate(fullMatch, 'digit-letter-suffix')) continue;
+      cardDetails.cardNumber = fullMatch;
+      console.log(`Detected digit+letter card number (e.g. 8T, 15U): ${fullMatch}`);
+      return;
+    }
+
     // Alphanumeric patterns like: T27, T119, TC12, etc. (letter prefix + digits, no dash)
     // Check these BEFORE standalone numbers to avoid "59" overriding "T119"
     const alphaNumPatternEarly = /\b([A-Z]{1,3})(\d{1,4})\b/g;
