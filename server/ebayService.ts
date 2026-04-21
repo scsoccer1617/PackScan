@@ -412,8 +412,11 @@ function prioritizeListingsByCardMatch(
       }
     }
 
-    // For base cards (no foilType), penalize listings that mention any parallel/foil keyword
-    const isBaseCard = !foilType || foilType.trim() === '';
+    // For base cards (no foilType AND no confirmed variant), penalize listings that
+    // mention any parallel/foil keyword. When the user has confirmed the card IS a
+    // variant (e.g. "Hidden Elf Variations"), every relevant listing will mention a
+    // parallel/variation keyword — applying the penalty would wipe them all out.
+    const isBaseCard = (!foilType || foilType.trim() === '') && (!variant || variant.trim() === '');
     if (isBaseCard) {
       const hasParallel = PARALLEL_KEYWORDS.some(kw => {
         const re = new RegExp(`\\b${kw}\\b`, 'i');
@@ -496,7 +499,7 @@ export async function searchCardValues(
       console.log(`[eBay] Stripped middle name(s) for search: "${originalPlayerName}" → "${playerName}"`);
     }
     // Create cache key from search parameters including foil type and serial number
-    const cacheKey = `${playerName}-${cardNumber}-${brand}-${year}-${collection || ''}-${isNumbered || ''}-${foilType || ''}-${serialNumber || ''}-${variant || ''}`;
+    const cacheKey = `${playerName}-${cardNumber}-${brand}-${year}-${collection || ''}-${set || ''}-${isNumbered || ''}-${foilType || ''}-${serialNumber || ''}-${variant || ''}`;
     const cached = searchCache.get(cacheKey);
     
     // Return cached result if still valid
