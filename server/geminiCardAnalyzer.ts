@@ -72,7 +72,12 @@ Extract these fields when visible:
 - sport: "Baseball", "Basketball", "Football", "Hockey", "Soccer", etc.
 - isRookie: true if "RC", "Rookie Card", or a rookie logo is visible
 - isAutograph: true if signed or marked "AUTO"
-- serialNumber: Serial number if numbered (e.g. "10/399", "/499")
+- serialNumber: Serial number if numbered (e.g. "10/399", "0456/2024", "/499"). Look CAREFULLY — these are often:
+   - Foil-stamped (gold/silver/coloured ink) on the front, frequently near the bottom edge, side border, or under the player image.
+   - Hand-numbered or printed in small text on the back.
+   - Format is ALWAYS "NNNN/NNNN" or "/NNNN" — a number-over-number. The denominator is the print run (e.g. /150, /299, /2024).
+   - The print run can numerically match the card's year (e.g. a 2024 Topps Gold parallel is /2024). DO NOT skip the serial just because the denominator looks like a year — if you see "0456/2024" on the card, that IS the serial number, even on a 2024 card. Extract the full string exactly as printed.
+   - If you can only see the denominator (e.g. "/2024" because the numerator is too blurry), still return "/2024".
 - parallel: A foil/refractor/colour-parallel name ONLY (e.g. "Gold", "Refractor", "X-Fractor", "Sky Blue", "Prizm Silver", "Mojo", "Holo"). These are alternate printings that differ visually (foil, color, texture). Leave null if the card is the base version.
 - variant: Non-parallel variations ONLY (e.g. "Short Print", "Photo Variation", "Pre-Production Sample", "Error", "Corrected", "Update", "Traded"). Things printed on the card that distinguish it from the base but are NOT a foil/colour parallel. Leave null if none.
 - cmpNumber: The internal product/CMP code printed on the back, usually labelled "CODE#" or "CMP" (e.g. "CMP1234", "CODE#TMP12...", "BCP123"). Capture the full code exactly as printed (letters + digits). Leave null if not visible.
