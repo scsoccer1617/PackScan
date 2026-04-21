@@ -1120,6 +1120,22 @@ function extractCardNumberPass(
         statBlockLines.add(i);
       }
     }
+    // 4. Career-totals anchor: when the OCR splits the career-totals row
+    //    across many lines (common on vintage backs where the grid is narrow),
+    //    the "MAJ LEA TOTALS" / "CAREER TOTALS" label may appear on its own
+    //    line with zero numbers, and the totals values trail after it as
+    //    short numeric cells. Anchor on the label and expand forward through
+    //    consecutive stat-row / short-cell lines so a stray bare number
+    //    (e.g. the last walks total "287") isn't mistaken for a card #.
+    for (let i = 0; i < linesForStats.length; i++) {
+      if (!isTotalsLine(linesForStats[i])) continue;
+      statBlockLines.add(i);
+      for (let j = i + 1; j < linesForStats.length; j++) {
+        if (isStatRowLine(linesForStats[j]) || isShortStatCell(linesForStats[j])) {
+          statBlockLines.add(j);
+        } else break;
+      }
+    }
     if (statBlockLines.size > 0) {
       const preview = [...statBlockLines].sort((a, b) => a - b).slice(0, 8)
         .map(i => `${i}:"${linesForStats[i].slice(0, 40)}"`).join(' | ');
