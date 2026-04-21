@@ -4,7 +4,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ExternalLink, TrendingUp, Pencil, RotateCcw, ThumbsUp, ThumbsDown, Check } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { ExternalLink, TrendingUp, Pencil, RotateCcw, ThumbsUp, ThumbsDown, Check, Sparkles, ScanText } from "lucide-react";
 import { CardFormValues } from "@shared/schema";
 import { apiRequest } from "@/lib/queryClient";
 import VariantCombobox from "@/components/VariantCombobox";
@@ -310,7 +311,19 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
       <Card ref={cardInfoRef}>
         <CardHeader>
           <div className="flex justify-between items-center">
-            <CardTitle className="text-lg">Card Information</CardTitle>
+            <CardTitle className="text-lg flex items-center gap-2">
+              Card Information
+              {(cardData as any)?._engine === 'gemini' && (
+                <Badge variant="secondary" className="gap-1 text-xs font-normal" title="Identified by Gemini Vision">
+                  <Sparkles className="h-3 w-3 text-purple-500" /> Gemini
+                </Badge>
+              )}
+              {(cardData as any)?._engine === 'ocr' && (
+                <Badge variant="outline" className="gap-1 text-xs font-normal" title="Identified by OCR + catalog lookup">
+                  <ScanText className="h-3 w-3 text-slate-500" /> OCR
+                </Badge>
+              )}
+            </CardTitle>
             {!editMode && (
               <Button variant="outline" size="sm" onClick={handleStartEdit}>
                 <Pencil className="h-3.5 w-3.5 mr-1.5" />

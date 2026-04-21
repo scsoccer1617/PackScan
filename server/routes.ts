@@ -1032,11 +1032,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Call the dual-side handler directly
       console.log('About to call handleDualSideCardAnalysis directly...');
-      const dualRequest = { 
-        files: { 
+      const dualRequest = {
+        files: {
           backImage: [backFile],
           ...(files.frontImage && { frontImage: files.frontImage })
-        } 
+        },
+        body: req.body || {},
+        query: req.query || {},
       } as any;
       
       let backOcrResponse: any = null;
