@@ -178,6 +178,25 @@ function detectSerialNumberFromPatterns(fullText: string): SerialNumberResult {
           }
           
           if (serialNumber && isValidSerialNumber(serialNumber)) {
+            // Reject matches that are part of a M/D/Y date (e.g.
+            // "1/19" extracted from "SIGNED … 1/19/79"). If the
+            // character immediately after the matched substring is
+            // a "/" followed by 1-4 digits, this is a date fragment,
+            // not a print-run serial.
+            const matchEnd = (match.index ?? 0) + match[0].length;
+            const tail = line.slice(matchEnd, matchEnd + 6);
+            if (/^\s*\/\s*\d{1,4}\b/.test(tail)) {
+              console.log(`Rejecting pattern serial "${serialNumber}" — followed by "/N", looks like a M/D/Y date in line "${line.trim()}"`);
+              continue;
+            }
+            // Likewise, reject if the character immediately BEFORE
+            // the match is "/" + digits — covers "/N" prefix from a
+            // date that began earlier on the line.
+            const head = line.slice(Math.max(0, (match.index ?? 0) - 6), match.index ?? 0);
+            if (/\b\d{1,4}\s*\/\s*$/.test(head)) {
+              console.log(`Rejecting pattern serial "${serialNumber}" — preceded by "N/", looks like the tail of a M/D/Y date in line "${line.trim()}"`);
+              continue;
+            }
             // Always check for print-code masquerading as serial (e.g.
             // "19/93" on a 1993 card). Cheap to run, catches false
             // positives the bio-context check misses on short lines.
