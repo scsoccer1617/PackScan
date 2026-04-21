@@ -335,15 +335,34 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
                 result.isRookieCard = lookup.isRookieCard;
                 source.isRookieCard = 'db';
               }
-              if (lookup.variation && !result.foilType) {
+              // Catalog is authoritative for parallels. Three cases:
+              //   1. DB picked exactly one → use it (overwrite Gemini's guess).
+              //   2. DB returned ambiguous options → flag for user, clear Gemini's guess
+              //      so the UI doesn't display an unverified parallel.
+              //   3. DB returned no variation at all (no matching serial row, or no
+              //      NULL-serial row when serial is undetected) → there is no such
+              //      parallel for this card; clear Gemini's guess and treat as base.
+              if (lookup.variation) {
                 result.foilType = lookup.variation;
                 result.isFoil = true;
                 source.foilType = 'db';
-              }
-              if (lookup.variationAmbiguous && lookup.variationOptions?.length) {
+              } else if (lookup.variationAmbiguous && lookup.variationOptions?.length) {
                 (result as CardFormWithFlags)._variationAmbiguous = true;
                 (result as CardFormWithFlags)._variationOptions = lookup.variationOptions;
+                if (result.foilType) {
+                  console.log(`[Engine] gemini-first: clearing Gemini foilType "${result.foilType}" — DB has ${lookup.variationOptions.length} ambiguous options, awaiting user confirmation`);
+                  result.foilType = undefined;
+                  result.isFoil = false;
+                }
+                source.foilType = 'db';
                 console.log(`[Engine] gemini-first variation ambiguous (${lookup.variationOptions.length} options) — needs user confirmation`);
+              } else {
+                if (result.foilType) {
+                  console.log(`[Engine] gemini-first: clearing Gemini foilType "${result.foilType}" — DB has no matching parallel for this card (treating as base)`);
+                  result.foilType = undefined;
+                  result.isFoil = false;
+                  source.foilType = 'db';
+                }
               }
               console.log('[Engine] gemini-first DB enrichment applied');
             } else {
