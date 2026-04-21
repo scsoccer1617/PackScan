@@ -264,6 +264,7 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
           collection: gem.collection || undefined,
           set: gem.set || undefined,
           cardNumber: gem.cardNumber || undefined,
+          team: gem.team || undefined,
           sport: gem.sport || undefined,
           isRookieCard: gem.isRookie ?? undefined,
           isAutographed: gem.isAutograph ?? undefined,
@@ -305,6 +306,7 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
               };
               setFromDb('playerFirstName', lookup.playerFirstName ?? undefined);
               setFromDb('playerLastName',  lookup.playerLastName  ?? undefined);
+              setFromDb('team',            lookup.team            ?? undefined);
               setFromDb('collection',      lookup.collection      ?? undefined);
               setFromDb('set',             lookup.set             ?? undefined);
               setFromDb('cardNumber',      lookup.cardNumber      ?? undefined);
@@ -336,24 +338,37 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
         // perfectly good card-number read that simply wasn't in our catalog.
         const usable = !!result.cardNumber || dbFound;
         if (usable) {
-          // Visual foil detector — only run when Gemini didn't already name a
-          // variant. Keeps behaviour consistent with the OCR path where visual
-          // detection is always attempted.
-          if (!result.foilType && frontImage) {
+          // Visual foil detector — always run in Gemini-first mode, matching
+          // the OCR path. If Gemini/DB hadn't already named a variant and the
+          // detector finds one with confidence >= 0.65, adopt it. If a variant
+          // is already set, the detector result is logged for telemetry but
+          // only overrides when the existing variant came from Gemini (never
+          // overrides an authoritative DB-sourced variation).
+          if (frontImage) {
             try {
               const { detectFoilFromImage } = await import('./visualFoilDetector');
               const visual = await detectFoilFromImage(
                 frontImage.buffer.toString('base64'),
                 { isNumbered: !!result.isNumbered, imageBuffer: frontImage.buffer },
               );
-              if (visual?.isFoil && visual.foilType && (visual.confidence ?? 0) >= 0.65) {
-                result.foilType = visual.foilType;
-                result.isFoil = true;
-                source['foilType'] = 'gemini';
-                console.log(`[Engine] gemini-first visual foil accepted: ${visual.foilType} (${visual.confidence})`);
+              const visualConfident = !!visual?.isFoil && !!visual.foilType && (visual.confidence ?? 0) >= 0.65;
+              if (visualConfident) {
+                if (!result.foilType) {
+                  result.foilType = visual!.foilType!;
+                  result.isFoil = true;
+                  source.foilType = 'gemini';
+                  console.log(`[Engine] gemini-first visual foil accepted: ${visual!.foilType} (${visual!.confidence})`);
+                } else if (source.foilType === 'gemini') {
+                  console.log(`[Engine] gemini-first visual foil override Gemini variant: "${result.foilType}" -> "${visual!.foilType}" (${visual!.confidence})`);
+                  result.foilType = visual!.foilType!;
+                  result.isFoil = true;
+                } else {
+                  console.log(`[Engine] gemini-first visual foil detected "${visual!.foilType}" but keeping DB variant "${result.foilType}"`);
+                }
               }
-            } catch (err: any) {
-              console.warn('[Engine] gemini-first visual foil detector failed:', err?.message);
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : String(err);
+              console.warn('[Engine] gemini-first visual foil detector failed:', msg);
             }
           }
 
