@@ -1152,19 +1152,39 @@ async function combineCardResults(
       // whether (brand, year, cardNumber) actually exists in the
       // catalog. If it doesn't, the surname-search salvage pass below
       // will fire even when only one year was in play.
+      //
+      // The flag is gated on PLAYER-NAME agreement, not just row
+      // presence: a probe that returns a different player at the same
+      // (brand, year, cardNumber) means the OCR cardNumber is wrong,
+      // and we still want the salvage pass to fire and search the
+      // catalog by surname. Sport-/player-agnostic — surname comes
+      // from OCR only.
       if (uniqueCandidates.length === 1) {
         const brandLower = String(combined.brand).toLowerCase();
         const cardNumLower = String(combined.cardNumber).toLowerCase();
         const probeRows = await db
-          .select({ id: cardDatabase.id })
+          .select({ name: cardDatabase.playerName })
           .from(cardDatabase)
           .where(and(
             sql`lower(${cardDatabase.brand}) = ${brandLower}`,
             eq(cardDatabase.year, uniqueCandidates[0]),
             sql`lower(${cardDatabase.cardNumberRaw}) = ${cardNumLower}`,
           ))
-          .limit(1);
-        yearProbeFoundCatalogHit = probeRows.length > 0;
+          .limit(5);
+        const ocrSurnames: string[] = [];
+        const backLast = (combined.playerLastName || '').trim().toLowerCase().split(/\s+/).pop() || '';
+        if (backLast.length >= 4 && !bogusNameWords.has(backLast.toUpperCase())) ocrSurnames.push(backLast);
+        for (const fs of frontSurnames) {
+          const fl = fs.toLowerCase();
+          if (fl.length >= 4 && !ocrSurnames.includes(fl)) ocrSurnames.push(fl);
+        }
+        const nameAgrees = probeRows.some(r =>
+          ocrSurnames.some(sn => (r.name || '').toLowerCase().includes(sn))
+        );
+        yearProbeFoundCatalogHit = probeRows.length > 0 && (ocrSurnames.length === 0 || nameAgrees);
+        if (probeRows.length > 0 && ocrSurnames.length > 0 && !nameAgrees) {
+          console.log(`[Year] Single-year probe found ${probeRows.length} row(s) at (${combined.brand}, ${uniqueCandidates[0]}, #${cardNumLower}) but none matched OCR surname [${ocrSurnames.join('|')}] (DB names: ${probeRows.map(r => r.name).join(', ')}) — keeping salvage open.`);
+        }
       }
       if (uniqueCandidates.length >= 2) {
         const brandLower = String(combined.brand).toLowerCase();
@@ -1456,6 +1476,40 @@ async function combineCardResults(
               flagged._yearFromBareFallback = false;
               console.log(`[CardDB] Surname salvage (year-agnostic): "${fs}" uniquely matched ${row.playerName} (${combined.brand} ${row.year} #${row.cardNumber}). OCR cardNumber ${oldCardNum} did not match any catalog row — overriding to #${row.cardNumber}.`);
               break;
+            }
+            // Year-only correction: when surname matches multiple catalog
+            // rows but none have the OCR cardNumber, the OCR cardNumber is
+            // bad (likely a print code from the bottom of the card, or a
+            // subset card not in the base catalog). We can't recover the
+            // cardNumber, but we CAN at least correct the year by picking
+            // the year closest to the OCR year that has a row for this
+            // brand+surname. Vintage Donruss/Leaf imprints lag the
+            // production year by 1, so a +1 tie wins over -1.
+            if (combined.year && Number(combined.year) > 0 && (
+              !!(combined as CardFormWithFlags)._yearFromCopyright ||
+              !!(combined as CardFormWithFlags)._yearFromBackOnly
+            )) {
+              const ocrYr = Number(combined.year);
+              const yearsAvail = Array.from(new Set(rows.map(r => r.year))).filter(y => y > 0);
+              if (yearsAvail.length > 0) {
+                const dist = (y: number) => Math.abs(y - ocrYr);
+                yearsAvail.sort((a, b) => {
+                  const d = dist(a) - dist(b);
+                  if (d !== 0) return d;
+                  // Tiebreak: prefer year > ocrYr (publisher imprint lag).
+                  return (b - ocrYr) - (a - ocrYr);
+                });
+                const newYr = yearsAvail[0];
+                if (newYr !== ocrYr) {
+                  combined.year = newYr;
+                  flagged._yearFromCatalogProbe = true;
+                  flagged._yearFromBackOnly = false;
+                  flagged._yearFromCopyright = false;
+                  flagged._yearFromBareFallback = false;
+                  console.log(`[CardDB] Surname salvage (year-only): "${fs}" matched ${rows.length} catalog rows across years [${yearsAvail.join(', ')}] but none had OCR cardNumber #${cardNumLower}. Shifting low-confidence year ${ocrYr} → ${newYr} (closest catalog year, +1 publisher-imprint-lag preference). Leaving cardNumber in place.`);
+                  break;
+                }
+              }
             }
             console.log(`[CardDB] Surname salvage (year-agnostic): "${fs}" matched ${rows.length} catalog rows but none matched OCR cardNumber #${cardNumLower} — leaving in place.`);
           }
