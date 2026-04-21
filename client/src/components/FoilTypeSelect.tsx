@@ -14,17 +14,42 @@ interface FoilTypeSelectProps {
   // the consumer wires it up) shows only non-serialized parallels — the
   // user-confirmed expectation when the scanned card has no /xxx serial.
   isNumbered?: boolean;
+  // Splits the catalog by name. 'parallel' (default) excludes any row whose
+  // variation_or_parallel name contains the word "Variation"/"Variations";
+  // 'variant' includes ONLY those rows. Drives both the API filter and the
+  // user-facing labels/placeholders.
+  kind?: 'parallel' | 'variant';
+  placeholder?: string;
+  noneLabel?: string;
+  customPlaceholder?: string;
 }
 
 const CUSTOM_VALUE = "__custom__";
 const NONE_VALUE   = "__none__";
 
-export default function FoilTypeSelect({ brand, year, collection, set, value, onChange, isNumbered }: FoilTypeSelectProps) {
+export default function FoilTypeSelect({
+  brand,
+  year,
+  collection,
+  set,
+  value,
+  onChange,
+  isNumbered,
+  kind = 'parallel',
+  placeholder,
+  noneLabel = 'None detected',
+  customPlaceholder,
+}: FoilTypeSelectProps) {
   const [options, setOptions] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [fetched, setFetched] = useState(false);
   const [customMode, setCustomMode] = useState(false);
   const [customText, setCustomText] = useState("");
+
+  const effectivePlaceholder = placeholder
+    ?? (kind === 'variant' ? 'Select variant...' : 'Select parallel...');
+  const effectiveCustomPlaceholder = customPlaceholder
+    ?? (kind === 'variant' ? 'Type custom variant...' : 'Type custom parallel...');
 
   useEffect(() => {
     if (!brand || !year) {
@@ -42,7 +67,12 @@ export default function FoilTypeSelect({ brand, year, collection, set, value, on
         // Default: when isNumbered is unspecified or false, only show
         // non-serialized parallels. Numbered cards explicitly opt in via
         // serialStatus=numbered so the dropdown shows /xxx options.
-        params.set("serialStatus", isNumbered ? "numbered" : "none");
+        // For the variant kind, serial status is not meaningful — variants
+        // are always "Photo Variation" / "Image Variation" style entries.
+        if (kind !== 'variant') {
+          params.set("serialStatus", isNumbered ? "numbered" : "none");
+        }
+        params.set("kind", kind);
         const resp = await fetch(`/api/card-variations/options?${params}`);
         if (resp.ok) {
           const data = await resp.json();
@@ -60,7 +90,7 @@ export default function FoilTypeSelect({ brand, year, collection, set, value, on
       }
     };
     fetchOptions();
-  }, [brand, year, collection, set, isNumbered]);
+  }, [brand, year, collection, set, isNumbered, kind]);
 
   // When value changes externally, check if it needs custom mode
   useEffect(() => {
@@ -99,10 +129,10 @@ export default function FoilTypeSelect({ brand, year, collection, set, value, on
         }}
       >
         <SelectTrigger>
-          <SelectValue placeholder="Select parallel..." />
+          <SelectValue placeholder={effectivePlaceholder} />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value={NONE_VALUE}>None detected</SelectItem>
+          <SelectItem value={NONE_VALUE}>{noneLabel}</SelectItem>
           {options.map((opt) => (
             <SelectItem key={opt} value={opt}>{opt}</SelectItem>
           ))}
@@ -116,7 +146,7 @@ export default function FoilTypeSelect({ brand, year, collection, set, value, on
             setCustomText(e.target.value);
             onChange(e.target.value);
           }}
-          placeholder="Type custom parallel..."
+          placeholder={effectiveCustomPlaceholder}
           autoFocus
         />
       )}

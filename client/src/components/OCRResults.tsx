@@ -456,14 +456,18 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
               />
             </div>
 
-            {/* Variant — free-text only (e.g. SSP, Image Variation, Photo Variation) */}
+            {/* Variant — dropdown of catalog rows whose name contains
+                "Variation"/"Variations" (e.g. "Image Variation", "Photo Variation"). */}
             <div className="space-y-2 col-span-1 md:col-span-2">
-              <Label htmlFor="variant">Variant</Label>
-              <Input
-                id="variant"
+              <Label>Variant</Label>
+              <FoilTypeSelect
+                kind="variant"
+                brand={editedData.brand}
+                year={editedData.year}
+                collection={editedData.collection}
+                set={editedData.set}
                 value={editedData.variant || ''}
-                onChange={(e) => handleInputChange('variant', e.target.value)}
-                placeholder="e.g. SSP, Photo Variation"
+                onChange={(variant) => handleInputChange('variant', variant)}
               />
             </div>
 

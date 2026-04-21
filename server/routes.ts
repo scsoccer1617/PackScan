@@ -1920,7 +1920,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Queries with decreasing specificity so the most targeted match wins.
   app.get(`${apiPrefix}/card-variations/options`, async (req, res) => {
     try {
-      const { brand, year: yearStr, collection, set, serialStatus } = req.query as Record<string, string | undefined>;
+      const { brand, year: yearStr, collection, set, serialStatus, kind } = req.query as Record<string, string | undefined>;
       if (!brand || !yearStr) {
         return res.status(400).json({ error: 'brand and year are required' });
       }
@@ -1939,16 +1939,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ? sql`(${cardVariations.serialNumber} is not null and trim(${cardVariations.serialNumber}) <> '')`
           : undefined;
 
-      const base = serialFilter
-        ? and(
-            sql`lower(${cardVariations.brand}) = lower(${brand.trim()})`,
-            eq(cardVariations.year, year),
-            serialFilter,
-          )
-        : and(
-            sql`lower(${cardVariations.brand}) = lower(${brand.trim()})`,
-            eq(cardVariations.year, year),
-          );
+      // Optional kind filter — splits catalog rows into "variant" vs "parallel"
+      // by whether the variation_or_parallel name contains the word
+      // "Variation"/"Variations" (case-insensitive, whole word).
+      //   kind=variant   → only rows whose name matches /\bvariations?\b/i
+      //   kind=parallel  → only rows whose name does NOT match
+      const kindFilter = kind === 'variant'
+        ? sql`${cardVariations.variationOrParallel} ~* '\\mvariations?\\M'`
+        : kind === 'parallel'
+          ? sql`${cardVariations.variationOrParallel} !~* '\\mvariations?\\M'`
+          : undefined;
+
+      const baseFilters = [
+        sql`lower(${cardVariations.brand}) = lower(${brand.trim()})`,
+        eq(cardVariations.year, year),
+      ];
+      if (serialFilter) baseFilters.push(serialFilter);
+      if (kindFilter) baseFilters.push(kindFilter);
+      const base = and(...baseFilters);
 
       const runQuery = (extra?: any) =>
         db

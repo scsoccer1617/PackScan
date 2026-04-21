@@ -343,9 +343,18 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
               //      NULL-serial row when serial is undetected) → there is no such
               //      parallel for this card; clear Gemini's guess and treat as base.
               if (lookup.variation) {
-                result.foilType = lookup.variation;
-                result.isFoil = true;
-                source.foilType = 'db';
+                // Catalog rows whose name contains "Variation"/"Variations"
+                // (e.g. "Image Variation", "Photo Variation") feed the Variant
+                // field instead of Parallel — keeps the two UI dropdowns
+                // populated from disjoint subsets of the same catalog column.
+                if (/\bvariations?\b/i.test(lookup.variation)) {
+                  result.variant = lookup.variation;
+                  source.variant = 'db';
+                } else {
+                  result.foilType = lookup.variation;
+                  result.isFoil = true;
+                  source.foilType = 'db';
+                }
               } else if (lookup.variationAmbiguous && lookup.variationOptions?.length) {
                 (result as CardFormWithFlags)._variationAmbiguous = true;
                 (result as CardFormWithFlags)._variationOptions = lookup.variationOptions;
@@ -2309,10 +2318,21 @@ async function combineCardResults(
   // If visual/text foil detection found nothing, use the DB-resolved parallel name.
   // This handles cases like "Aqua" (/399) where the foil color isn't visually obvious
   // or not present in the card's OCR text, but the serial number uniquely identifies it.
-  if (!combined.foilType && dbVariation) {
-    combined.foilType = dbVariation;
-    combined.isFoil = true;
-    console.log(`[CardDB] Applied DB variation as foilType fallback: "${dbVariation}"`);
+  if (dbVariation) {
+    // Catalog rows whose name contains "Variation"/"Variations" (e.g. "Image
+    // Variation", "Photo Variation") feed the Variant field instead of the
+    // Parallel/foilType field. The two UI dropdowns are populated from
+    // disjoint subsets of the same catalog column.
+    if (/\bvariations?\b/i.test(dbVariation)) {
+      if (!combined.variant) {
+        combined.variant = dbVariation;
+        console.log(`[CardDB] Applied DB variation as variant fallback: "${dbVariation}"`);
+      }
+    } else if (!combined.foilType) {
+      combined.foilType = dbVariation;
+      combined.isFoil = true;
+      console.log(`[CardDB] Applied DB variation as foilType fallback: "${dbVariation}"`);
+    }
   }
 
   // ─── Catalog Authority: clear detector-assigned parallels with no DB backing ─

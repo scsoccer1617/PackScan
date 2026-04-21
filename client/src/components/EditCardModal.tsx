@@ -534,7 +534,8 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
               />
             </div>
 
-            {/* Variant (free-text only) */}
+            {/* Variant — dropdown of catalog rows whose name contains
+                "Variation"/"Variations" (e.g. "Image Variation", "Photo Variation"). */}
             <div className="form-grid">
               <FormField
                 control={form.control}
@@ -543,7 +544,15 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
                   <FormItem className="col-span-1 md:col-span-2">
                     <FormLabel>Variant</FormLabel>
                     <FormControl>
-                      <Input placeholder="e.g. SSP, Photo Variation" {...field} />
+                      <FoilTypeSelect
+                        kind="variant"
+                        brand={watchedBrand}
+                        year={watchedYear as number | undefined}
+                        collection={watchedCollection}
+                        set={watchedSet}
+                        value={(field.value as string) || ''}
+                        onChange={(variant) => field.onChange(variant)}
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
