@@ -264,7 +264,27 @@ function checkIfIsolated(targetAnnotation: any, allAnnotations: any[]): boolean 
 function isSerialNumberInBioContext(serialNumber: string, fullText: string): boolean {
   const parts = serialNumber.split('/');
   if (parts.length === 2) {
+    const numerator = parts[0];
     const denominator = parseInt(parts[1], 10);
+
+    // Catch print-codes that look like serials, e.g. "19/93" on a 1993
+    // card or "20/12" on a 2012 card. If the numerator is a valid year
+    // century prefix (19 or 20) and the concatenation forms a 4-digit
+    // year that ALSO appears elsewhere in the OCR text, this is the
+    // copyright/print-year split across a slash by Vision — not a
+    // serial. Sport-agnostic, no card-specific rules.
+    if ((numerator === '19' || numerator === '20') && parts[1].length === 2) {
+      const reconstructedYear = `${numerator}${parts[1]}`;
+      const yearNum = parseInt(reconstructedYear, 10);
+      if (yearNum >= 1900 && yearNum <= 2099) {
+        const yearTokens = (fullText.match(/\b(19|20)\d{2}\b/g) || []);
+        if (yearTokens.includes(reconstructedYear)) {
+          console.log(`Rejecting "${serialNumber}" — looks like a ${reconstructedYear} print-code (year token also present in OCR text)`);
+          return true;
+        }
+      }
+    }
+
     if (denominator >= 50) {
       console.log(`Serial number "${serialNumber}" has denominator ${denominator} >= 50, not a date - accepting`);
       return false;

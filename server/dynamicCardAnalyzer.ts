@@ -1775,24 +1775,62 @@ function extractCardNumberPass(
       }
     }
 
-    // Iterate over EVERY standalone 1-3 digit line, not just the first.
-    // The first standalone short number on a card with stats is often a
-    // stat cell that escaped block detection (e.g. a column total like
-    // "888"); the real card number frequently appears further down the
-    // back, printed below the stat grid next to the brand wordmark.
-    // acceptCandidate() now uses the candidate's line index to allow
-    // bare numerics that fall OUTSIDE the stat-block span, so we just
-    // need to feed it every candidate in order.
+    // Collect EVERY standalone 1-3 digit line (not just the first), then
+    // score each by surrounding context so we pick the one that actually
+    // looks like a printed card number — not a stat-table tail that
+    // escaped block detection.
+    //
+    // Scoring rationale (sport-agnostic, no hardcoded card rules):
+    //   + neighbours contain a brand wordmark token (LEAF, DONRUSS,
+    //     TOPPS, FLEER, SCORE, BOWMAN, PINNACLE, PANINI, UPPER, DECK …)
+    //   + neighbours contain a set/series token (SERIES, SET, EDITION,
+    //     COLLECTION, ONE, TWO, PREMIER, PREMIUM, UPDATE, TRADED)
+    //   − neighbours are purely numeric / stat-row-like (these are
+    //     usually the trailing tail of the stat grid that didn't get
+    //     flagged as part of the block)
     const standaloneLines = textForStandalone.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+    const BRAND_WORDMARK = /\b(LEAF|DONRUSS|TOPPS|FLEER|SCORE|BOWMAN|PINNACLE|PANINI|UPPER|DECK|STADIUM|CLUB|ULTRA|SELECT|PRIZM|CHRONICLES|CONTENDERS|MOSAIC|OPTIC|HOOPS|CERTIFIED|ABSOLUTE|ELITE|GYPSY|HERITAGE|CHROME|FINEST|COLLECTOR|SKYBOX|PROSET|CLASSIC)\b/i;
+    const SET_TOKEN = /\b(SERIES|SET|EDITION|COLLECTION|PREMIER|PREMIUM|UPDATE|TRADED|FACTORY|ONE|TWO|THREE)\b/i;
+    const PURE_NUMERIC_LINE = /^[\d\s.,/-]+$/;
+
+    type NumCandidate = { number: string; lineIndex: number; score: number };
+    const candidates: NumCandidate[] = [];
     for (let li = 0; li < standaloneLines.length; li++) {
       const ln = standaloneLines[li];
       const m = ln.match(/^(\d{1,3})$/);
       if (!m) continue;
       const number = m[1];
       if (parseInt(number) >= 1000) continue;
-      if (acceptCandidate(number, 'standalone-line-number', li)) {
-        cardDetails.cardNumber = number;
-        console.log(`Detected standalone card number: ${cardDetails.cardNumber}`);
+
+      let score = 0;
+      for (const offset of [-2, -1, 1, 2]) {
+        const neighbour = standaloneLines[li + offset];
+        if (!neighbour) continue;
+        if (BRAND_WORDMARK.test(neighbour)) score += 2;
+        if (SET_TOKEN.test(neighbour)) score += 2;
+        if (PURE_NUMERIC_LINE.test(neighbour) && /\d{2,}/.test(neighbour)) score -= 2;
+      }
+      candidates.push({ number, lineIndex: li, score });
+    }
+
+    // Prefer highest-scoring candidate; ties resolved by document order
+    // (earlier line wins, matching the previous behaviour). Candidates
+    // with strongly negative scores (≤ −2) are tried last so a stat-tail
+    // numeric never beats out a true card number sitting next to the
+    // brand wordmark / set name.
+    candidates.sort((a, b) => {
+      if (a.score !== b.score) return b.score - a.score;
+      return a.lineIndex - b.lineIndex;
+    });
+    if (candidates.length > 0) {
+      const preview = candidates.slice(0, 5).map(c => `"${c.number}"@${c.lineIndex}(score=${c.score})`).join(', ');
+      console.log(`[CardNum] Standalone numeric candidates ranked: ${preview}`);
+    }
+
+    for (const cand of candidates) {
+      if (acceptCandidate(cand.number, 'standalone-line-number', cand.lineIndex)) {
+        cardDetails.cardNumber = cand.number;
+        console.log(`Detected standalone card number: ${cardDetails.cardNumber} (context score=${cand.score})`);
         return;
       }
     }
