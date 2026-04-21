@@ -1064,8 +1064,16 @@ function extractCardNumberPass(
     };
 
     const hasStatBlock = statBlockLines.size > 0;
+    // Span of the stat block on the card. Bare-numeric candidates whose
+    // line index lies INSIDE this span are almost certainly stat cells
+    // that escaped block detection. Candidates that appear AFTER the
+    // last stat line are typically the card number printed below the
+    // stat grid (very common on Leaf/Donruss/Score backs where the # is
+    // tucked under the brand wordmark at the bottom-right of the card).
+    const statBlockMinLine = hasStatBlock ? Math.min(...statBlockLines) : -1;
+    const statBlockMaxLine = hasStatBlock ? Math.max(...statBlockLines) : -1;
 
-    const acceptCandidate = (matched: string, source: string): boolean => {
+    const acceptCandidate = (matched: string, source: string, lineIndex?: number): boolean => {
       if (isOnlyInStatBlock(matched)) {
         console.log(`[CardNum] Rejecting "${matched}" via ${source} — only appears inside stats block`);
         return false;
@@ -1078,9 +1086,20 @@ function extractCardNumberPass(
       // are still caught by higher-priority sources (first-line-digit,
       // brand-near-number, plain-number "#nnn"); blocking only this single
       // weak source removes the failure mode without losing real cards.
+      //
+      // Exception: if we know the line index of the candidate AND that
+      // line falls outside the [min..max] span of the stat-block lines,
+      // it's not a stat cell — it's text printed above or below the
+      // stats grid. Bottom-of-card placement is exactly where Leaf,
+      // Donruss, Score and many other 1990s sets print their #.
       if (hasStatBlock && source === 'standalone-line-number' && /^\d{1,3}$/.test(matched)) {
-        console.log(`[CardNum] Rejecting "${matched}" via ${source} — bare numeric on a card with a detected stats block`);
-        return false;
+        const outsideStatSpan = lineIndex !== undefined &&
+          (lineIndex < statBlockMinLine || lineIndex > statBlockMaxLine);
+        if (!outsideStatSpan) {
+          console.log(`[CardNum] Rejecting "${matched}" via ${source} — bare numeric on a card with a detected stats block`);
+          return false;
+        }
+        console.log(`[CardNum] Allowing "${matched}" via ${source} at line ${lineIndex} — outside stat-block span [${statBlockMinLine}..${statBlockMaxLine}]`);
       }
       return acceptRaw(matched, source);
     };
@@ -1756,18 +1775,25 @@ function extractCardNumberPass(
       }
     }
 
-    const standaloneNumberPattern = /(?:^|\n)\s*(\d{1,3})\s*(?:\n|$)/;
-    const standaloneNumberMatch = textForStandalone.match(standaloneNumberPattern);
-    
-    if (standaloneNumberMatch && standaloneNumberMatch[1]) {
-      // Make sure it's a reasonable card number (not too large)
-      const number = standaloneNumberMatch[1];
-      if (parseInt(number) < 1000) {
-        if (acceptCandidate(number, 'standalone-line-number')) {
-          cardDetails.cardNumber = number;
-          console.log(`Detected standalone card number: ${cardDetails.cardNumber}`);
-          return;
-        }
+    // Iterate over EVERY standalone 1-3 digit line, not just the first.
+    // The first standalone short number on a card with stats is often a
+    // stat cell that escaped block detection (e.g. a column total like
+    // "888"); the real card number frequently appears further down the
+    // back, printed below the stat grid next to the brand wordmark.
+    // acceptCandidate() now uses the candidate's line index to allow
+    // bare numerics that fall OUTSIDE the stat-block span, so we just
+    // need to feed it every candidate in order.
+    const standaloneLines = textForStandalone.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+    for (let li = 0; li < standaloneLines.length; li++) {
+      const ln = standaloneLines[li];
+      const m = ln.match(/^(\d{1,3})$/);
+      if (!m) continue;
+      const number = m[1];
+      if (parseInt(number) >= 1000) continue;
+      if (acceptCandidate(number, 'standalone-line-number', li)) {
+        cardDetails.cardNumber = number;
+        console.log(`Detected standalone card number: ${cardDetails.cardNumber}`);
+        return;
       }
     }
     
