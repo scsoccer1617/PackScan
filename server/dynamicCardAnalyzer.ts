@@ -1823,6 +1823,7 @@ function extractCardNumberPass(
       'HR', 'RBI', 'BB', 'AB', 'SO', 'IP', 'ER', 'GS', 'SV', 'SB', 'CS', 'GP', 'SH', 'SF', 'PA', 'OPS', 'BA', 'SLG', 'OBP', 'ERA', // baseball stats
       'TD', 'FG', 'XP', 'PAT', 'YD', 'QBR', 'PPG', 'RPG', 'APG', 'FGP', 'FTP', // other sports stats
       'K', 'L', 'W', 'H', 'E', 'O', 'P', 'C', 'D', // single-letter stat codes
+      'B', // baseball position suffix: 1B/2B/3B (first/second/third base)
     ]);
     let digitLetterMatch;
     while ((digitLetterMatch = digitLetterPattern.exec(text)) !== null) {
