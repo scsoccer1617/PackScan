@@ -21,6 +21,8 @@ interface YearConfidenceFlags {
   _yearFromBackOnly?: boolean;
   _yearFromCatalogProbe?: boolean;
   _cardNumberLowConfidence?: boolean;
+  _variationAmbiguous?: boolean;
+  _variationOptions?: string[];
 }
 type CardFormWithFlags = CardFormValues & YearConfidenceFlags;
 
@@ -309,6 +311,7 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
               cardNumber: result.cardNumber,
               serialNumber: result.serialNumber,
               playerLastName: result.playerLastName,
+              parallelHint: gem.parallel || result.foilType || undefined,
             });
             if (lookup.found) {
               dbFound = true;
@@ -336,6 +339,11 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
                 result.foilType = lookup.variation;
                 result.isFoil = true;
                 source.foilType = 'db';
+              }
+              if (lookup.variationAmbiguous && lookup.variationOptions?.length) {
+                (result as CardFormWithFlags)._variationAmbiguous = true;
+                (result as CardFormWithFlags)._variationOptions = lookup.variationOptions;
+                console.log(`[Engine] gemini-first variation ambiguous (${lookup.variationOptions.length} options) — needs user confirmation`);
               }
               console.log('[Engine] gemini-first DB enrichment applied');
             } else {
@@ -1340,6 +1348,11 @@ async function combineCardResults(
     if (dbResult.variation) {
       dbVariation = dbResult.variation;
       console.log(`[CardDB] Stashed DB variation for foil fallback: "${dbResult.variation}"`);
+    }
+    if (dbResult.variationAmbiguous && dbResult.variationOptions?.length) {
+      (combined as CardFormWithFlags)._variationAmbiguous = true;
+      (combined as CardFormWithFlags)._variationOptions = dbResult.variationOptions;
+      console.log(`[CardDB] Variation ambiguous (${dbResult.variationOptions.length} options) — needs user confirmation: ${dbResult.variationOptions.join(' | ')}`);
     }
     // Signal success so callers (e.g. the year-widening fallback loop) stop
     // trying additional years. Without this the function falls through to

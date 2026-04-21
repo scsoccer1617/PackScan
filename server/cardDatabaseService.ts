@@ -31,6 +31,13 @@ export interface CardLookupInput {
   serialNumber?: string;
   playerLastName?: string;  // used to disambiguate when prefix-matching finds multiple candidates
   /**
+   * Optional hint (typically Gemini's `parallel` field) used to pick one
+   * variation when the serial-based or NULL-serial DB lookup returns multiple
+   * candidates. e.g. multiple base-line variations could exist for a set; if
+   * the hint matches one of their names (token overlap), that one is picked.
+   */
+  parallelHint?: string;
+  /**
    * Raw OCR text from front and/or back of the card. Used as a generic
    * tiebreaker when multiple DB rows share the same brand+year+cardNumber:
    * if exactly one candidate row's collection or set name appears verbatim
@@ -56,6 +63,13 @@ export interface CardLookupResult {
   year?: number;
   cmpNumber?: string;       // internal CMP reference code from card_database
   source: 'card_database' | 'ocr_fallback';
+  /** All candidate variation names found (when more than one matched the
+   * serial-or-NULL-serial filter). When set and `variation` is undefined, the
+   * caller should ask the user to confirm which parallel they have. */
+  variationOptions?: string[];
+  /** True when multiple variations matched and the parallelHint did not
+   * uniquely resolve to one of them. */
+  variationAmbiguous?: boolean;
 }
 
 export interface CsvImportResult {
@@ -700,10 +714,11 @@ export async function lookupCard(input: CardLookupInput): Promise<CardLookupResu
       collection: cardRow.collection,
       set: cardRow.set || undefined,
       serialNumber,
+      parallelHint: input.parallelHint,
     });
 
-    // Resolve set: prefer card_database.set, fall back to variation row's set
-    const resolvedSet = cardRow.set || variationResult?.set || undefined;
+    // Resolve set: prefer card_database.set, fall back to (single) variation row's set
+    const resolvedSet = cardRow.set || variationResult.picked?.set || undefined;
 
     // When the autograph-parallel fallback was used, the matched DB row is
     // the player's *base* card (e.g. Revolution #46) — used only to discover
@@ -723,8 +738,10 @@ export async function lookupCard(input: CardLookupInput): Promise<CardLookupResu
       collection: cardRow.collection,
       set: resolvedSet || undefined,
       cardNumber: resolvedCardNumber,
-      variation: variationResult?.variationOrParallel,
-      serialNumber: variationResult?.serialNumber || serialNumber,
+      variation: variationResult.picked?.variationOrParallel,
+      variationOptions: variationResult.options,
+      variationAmbiguous: variationResult.ambiguous,
+      serialNumber: variationResult.picked?.serialNumber || serialNumber,
       isRookieCard,
       brand: cardRow.brand,
       year: cardRow.year,
@@ -739,16 +756,34 @@ export async function lookupCard(input: CardLookupInput): Promise<CardLookupResu
 }
 
 /**
- * Find a variation record matching the given context + serial number.
+ * Find variation record(s) matching the given context.
+ *
+ * Rule:
+ *   - If a serial number was detected on the card, restrict to DB rows whose
+ *     serial-limit matches.
+ *   - If no serial number was detected, restrict to DB rows where serial_number
+ *     is NULL/blank (the un-numbered base/finish row).
+ *   - Of the resulting candidates:
+ *       0 → no variation.
+ *       1 → auto-pick.
+ *       n → try `parallelHint` (token overlap) to pick one. If still
+ *           ambiguous, return all options for the user to confirm.
  */
+type VariationLookupResult = {
+  picked: typeof cardVariations.$inferSelect | null;
+  options?: string[];
+  ambiguous?: boolean;
+};
+
 async function lookupVariation(params: {
   brandId: string;
   year: number;
   collection: string;
   set?: string;
   serialNumber?: string;
-}): Promise<typeof cardVariations.$inferSelect | null> {
-  const { brandId, year, collection, set, serialNumber } = params;
+  parallelHint?: string;
+}): Promise<VariationLookupResult> {
+  const { brandId, year, collection, set, serialNumber, parallelHint } = params;
 
   // Build WHERE conditions — always filter by brand + year + collection.
   // Also filter by set when available to prevent cross-product contamination
@@ -763,35 +798,93 @@ async function lookupVariation(params: {
     conditions.push(sql`lower(${cardVariations.set}) = lower(${set})`);
   }
 
-  let rows = await db
+  const rows = await db
     .select()
     .from(cardVariations)
     .where(and(...conditions))
-    .limit(100);
+    .limit(200);
 
-  if (rows.length === 0) return null;
+  if (rows.length === 0) {
+    console.log('[CardDB] No variation rows for brand/year/collection/set');
+    return { picked: null };
+  }
 
-  // Only return a variation when we have a serial number from OCR that matches.
-  // Never assign a numbered parallel to a base card that has no serial number detected.
+  // ── Step 1: filter to candidates that match the serial-number rule ──
+  let candidates: typeof rows;
+  const isBlank = (s: string | null | undefined) =>
+    !s || !s.trim() || /^(none|n\/a|not\s*serialized|unnumbered)$/i.test(s.trim());
+
   if (serialNumber) {
     const ocrLimit = extractSerialLimit(serialNumber);
-    if (ocrLimit) {
-      const matched = rows.filter(r => {
-        if (!r.serialNumber) return false;
-        const dbLimit = extractSerialLimit(r.serialNumber);
-        return dbLimit === ocrLimit;
-      });
-      if (matched.length > 0) {
-        console.log(`[CardDB] Variation matched by serial /${ocrLimit}: ${matched[0].variationOrParallel}`);
-        return matched[0];
-      }
+    if (!ocrLimit) {
+      console.log(`[CardDB] Serial "${serialNumber}" detected but unparseable — no variation`);
+      return { picked: null };
+    }
+    candidates = rows.filter(r => {
+      if (isBlank(r.serialNumber)) return false;
+      return extractSerialLimit(r.serialNumber!) === ocrLimit;
+    });
+    console.log(`[CardDB] Serial /${ocrLimit} → ${candidates.length} candidate variation(s)`);
+  } else {
+    candidates = rows.filter(r => isBlank(r.serialNumber));
+    console.log(`[CardDB] No serial detected → ${candidates.length} NULL-serial variation(s)`);
+  }
+
+  if (candidates.length === 0) return { picked: null };
+  if (candidates.length === 1) {
+    console.log(`[CardDB] Variation auto-picked: "${candidates[0].variationOrParallel}"`);
+    return { picked: candidates[0] };
+  }
+
+  // ── Step 2: multiple candidates — disambiguate using the parallel hint ──
+  const optionNames = Array.from(
+    new Set(candidates.map(c => c.variationOrParallel).filter(Boolean) as string[])
+  );
+
+  if (parallelHint && parallelHint.trim()) {
+    const picked = pickByHint(candidates, parallelHint);
+    if (picked) {
+      console.log(`[CardDB] Variation picked via hint "${parallelHint}": "${picked.variationOrParallel}"`);
+      return { picked, options: optionNames };
     }
   }
 
-  // No serial number detected — do not infer a parallel/variation from the DB.
-  // The card is a base card or we don't have enough information to assign a variant.
-  console.log('[CardDB] No serial number detected — skipping variation assignment');
-  return null;
+  console.log(
+    `[CardDB] Ambiguous variation (${candidates.length} options) — needs user confirmation: ${optionNames.join(' | ')}`
+  );
+  return { picked: null, options: optionNames, ambiguous: true };
+}
+
+/**
+ * Pick one candidate whose `variationOrParallel` overlaps best with the hint.
+ * Generic token-overlap: the hint and each candidate name are reduced to
+ * lowercase alphanumeric word tokens; the candidate with the most overlapping
+ * tokens wins, but only if it strictly beats the runner-up.
+ */
+function pickByHint(
+  candidates: Array<typeof cardVariations.$inferSelect>,
+  hint: string,
+): typeof cardVariations.$inferSelect | null {
+  const tok = (s: string) =>
+    new Set(
+      s.toLowerCase()
+        .replace(/[^a-z0-9 ]+/g, ' ')
+        .split(/\s+/)
+        .filter(t => t.length >= 3),
+    );
+  const hintTokens = tok(hint);
+  if (hintTokens.size === 0) return null;
+
+  const scored = candidates.map(c => {
+    const ct = tok(c.variationOrParallel || '');
+    let overlap = 0;
+    hintTokens.forEach(t => { if (ct.has(t)) overlap++; });
+    return { c, overlap };
+  });
+  scored.sort((a, b) => b.overlap - a.overlap);
+  if (scored[0].overlap === 0) return null;
+  if (scored.length > 1 && scored[0].overlap === scored[1].overlap) return null;
+  return scored[0].c;
 }
 
 // ───────────────────────────────────────────────
