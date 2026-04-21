@@ -2319,6 +2319,40 @@ async function combineCardResults(
     combined.isFoil = false;
   }
 
+  // ─── Catalog Authority (ambiguous case): apply the parallel-hint rule late ──
+  // When the catalog returned multiple NULL-serial parallel candidates, the
+  // lookup deferred picking one (no positive parallel hint at lookup time).
+  // Now that visual / text foil detection has run, treat its foilType as the
+  // late parallel hint: keep it only if it shares a token with one of the
+  // catalog options; otherwise clear and default to base. The user's rule:
+  // un-numbered parallels need positive evidence to apply.
+  {
+    const flagged = combined as CardFormWithFlags;
+    if (flagged._variationAmbiguous && flagged._variationOptions?.length && combined.foilType) {
+      const tok = (s: string) =>
+        new Set(
+          s.toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').split(/\s+/).filter(t => t.length >= 3),
+        );
+      const hintTokens = tok(combined.foilType);
+      const matchedOption = flagged._variationOptions.find(opt => {
+        const ct = tok(opt);
+        for (const t of hintTokens) if (ct.has(t)) return true;
+        return false;
+      });
+      if (matchedOption) {
+        console.log(`[CardDB] Late parallel-hint match: detector "${combined.foilType}" matched catalog option "${matchedOption}" — keeping and clearing ambiguity flag.`);
+        combined.foilType = matchedOption;
+        combined.isFoil = true;
+        flagged._variationAmbiguous = false;
+        flagged._variationOptions = undefined;
+      } else {
+        console.log(`[CardDB] No catalog option matched detector foilType "${combined.foilType}" — clearing (defaulting to base). Options were: ${flagged._variationOptions.join(' | ')}`);
+        combined.foilType = null;
+        combined.isFoil = false;
+      }
+    }
+  }
+
   // Final card-number confidence check: if no card # was extracted at all,
   // flag low-confidence so the UI can prompt the user to enter it. This
   // complements the salvage-path flag set when the catalog rejects the OCR

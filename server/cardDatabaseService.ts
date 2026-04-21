@@ -831,26 +831,51 @@ async function lookupVariation(params: {
   }
 
   if (candidates.length === 0) return { picked: null };
-  if (candidates.length === 1) {
-    console.log(`[CardDB] Variation auto-picked: "${candidates[0].variationOrParallel}"`);
-    return { picked: candidates[0] };
-  }
 
-  // ── Step 2: multiple candidates — disambiguate using the parallel hint ──
   const optionNames = Array.from(
     new Set(candidates.map(c => c.variationOrParallel).filter(Boolean) as string[])
   );
 
+  // ── Step 2: pick from candidates ──
+  // Serial-detected case: the serial number itself is positive evidence the
+  // card is one of these parallels, so a single candidate auto-picks.
+  // No-serial case: card_variations only catalogs parallels (it has no
+  // explicit "base" rows for most collections), so a NULL-serial entry like
+  // "1987 Topps Blue" is itself an un-numbered parallel — NOT the base
+  // finish. Without positive evidence (a parallel hint matching the
+  // candidate's name), we must NOT auto-apply it; the card is treated as
+  // base and the candidates are surfaced as options for user confirmation.
+  if (serialNumber) {
+    if (candidates.length === 1) {
+      console.log(`[CardDB] Variation auto-picked by serial: "${candidates[0].variationOrParallel}"`);
+      return { picked: candidates[0] };
+    }
+    // multiple serial-matched candidates — try the hint
+    if (parallelHint && parallelHint.trim()) {
+      const picked = pickByHint(candidates, parallelHint);
+      if (picked) {
+        console.log(`[CardDB] Variation picked via hint "${parallelHint}": "${picked.variationOrParallel}"`);
+        return { picked, options: optionNames };
+      }
+    }
+    console.log(
+      `[CardDB] Ambiguous serial-matched variation (${candidates.length}) — needs user confirmation: ${optionNames.join(' | ')}`
+    );
+    return { picked: null, options: optionNames, ambiguous: true };
+  }
+
+  // No serial detected — require positive parallel-hint evidence to apply
+  // any NULL-serial candidate. Without a confident hint match, default to
+  // base (no variation) and surface the options for the user to confirm.
   if (parallelHint && parallelHint.trim()) {
     const picked = pickByHint(candidates, parallelHint);
     if (picked) {
-      console.log(`[CardDB] Variation picked via hint "${parallelHint}": "${picked.variationOrParallel}"`);
+      console.log(`[CardDB] NULL-serial variation picked via hint "${parallelHint}": "${picked.variationOrParallel}"`);
       return { picked, options: optionNames };
     }
   }
-
   console.log(
-    `[CardDB] Ambiguous variation (${candidates.length} options) — needs user confirmation: ${optionNames.join(' | ')}`
+    `[CardDB] No serial + no matching parallel hint → defaulting to base. NULL-serial parallel options exist (${candidates.length}): ${optionNames.join(' | ')}`
   );
   return { picked: null, options: optionNames, ambiguous: true };
 }
