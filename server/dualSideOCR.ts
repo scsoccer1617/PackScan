@@ -314,7 +314,74 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
         error: 'Error combining card analysis results'
       });
     }
-    
+
+    // ── Gemini Vision Fallback ────────────────────────────────────────────────
+    // When the OCR-based pipeline can't confidently recover the card number,
+    // ask Gemini to re-analyse the raw card images. It treats the card as a
+    // whole visual object rather than loose text tokens, so it often recovers
+    // the small printed card # that OCR misreads or misses entirely. We only
+    // fill in fields the OCR+DB cascade left empty — never overwrite confident
+    // OCR values.
+    try {
+      const flagged = combinedResult as CardFormWithFlags;
+      if (flagged._cardNumberLowConfidence && frontImage) {
+        console.log('[Gemini] Card # low-confidence — invoking Gemini Vision fallback…');
+        const { analyzeCardWithGemini } = await import('./geminiCardAnalyzer');
+        console.time('gemini-fallback');
+        const gem = await analyzeCardWithGemini(
+          frontImage.buffer,
+          backImage?.buffer,
+          frontImage.mimetype || 'image/jpeg',
+          backImage?.mimetype || 'image/jpeg',
+        );
+        console.timeEnd('gemini-fallback');
+        console.log('[Gemini] Result:', JSON.stringify(gem, null, 2));
+
+        const fillIfEmpty = <K extends keyof CardFormValues>(
+          key: K,
+          value: CardFormValues[K] | null | undefined,
+        ) => {
+          if (value == null || value === '' ) return;
+          const cur: any = (combinedResult as any)[key];
+          const isEmpty = cur == null || cur === '' ||
+            (key === 'brand' && typeof cur === 'string' && cur.toLowerCase() === 'unknown');
+          if (isEmpty) {
+            (combinedResult as any)[key] = value;
+            console.log(`[Gemini] Filled missing "${String(key)}" = ${JSON.stringify(value)}`);
+          }
+        };
+
+        fillIfEmpty('cardNumber', gem.cardNumber ?? undefined);
+        fillIfEmpty('playerFirstName', gem.playerFirstName ?? undefined);
+        fillIfEmpty('playerLastName', gem.playerLastName ?? undefined);
+        fillIfEmpty('year', (gem.year ?? undefined) as any);
+        fillIfEmpty('brand', gem.brand ?? undefined);
+        fillIfEmpty('collection', gem.collection ?? undefined);
+        fillIfEmpty('set' as any, gem.set ?? undefined);
+        fillIfEmpty('team' as any, gem.team ?? undefined);
+        fillIfEmpty('sport', gem.sport ?? undefined);
+        if (gem.isRookie === true && !(combinedResult as any).isRookie) {
+          (combinedResult as any).isRookie = true;
+          console.log('[Gemini] Set isRookie=true');
+        }
+        if (gem.isAutograph === true && !(combinedResult as any).isAutograph) {
+          (combinedResult as any).isAutograph = true;
+          console.log('[Gemini] Set isAutograph=true');
+        }
+        fillIfEmpty('serialNumber' as any, gem.serialNumber ?? undefined);
+        fillIfEmpty('variant' as any, gem.variant ?? undefined);
+
+        // If Gemini recovered a card number, clear the low-confidence flag so
+        // the UI stops prompting the user to type it in.
+        if (gem.cardNumber && (combinedResult as any).cardNumber === gem.cardNumber) {
+          flagged._cardNumberLowConfidence = false;
+          (combinedResult as any)._geminiFilled = true;
+        }
+      }
+    } catch (err: any) {
+      console.warn('[Gemini] Fallback failed, continuing with OCR-only result:', err?.message);
+    }
+
     // Make sure we have all required fields with defaults if needed
     const finalResult = ensureRequiredFields(combinedResult);
     
