@@ -219,6 +219,121 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
         : Promise.resolve(),
     ]);
 
+    // ── Engine selection ──────────────────────────────────────────────────────
+    // `engine=gemini` runs Gemini Vision FIRST on the raw images and enriches
+    // the result via the card_database lookup. The OCR+DB cascade only runs
+    // if Gemini fails or returns an unusable result (missing brand/year/#).
+    // Default is `ocr` — existing behaviour unchanged.
+    const requestedEngine = String(
+      (req.body as any)?.engine || (req.query as any)?.engine || 'ocr'
+    ).toLowerCase();
+
+    if (requestedEngine === 'gemini') {
+      console.log('[Engine] gemini-first START');
+      try {
+        const { analyzeCardWithGemini } = await import('./geminiCardAnalyzer');
+        console.time('gemini-first');
+        const gem = await analyzeCardWithGemini(
+          (frontImage ?? backImage)!.buffer,
+          frontImage && backImage ? backImage.buffer : null,
+          frontImage?.mimetype || 'image/jpeg',
+          backImage?.mimetype || 'image/jpeg',
+        );
+        console.timeEnd('gemini-first');
+        console.log('[Engine] gemini raw result:', JSON.stringify(gem, null, 2));
+
+        const seriallike = gem.serialNumber && /\d+\s*\/\s*\d+|\/\s*\d+/.test(gem.serialNumber);
+        const result: Partial<CardFormValues> & Record<string, any> = {
+          playerFirstName: gem.playerFirstName || undefined,
+          playerLastName: gem.playerLastName || undefined,
+          year: (gem.year as any) || undefined,
+          brand: gem.brand || undefined,
+          collection: gem.collection || undefined,
+          set: gem.set || undefined,
+          cardNumber: gem.cardNumber || undefined,
+          team: gem.team || undefined,
+          sport: gem.sport || undefined,
+          isRookieCard: gem.isRookie ?? undefined,
+          isAutographed: gem.isAutograph ?? undefined,
+          serialNumber: gem.serialNumber || undefined,
+          isNumbered: !!seriallike,
+          foilType: gem.variant || undefined,
+          isFoil: !!gem.variant,
+        };
+
+        // DB enrichment — authoritative player/team/collection/set/rookie.
+        if (result.brand && result.year && result.cardNumber) {
+          try {
+            const lookup = await lookupCard({
+              brand: result.brand,
+              year: result.year as number,
+              collection: result.collection,
+              cardNumber: result.cardNumber,
+              serialNumber: result.serialNumber,
+              playerLastName: result.playerLastName,
+            });
+            if (lookup.found) {
+              if (lookup.playerFirstName) result.playerFirstName = lookup.playerFirstName;
+              if (lookup.playerLastName)  result.playerLastName  = lookup.playerLastName;
+              if (lookup.team)            result.team            = lookup.team;
+              if (lookup.collection)      result.collection      = lookup.collection;
+              if (lookup.set)             result.set             = lookup.set;
+              if (lookup.cardNumber)      result.cardNumber      = lookup.cardNumber;
+              if (lookup.year)            result.year            = lookup.year as any;
+              if (lookup.brand)           result.brand           = lookup.brand;
+              if (lookup.isRookieCard !== undefined) result.isRookieCard = lookup.isRookieCard;
+              if (lookup.variation && !result.foilType) {
+                result.foilType = lookup.variation;
+                result.isFoil = true;
+              }
+              console.log('[Engine] gemini-first DB enrichment applied');
+            } else {
+              console.log('[Engine] gemini-first: no DB match for brand/year/#');
+            }
+          } catch (err: any) {
+            console.warn('[Engine] gemini-first DB lookup failed:', err?.message);
+          }
+        }
+
+        const usable = !!result.brand && !!result.year && !!result.cardNumber;
+        if (usable) {
+          // Visual foil detector — only run when Gemini didn't already name a
+          // variant. Keeps behaviour consistent with the OCR path where visual
+          // detection is always attempted.
+          if (!result.foilType && frontImage) {
+            try {
+              const { detectFoilFromImage } = await import('./visualFoilDetector');
+              const visual = await detectFoilFromImage(
+                frontImage.buffer.toString('base64'),
+                { isNumbered: !!result.isNumbered, imageBuffer: frontImage.buffer },
+              );
+              if (visual?.isFoil && visual.foilType && (visual.confidence ?? 0) >= 0.65) {
+                result.foilType = visual.foilType;
+                result.isFoil = true;
+                console.log(`[Engine] gemini-first visual foil accepted: ${visual.foilType} (${visual.confidence})`);
+              }
+            } catch (err: any) {
+              console.warn('[Engine] gemini-first visual foil detector failed:', err?.message);
+            }
+          }
+
+          result._engine = 'gemini';
+          const finalResult = ensureRequiredFields(result);
+          console.log(
+            `[Engine] gemini-first END — brand=${result.brand} year=${result.year} #${result.cardNumber} player="${result.playerFirstName} ${result.playerLastName}" foil=${result.foilType || 'none'}`
+          );
+          console.timeEnd('dual-card-analysis-total');
+          return res.json({ success: true, data: finalResult });
+        }
+
+        console.log('[Engine] gemini-first unusable (missing brand/year/#) — falling back to OCR');
+      } catch (err: any) {
+        console.warn('[Engine] gemini-first failed, falling back to OCR:', err?.message);
+      }
+    }
+
+    console.log(`[Engine] ${requestedEngine === 'gemini' ? 'ocr-fallback' : 'ocr-first'} START`);
+
     // ── Batch Vision API call ─────────────────────────────────────────────────
     // Send both images to Vision in a SINGLE batchAnnotateImages request.
     // Results are stored in the per-request OCR cache so that all subsequent
