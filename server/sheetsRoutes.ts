@@ -138,6 +138,7 @@ export function registerSheetRoutes(app: Express) {
       const ebayUrl = c.ebaySearchUrl || (c.brand ? getEbaySearchUrl(
         player, c.cardNumber || '', c.brand || '', yr, c.collection || '', '',
         !!c.isNumbered, c.foilType || '', c.serialNumber || '',
+        (c as any).variant || '', c.set || '',
       ) : '');
       const frontStored = await persistDataUriIfNeeded(c.frontImageUrl, 'front');
       const backStored = await persistDataUriIfNeeded(c.backImageUrl, 'back');

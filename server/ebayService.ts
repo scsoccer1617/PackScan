@@ -598,7 +598,7 @@ export async function searchCardValues(
     const safePlayerName = playerName || '';
     let results: EbaySearchResult[] = [];
     let dataType: 'sold' | 'current' = 'sold';
-    const fallbackSearchUrl = getEbaySearchUrl(safePlayerName, cardNumber, brand, year, collection, '', isNumbered, foilType, serialNumber);
+    const fallbackSearchUrl = getEbaySearchUrl(safePlayerName, cardNumber, brand, year, collection, '', isNumbered, foilType, serialNumber, variant, set);
 
     // Use eBay Finding API (findCompletedItems) to get sold listings.
     // This API is accessible from Replit servers (unlike the web UI which hits Akamai bot protection).
@@ -1096,7 +1096,7 @@ export async function searchCardValues(
     return {
       averageValue: 0,
       results: [],
-      searchUrl: getEbaySearchUrl(playerName || '', cardNumber, brand, year, collection, '', isNumbered, foilType, serialNumber),
+      searchUrl: getEbaySearchUrl(playerName || '', cardNumber, brand, year, collection, '', isNumbered, foilType, serialNumber, variant, set),
       errorMessage: 'eBay search failed',
       dataType: 'sold' as const
     };
@@ -1115,19 +1115,28 @@ export function getEbaySearchUrl(
   condition?: string,
   isNumbered?: boolean,
   foilType?: string,
-  serialNumber?: string
+  serialNumber?: string,
+  variant?: string,
+  set?: string
 ): string {
-  const searchCollection = collection ? normalizeCollectionForSearch(collection) : '';
-  
+  // Prefer the product Set name (e.g. "Holiday", "Series 1") over the generic
+  // Collection name (e.g. "Base Set") that eBay sellers never write in titles.
+  const rawCollection = collection || '';
+  const searchSetName = set ? normalizeSetForSearch(set, brand) : '';
+  const collectionForSearch = !GENERIC_COLLECTION_NAMES.has(rawCollection.toLowerCase())
+    ? normalizeCollectionForSearch(rawCollection)
+    : '';
+  const searchProductLine = searchSetName || collectionForSearch;
+
   const parts: string[] = [];
   if (year > 0) parts.push(String(year));
   if (brand) parts.push(brand);
-  if (searchCollection) parts.push(searchCollection);
+  if (searchProductLine) parts.push(searchProductLine);
   parts.push(playerName);
   if (cardNumber) parts.push(/^\d+$/.test(cardNumber) ? `#${cardNumber}` : cardNumber);
-  
+
   let keywords = parts.filter(Boolean).join(' ');
-  
+
   // Add serial number suffix for serialized cards (e.g., "/399" instead of "numbered")
   if (isNumbered && serialNumber && serialNumber.includes('/')) {
     const serialMatch = serialNumber.match(/\/(\d+)$/);
@@ -1139,13 +1148,16 @@ export function getEbaySearchUrl(
   } else if (isNumbered) {
     keywords += ' numbered';
   }
-  
-  // Add foil variant once using normalized search term
-  if (foilType) {
+
+  // Prefer an explicit variant (e.g. "Hidden Elf Variation") over the generic
+  // foilType when both exist — variant is the more specific descriptor.
+  if (variant && variant.trim()) {
+    keywords += ` ${variant.trim()}`;
+  } else if (foilType) {
     const foilSearchTerm = getFoilSearchTerm(foilType);
     keywords += ` ${foilSearchTerm || foilType}`;
   }
-  
+
   // Encode for URL — sold/completed listings (last 90 days), sorted by most recent
   return `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(keywords)}&_sacat=213&LH_Sold=1&LH_Complete=1&_sop=13`;
 }
