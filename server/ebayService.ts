@@ -794,9 +794,9 @@ export async function searchCardValues(
 
     // Terms that definitively indicate a parallel/special version (word-boundary matched)
     const HARD_PARALLEL_TERMS = [
-      'parallel', 'refractor', 'xfractor', 'x-fractor', 'rainbow', 'mojo', 'holo', 'holographic',
+      'parallel', 'refractor', 'xfractor', 'rainbow', 'mojo', 'holo', 'holographic',
       'foilboard', 'sparkle', 'glitter', 'prizm', 'laser', 'atomic', 'crackle', 'shimmer',
-      'foil', 'sepia', 'wave', 'waves', 'velocity', 'fast break', 'cracked ice',
+      'foil',
       // One-word foil compounds — `\bfoil\b` does NOT match "Holofoil" because
       // it's a single token. Add the common compounds explicitly so titles like
       // "2026 Topps Series 1 ... Holofoil & Confetti" get hard-filtered out of
@@ -958,21 +958,7 @@ export async function searchCardValues(
           const re = new RegExp(`\\b${kw.replace(/\s+/g, '\\s+')}\\b`, 'i');
           return re.test(t);
         });
-        if (hasParallel) {
-          console.log(`  ↳ Hard-filtered (parallel keyword): "${r.title}"`);
-          return false;
-        }
-
-        // "Chrome" hard-filter for base-card searches: only if our card's
-        // brand/set/collection isn't itself a *Chrome product line.
-        // (Topps Chrome / Bowman Chrome are base lines; "Stadium Club Chrome"
-        // is a parallel relative to "Stadium Club".)
-        const ownLine = `${(brand || '').toLowerCase()} ${(set || '').toLowerCase()} ${(rawCollection || '').toLowerCase()}`;
-        const ownIsChromeLine = /\bchrome\b/.test(ownLine);
-        if (!ownIsChromeLine && /\bchrome\b/i.test(t)) {
-          console.log(`  ↳ Hard-filtered (chrome parallel): our card isn't a Chrome line — "${r.title}"`);
-          return false;
-        }
+        if (hasParallel) return false;
 
         // Filter serially-numbered listings (e.g. /150, /75, /250) —
         // a non-numbered base card should never match a /NNN print run.
@@ -1037,8 +1023,18 @@ export async function searchCardValues(
     // Always use filtered results — show fewer correct matches rather than wrong ones
     const candidateResults = filtered;
 
+    // Apply a minimum-score floor so heavily-penalised listings (parallels that
+    // slipped through hard-filtering, wrong-collection matches, etc.) don't pad
+    // the result list. Better to show 2 correct comps than 5 with parallels mixed in.
+    // Threshold is tuned to require at least the player-name match (100) plus
+    // some other identifier (year/card #/brand). 150 keeps real base-card matches
+    // (which routinely score 215-275) and drops parallel-penalised ones (≤75).
+    const MIN_DISPLAY_SCORE = 150;
+    const qualifiedResults = candidateResults.filter(r => (r.matchScore ?? 0) >= MIN_DISPLAY_SCORE);
+    console.log(`Score floor (≥${MIN_DISPLAY_SCORE}): ${candidateResults.length} → ${qualifiedResults.length} results`);
+
     // Only use top 5 results for display and calculation
-    const topResults = candidateResults.slice(0, 5);
+    const topResults = qualifiedResults.slice(0, 5);
     
     // Calculate average value based on the top 5 displayed results only
     const displayedTotal = topResults.reduce((sum, item) => sum + item.price, 0);
