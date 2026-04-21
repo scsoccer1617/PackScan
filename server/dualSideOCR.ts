@@ -381,11 +381,19 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
           // the lookup.found path above (signalled by source.foilType === 'db').
           if (result.foilType && source.foilType !== 'db') {
             try {
-              const known = await getKnownVariationNames(
+              // First try collection-narrowed; if Gemini's collection name
+              // doesn't match the catalog (e.g. Gemini said "35th Anniversary"
+              // but catalog stores it as "1987 Topps Baseball"), widen to the
+              // brand+year vocabulary so we still get a verification signal.
+              let known = await getKnownVariationNames(
                 result.brand!,
                 result.year!,
                 result.collection,
               );
+              if (known.length === 0 && result.collection) {
+                console.log(`[Engine] gemini-first: no catalog rows for collection "${result.collection}" — widening to brand+year only.`);
+                known = await getKnownVariationNames(result.brand!, result.year!);
+              }
               if (known.length > 0) {
                 const hintTokens = new Set(
                   result.foilType.toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').split(/\s+/).filter(t => t.length >= 3)

@@ -67,7 +67,7 @@ Extract these fields when visible:
 - brand: Manufacturer (Topps, Panini, Upper Deck, Donruss, Fleer, Bowman, etc.)
 - collection: Product line (e.g. "Chrome", "Prizm", "Update", "Traded", "Series 1", "Heritage", "Stadium Club"). Omit if brand IS the collection.
 - set: Full set name if printed (e.g. "Topps Series 1 Baseball")
-- cardNumber: Exact card number as printed. Include any letter suffixes (e.g. "8T", "US150", "RC-5"). Do NOT invent one — leave null if not visible.
+- cardNumber: Exact card number as printed. Include any letter PREFIXES or suffixes (e.g. "8T", "US150", "RC-5", "T87-31", "U-150"). Insert and throwback designs commonly start with a letter prefix like "T", "U", "TT", "FS", "BCP" — look CAREFULLY at the leading character: a printed "T" can resemble "7" or "1" in low-contrast scans, but if it appears at the START of a card-number-shaped token (letter + digits + optional dash + digits), it is a letter, not a digit. When the leading glyph is ambiguous, prefer the letter interpretation. Do NOT invent one — leave null if not visible.
 - team: Team name if shown
 - sport: "Baseball", "Basketball", "Football", "Hockey", "Soccer", etc.
 - isRookie: true if "RC", "Rookie Card", or a rookie logo is visible
