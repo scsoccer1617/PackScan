@@ -495,8 +495,7 @@ export default function PriceLookup() {
       setBackImage(dataUrl);
       setCameraOpen(false);
       setCaptureStep('idle');
-      // Auto-trigger analysis once we have both sides.
-      handleAnalyzeRequest(frontImage, dataUrl);
+      // Analysis fires from the autoAnalyze effect once backImage is set.
     }
   };
 
@@ -531,11 +530,33 @@ export default function PriceLookup() {
       } else if (captureStep === 'back') {
         setBackImage(dataUrl);
         setCaptureStep('idle');
-        handleAnalyzeRequest(frontImage, dataUrl);
+        // Analysis fires from the autoAnalyze effect once backImage is set.
       }
     };
     reader.readAsDataURL(file);
   };
+
+  // Auto-trigger analysis as soon as both sides are captured. Using an
+  // effect (rather than calling handleAnalyzeRequest inline from the capture
+  // handlers) avoids any closure / batched-state-update timing issues that
+  // can otherwise swallow the request and leave the user stuck on the
+  // upload screen with both images already captured.
+  useEffect(() => {
+    if (
+      captureStep === 'idle' &&
+      frontImage &&
+      backImage &&
+      !analyzing &&
+      !cardData &&
+      !showPriceResults &&
+      !showOCRResults &&
+      !showParallelConfirm &&
+      !showParallelPicker
+    ) {
+      handleAnalyzeRequest(frontImage, backImage);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [frontImage, backImage, captureStep]);
 
   // User said "Yes, this is a parallel" → show the picker
   const handleParallelConfirmYes = () => {
