@@ -1128,6 +1128,25 @@ async function combineCardResults(
       const ocrCandidates = extractAllYearCandidates(allOcrText);
       const candidateSet = new Set<number>(ocrCandidates);
       if (combined.year && Number(combined.year) > 0) candidateSet.add(Number(combined.year));
+      // When the chosen year is low-confidence (came from a copyright line on
+      // the back, or only the back side had a year at all), seed the
+      // candidate set with year±1. Modern card backs frequently print the
+      // prior-year copyright on cards sold the following year — the most
+      // common manifestation is "© 2003" appearing on a 2004 product.
+      // Without this, the catalog probe below sees a single OCR-derived
+      // year and skips the surname-vs-catalog disambiguation entirely;
+      // the lookup then locks onto a wrong-player row at the printed year
+      // and the downstream rejection-+-±1-fallback can also miss when the
+      // wrong-year row has the same OCR-vocab signal (e.g. "ULTRA") as the
+      // right-year row. Adding ±1 here lets the surname disambiguator below
+      // pick the year whose row actually matches the OCR player.
+      const yearLooksLowConfidence =
+        !!(combined as any)._yearFromCopyright || !!(combined as any)._yearFromBackOnly;
+      const seedYear = Number(combined.year || 0);
+      if (yearLooksLowConfidence && seedYear > 0) {
+        candidateSet.add(seedYear + 1);
+        candidateSet.add(seedYear - 1);
+      }
       const uniqueCandidates = Array.from(candidateSet).filter(y => y > 0);
       // Always probe whatever single candidate year we have so we know
       // whether (brand, year, cardNumber) actually exists in the
