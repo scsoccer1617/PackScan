@@ -183,6 +183,7 @@ export const cardSchema = z.object({
   googleSheetId: z.string().optional(),
   cmpNumber: z.string().optional(),
   set: z.string().optional(),
+  _engine: z.enum(['ocr', 'gemini']).optional(),
 });
 
 export type CardInsert = z.infer<typeof cardInsertSchema>;

@@ -224,34 +224,46 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
     // the result via the card_database lookup. The OCR+DB cascade only runs
     // if Gemini fails or returns an unusable result (missing brand/year/#).
     // Default is `ocr` — existing behaviour unchanged.
-    const requestedEngine = String(
-      (req.body as any)?.engine || (req.query as any)?.engine || 'ocr'
-    ).toLowerCase();
+    const engineFromBody =
+      req.body && typeof req.body === 'object' && 'engine' in req.body
+        ? (req.body as { engine?: unknown }).engine
+        : undefined;
+    const engineFromQuery =
+      req.query && typeof req.query === 'object' && 'engine' in req.query
+        ? (req.query as { engine?: unknown }).engine
+        : undefined;
+    const requestedEngine = String(engineFromBody ?? engineFromQuery ?? 'ocr').toLowerCase();
 
     if (requestedEngine === 'gemini') {
       console.log('[Engine] gemini-first START');
       try {
         const { analyzeCardWithGemini } = await import('./geminiCardAnalyzer');
         console.time('gemini-first');
+        const primaryImage = frontImage ?? backImage!;
         const gem = await analyzeCardWithGemini(
-          (frontImage ?? backImage)!.buffer,
+          primaryImage.buffer,
           frontImage && backImage ? backImage.buffer : null,
-          frontImage?.mimetype || 'image/jpeg',
+          primaryImage.mimetype || 'image/jpeg',
           backImage?.mimetype || 'image/jpeg',
         );
         console.timeEnd('gemini-first');
         console.log('[Engine] gemini raw result:', JSON.stringify(gem, null, 2));
 
         const seriallike = gem.serialNumber && /\d+\s*\/\s*\d+|\/\s*\d+/.test(gem.serialNumber);
-        const result: Partial<CardFormValues> & Record<string, any> = {
+        const geminiYear =
+          typeof gem.year === 'number'
+            ? gem.year
+            : typeof gem.year === 'string' && /^\d{4}$/.test(gem.year)
+              ? Number.parseInt(gem.year, 10)
+              : undefined;
+        const result: Partial<CardFormValues> = {
           playerFirstName: gem.playerFirstName || undefined,
           playerLastName: gem.playerLastName || undefined,
-          year: (gem.year as any) || undefined,
+          year: geminiYear,
           brand: gem.brand || undefined,
           collection: gem.collection || undefined,
           set: gem.set || undefined,
           cardNumber: gem.cardNumber || undefined,
-          team: gem.team || undefined,
           sport: gem.sport || undefined,
           isRookieCard: gem.isRookie ?? undefined,
           isAutographed: gem.isAutograph ?? undefined,
@@ -263,7 +275,8 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
 
         // Per-field provenance tracker — `gemini` for values Gemini produced,
         // `db` for values replaced by the catalog lookup.
-        const source: Record<string, 'gemini' | 'db'> = {};
+        type EngineFieldSource = 'gemini' | 'db';
+        const source: Record<string, EngineFieldSource> = {};
         for (const [k, v] of Object.entries(result)) {
           if (v !== undefined && v !== null && v !== '') source[k] = 'gemini';
         }
@@ -274,7 +287,7 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
           try {
             const lookup = await lookupCard({
               brand: result.brand,
-              year: result.year as number,
+              year: result.year,
               collection: result.collection,
               cardNumber: result.cardNumber,
               serialNumber: result.serialNumber,
@@ -282,34 +295,37 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
             });
             if (lookup.found) {
               dbFound = true;
-              const setFromDb = (key: keyof CardFormValues, val: any) => {
+              const setFromDb = <K extends keyof CardFormValues>(
+                key: K,
+                val: CardFormValues[K] | undefined | null,
+              ) => {
                 if (val == null || val === '') return;
-                (result as any)[key] = val;
-                source[key as string] = 'db';
+                result[key] = val as CardFormValues[K];
+                source[key] = 'db';
               };
-              setFromDb('playerFirstName', lookup.playerFirstName);
-              setFromDb('playerLastName',  lookup.playerLastName);
-              setFromDb('team' as any,     lookup.team);
-              setFromDb('collection',      lookup.collection);
-              setFromDb('set' as any,      lookup.set);
-              setFromDb('cardNumber',      lookup.cardNumber);
-              setFromDb('year',            lookup.year);
-              setFromDb('brand',           lookup.brand);
+              setFromDb('playerFirstName', lookup.playerFirstName ?? undefined);
+              setFromDb('playerLastName',  lookup.playerLastName  ?? undefined);
+              setFromDb('collection',      lookup.collection      ?? undefined);
+              setFromDb('set',             lookup.set             ?? undefined);
+              setFromDb('cardNumber',      lookup.cardNumber      ?? undefined);
+              setFromDb('year',            lookup.year            ?? undefined);
+              setFromDb('brand',           lookup.brand           ?? undefined);
               if (lookup.isRookieCard !== undefined) {
                 result.isRookieCard = lookup.isRookieCard;
-                source['isRookieCard'] = 'db';
+                source.isRookieCard = 'db';
               }
               if (lookup.variation && !result.foilType) {
                 result.foilType = lookup.variation;
                 result.isFoil = true;
-                source['foilType'] = 'db';
+                source.foilType = 'db';
               }
               console.log('[Engine] gemini-first DB enrichment applied');
             } else {
               console.log('[Engine] gemini-first: no DB match for brand/year/#');
             }
-          } catch (err: any) {
-            console.warn('[Engine] gemini-first DB lookup failed:', err?.message);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            console.warn('[Engine] gemini-first DB lookup failed:', msg);
           }
         }
 
@@ -526,7 +542,7 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
     }
 
     // Make sure we have all required fields with defaults if needed
-    (combinedResult as any)._engine = (combinedResult as any)._engine || 'ocr';
+    combinedResult._engine = combinedResult._engine ?? 'ocr';
     const finalResult = ensureRequiredFields(combinedResult);
 
     const _ocrEngineLabel = requestedEngine === 'gemini' ? 'ocr-fallback' : 'ocr-first';

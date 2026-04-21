@@ -313,12 +313,12 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
           <div className="flex justify-between items-center">
             <CardTitle className="text-lg flex items-center gap-2">
               Card Information
-              {(cardData as any)?._engine === 'gemini' && (
+              {cardData?._engine === 'gemini' && (
                 <Badge variant="secondary" className="gap-1 text-xs font-normal" title="Identified by Gemini Vision">
                   <Sparkles className="h-3 w-3 text-purple-500" /> Gemini
                 </Badge>
               )}
-              {(cardData as any)?._engine === 'ocr' && (
+              {cardData?._engine === 'ocr' && (
                 <Badge variant="outline" className="gap-1 text-xs font-normal" title="Identified by OCR + catalog lookup">
                   <ScanText className="h-3 w-3 text-slate-500" /> OCR
                 </Badge>

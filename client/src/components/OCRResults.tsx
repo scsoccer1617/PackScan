@@ -263,12 +263,12 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
           <CardTitle className="text-lg flex items-center gap-2">
             <Check className="h-5 w-5 text-green-600" />
             Card Information Found
-            {(data as any)?._engine === 'gemini' && (
+            {data?._engine === 'gemini' && (
               <Badge variant="secondary" className="gap-1 text-xs font-normal">
                 <Sparkles className="h-3 w-3 text-purple-500" /> Gemini
               </Badge>
             )}
-            {(data as any)?._engine === 'ocr' && (
+            {data?._engine === 'ocr' && (
               <Badge variant="outline" className="gap-1 text-xs font-normal">
                 <ScanText className="h-3 w-3 text-slate-500" /> OCR
               </Badge>
