@@ -59,6 +59,17 @@ export function extractAllYearCandidates(text: string): number[] {
   const pubThenYear = new RegExp(`${publishers}(?:[\\s,.]+(?:CHEWING\\s+GUM|COMPANY|INC\\.?|LTD|CORP|LLC))?[\\s,.;:]+(\\d{4})`, 'gi');
   while ((m = pubThenYear.exec(text)) !== null) accept(m[1]);
 
+  // Licensing-org adjacency: modern card backs print
+  // "© YYYY MLBPA" / "YYYY MLB PROPERTIES INC." / "YYYY PLAYERS MAJOR LEAGUE
+  // BASEBALL" / "YYYY NFLPA" etc. as a separate trademark line, often the
+  // ONLY place the actual production year appears (e.g. Fleer Ultra 2004
+  // back shows "2003 FLEER/SKYBOX" alongside "2004 PLAYERS MAJOR LEAGUE
+  // BASEBALL"). Recognising this pattern lets the catalog-validated year
+  // selector see the production year as a candidate. Sport-agnostic.
+  const licensingOrgs = '(?:MLBPA|NFLPA|NBAPA|NHLPA|WNBPA|MLSPA|MLB\\s+PROPERTIES|NFL\\s+PROPERTIES|NBA\\s+PROPERTIES|NHL\\s+PROPERTIES|PLAYERS\\s+ASS(?:OCIATION|N|\\.)?|PLAYERS\\s+(?:MAJOR|NATIONAL)|MAJOR\\s+LEAGUE\\s+BASEBALL|NATIONAL\\s+FOOTBALL\\s+LEAGUE|NATIONAL\\s+BASKETBALL\\s+ASS|NATIONAL\\s+HOCKEY\\s+LEAGUE)';
+  const yearThenLic = new RegExp(`(\\d{4})[\\s,;:.\/]{1,4}${licensingOrgs}`, 'gi');
+  while ((m = yearThenLic.exec(text)) !== null) accept(m[1]);
+
   return Array.from(years);
 }
 

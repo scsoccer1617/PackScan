@@ -1252,6 +1252,45 @@ async function combineCardResults(
               chosen = surnameHits[0];
               reason = `surname "${surname}" matched only ${chosen.year} among ${hits.length} catalog-confirmed candidates`;
             } else {
+              // Catalog-vocabulary surname salvage: when the OCR-extracted
+              // surname is empty/bogus (e.g. picked from "YEAR TEAM" stat-
+              // table headers) or matches multiple years, scan the FULL
+              // OCR text (front + back) for each candidate row's surname.
+              // The DB itself is the vocabulary — no hardcoded names. If
+              // exactly one year has a row whose surname appears verbatim
+              // in the OCR text, that year is the right one.
+              const allOcrLower = allOcrText.toLowerCase();
+              const splitSurname = (full: string): string => {
+                // "Ken Griffey, Jr." → "griffey"; "Eric Chavez" → "chavez";
+                // "Barry Larkin / Ken Griffey Jr." → take first half's surname.
+                const head = full.split('/')[0];
+                const cleaned = head.replace(/[,.]/g, '').trim();
+                const parts = cleaned.split(/\s+/).filter(p => p.length > 0);
+                // Strip trailing suffixes (Jr/Sr/II/III/IV) so we land on the actual surname.
+                const suffixes = new Set(['jr', 'sr', 'ii', 'iii', 'iv', 'v']);
+                while (parts.length > 1 && suffixes.has(parts[parts.length - 1].toLowerCase())) {
+                  parts.pop();
+                }
+                return parts.length > 0 ? parts[parts.length - 1].toLowerCase() : '';
+              };
+              const ocrTextHits = hits.filter(h =>
+                h.rows.some(r => {
+                  const sn = splitSurname(r.name);
+                  if (sn.length < 4) return false; // avoid 2-3 letter false positives
+                  return new RegExp(`\\b${sn.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}\\b`).test(allOcrLower);
+                })
+              );
+              if (ocrTextHits.length === 1) {
+                chosen = ocrTextHits[0];
+                const matchedRow = chosen.rows.find(r => {
+                  const sn = splitSurname(r.name);
+                  return sn.length >= 4 && new RegExp(`\\b${sn}\\b`).test(allOcrLower);
+                });
+                reason = `catalog-vocab surname "${matchedRow ? splitSurname(matchedRow.name) : '?'}" found in OCR text — only ${chosen.year} among ${hits.length} catalog-confirmed candidates has a matching row`;
+                if (chosen.year !== Number(combined.year)) {
+                  console.log(`[Year] Catalog-vocab surname salvage: OCR text contains "${matchedRow?.name}" → year ${chosen.year}.`);
+                }
+              } else {
               // Surname doesn't disambiguate (or matches none). Prefer
               // years extracted directly from the OCR text (via
               // copyright/publisher proximity in
@@ -1269,6 +1308,7 @@ async function combineCardResults(
               } else {
                 chosen = hits.find(h => h.year === existing) ?? hits.reduce((a, b) => (b.year > a.year ? b : a));
                 reason = `latest among ${hits.length} catalog-confirmed candidates (no OCR-grounded year hit)`;
+              }
               }
             }
           }
