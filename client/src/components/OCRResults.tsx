@@ -5,7 +5,8 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
-import { Loader2, AlertCircle, Check, Pencil, ThumbsUp, ThumbsDown } from 'lucide-react';
+import { Badge } from "@/components/ui/badge";
+import { Loader2, AlertCircle, Check, Pencil, Sparkles, ScanText, ThumbsUp, ThumbsDown } from 'lucide-react';
 import { CardFormValues } from "@shared/schema";
 import { UseFormReturn } from "react-hook-form";
 import { apiRequest } from "@/lib/queryClient";
@@ -259,9 +260,19 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
     <Card className="w-full mt-4 border border-slate-200">
       <CardHeader className="pb-2">
         <div className="flex justify-between items-center">
-          <CardTitle className="text-lg flex items-center">
-            <Check className="h-5 w-5 mr-2 text-green-600" />
+          <CardTitle className="text-lg flex items-center gap-2">
+            <Check className="h-5 w-5 text-green-600" />
             Card Information Found
+            {(data as any)?._engine === 'gemini' && (
+              <Badge variant="secondary" className="gap-1 text-xs font-normal">
+                <Sparkles className="h-3 w-3 text-purple-500" /> Gemini
+              </Badge>
+            )}
+            {(data as any)?._engine === 'ocr' && (
+              <Badge variant="outline" className="gap-1 text-xs font-normal">
+                <ScanText className="h-3 w-3 text-slate-500" /> OCR
+              </Badge>
+            )}
           </CardTitle>
         </div>
         <CardDescription>

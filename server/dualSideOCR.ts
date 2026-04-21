@@ -261,7 +261,15 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
           isFoil: !!gem.variant,
         };
 
+        // Per-field provenance tracker — `gemini` for values Gemini produced,
+        // `db` for values replaced by the catalog lookup.
+        const source: Record<string, 'gemini' | 'db'> = {};
+        for (const [k, v] of Object.entries(result)) {
+          if (v !== undefined && v !== null && v !== '') source[k] = 'gemini';
+        }
+
         // DB enrichment — authoritative player/team/collection/set/rookie.
+        let dbFound = false;
         if (result.brand && result.year && result.cardNumber) {
           try {
             const lookup = await lookupCard({
@@ -273,18 +281,28 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
               playerLastName: result.playerLastName,
             });
             if (lookup.found) {
-              if (lookup.playerFirstName) result.playerFirstName = lookup.playerFirstName;
-              if (lookup.playerLastName)  result.playerLastName  = lookup.playerLastName;
-              if (lookup.team)            result.team            = lookup.team;
-              if (lookup.collection)      result.collection      = lookup.collection;
-              if (lookup.set)             result.set             = lookup.set;
-              if (lookup.cardNumber)      result.cardNumber      = lookup.cardNumber;
-              if (lookup.year)            result.year            = lookup.year as any;
-              if (lookup.brand)           result.brand           = lookup.brand;
-              if (lookup.isRookieCard !== undefined) result.isRookieCard = lookup.isRookieCard;
+              dbFound = true;
+              const setFromDb = (key: keyof CardFormValues, val: any) => {
+                if (val == null || val === '') return;
+                (result as any)[key] = val;
+                source[key as string] = 'db';
+              };
+              setFromDb('playerFirstName', lookup.playerFirstName);
+              setFromDb('playerLastName',  lookup.playerLastName);
+              setFromDb('team' as any,     lookup.team);
+              setFromDb('collection',      lookup.collection);
+              setFromDb('set' as any,      lookup.set);
+              setFromDb('cardNumber',      lookup.cardNumber);
+              setFromDb('year',            lookup.year);
+              setFromDb('brand',           lookup.brand);
+              if (lookup.isRookieCard !== undefined) {
+                result.isRookieCard = lookup.isRookieCard;
+                source['isRookieCard'] = 'db';
+              }
               if (lookup.variation && !result.foilType) {
                 result.foilType = lookup.variation;
                 result.isFoil = true;
+                source['foilType'] = 'db';
               }
               console.log('[Engine] gemini-first DB enrichment applied');
             } else {
@@ -295,7 +313,12 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
           }
         }
 
-        const usable = !!result.brand && !!result.year && !!result.cardNumber;
+        // Accept Gemini path whenever it produced at least a card number OR
+        // the DB confirmed a hit. We fall back to OCR only when Gemini truly
+        // couldn't read anything useful — a stricter "brand+year+#" gate was
+        // too aggressive and forced OCR fallback even when Gemini had a
+        // perfectly good card-number read that simply wasn't in our catalog.
+        const usable = !!result.cardNumber || dbFound;
         if (usable) {
           // Visual foil detector — only run when Gemini didn't already name a
           // variant. Keeps behaviour consistent with the OCR path where visual
@@ -310,6 +333,7 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
               if (visual?.isFoil && visual.foilType && (visual.confidence ?? 0) >= 0.65) {
                 result.foilType = visual.foilType;
                 result.isFoil = true;
+                source['foilType'] = 'gemini';
                 console.log(`[Engine] gemini-first visual foil accepted: ${visual.foilType} (${visual.confidence})`);
               }
             } catch (err: any) {
@@ -319,14 +343,18 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
 
           result._engine = 'gemini';
           const finalResult = ensureRequiredFields(result);
+          const provenance = ['brand','year','cardNumber','playerFirstName','playerLastName','collection','set','team','foilType']
+            .filter(k => source[k])
+            .map(k => `${k}=${source[k]}`)
+            .join(' ');
           console.log(
-            `[Engine] gemini-first END — brand=${result.brand} year=${result.year} #${result.cardNumber} player="${result.playerFirstName} ${result.playerLastName}" foil=${result.foilType || 'none'}`
+            `[Engine] gemini-first END — brand=${result.brand} year=${result.year} #${result.cardNumber} player="${result.playerFirstName ?? ''} ${result.playerLastName ?? ''}" foil=${result.foilType || 'none'} dbFound=${dbFound} sources(${provenance})`
           );
           console.timeEnd('dual-card-analysis-total');
           return res.json({ success: true, data: finalResult });
         }
 
-        console.log('[Engine] gemini-first unusable (missing brand/year/#) — falling back to OCR');
+        console.log('[Engine] gemini-first produced no usable card number — falling back to OCR');
       } catch (err: any) {
         console.warn('[Engine] gemini-first failed, falling back to OCR:', err?.message);
       }
@@ -498,11 +526,16 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
     }
 
     // Make sure we have all required fields with defaults if needed
+    (combinedResult as any)._engine = (combinedResult as any)._engine || 'ocr';
     const finalResult = ensureRequiredFields(combinedResult);
-    
+
+    const _ocrEngineLabel = requestedEngine === 'gemini' ? 'ocr-fallback' : 'ocr-first';
+    console.log(
+      `[Engine] ${_ocrEngineLabel} END — brand=${finalResult.brand} year=${finalResult.year} #${finalResult.cardNumber} player="${finalResult.playerFirstName ?? ''} ${finalResult.playerLastName ?? ''}" foil=${finalResult.foilType || 'none'}`
+    );
     console.log('Combined card analysis result:', JSON.stringify(finalResult, null, 2));
     console.timeEnd('dual-card-analysis-total');
-    
+
     return res.json({
       success: true,
       data: finalResult
