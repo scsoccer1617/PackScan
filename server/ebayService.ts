@@ -215,13 +215,15 @@ clearEbayCache();
 // Deliberately excludes product-line names that appear in BASE card titles too
 // (e.g. "chrome" in "Bowman Chrome", "prizm" in "Panini Prizm", "optic"/"mosaic" as set names).
 const PARALLEL_KEYWORDS = [
-  'refractor', 'xfractor', 'foilboard',
+  'refractor', 'xfractor', 'x-fractor', 'foilboard',
   'holo', 'holographic', 'rainbow', 'parallel',
   'mojo', 'sparkle', 'glitter', 'laser',
   'fractal', 'pulsar', 'atomic', 'silk',
-  'crackle', 'shimmer',
+  'crackle', 'shimmer', 'sepia', 'sapphire',
+  'wave', 'waves', 'velocity', 'fast break', 'cracked ice',
   'aqua foil', 'blue foil', 'red foil', 'green foil', 'gold foil',
-  'purple foil', 'orange foil', 'pink foil', 'silver foil', 'rainbow foil'
+  'purple foil', 'orange foil', 'pink foil', 'silver foil', 'rainbow foil',
+  'black foil', 'rose gold',
 ];
 
 // Keywords that signal an autograph — used to penalise non-auto searches
