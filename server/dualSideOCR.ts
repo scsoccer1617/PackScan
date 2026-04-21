@@ -20,6 +20,7 @@ interface YearConfidenceFlags {
   _yearFromBareFallback?: boolean;
   _yearFromBackOnly?: boolean;
   _yearFromCatalogProbe?: boolean;
+  _cardNumberLowConfidence?: boolean;
 }
 type CardFormWithFlags = CardFormValues & YearConfidenceFlags;
 
@@ -1506,7 +1507,8 @@ async function combineCardResults(
                   flagged._yearFromBackOnly = false;
                   flagged._yearFromCopyright = false;
                   flagged._yearFromBareFallback = false;
-                  console.log(`[CardDB] Surname salvage (year-only): "${fs}" matched ${rows.length} catalog rows across years [${yearsAvail.join(', ')}] but none had OCR cardNumber #${cardNumLower}. Shifting low-confidence year ${ocrYr} → ${newYr} (closest catalog year, +1 publisher-imprint-lag preference). Leaving cardNumber in place.`);
+                  flagged._cardNumberLowConfidence = true;
+                  console.log(`[CardDB] Surname salvage (year-only): "${fs}" matched ${rows.length} catalog rows across years [${yearsAvail.join(', ')}] but none had OCR cardNumber #${cardNumLower}. Shifting low-confidence year ${ocrYr} → ${newYr} (closest catalog year, +1 publisher-imprint-lag preference). Leaving cardNumber in place — flagged low-confidence so the UI can prompt the user.`);
                   break;
                 }
               }
@@ -1913,6 +1915,19 @@ async function combineCardResults(
     combined.foilType = dbVariation;
     combined.isFoil = true;
     console.log(`[CardDB] Applied DB variation as foilType fallback: "${dbVariation}"`);
+  }
+
+  // Final card-number confidence check: if no card # was extracted at all,
+  // flag low-confidence so the UI can prompt the user to enter it. This
+  // complements the salvage-path flag set when the catalog rejects the OCR
+  // cardNumber.
+  {
+    const flagged = combined as CardFormWithFlags;
+    const cn = combined.cardNumber == null ? '' : String(combined.cardNumber).trim();
+    if (cn.length === 0) {
+      flagged._cardNumberLowConfidence = true;
+      console.log('[CardNum] No card number extracted — flagging low-confidence so UI prompts user.');
+    }
   }
 
   console.log('=== COMBINATION COMPLETE ===');

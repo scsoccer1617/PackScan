@@ -12,6 +12,34 @@ import { apiRequest } from "@/lib/queryClient";
 import VariantCombobox from "@/components/VariantCombobox";
 import FoilTypeSelect from "@/components/FoilTypeSelect";
 
+function CardNumberPrompt({ initialValue, onSave }: { initialValue: string; onSave: (num: string) => void }) {
+  const [val, setVal] = useState(initialValue);
+  return (
+    <div className="mt-2 mb-2 p-3 border border-amber-200 bg-amber-50 rounded-md">
+      <Label htmlFor="manual-card-number" className="text-sm font-medium text-amber-900">
+        We couldn't reliably read the card number — please enter it
+      </Label>
+      <div className="flex items-center gap-2 mt-2">
+        <Input
+          id="manual-card-number"
+          value={val}
+          onChange={(e) => setVal(e.target.value)}
+          placeholder="e.g. 8 or BC-12"
+          className="h-9 max-w-[200px]"
+        />
+        <Button
+          size="sm"
+          variant="default"
+          disabled={!val.trim() || val.trim() === initialValue.trim()}
+          onClick={() => onSave(val.trim())}
+        >
+          Save
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 interface OCRResultsProps {
   loading: boolean;
   error: string | null;
@@ -519,7 +547,23 @@ export default function OCRResults({ loading, error, data: initialData, onApply,
               <div className="text-lg">
                 <span className="font-semibold text-slate-800">Card #: </span>
                 <span className="text-slate-700">{data.cardNumber || 'Not detected'}</span>
+                {(data as any)._cardNumberLowConfidence && (
+                  <span className="ml-2 text-xs font-medium text-amber-700 bg-amber-100 px-2 py-0.5 rounded">
+                    Low confidence — please verify
+                  </span>
+                )}
               </div>
+              {(data as any)._cardNumberLowConfidence && !editMode && (
+                <CardNumberPrompt
+                  initialValue={data.cardNumber || ''}
+                  onSave={(num) => {
+                    const next = { ...data, cardNumber: num, _cardNumberLowConfidence: false } as Partial<CardFormValues>;
+                    setData(next);
+                    setEditedData((prev) => ({ ...prev, cardNumber: num }));
+                    if (form) form.setValue('cardNumber' as any, num);
+                  }}
+                />
+              )}
               {data.cmpNumber && (
                 <div className="text-lg">
                   <span className="font-semibold text-slate-800">CMP Code: </span>
