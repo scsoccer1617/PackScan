@@ -53,7 +53,15 @@ const PROMPT = `You are a sports card identification expert. Analyze the provide
 
 Extract these fields when visible:
 - playerFirstName / playerLastName: The featured player's name
-- year: Card RELEASE year (4-digit integer). PRIORITY ORDER: (1) the year banner / set logo on the FRONT of the card (e.g. "2025 Topps", "2024 Bowman Chrome"); (2) the year prominently displayed near the brand/set logo on the BACK; (3) ONLY as a last resort, the small copyright/printed-in line. WARNING: modern card copyright lines are usually 1-2 years EARLIER than the actual release year (a 2025 Topps card often shows "© 2023 Topps" or "© 2024" on the back) — do NOT use the copyright year for modern cards if a release year is visible elsewhere. The copyright year is only reliable for vintage cards (pre-1990) where front/back rarely show an explicit year.
+- year: Card RELEASE year (4-digit integer). PRIORITY ORDER:
+  (1) An explicit year printed next to the brand/set name on the FRONT or BACK (e.g. "2025 Topps Chrome", "2024 Bowman Holiday").
+  (2) The copyright line on the BACK (e.g. "© 2025 The Topps Company", "© 2024 Panini America"). For modern cards (1990+) the copyright year almost always equals the release year — TRUST IT.
+  (3) The card-code/SKU stamped on the back (e.g. "CODE#TMP12...") sometimes encodes the year — only use as tiebreaker.
+  CRITICAL — do NOT use these as the year:
+   - Stat-table season columns ("YR" / "YEAR" column with values like "23", "24", "22-24") — those are PLAYER stat seasons, not the card year.
+   - Career milestone dates, draft year ("DRAFTED 2023"), birth year ("BORN 11-15-01"), or any year mentioned in the player bio paragraph.
+   - Trademark dates inside small legal text ("MLBPA® est. 1954") that aren't the © line.
+  When a stat column shows multiple years (e.g. "23, 23, 24, 24"), the card's release year is typically ONE year LATER than the most recent stat year shown — but only fall back to that inference if no explicit year and no copyright line is visible.
 - brand: Manufacturer (Topps, Panini, Upper Deck, Donruss, Fleer, Bowman, etc.)
 - collection: Product line (e.g. "Chrome", "Prizm", "Update", "Traded", "Series 1", "Heritage", "Stadium Club"). Omit if brand IS the collection.
 - set: Full set name if printed (e.g. "Topps Series 1 Baseball")
