@@ -354,19 +354,22 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
         // perfectly good card-number read that simply wasn't in our catalog.
         const usable = !!result.cardNumber || dbFound;
         if (usable) {
-          // Visual foil detector — runs in Gemini-first mode as a fallback.
-          // KEY GATE: if Gemini explicitly returned `parallel: null` it has
-          // looked at both images and decided this is a base card. Trust
-          // it and SKIP the pixel detector. Gemini is far better at
-          // distinguishing colourful card art (e.g. an All-Star Game card
-          // with orange/yellow background, or a card whose background is a
-          // stadium scene) from a real foil parallel finish. The pixel
-          // detector is the leading source of false positives like
-          // "Orange Shimmer Foil" on plain base cards with vivid art. We
-          // only fall back to it when Gemini was uncertain (parallel
-          // missing/undefined in the raw output).
-          const geminiExplicitlyNoParallel = gem.parallel === null;
-          if (frontImage && !geminiExplicitlyNoParallel) {
+          // Visual foil detector — runs in Gemini-first mode as a fallback ONLY.
+          // KEY GATE: trust whatever Gemini said about the parallel:
+          //   - Gemini returned `null` → base card → skip detector.
+          //   - Gemini returned a specific name (e.g. "Rainbow Foil",
+          //     "Refractor", "Sky Blue") → it looked at both images and
+          //     named one → skip detector.
+          //   - Gemini returned undefined/missing → uncertain → fall back
+          //     to the pixel detector.
+          // Gemini is far better at distinguishing colourful card art (insert
+          // borders, All-Star Game backgrounds, stadium scenes) from real
+          // foil parallel finishes. The pixel detector is the leading source
+          // of false positives like "Orange Shimmer Foil" on plain base
+          // cards with vivid art, or "Red Ice Foil" on a Stars-of-MLB
+          // insert because of the colourful frame border tint.
+          const geminiAnsweredParallel = gem.parallel !== undefined;
+          if (frontImage && !geminiAnsweredParallel) {
             try {
               const { detectFoilFromImage } = await import('./visualFoilDetector');
               const visual = await detectFoilFromImage(
