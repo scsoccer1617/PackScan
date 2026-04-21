@@ -902,7 +902,10 @@ export async function searchCardValues(
         const hasWrongQualifier = WRONG_PARALLEL_QUALIFIERS.some(q =>
           !foilSearchWords.includes(q) && new RegExp(`\\b${q}\\b`, 'i').test(t)
         );
-        if (hasWrongQualifier && !t.includes(foilSearchTermLower)) {
+        // Word-boundary check on the foil term: substring match would let
+        // "golden" satisfy a "gold" search and bypass the filter incorrectly.
+        const foilTermRe = new RegExp(`\\b${foilSearchTermLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+')}\\b`, 'i');
+        if (hasWrongQualifier && !foilTermRe.test(t)) {
           console.log(`  ↳ Hard-filtered (wrong parallel): searching "${foilSearchTermLower}" but title="${r.title}"`);
           return false;
         }
