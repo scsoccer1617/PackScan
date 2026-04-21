@@ -910,7 +910,7 @@ function extractCardNumber(
       return false;
     };
 
-    extractCardNumberPass(text, cardDetails, originalText, acceptCandidate);
+    extractCardNumberPass(text, cardDetails, originalText, acceptCandidate, side);
   };
 
   if (posMap) {
@@ -931,7 +931,8 @@ function extractCardNumberPass(
   text: string,
   cardDetails: Partial<CardFormValues>,
   originalText: string | undefined,
-  acceptRaw: (matched: string, source: string) => boolean
+  acceptRaw: (matched: string, source: string) => boolean,
+  side: 'front' | 'back' | 'unknown' = 'unknown'
 ): void {
   try {
     // ── Stat-block detection ──────────────────────────────────────────
@@ -1945,6 +1946,12 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>,
       { search: 'SSPC',         display: 'SSPC' },
       { search: 'WILD CARD',    display: 'Wild Card' },
       { search: 'WILSON FRANKS', display: 'Wilson Franks' },
+      // POST (Post Cereal): 1960s-90s food-issue baseball brand. Wordmark
+      // is a plain "POST" token printed on both front and back. Tight
+      // word-boundary match avoids matching English body text like
+      // "POSTED", "POSTSEASON" (those have trailing word chars and won't
+      // match \bPOST\b).
+      { search: 'POST',         display: 'Post',         fuzzy: /\bP[O0Q][S5]T\b/i },
       // TCMA (The Card Memorabilia Associates): vintage-reissue brand whose
       // wordmark appears on both front and back. Catalog has TCMA cards
       // (e.g. 1982 Baseball's Greatest Pitchers).
