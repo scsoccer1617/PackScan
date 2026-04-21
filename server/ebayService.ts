@@ -245,7 +245,8 @@ function prioritizeListingsByCardMatch(
   foilType?: string,
   isAutographed?: boolean,
   serialNumber?: string,
-  set?: string
+  set?: string,
+  variant?: string
 ): EbaySearchResult[] {
   return results.map(result => {
     const title = result.title.toLowerCase();
@@ -785,7 +786,8 @@ export async function searchCardValues(
       foilType,
       isAutographed,
       serialNumber,
-      set
+      set,
+      variant
     );
 
     // ── Hard post-filter ─────────────────────────────────────────────────────
