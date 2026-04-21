@@ -184,16 +184,18 @@ function detectSerialNumberFromPatterns(fullText: string): SerialNumberResult {
             if (isSerialNumberInBioContext(serialNumber, fullText)) {
               continue;
             }
-            // "X OF Y" notation with a small denominator is an insert /
-            // subset POSITION ("13 of 24 in the All-Stars insert"), not
-            // a print-run serial. True serials use a slash. Reject so
-            // downstream code can interpret X as a card number instead.
+            // "X OF Y" notation with the literal word "OF" is, by
+            // definition, a card-position-in-set marker (e.g. "13 of
+            // 24" on an insert, "174 of 660" on a base-set card),
+            // NEVER a true print-run serial. Real print-run serials
+            // are always written with a slash ("13/24", "174/660"),
+            // never with the word "of". Reject unconditionally so the
+            // downstream card-number detector can interpret X as the
+            // card number instead.
             if (isWordOf) {
               const denomOf = parseInt(serialNumber.split('/')[1], 10);
-              if (denomOf <= 50) {
-                console.log(`Rejecting "X of Y" pattern "${match[0]}" → "${serialNumber}" — small denominator (${denomOf}); treating as insert position, not serial`);
-                continue;
-              }
+              console.log(`Rejecting "X of Y" pattern "${match[0]}" → "${serialNumber}" (denominator ${denomOf}) — literal "OF" denotes card position in set, not a print-run serial`);
+              continue;
             }
             if (isLongLine && isSerialNumberInBioContext(serialNumber, line)) {
               continue;

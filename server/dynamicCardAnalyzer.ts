@@ -1144,26 +1144,29 @@ function extractCardNumberPass(
       console.log(`Skipping potential birthdate/stat lines for card number detection:`, birthdateLines);
     }
 
-    // HIGH PRIORITY: "X of Y" insert position notation (e.g. "13 of 24"
-    // on a Fleer All-Stars insert). When the literal word "of" sits
-    // between two small integers, this is the card-position-in-set
-    // marker — X is the card number, Y is the insert size. True print
-    // serials use a slash, never the word "of". Bound the denominator
-    // at ≤ 50 to stay sport-agnostic without colliding with print runs.
-    // Run this BEFORE the autograph / brand-near-number detectors so a
-    // garbage alphanumeric like "L-STARS" (mis-parsed from "ALL-STARS")
-    // never wins over the real card #.
-    const xOfYRegex = /\b(\d{1,3})\s+OF\s+(\d{1,3})\b/i;
+    // HIGH PRIORITY: "X of Y" card-position-in-set notation. When the
+    // literal word "of" sits between two integers, that pair is, by
+    // definition, the card's position in its set/insert/subset (e.g.
+    // "13 of 24" on a Fleer All-Stars insert, "174 of 660" on a Score
+    // base card). X is the card number, Y is the set size. True
+    // print-run serials are ALWAYS written with a slash, never the
+    // word "of". Cap the denominator at 1000 — comfortably above the
+    // largest mainstream base-set sizes (792 Topps, 660 Score, 528
+    // Donruss, 720 Fleer …) without colliding with anything else. Run
+    // BEFORE the autograph / brand-near-number detectors so a garbage
+    // alphanumeric like "L-STARS" (mis-parsed from "ALL-STARS") never
+    // wins over the real card #.
+    const xOfYRegex = /\b(\d{1,4})\s+OF\s+(\d{1,4})\b/i;
     for (const line of lines) {
       if (isDOBFormat(line)) continue;
       const m = line.match(xOfYRegex);
       if (!m) continue;
       const xNum = parseInt(m[1], 10);
       const yNum = parseInt(m[2], 10);
-      if (!xNum || !yNum || xNum > yNum || yNum > 50) continue;
+      if (!xNum || !yNum || xNum > yNum || yNum > 1000) continue;
       if (acceptCandidate(m[1], 'x-of-y-insert-position')) {
         cardDetails.cardNumber = m[1];
-        console.log(`Detected card number from "X of Y" insert position: ${m[1]} (set size ${yNum}) on line "${line}"`);
+        console.log(`Detected card number from "X of Y" position: ${m[1]} (set size ${yNum}) on line "${line}"`);
         return;
       }
     }
