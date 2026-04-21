@@ -1846,15 +1846,51 @@ function extractCardNumberPass(
       }
     }
     
-    // Check the first 3 lines for a standalone number as fallback
-    for (let i = 0; i < Math.min(3, lines.length); i++) {
-      const trimmedLine = lines[i].trim();
-      // If the line is just a number and it's a reasonable card number (1-999)
-      if (/^\d{1,3}$/.test(trimmedLine) && parseInt(trimmedLine) > 0 && parseInt(trimmedLine) < 1000) {
-        if (acceptCandidate(trimmedLine, 'top-3-lines')) {
-          cardDetails.cardNumber = trimmedLine;
-          console.log(`Detected top card number: ${cardDetails.cardNumber}`);
-          return;
+    // Check the first 3 lines for a standalone number as fallback.
+    // Skip this fallback when a stronger candidate exists: a standalone
+    // numeric line immediately adjacent (±1) to the player-name line.
+    // Player-name proximity is the strongest sport-agnostic signal for
+    // card-number identity on the back; the top-3-lines path is a
+    // generic shot-in-the-dark that frequently grabs stray digits ("5"
+    // pulled out of "5'10"" or a logo glyph) sitting near the top.
+    const allLinesForProximity = (originalText || text).split('\n').map(l => l.trim());
+    const playerLastForProx =
+      typeof cardDetails.playerLastName === 'string' && cardDetails.playerLastName.trim()
+        ? cardDetails.playerLastName.trim().toUpperCase().split(/\s+/).filter(t => t.length >= 3)
+        : [];
+    let playerNameLineIdx = -1;
+    if (playerLastForProx.length > 0) {
+      for (let li = 0; li < allLinesForProximity.length; li++) {
+        const up = allLinesForProximity[li].toUpperCase();
+        if (playerLastForProx.some(tok => new RegExp(`\\b${tok.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(up))) {
+          playerNameLineIdx = li;
+          break;
+        }
+      }
+    }
+    let hasPlayerAdjacentNumber = false;
+    if (playerNameLineIdx >= 0) {
+      for (const off of [-1, 1]) {
+        const adj = allLinesForProximity[playerNameLineIdx + off];
+        if (adj && /^\d{1,3}$/.test(adj) && parseInt(adj) > 0 && parseInt(adj) < 1000) {
+          hasPlayerAdjacentNumber = true;
+          break;
+        }
+      }
+    }
+
+    if (hasPlayerAdjacentNumber) {
+      console.log(`[CardNum] Skipping top-3-lines fallback — a standalone numeric line sits adjacent to player-name line ${playerNameLineIdx} ("${allLinesForProximity[playerNameLineIdx]}"); deferring to player-name-proximity scoring.`);
+    } else {
+      for (let i = 0; i < Math.min(3, lines.length); i++) {
+        const trimmedLine = lines[i].trim();
+        // If the line is just a number and it's a reasonable card number (1-999)
+        if (/^\d{1,3}$/.test(trimmedLine) && parseInt(trimmedLine) > 0 && parseInt(trimmedLine) < 1000) {
+          if (acceptCandidate(trimmedLine, 'top-3-lines')) {
+            cardDetails.cardNumber = trimmedLine;
+            console.log(`Detected top card number: ${cardDetails.cardNumber}`);
+            return;
+          }
         }
       }
     }
