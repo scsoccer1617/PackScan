@@ -1845,7 +1845,37 @@ function extractCardNumberPass(
         }
       }
     }
-    
+
+    // Vintage back-side pattern: card # is printed in a small box/circle at the top
+    // of the back, and OCR concatenates it with the player's bio paragraph below.
+    // Example: line reads "252 DRAFTED: PHILLIES #1-JUNE 1972 ACQUIRED: VIA DRAFT".
+    // Detect a 1-4 digit number leading any of the first 5 lines, where the
+    // remainder of the line is bio prose (DRAFTED/BORN/BATS/THROWS/etc.). This
+    // is sport-agnostic: every vintage card back has bio keywords near the top.
+    const bioKeywordRe = /\b(DRAFTED|DRAFT|BORN|BATS|THROWS|HEIGHT|WEIGHT|ACQUIRED|RESIDES|SIGNED|AGENT|HOME|HOMETOWN|HT|WT|POSITION|PITCHES|HITS|COLLEGE|SCHOOL|PHILLIES|YANKEES|METS|RED SOX|DODGERS|GIANTS|CUBS|CARDINALS|INDIANS|TIGERS|TWINS|ROYALS|ATHLETICS|RANGERS|MARINERS|BLUE JAYS|ORIOLES|BREWERS|PIRATES|REDS|ASTROS|BRAVES|EXPOS|PADRES|ANGELS|WHITE SOX)\b/i;
+    const topLineLimit = Math.min(lines.length, 5);
+    for (let li = 0; li < topLineLimit; li++) {
+      const ln = lines[li].trim();
+      const m = ln.match(/^(\d{1,4})\s+(.+)$/);
+      if (!m) continue;
+      const num = m[1];
+      const rest = m[2];
+      const numInt = parseInt(num);
+      if (!(numInt > 0 && numInt < 10000)) continue;
+      // Reject years to avoid grabbing copyright/career-start years.
+      if (numInt >= 1900 && numInt <= 2099) continue;
+      // Require bio prose on the rest of the line.
+      if (!bioKeywordRe.test(rest)) continue;
+      // Avoid stat rows like "1973 PHILLIES 10 34 ..." — those start with a year (already filtered)
+      // but also reject if the rest contains 4+ standalone numbers (stat row pattern).
+      const numericTokens = rest.split(/\s+/).filter(t => /^\d+(\.\d+)?$/.test(t));
+      if (numericTokens.length >= 4) continue;
+      if (!acceptCandidate(num, 'top-line-leading-digit-bio')) continue;
+      cardDetails.cardNumber = num;
+      console.log(`Detected card number from leading digit on bio line ${li}: "${num}" (line: "${ln.slice(0, 80)}")`);
+      return;
+    }
+
     // Check the first 3 lines for a standalone number as fallback.
     // Skip this fallback when a stronger candidate exists: a standalone
     // numeric line immediately adjacent (±1) to the player-name line.
