@@ -249,6 +249,17 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
         console.timeEnd('gemini-first');
         console.log('[Engine] gemini raw result:', JSON.stringify(gem, null, 2));
 
+        // Safety net: even with the prompt rule, Gemini sometimes drops a
+        // non-parallel variation (Pre-Production Sample, Short Print, Photo
+        // Variation, Error, Test Issue, Promo, etc.) into the parallel field.
+        // Move those out of parallel → variant before mapping to result fields.
+        const NON_PARALLEL_KEYWORDS = /\b(sample|short\s*print|sp|photo\s*var(iation)?|var(iation)?|error|corrected|update|traded|promo|prototype|test\s*issue|pre[-\s]?production|proof|blank\s*back)\b/i;
+        if (gem.parallel && NON_PARALLEL_KEYWORDS.test(gem.parallel)) {
+          console.log(`[Engine] gemini-first reclassify "${gem.parallel}" parallel → variant`);
+          if (!gem.variant) gem.variant = gem.parallel;
+          gem.parallel = null;
+        }
+
         const seriallike = gem.serialNumber && /\d+\s*\/\s*\d+|\/\s*\d+/.test(gem.serialNumber);
         const geminiYear =
           typeof gem.year === 'number'
