@@ -287,6 +287,7 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
           foilType: gem.parallel || undefined,
           isFoil: !!gem.parallel,
           variant: gem.variant || undefined,
+          cmpNumber: gem.cmpNumber || undefined,
         };
 
         // Per-field provenance tracker — `gemini` for values Gemini produced,
@@ -366,7 +367,36 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
                 frontImage.buffer.toString('base64'),
                 { isNumbered: !!result.isNumbered, imageBuffer: frontImage.buffer },
               );
-              const visualConfident = !!visual?.isFoil && !!visual.foilType && (visual.confidence ?? 0) >= 0.55;
+              // Jersey-contamination guard: if the border-tint hue the
+              // detector locked onto is ALSO a dominant hue in the centre
+               // region, the player photo's colour is leaking into the side
+              // strips and the "border tint" is unreliable (e.g. a player
+              // wearing a red jersey makes all 4 strips look red). Reject
+              // the visual finding in that case unless Gemini independently
+              // confirmed a parallel.
+              const reg = visual?.regional;
+              let jerseyContamination = false;
+              if (reg?.borderTint && (reg as any)) {
+                // rainbowScore log line stores per-hue centre coverage; we
+                // re-derive it from indicators since it isn't a typed field.
+                const tintHue = reg.borderTint.hue.toLowerCase();
+                const perHueLine = reg.indicators.find(s => s.includes('perHue=')) || '';
+                const m = perHueLine.match(/perHue=(\{[^}]*\})/);
+                if (m) {
+                  try {
+                    const perHue: Record<string, number> = JSON.parse(m[1]);
+                    const centerShare = perHue[tintHue] ?? 0;
+                    if (centerShare >= 30) {
+                      jerseyContamination = true;
+                      console.log(`[Engine] gemini-first visual foil REJECTED — borderTint "${tintHue}" also dominates centre (${centerShare}%); likely jersey/photo contamination`);
+                    }
+                  } catch {}
+                }
+              }
+              const visualConfident = !visual ? false :
+                !!visual.isFoil && !!visual.foilType &&
+                (visual.confidence ?? 0) >= 0.55 &&
+                !jerseyContamination;
               if (visualConfident) {
                 if (!result.foilType) {
                   result.foilType = visual!.foilType!;

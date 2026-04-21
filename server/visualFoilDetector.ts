@@ -6,6 +6,7 @@ interface FoilDetectionResult {
   foilType: string | null;
   confidence: number;
   indicators: string[];
+  regional?: RegionalFoilEvidence | null;
 }
 
 function formatPrivateKey(rawKey: string): string {
@@ -517,7 +518,7 @@ export async function detectFoilFromImage(
     console.log(`Indicators: ${indicators.join('; ')}`);
     console.log('=== END VISUAL FOIL DETECTION ===');
 
-    return { isFoil, foilType, confidence, indicators };
+    return { isFoil, foilType, confidence, indicators, regional };
 
   } catch (error) {
     console.error('Error in visual foil detection:', error);

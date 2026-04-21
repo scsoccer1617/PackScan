@@ -23,6 +23,7 @@ export interface GeminiCardResult {
   serialNumber?: string | null;
   parallel?: string | null;
   variant?: string | null;
+  cmpNumber?: string | null;
   confidence?: number | null;
   notes?: string | null;
 }
@@ -44,6 +45,7 @@ const SCHEMA = {
     serialNumber: { type: Type.STRING, nullable: true },
     parallel: { type: Type.STRING, nullable: true },
     variant: { type: Type.STRING, nullable: true },
+    cmpNumber: { type: Type.STRING, nullable: true },
     confidence: { type: Type.NUMBER, nullable: true },
     notes: { type: Type.STRING, nullable: true },
   },
@@ -53,15 +55,15 @@ const PROMPT = `You are a sports card identification expert. Analyze the provide
 
 Extract these fields when visible:
 - playerFirstName / playerLastName: The featured player's name
-- year: Card RELEASE year (4-digit integer). PRIORITY ORDER:
-  (1) An explicit year printed next to the brand/set name on the FRONT or BACK (e.g. "2025 Topps Chrome", "2024 Bowman Holiday").
-  (2) The copyright line on the BACK (e.g. "© 2025 The Topps Company", "© 2024 Panini America"). For modern cards (1990+) the copyright year almost always equals the release year — TRUST IT.
-  (3) The card-code/SKU stamped on the back (e.g. "CODE#TMP12...") sometimes encodes the year — only use as tiebreaker.
-  CRITICAL — do NOT use these as the year:
-   - Stat-table season columns ("YR" / "YEAR" column with values like "23", "24", "22-24") — those are PLAYER stat seasons, not the card year.
-   - Career milestone dates, draft year ("DRAFTED 2023"), birth year ("BORN 11-15-01"), or any year mentioned in the player bio paragraph.
-   - Trademark dates inside small legal text ("MLBPA® est. 1954") that aren't the © line.
-  When a stat column shows multiple years (e.g. "23, 23, 24, 24"), the card's release year is typically ONE year LATER than the most recent stat year shown — but only fall back to that inference if no explicit year and no copyright line is visible.
+- year: Card RELEASE year (4-digit integer). Use this priority order — DO NOT skip steps:
+  (1) An explicit year printed next to the brand/set name on the FRONT or BACK (e.g. "2025 Topps Chrome", "2024 Bowman Holiday"). Strongest signal.
+  (2) MOST RECENT STAT YEAR + 1. The back almost always shows a stat table whose left column is "YR" or "YEAR" with two-digit seasons (e.g. "21, 22, 22, 22"). The card's release year is ONE year AFTER the most recent stat year. Examples: stats end in "22" → card year 2023. Stats end in "24" → card year 2025. Stats end in "20" → card year 2021. This is the most reliable signal when no explicit year is on the front.
+  (3) The copyright "© YEAR" line on the back. WARNING: this is often 1 year EARLIER than the actual release year (a 2023 Topps Series 1 card frequently reads "© 2022 The Topps Company"). Only use this if rules (1) and (2) both fail, and prefer (release_year_inferred_from_stats) over (©_year) if they disagree.
+  (4) Card-code/SKU on the back (e.g. "CODE#TMP12...") — last-resort tiebreaker only.
+  CRITICAL — NEVER use these as the year:
+   - Career milestone dates, draft year ("DRAFTED 2023"), birth year ("BORN 11-15-01"), debut year, or any year mentioned in the player bio paragraph.
+   - Trademark / "established" dates in small legal text (e.g. "MLBPA® est. 1954").
+   - Stadium-built / franchise-history dates.
 - brand: Manufacturer (Topps, Panini, Upper Deck, Donruss, Fleer, Bowman, etc.)
 - collection: Product line (e.g. "Chrome", "Prizm", "Update", "Traded", "Series 1", "Heritage", "Stadium Club"). Omit if brand IS the collection.
 - set: Full set name if printed (e.g. "Topps Series 1 Baseball")
@@ -73,6 +75,7 @@ Extract these fields when visible:
 - serialNumber: Serial number if numbered (e.g. "10/399", "/499")
 - parallel: A foil/refractor/colour-parallel name ONLY (e.g. "Gold", "Refractor", "X-Fractor", "Sky Blue", "Prizm Silver", "Mojo", "Holo"). These are alternate printings that differ visually (foil, color, texture). Leave null if the card is the base version.
 - variant: Non-parallel variations ONLY (e.g. "Short Print", "Photo Variation", "Pre-Production Sample", "Error", "Corrected", "Update", "Traded"). Things printed on the card that distinguish it from the base but are NOT a foil/colour parallel. Leave null if none.
+- cmpNumber: The internal product/CMP code printed on the back, usually labelled "CODE#" or "CMP" (e.g. "CMP1234", "CODE#TMP12...", "BCP123"). Capture the full code exactly as printed (letters + digits). Leave null if not visible.
 - confidence: 0.0–1.0 your overall confidence
 - notes: Any relevant observations (OCR ambiguity, unusual formatting, etc.)
 
@@ -151,7 +154,9 @@ export async function analyzeCardWithGemini(
     isRookie: parsed.isRookie ?? null,
     isAutograph: parsed.isAutograph ?? null,
     serialNumber: clean(parsed.serialNumber),
+    parallel: clean(parsed.parallel),
     variant: clean(parsed.variant),
+    cmpNumber: clean(parsed.cmpNumber),
     confidence: parsed.confidence ?? null,
     notes: clean(parsed.notes),
   };
