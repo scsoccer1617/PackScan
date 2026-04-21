@@ -424,12 +424,15 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
                 <Input id="edit-serialNumber" value={editData.serialNumber || ''} onChange={e => updateEditField('serialNumber', e.target.value)} />
               </div>
               <div>
-                <Label htmlFor="edit-variant">Variant</Label>
-                <Input
-                  id="edit-variant"
+                <Label>Variant</Label>
+                <FoilTypeSelect
+                  kind="variant"
+                  brand={editData.brand}
+                  year={editData.year}
+                  collection={editData.collection}
+                  set={editData.set}
                   value={editData.variant || ''}
-                  onChange={e => updateEditField('variant', e.target.value)}
-                  placeholder="e.g. SSP, Photo Variation"
+                  onChange={(variant) => updateEditField('variant', variant)}
                 />
               </div>
               <div className="flex items-center gap-2 pt-1">
