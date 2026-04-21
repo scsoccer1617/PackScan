@@ -41,4 +41,4 @@ path = "scripts/post-merge.sh"
 timeoutMs = 20000
 
 [agent]
-integrations = ["javascript_object_storage:2.0.0"]
+integrations = ["javascript_object_storage:2.0.0", "javascript_gemini:1.0.0"]
