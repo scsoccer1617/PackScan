@@ -366,7 +366,7 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
                 frontImage.buffer.toString('base64'),
                 { isNumbered: !!result.isNumbered, imageBuffer: frontImage.buffer },
               );
-              const visualConfident = !!visual?.isFoil && !!visual.foilType && (visual.confidence ?? 0) >= 0.65;
+              const visualConfident = !!visual?.isFoil && !!visual.foilType && (visual.confidence ?? 0) >= 0.55;
               if (visualConfident) {
                 if (!result.foilType) {
                   result.foilType = visual!.foilType!;
