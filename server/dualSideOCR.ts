@@ -3,7 +3,7 @@ import sharp from 'sharp';
 import { CardFormValues } from '@shared/schema';
 import { analyzeSportsCardImage, extractAllYearCandidates } from './dynamicCardAnalyzer';
 import { detectFoilVariant } from './foilVariantDetector';
-import { lookupCard } from './cardDatabaseService';
+import { lookupCard, getKnownVariationNames } from './cardDatabaseService';
 import { batchExtractTextFromImages, clearOcrCache } from './googleVisionFetch';
 import { db } from '@db';
 import { cardVariations, cardDatabase } from '@shared/schema';
@@ -371,6 +371,45 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
             console.warn('[Engine] gemini-first DB lookup failed:', msg);
+          }
+
+          // ─── Catalog Authority Check (runs even when card row not found) ───
+          // Validate any Gemini-supplied parallel against the catalog. If the
+          // brand+year+collection has variation rows but Gemini's name isn't
+          // among them (no token overlap), the parallel is unverified and is
+          // cleared. Only runs when the variation wasn't already accepted via
+          // the lookup.found path above (signalled by source.foilType === 'db').
+          if (result.foilType && source.foilType !== 'db') {
+            try {
+              const known = await getKnownVariationNames(
+                result.brand!,
+                result.year!,
+                result.collection,
+              );
+              if (known.length > 0) {
+                const hintTokens = new Set(
+                  result.foilType.toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').split(/\s+/).filter(t => t.length >= 3)
+                );
+                const matches = known.some(name => {
+                  const ct = new Set(name.toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').split(/\s+/).filter(t => t.length >= 3));
+                  for (const t of hintTokens) if (ct.has(t)) return true;
+                  return false;
+                });
+                if (!matches) {
+                  console.log(`[Engine] gemini-first: clearing Gemini foilType "${result.foilType}" — not present in ${known.length} catalog variations for ${result.brand} ${result.year}${result.collection ? ' / ' + result.collection : ''} (known: ${known.slice(0, 6).join(' | ')}${known.length > 6 ? '…' : ''})`);
+                  result.foilType = undefined;
+                  result.isFoil = false;
+                  source.foilType = 'db';
+                } else {
+                  console.log(`[Engine] gemini-first: Gemini foilType "${result.foilType}" verified against catalog.`);
+                }
+              } else {
+                console.log(`[Engine] gemini-first: no catalog variations for ${result.brand} ${result.year}${result.collection ? ' / ' + result.collection : ''} — leaving Gemini foilType "${result.foilType}" unverified.`);
+              }
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : String(err);
+              console.warn('[Engine] gemini-first catalog veto check failed:', msg);
+            }
           }
         }
 
@@ -1276,6 +1315,12 @@ async function combineCardResults(
   // OCR foil/serial/condition data is preserved and not overwritten.
   // dbVariation is stashed here and applied AFTER visual/text foil detection as a fallback.
   let dbVariation: string | null = null;
+  // Set to true when the catalog confirmed a card hit but no parallel
+  // variation row matched the serial-number rule (no detected serial → no
+  // NULL-serial row; serial detected → no matching limit row). Per the rule,
+  // the catalog is authoritative: any foilType assigned by visual / text /
+  // regional detectors should be cleared at the end of the pipeline.
+  let dbConfirmsNoParallel = false;
 
   const applyDbResult = (dbResult: any, label: string): boolean => {
     console.log(`[CardDB] ${label} — ${dbResult.playerFirstName} ${dbResult.playerLastName}, team: ${dbResult.team}, collection: ${dbResult.collection}, cardNumber: ${dbResult.cardNumber}`);
@@ -1372,6 +1417,11 @@ async function combineCardResults(
       (combined as CardFormWithFlags)._variationAmbiguous = true;
       (combined as CardFormWithFlags)._variationOptions = dbResult.variationOptions;
       console.log(`[CardDB] Variation ambiguous (${dbResult.variationOptions.length} options) — needs user confirmation: ${dbResult.variationOptions.join(' | ')}`);
+    } else if (!dbResult.variation) {
+      // Catalog confirmed the card but had no parallel matching the serial-number rule.
+      // Mark so the post-detection pipeline clears any visual/text-detected foilType.
+      dbConfirmsNoParallel = true;
+      console.log('[CardDB] Catalog confirms no parallel for this card — will clear any detector-assigned foilType.');
     }
     // Signal success so callers (e.g. the year-widening fallback loop) stop
     // trying additional years. Without this the function falls through to
@@ -2255,6 +2305,18 @@ async function combineCardResults(
     combined.foilType = dbVariation;
     combined.isFoil = true;
     console.log(`[CardDB] Applied DB variation as foilType fallback: "${dbVariation}"`);
+  }
+
+  // ─── Catalog Authority: clear detector-assigned parallels with no DB backing ─
+  // The card_variations table is the source of truth. If the catalog confirmed
+  // the card and had no matching variation row (no NULL-serial row when no
+  // serial was detected, or no matching limit row when one was), any foilType
+  // assigned by the visual / text / regional detectors is unverified and must
+  // be cleared. The user's rule: default to "None detected" in that case.
+  if (dbConfirmsNoParallel && combined.foilType) {
+    console.log(`[CardDB] Clearing detector-assigned foilType "${combined.foilType}" — catalog has no parallel for this card.`);
+    combined.foilType = null;
+    combined.isFoil = false;
   }
 
   // Final card-number confidence check: if no card # was extracted at all,

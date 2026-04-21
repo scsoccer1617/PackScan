@@ -891,6 +891,42 @@ function pickByHint(
 // Helpers
 // ───────────────────────────────────────────────
 
+/**
+ * List every distinct `variation_or_parallel` name in card_variations for a
+ * given brand+year (optionally narrowed by collection). Used to verify a
+ * detector- or model-supplied parallel name against the catalog even when the
+ * specific card row was not found in card_database (e.g. Gemini guessed a
+ * card # that isn't in our catalog, but we still want to veto a parallel
+ * name that doesn't exist for the brand/year).
+ *
+ * Returns an empty array when no rows exist (caller can decide whether
+ * "unknown to catalog" should be treated as veto or as no-info).
+ */
+export async function getKnownVariationNames(
+  brand: string,
+  year: number,
+  collection?: string,
+): Promise<string[]> {
+  if (!brand || !year) return [];
+  const conditions: any[] = [
+    sql`lower(${cardVariations.brand}) = lower(${normalizeBrand(brand)})`,
+    eq(cardVariations.year, year),
+  ];
+  if (collection && collection.trim()) {
+    conditions.push(sql`lower(${cardVariations.collection}) = lower(${collection})`);
+  }
+  const rows = await db
+    .select({ name: cardVariations.variationOrParallel })
+    .from(cardVariations)
+    .where(and(...conditions))
+    .limit(500);
+  const set = new Set<string>();
+  for (const r of rows) {
+    if (r.name && r.name.trim()) set.add(r.name.trim());
+  }
+  return Array.from(set);
+}
+
 function normalizeBrand(brand: string): string {
   return brand.trim().replace(/\s+/g, ' ');
 }
