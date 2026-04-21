@@ -794,7 +794,10 @@ export async function searchCardValues(
     // Remove listings that clearly don't match the card type BEFORE picking top 5.
     // This is more reliable than scoring alone because if every eBay result is a
     // parallel, scoring penalties still leave parallels in the top 5.
-    const isBaseCardSearch = !foilType || foilType.trim() === '';
+    // A confirmed Variant (e.g. "Hidden Elf Variations") means we are NOT
+    // searching for a base card — without this, the hard filter below would
+    // strip every variant listing as a "parallel" and leave us with 0 results.
+    const isBaseCardSearch = (!foilType || foilType.trim() === '') && (!variant || variant.trim() === '');
     const isNumberedCard   = !!isNumbered;
 
     // Terms that definitively indicate a parallel/special version (word-boundary matched)
