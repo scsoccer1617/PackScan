@@ -876,7 +876,12 @@ export async function searchCardValues(
       // that does is a different parallel and should be filtered.
       'rainbow', 'diamante', 'holo', 'holographic', 'foilboard',
       'sandglitter', 'sapphire', 'prizm', 'optic', 'chromium',
-      'sepia', 'negative', 'superfractor'
+      'sepia', 'negative', 'superfractor',
+      // Photo/image-variation cards (e.g. "Golden Mirror Image Variation",
+      // "Photo Variation", "Image Swap") are SP variations, not foil parallels.
+      // When searching for a specific foil parallel, these should be filtered.
+      'mirror image', 'image variation', 'photo variation', 'image swap',
+      'sp variation', 'ssp variation', 'variation sp', 'variation ssp',
     ];
 
     const hardFilter = (r: EbaySearchResult): boolean => {
