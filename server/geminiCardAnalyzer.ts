@@ -53,7 +53,7 @@ const PROMPT = `You are a sports card identification expert. Analyze the provide
 
 Extract these fields when visible:
 - playerFirstName / playerLastName: The featured player's name
-- year: Card year (4-digit integer). For vintage cards the copyright year on the back often indicates this.
+- year: Card RELEASE year (4-digit integer). PRIORITY ORDER: (1) the year banner / set logo on the FRONT of the card (e.g. "2025 Topps", "2024 Bowman Chrome"); (2) the year prominently displayed near the brand/set logo on the BACK; (3) ONLY as a last resort, the small copyright/printed-in line. WARNING: modern card copyright lines are usually 1-2 years EARLIER than the actual release year (a 2025 Topps card often shows "© 2023 Topps" or "© 2024" on the back) — do NOT use the copyright year for modern cards if a release year is visible elsewhere. The copyright year is only reliable for vintage cards (pre-1990) where front/back rarely show an explicit year.
 - brand: Manufacturer (Topps, Panini, Upper Deck, Donruss, Fleer, Bowman, etc.)
 - collection: Product line (e.g. "Chrome", "Prizm", "Update", "Traded", "Series 1", "Heritage", "Stadium Club"). Omit if brand IS the collection.
 - set: Full set name if printed (e.g. "Topps Series 1 Baseball")
