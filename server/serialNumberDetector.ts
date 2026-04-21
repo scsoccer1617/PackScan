@@ -140,10 +140,15 @@ function detectSerialNumberFromPositions(textAnnotations: any[]): SerialNumberRe
 function detectSerialNumberFromPatterns(fullText: string): SerialNumberResult {
   try {
     // Common serial number patterns — allow 1+ digit denominators (/1, /5, /99, /1000)
-    const patterns = [
-      /\b(\d{1,3}\/\d{1,4})\b/g,           // 1/1, 010/399, 16/99, 123/1000
-      /\b(\d{1,3})\s*\/\s*(\d{1,4})\b/g,   // 010 / 399 (with spaces)
-      /\b(\d{1,3})\s+OF\s+(\d{1,4})\b/gi,  // 16 OF 99
+    // The third pattern uses the literal word "OF" — this notation is
+    // overwhelmingly used for INSERT POSITIONS ("card 13 of 24 in the
+    // All-Stars insert set"), not print-run serials. True serials almost
+    // always use a slash. We tag matches from this pattern and reject
+    // them when the denominator is small.
+    const patterns: Array<{ re: RegExp; isWordOf: boolean }> = [
+      { re: /\b(\d{1,3}\/\d{1,4})\b/g,          isWordOf: false },
+      { re: /\b(\d{1,3})\s*\/\s*(\d{1,4})\b/g,  isWordOf: false },
+      { re: /\b(\d{1,3})\s+OF\s+(\d{1,4})\b/gi, isWordOf: true  },
     ];
     
     // Split text into lines to avoid matching serial numbers in paragraphs
@@ -159,7 +164,7 @@ function detectSerialNumberFromPatterns(fullText: string): SerialNumberResult {
       // serial numbers like "010/399" often appear in long copyright text on card backs
       const isLongLine = line.length > 50;
       
-      for (const pattern of patterns) {
+      for (const { re: pattern, isWordOf } of patterns) {
         pattern.lastIndex = 0; // Reset regex
         const matches = Array.from(line.matchAll(pattern));
         
@@ -173,6 +178,23 @@ function detectSerialNumberFromPatterns(fullText: string): SerialNumberResult {
           }
           
           if (serialNumber && isValidSerialNumber(serialNumber)) {
+            // Always check for print-code masquerading as serial (e.g.
+            // "19/93" on a 1993 card). Cheap to run, catches false
+            // positives the bio-context check misses on short lines.
+            if (isSerialNumberInBioContext(serialNumber, fullText)) {
+              continue;
+            }
+            // "X OF Y" notation with a small denominator is an insert /
+            // subset POSITION ("13 of 24 in the All-Stars insert"), not
+            // a print-run serial. True serials use a slash. Reject so
+            // downstream code can interpret X as a card number instead.
+            if (isWordOf) {
+              const denomOf = parseInt(serialNumber.split('/')[1], 10);
+              if (denomOf <= 50) {
+                console.log(`Rejecting "X of Y" pattern "${match[0]}" → "${serialNumber}" — small denominator (${denomOf}); treating as insert position, not serial`);
+                continue;
+              }
+            }
             if (isLongLine && isSerialNumberInBioContext(serialNumber, line)) {
               continue;
             }

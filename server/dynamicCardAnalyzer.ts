@@ -1131,6 +1131,30 @@ function extractCardNumberPass(
     if (birthdateLines.length > 0) {
       console.log(`Skipping potential birthdate/stat lines for card number detection:`, birthdateLines);
     }
+
+    // HIGH PRIORITY: "X of Y" insert position notation (e.g. "13 of 24"
+    // on a Fleer All-Stars insert). When the literal word "of" sits
+    // between two small integers, this is the card-position-in-set
+    // marker — X is the card number, Y is the insert size. True print
+    // serials use a slash, never the word "of". Bound the denominator
+    // at ≤ 50 to stay sport-agnostic without colliding with print runs.
+    // Run this BEFORE the autograph / brand-near-number detectors so a
+    // garbage alphanumeric like "L-STARS" (mis-parsed from "ALL-STARS")
+    // never wins over the real card #.
+    const xOfYRegex = /\b(\d{1,3})\s+OF\s+(\d{1,3})\b/i;
+    for (const line of lines) {
+      if (isDOBFormat(line)) continue;
+      const m = line.match(xOfYRegex);
+      if (!m) continue;
+      const xNum = parseInt(m[1], 10);
+      const yNum = parseInt(m[2], 10);
+      if (!xNum || !yNum || xNum > yNum || yNum > 50) continue;
+      if (acceptCandidate(m[1], 'x-of-y-insert-position')) {
+        cardDetails.cardNumber = m[1];
+        console.log(`Detected card number from "X of Y" insert position: ${m[1]} (set size ${yNum}) on line "${line}"`);
+        return;
+      }
+    }
     
     // Helper: check if a number appears in a player bio context (height, weight, draft pick, etc.)
     const isPlayerBioNumber = (num: string, contextLine: string): boolean => {
@@ -1284,7 +1308,13 @@ function extractCardNumberPass(
       'WALK', 'OFF', 'RBI', 'ERA', 'AVG', 'OBP', 'OPS', 'WAR', 'SLG', 'WHIP',
       'PPG', 'RPG', 'APG', 'FGP', 'FTP', 'TD', 'YDS', 'ATT', 'QBR', 'INT',
       'SOG', 'PIM', 'SHG', 'GWG', 'GP', 'PKS', 'GA', 'CS', 'YC', 'RC',
-      'ALL', 'STAR', 'PRO', 'MVP', 'HOF', 'NL', 'AL',
+      'ALL', 'STAR', 'STARS', 'PRO', 'MVP', 'HOF', 'NL', 'AL',
+      // Insert / subset collection-name suffixes that hyphenate as
+      // "{LETTER}-{NAME}" (e.g. "L-STARS" parsed out of "ALL-STARS",
+      // "G-GREATS" out of "ALL-GREATS"). These are collection labels,
+      // never card-identifier codes.
+      'GREATS', 'LEGENDS', 'HEROES', 'ROOKIES', 'AGES', 'GIANTS',
+      'ELITE', 'PRIDE', 'KINGS', 'GREATEST', 'BEST', 'TIME',
       // Common English bio-text words that get hyphenated on card backs
       // (e.g. "TWO-GAME SPAN", "FIVE-TOOL", "BIG-LEAGUE", "ALL-STAR", "PRO-DEBUT",
       // "STAT-LINE", "GAME-DAY", "CALL-UP", "WALK-OFF", "FREE-AGENT", "RIGHT-HAND").
