@@ -354,13 +354,19 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
         // perfectly good card-number read that simply wasn't in our catalog.
         const usable = !!result.cardNumber || dbFound;
         if (usable) {
-          // Visual foil detector — always run in Gemini-first mode, matching
-          // the OCR path. If Gemini/DB hadn't already named a variant and the
-          // detector finds one with confidence >= 0.65, adopt it. If a variant
-          // is already set, the detector result is logged for telemetry but
-          // only overrides when the existing variant came from Gemini (never
-          // overrides an authoritative DB-sourced variation).
-          if (frontImage) {
+          // Visual foil detector — runs in Gemini-first mode as a fallback.
+          // KEY GATE: if Gemini explicitly returned `parallel: null` it has
+          // looked at both images and decided this is a base card. Trust
+          // it and SKIP the pixel detector. Gemini is far better at
+          // distinguishing colourful card art (e.g. an All-Star Game card
+          // with orange/yellow background, or a card whose background is a
+          // stadium scene) from a real foil parallel finish. The pixel
+          // detector is the leading source of false positives like
+          // "Orange Shimmer Foil" on plain base cards with vivid art. We
+          // only fall back to it when Gemini was uncertain (parallel
+          // missing/undefined in the raw output).
+          const geminiExplicitlyNoParallel = gem.parallel === null;
+          if (frontImage && !geminiExplicitlyNoParallel) {
             try {
               const { detectFoilFromImage } = await import('./visualFoilDetector');
               const visual = await detectFoilFromImage(
