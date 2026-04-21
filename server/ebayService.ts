@@ -794,9 +794,9 @@ export async function searchCardValues(
 
     // Terms that definitively indicate a parallel/special version (word-boundary matched)
     const HARD_PARALLEL_TERMS = [
-      'parallel', 'refractor', 'xfractor', 'rainbow', 'mojo', 'holo', 'holographic',
+      'parallel', 'refractor', 'xfractor', 'x-fractor', 'rainbow', 'mojo', 'holo', 'holographic',
       'foilboard', 'sparkle', 'glitter', 'prizm', 'laser', 'atomic', 'crackle', 'shimmer',
-      'foil',
+      'foil', 'sepia', 'wave', 'waves', 'velocity', 'fast break', 'cracked ice',
       // One-word foil compounds — `\bfoil\b` does NOT match "Holofoil" because
       // it's a single token. Add the common compounds explicitly so titles like
       // "2026 Topps Series 1 ... Holofoil & Confetti" get hard-filtered out of
@@ -958,7 +958,21 @@ export async function searchCardValues(
           const re = new RegExp(`\\b${kw.replace(/\s+/g, '\\s+')}\\b`, 'i');
           return re.test(t);
         });
-        if (hasParallel) return false;
+        if (hasParallel) {
+          console.log(`  ↳ Hard-filtered (parallel keyword): "${r.title}"`);
+          return false;
+        }
+
+        // "Chrome" hard-filter for base-card searches: only if our card's
+        // brand/set/collection isn't itself a *Chrome product line.
+        // (Topps Chrome / Bowman Chrome are base lines; "Stadium Club Chrome"
+        // is a parallel relative to "Stadium Club".)
+        const ownLine = `${(brand || '').toLowerCase()} ${(set || '').toLowerCase()} ${(rawCollection || '').toLowerCase()}`;
+        const ownIsChromeLine = /\bchrome\b/.test(ownLine);
+        if (!ownIsChromeLine && /\bchrome\b/i.test(t)) {
+          console.log(`  ↳ Hard-filtered (chrome parallel): our card isn't a Chrome line — "${r.title}"`);
+          return false;
+        }
 
         // Filter serially-numbered listings (e.g. /150, /75, /250) —
         // a non-numbered base card should never match a /NNN print run.
