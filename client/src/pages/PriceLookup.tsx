@@ -1,9 +1,9 @@
-import { useState, useEffect, useRef } from "react";
-import CardCameraCapture from "@/components/CardCameraCapture";
+import { useState, useEffect } from "react";
+import SimpleImageUploader from "@/components/SimpleImageUploader";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { Sparkles, ScanSearch, Camera, Image as ImageIcon, ScanLine } from "lucide-react";
+import { Sparkles, ScanSearch } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useOCR } from "@/hooks/use-ocr";
 import { useToast } from "@/hooks/use-toast";
@@ -164,29 +164,10 @@ async function fetchParallels(
   return merged;
 }
 
-// Decorative viewfinder corner brackets that frame the preview area.
-function CornerBrackets({ active }: { active: boolean }) {
-  const color = active ? 'border-emerald-400' : 'border-slate-400';
-  const base = `absolute w-6 h-6 border-2 ${color} pointer-events-none transition-colors`;
-  return (
-    <>
-      <div className={`${base} top-2 left-2 border-r-0 border-b-0 rounded-tl-lg`} />
-      <div className={`${base} top-2 right-2 border-l-0 border-b-0 rounded-tr-lg`} />
-      <div className={`${base} bottom-2 left-2 border-r-0 border-t-0 rounded-bl-lg`} />
-      <div className={`${base} bottom-2 right-2 border-l-0 border-t-0 rounded-br-lg`} />
-    </>
-  );
-}
-
 export default function PriceLookup() {
   const [frontImage, setFrontImage] = useState<string>("");
   const [backImage, setBackImage] = useState<string>("");
-  // Sequential capture state machine: which side we're currently capturing.
-  // 'idle' = nothing in flight, 'front' = camera/library expecting front image,
-  // 'back' = camera/library expecting back image.
-  const [captureStep, setCaptureStep] = useState<'idle' | 'front' | 'back'>('idle');
-  const [cameraOpen, setCameraOpen] = useState<boolean>(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [backCameraSignal, setBackCameraSignal] = useState<number>(0);
   const [showOCRResults, setShowOCRResults] = useState<boolean>(false);
   const [cardData, setCardData] = useState<Partial<CardFormValues> | null>(null);
   const [showPriceResults, setShowPriceResults] = useState<boolean>(false);
@@ -384,13 +365,11 @@ export default function PriceLookup() {
     setShowPriceResults(true);
   };
 
-  const handleAnalyzeRequest = async (frontOverride?: string, backOverride?: string) => {
-    const front = frontOverride ?? frontImage;
-    const back = backOverride ?? backImage;
-    if (!back) {
+  const handleAnalyzeRequest = async () => {
+    if (!backImage) {
       toast({
         title: "Back Image Required",
-        description: "Please capture the back of the card for detailed card information.",
+        description: "Please upload the BACK of the card for detailed card information.",
         variant: "destructive",
       });
       return;
@@ -401,8 +380,8 @@ export default function PriceLookup() {
       // Compress both images in parallel before upload — reduces size 5-10x
       // (camera images are often 1.5-3 MB; 1200px JPEG is plenty for OCR)
       const [backBlob, frontBlob] = await Promise.all([
-        compressImage(back),
-        front ? compressImage(front) : Promise.resolve(null),
+        compressImage(backImage),
+        frontImage ? compressImage(frontImage) : Promise.resolve(null),
       ]);
 
       const formData = new FormData();
@@ -470,93 +449,7 @@ export default function PriceLookup() {
     setShowParallelConfirm(false);
     setParallelOptions([]);
     setCardData(null);
-    setCaptureStep('idle');
-    setCameraOpen(false);
   };
-
-  // Sequential camera capture: front → back → auto-analyze.
-  const startCameraCapture = () => {
-    setFrontImage("");
-    setBackImage("");
-    setCaptureStep('front');
-    setCameraOpen(true);
-  };
-
-  const handleCameraCapture = (dataUrl: string) => {
-    if (captureStep === 'front') {
-      setFrontImage(dataUrl);
-      // Brief close so the camera reinitialises with the new title.
-      setCameraOpen(false);
-      setCaptureStep('back');
-      // Re-open immediately for the back. requestAnimationFrame avoids
-      // the modal flicker of doing it synchronously.
-      requestAnimationFrame(() => setCameraOpen(true));
-    } else if (captureStep === 'back') {
-      setBackImage(dataUrl);
-      setCameraOpen(false);
-      setCaptureStep('idle');
-      // Analysis fires from the autoAnalyze effect once backImage is set.
-    }
-  };
-
-  const handleCameraClose = () => {
-    setCameraOpen(false);
-    setCaptureStep('idle');
-  };
-
-  // Sequential photo library pick: front → back → auto-analyze.
-  const startLibraryPick = () => {
-    setFrontImage("");
-    setBackImage("");
-    setCaptureStep('front');
-    fileInputRef.current?.click();
-  };
-
-  const handleLibraryFile = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    event.target.value = '';
-    if (!file) {
-      setCaptureStep('idle');
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const dataUrl = e.target?.result as string;
-      if (captureStep === 'front') {
-        setFrontImage(dataUrl);
-        setCaptureStep('back');
-        // Re-open the file picker for the back image on next tick.
-        setTimeout(() => fileInputRef.current?.click(), 50);
-      } else if (captureStep === 'back') {
-        setBackImage(dataUrl);
-        setCaptureStep('idle');
-        // Analysis fires from the autoAnalyze effect once backImage is set.
-      }
-    };
-    reader.readAsDataURL(file);
-  };
-
-  // Auto-trigger analysis as soon as both sides are captured. Using an
-  // effect (rather than calling handleAnalyzeRequest inline from the capture
-  // handlers) avoids any closure / batched-state-update timing issues that
-  // can otherwise swallow the request and leave the user stuck on the
-  // upload screen with both images already captured.
-  useEffect(() => {
-    if (
-      captureStep === 'idle' &&
-      frontImage &&
-      backImage &&
-      !analyzing &&
-      !cardData &&
-      !showPriceResults &&
-      !showOCRResults &&
-      !showParallelConfirm &&
-      !showParallelPicker
-    ) {
-      handleAnalyzeRequest(frontImage, backImage);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [frontImage, backImage, captureStep]);
 
   // User said "Yes, this is a parallel" → show the picker
   const handleParallelConfirmYes = () => {
@@ -595,116 +488,72 @@ export default function PriceLookup() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <ScanSearch className="h-5 w-5" />
-              {analyzing ? 'Instant Card Recognition' : 'Scan Your Card'}
+              Upload Card Images
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            {!analyzing && (
-              <div className="flex items-center justify-between rounded-md border bg-muted/30 px-3 py-2">
-                <div className="flex items-center gap-2">
-                  <Sparkles className="h-4 w-4 text-purple-500" />
-                  <Label htmlFor="gemini-first" className="cursor-pointer text-sm font-medium">
-                    Try Gemini first (beta)
-                  </Label>
-                </div>
-                <Switch
-                  id="gemini-first"
-                  checked={useGeminiFirst}
-                  onCheckedChange={setUseGeminiFirst}
+            <div className="flex items-center justify-between rounded-md border bg-muted/30 px-3 py-2">
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-purple-500" />
+                <Label htmlFor="gemini-first" className="cursor-pointer text-sm font-medium">
+                  Try Gemini first (beta)
+                </Label>
+              </div>
+              <Switch
+                id="gemini-first"
+                checked={useGeminiFirst}
+                onCheckedChange={setUseGeminiFirst}
+              />
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <h3 className="font-medium mb-2">Front of Card</h3>
+                <SimpleImageUploader
+                  onImageCaptured={(img, source) => {
+                    setFrontImage(img);
+                    // Only auto-chain into the back-of-card camera if the user
+                    // captured the front via the live camera. If they uploaded
+                    // from their photo library, they almost certainly want to
+                    // upload the back the same way.
+                    if (!backImage && source === 'camera') {
+                      setBackCameraSignal((n) => n + 1);
+                    }
+                  }}
+                  label="Upload front image"
+                  cameraTitle="Front of Card"
+                  existingImage={frontImage}
                 />
               </div>
-            )}
-
-            {/* Card preview / scanning interstitial */}
-            <div
-              className={`relative mx-auto w-full max-w-sm aspect-[3/4] rounded-2xl overflow-hidden bg-slate-50 border-2 transition-all ${
-                analyzing
-                  ? 'border-emerald-400 shadow-[0_0_40px_rgba(52,211,153,0.45)]'
-                  : frontImage
-                  ? 'border-slate-300'
-                  : 'border-dashed border-slate-300'
-              }`}
+              <div>
+                <h3 className="font-medium mb-2">Back of Card</h3>
+                <SimpleImageUploader
+                  onImageCaptured={setBackImage}
+                  label="Upload back image"
+                  cameraTitle="Back of Card"
+                  existingImage={backImage}
+                  openCameraSignal={backCameraSignal}
+                />
+              </div>
+            </div>
+            
+            <Button 
+              onClick={handleAnalyzeRequest}
+              disabled={analyzing || !backImage}
+              className="w-full"
+              size="lg"
             >
-              {/* Corner brackets — always visible to evoke a viewfinder */}
-              <CornerBrackets active={analyzing} />
-
-              {frontImage ? (
-                <img src={frontImage} alt="Front preview" className="w-full h-full object-contain" />
-              ) : backImage ? (
-                <img src={backImage} alt="Back preview" className="w-full h-full object-contain" />
-              ) : (
-                <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400 gap-2">
-                  <ScanLine className="h-12 w-12" />
-                  <p className="text-xs uppercase tracking-widest font-semibold">Scanner Ready</p>
-                </div>
-              )}
-
-              {analyzing && (
+              {analyzing ? (
                 <>
-                  <div className="absolute top-3 left-3 flex items-center gap-1.5 bg-black/70 text-emerald-300 text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded-full">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                    Scanning
-                  </div>
-                  {/* Animated scan line sweep */}
-                  <div className="pointer-events-none absolute inset-x-0 top-0 h-full overflow-hidden">
-                    <div className="absolute inset-x-0 h-1 bg-gradient-to-r from-transparent via-emerald-400 to-transparent shadow-[0_0_12px_rgba(52,211,153,0.8)] animate-scan-sweep" />
-                  </div>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                  Analyzing Card...
+                </>
+              ) : (
+                <>
+                  <ScanSearch className="h-4 w-4 mr-2" />
+                  Analyze Card & Get Prices
                 </>
               )}
-            </div>
-
-            {analyzing ? (
-              <div className="flex flex-col items-center gap-3 pt-2">
-                <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm font-medium">
-                  <ScanSearch className="h-4 w-4" />
-                  Analyzing card...
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-bounce" style={{ animationDelay: '0ms' }} />
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-bounce" style={{ animationDelay: '150ms' }} />
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-bounce" style={{ animationDelay: '300ms' }} />
-                </div>
-              </div>
-            ) : (
-              <>
-                <p className="text-center text-sm text-muted-foreground">
-                  {captureStep === 'front'
-                    ? 'Capture the FRONT of the card'
-                    : captureStep === 'back'
-                    ? 'Now capture the BACK of the card'
-                    : 'Drop a card into the portal to unlock real-time market insights'}
-                </p>
-                <div className="grid grid-cols-2 gap-3">
-                  <Button
-                    onClick={startCameraCapture}
-                    size="lg"
-                    className="bg-slate-800 hover:bg-slate-900 text-white"
-                  >
-                    <Camera className="h-4 w-4 mr-2" />
-                    Take a Photo
-                  </Button>
-                  <Button onClick={startLibraryPick} size="lg" variant="outline">
-                    <ImageIcon className="h-4 w-4 mr-2" />
-                    Photo Library
-                  </Button>
-                </div>
-              </>
-            )}
-
-            <input
-              type="file"
-              ref={fileInputRef}
-              onChange={handleLibraryFile}
-              accept="image/jpeg,image/png,image/heic,image/heif,image/webp"
-              className="hidden"
-            />
-
-            <CardCameraCapture
-              open={cameraOpen}
-              title={captureStep === 'back' ? 'Back of Card' : 'Front of Card'}
-              onCapture={handleCameraCapture}
-              onClose={handleCameraClose}
-            />
+            </Button>
           </CardContent>
         </Card>
       )}

@@ -79,15 +79,10 @@ export default {
             height: "0",
           },
         },
-        "scan-sweep": {
-          "0%": { transform: "translateY(0%)" },
-          "100%": { transform: "translateY(calc(100% - 4px))" },
-        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
-        "scan-sweep": "scan-sweep 1.6s ease-in-out infinite alternate",
       },
     },
   },
