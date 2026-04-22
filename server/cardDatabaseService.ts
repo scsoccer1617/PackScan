@@ -614,24 +614,29 @@ export async function lookupCard(input: CardLookupInput): Promise<CardLookupResu
       // alphabetically-shortest set (e.g. Topps 2024 Ohtani #1 quietly
       // resolved to "Big League" or "Chrome" with no way for the user to
       // tell us they actually have a different one).
-      const nonSpecialty = cardRows.filter(r => !isSpecialtySubset(r.collection) && !r.collection.includes(' - '));
-      if (nonSpecialty.length >= 2) {
-        const ocrScores = nonSpecialty.map(r => ocrMatchScore(r));
+      let pool = cardRows.filter(r => !isSpecialtySubset(r.collection) && !r.collection.includes(' - '));
+      // Narrow to player-matching rows first when a player name is available.
+      // Card # often collides across sets with completely different players
+      // (e.g. Topps 2024 #1 = Ohtani in some sets, Judge / Trout / Acuña in
+      // others). Without this narrowing the OCR-vocab tie check almost never
+      // fires because non-Ohtani rows count as "differentiated by player".
+      if (lastNameNormGlobal && pool.length > 1) {
+        const playerMatches = pool.filter(r => r.playerName.toLowerCase().includes(lastNameNormGlobal));
+        if (playerMatches.length >= 1) pool = playerMatches;
+      }
+      if (pool.length >= 2) {
+        const ocrScores = pool.map(r => ocrMatchScore(r));
         const topOcr = Math.max(...ocrScores);
-        const ocrWinners = nonSpecialty.filter(r => ocrMatchScore(r) === topOcr);
-        const nameMatchCount = lastNameNormGlobal
-          ? nonSpecialty.filter(r => r.playerName.toLowerCase().includes(lastNameNormGlobal)).length
-          : 0;
-        const playerSignalUnique = lastNameNormGlobal &&
-          nameMatchCount > 0 && nameMatchCount < nonSpecialty.length;
+        const ocrWinners = pool.filter(r => ocrMatchScore(r) === topOcr);
         const ocrSignalUnique = topOcr > 0 && ocrWinners.length === 1;
-        if (!ocrSignalUnique && !playerSignalUnique) {
-          // No signal differentiates the top candidates. Dedupe by
-          // (collection, set) — two CSV rows with the same set/collection
-          // and player are the same card from the user's perspective.
+        if (!ocrSignalUnique) {
+          // No signal differentiates the player-matched candidates. Dedupe by
+          // (collection, set, player) — duplicate CSV rows with the same
+          // set/collection and player are the same card from the user's
+          // perspective.
           const seen = new Set<string>();
           const deduped: typeof cardRows = [];
-          for (const r of nonSpecialty) {
+          for (const r of pool) {
             const key = `${(r.collection || '').toLowerCase().trim()}||${(r.set || '').toLowerCase().trim()}||${(r.playerName || '').toLowerCase().trim()}`;
             if (seen.has(key)) continue;
             seen.add(key);
