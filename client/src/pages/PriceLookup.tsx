@@ -10,6 +10,7 @@ import { useToast } from "@/hooks/use-toast";
 import OCRResults from "@/components/OCRResults";
 import EbayPriceResults from "@/components/EbayPriceResults";
 import { HoloGradeCard, type HoloGrade } from "@/components/HoloGradeCard";
+import GradedPriceBreakdown from "@/components/GradedPriceBreakdown";
 import ParallelPickerSheet, { ParallelOption } from "@/components/ParallelPickerSheet";
 import CollectionPickerSheet, { CollectionCandidate } from "@/components/CollectionPickerSheet";
 import { CardFormValues } from "@shared/schema";
@@ -689,6 +690,12 @@ export default function PriceLookup() {
       {showPriceResults && cardData && (
         <div className="space-y-4">
           {holoGrade && <HoloGradeCard grade={holoGrade} />}
+          {holoGrade && (
+            <GradedPriceBreakdown
+              cardData={cardData}
+              holoOverall={holoGrade.overall}
+            />
+          )}
           <EbayPriceResults 
             cardData={cardData} 
             frontImage={frontImage}
