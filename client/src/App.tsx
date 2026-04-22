@@ -3,7 +3,8 @@ import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import NotFound from "@/pages/not-found";
 import Home from "@/pages/Home";
-import PriceLookup from "@/pages/PriceLookup";
+import Scan from "@/pages/Scan";
+import ScanResult from "@/pages/ScanResult";
 import CardSearch from "@/pages/CardSearch";
 import CardDatabaseAdmin from "@/pages/CardDatabaseAdmin";
 import Login from "@/pages/Login";
@@ -16,6 +17,7 @@ import Collection from "@/pages/Collection";
 import Stats from "@/pages/Stats";
 import AppShell from "@/components/AppShell";
 import { AuthProvider, useAuth } from "@/hooks/use-auth";
+import { ScanFlowProvider } from "@/hooks/use-scan-flow";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { apiRequest } from "@/lib/queryClient";
@@ -106,22 +108,27 @@ function Router() {
     return <Redirect to="/login" />;
   }
 
-  // Authenticated routes — wrapped in new shell
+  // Authenticated routes — wrapped in new shell. ScanFlowProvider wraps
+  // all auth routes so the /scan → /result navigation can share state
+  // without localStorage (which is blocked in some sandboxed builds).
   return (
-    <AppShell>
-      <VerificationBanner />
-      <Switch>
-        <Route path="/" component={Home} />
-        <Route path="/scan" component={PriceLookup} />
-        <Route path="/search" component={CardSearch} />
-        <Route path="/collection" component={Collection} />
-        <Route path="/sheets" component={MySheets} />
-        <Route path="/stats" component={Stats} />
-        <Route path="/account" component={AccountSettings} />
-        <Route path="/admin/card-database" component={CardDatabaseAdmin} />
-        <Route component={NotFound} />
-      </Switch>
-    </AppShell>
+    <ScanFlowProvider>
+      <AppShell>
+        <VerificationBanner />
+        <Switch>
+          <Route path="/" component={Home} />
+          <Route path="/scan" component={Scan} />
+          <Route path="/result" component={ScanResult} />
+          <Route path="/search" component={CardSearch} />
+          <Route path="/collection" component={Collection} />
+          <Route path="/sheets" component={MySheets} />
+          <Route path="/stats" component={Stats} />
+          <Route path="/account" component={AccountSettings} />
+          <Route path="/admin/card-database" component={CardDatabaseAdmin} />
+          <Route component={NotFound} />
+        </Switch>
+      </AppShell>
+    </ScanFlowProvider>
   );
 }
 
