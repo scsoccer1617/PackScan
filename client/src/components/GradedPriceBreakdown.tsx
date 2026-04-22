@@ -134,7 +134,7 @@ function TierColumn({
           <span className="text-sm font-semibold text-slate-700">{label}</span>
         </div>
         <div className="text-xs text-slate-500">{sublabel}</div>
-        <div className="text-sm text-slate-400 mt-2">\u2014</div>
+        <div className="text-sm text-slate-400 mt-2">—</div>
       </div>
     );
   }
