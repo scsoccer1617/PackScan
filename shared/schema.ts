@@ -255,6 +255,45 @@ export type CardVariationsInsert = z.infer<typeof cardVariationsInsertSchema>;
 export type CardVariation = typeof cardVariations.$inferSelect;
 
 // =============================================
+// Holo — AI Condition Grading
+// =============================================
+// One row per Holo grading run. A grade can stand alone (attached to a scan
+// that wasn't saved as a Card yet) OR be linked to a saved Card via cardId.
+// The overall_grade uses half-step values (1.0..10.0) per PSA convention.
+
+export const scanGrades = pgTable("scan_grades", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").references(() => users.id, { onDelete: 'cascade' }),
+  cardId: integer("card_id").references(() => cards.id, { onDelete: 'set null' }),
+  frontImagePath: text("front_image_path"),
+  backImagePath: text("back_image_path"),
+  // Sub-grades (1..10, half-steps). centeringBack is null when back image
+  // wasn't provided.
+  centering: numeric("centering", { precision: 3, scale: 1 }).notNull(),
+  centeringBack: numeric("centering_back", { precision: 3, scale: 1 }),
+  corners: numeric("corners", { precision: 3, scale: 1 }).notNull(),
+  edges: numeric("edges", { precision: 3, scale: 1 }).notNull(),
+  surface: numeric("surface", { precision: 3, scale: 1 }).notNull(),
+  overallGrade: numeric("overall_grade", { precision: 3, scale: 1 }).notNull(),
+  gradeLabel: text("grade_label").notNull(),            // e.g. "NM-MT 8"
+  // Free-form per-sub-grade notes + overall bullets, stored as JSON text.
+  // Shape: { centering: string, centeringBack: string|null, corners: string,
+  //         edges: string, surface: string, overall: string[] }
+  notes: jsonb("notes").notNull(),
+  model: text("model").notNull(),                       // e.g. "claude-sonnet-4-5"
+  confidence: numeric("confidence", { precision: 4, scale: 3 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("scan_grades_user_idx").on(table.userId),
+  index("scan_grades_card_idx").on(table.cardId),
+  index("scan_grades_created_idx").on(table.createdAt),
+]);
+
+export const scanGradesInsertSchema = createInsertSchema(scanGrades);
+export type ScanGradeInsert = z.infer<typeof scanGradesInsertSchema>;
+export type ScanGrade = typeof scanGrades.$inferSelect;
+
+// =============================================
 // Import History (tracks each CSV import event)
 // =============================================
 
