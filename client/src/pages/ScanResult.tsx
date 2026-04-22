@@ -352,7 +352,16 @@ export default function ScanResult() {
 
   const handleParallelConfirm = (foilType: string, serialNumber?: string) => {
     if (!cardData) return;
-    const updated: Partial<CardFormValues> = { ...cardData, foilType };
+    // The user explicitly picked this parallel in the sheet — treat their
+    // label as ground truth for downstream eBay searches. Set BOTH foilType
+    // (for back-compat with existing pricing code) AND variant (the field
+    // the server-side getEbaySearchUrl prefers) so the picked name actually
+    // makes it into the eBay query.
+    const updated: Partial<CardFormValues> = {
+      ...cardData,
+      foilType,
+      variant: foilType || "",
+    };
     if (serialNumber) {
       const limit = serialNumber.replace(/\//g, "");
       const existing = (cardData.serialNumber || "").trim();
@@ -516,16 +525,18 @@ export default function ScanResult() {
         onConfirm={handleCollectionConfirm}
       />
 
-      {/* Tabs — default to Details so the user lands on card info first
-          (brand, set, player, images) and can verify OCR before jumping
-          to grade/pricing or listings. */}
+      {/* Tabs — two tabs now: Details (card info + scanned images) and
+          Prices / Listings (Holo grade + graded-tier breakdown + eBay comps
+          stacked vertically). We merged the old "Grade & Pricing" and
+          "Listings" tabs into one "Prices / Listings" tab so the user sees
+          grade, price bands, and raw comps in a single scroll without
+          tab-hopping. */}
       <Tabs defaultValue="details" className="pt-3">
-        <TabsList className="mx-4 grid grid-cols-3 bg-slate-100/60">
+        <TabsList className="mx-4 grid grid-cols-2 bg-slate-100/60">
           <TabsTrigger value="details" data-testid="tab-details">Details</TabsTrigger>
-          <TabsTrigger value="grade-pricing" data-testid="tab-grade-pricing">
-            Grade &amp; Pricing
+          <TabsTrigger value="prices-listings" data-testid="tab-prices-listings">
+            Prices / Listings
           </TabsTrigger>
-          <TabsTrigger value="listings" data-testid="tab-listings">Listings</TabsTrigger>
         </TabsList>
 
         <TabsContent value="details" className="mt-4 space-y-3">
@@ -536,7 +547,7 @@ export default function ScanResult() {
           />
         </TabsContent>
 
-        <TabsContent value="grade-pricing" className="mt-4 space-y-4 px-4">
+        <TabsContent value="prices-listings" className="mt-4 space-y-4 px-4">
           {holoGrade && <HoloGradeCard grade={holoGrade} />}
           {holoGrade && (
             <GradedPriceBreakdown
@@ -566,23 +577,6 @@ export default function ScanResult() {
           {!holoGrade && (
             <p className="text-xs text-slate-500 text-center">
               No Holo grade returned for this scan.
-            </p>
-          )}
-        </TabsContent>
-
-        <TabsContent value="listings" className="mt-4 space-y-3 px-4">
-          {showPriceResults ? (
-            <EbayPriceResults
-              cardData={cardData}
-              frontImage={frontImage}
-              backImage={backImage}
-              onCardDataUpdate={(updatedData) => {
-                flow.setCardData(updatedData);
-              }}
-            />
-          ) : (
-            <p className="text-sm text-slate-500">
-              Complete the prompts above to load pricing.
             </p>
           )}
         </TabsContent>

@@ -134,7 +134,7 @@ function TierColumn({
           <span className="text-sm font-semibold text-slate-700">{label}</span>
         </div>
         <div className="text-xs text-slate-500">{sublabel}</div>
-        <div className="text-sm text-slate-400 mt-2">\u2014</div>
+        <div className="text-sm text-slate-400 mt-2">—</div>
       </div>
     );
   }
@@ -197,7 +197,7 @@ function TierColumn({
           </div>
           {low > 0 && high > 0 && low !== high && (
             <div className="text-xs text-slate-500 tabular-nums">
-              {formatPrice(low)} \u2013 {formatPrice(high)}
+              {formatPrice(low)} – {formatPrice(high)}
             </div>
           )}
           <div className="flex items-center justify-between gap-2 mt-1">

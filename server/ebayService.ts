@@ -538,7 +538,13 @@ export async function searchCardValues(
     // Use the product set name ("Series 1") for eBay searches when available,
     // because that's what sellers actually write in listing titles.
     // Fall back to collection only if it's not a generic placeholder like "Base Set".
-    const searchSet = set ? normalizeSetForSearch(set, brand) : '';
+    // Strip generic placeholder values ("Base", "Base Set") from BOTH set and
+    // collection — eBay sellers never write those words in listing titles and
+    // including them tanks recall.
+    const rawSet = set || '';
+    const searchSet = rawSet && !GENERIC_COLLECTION_NAMES.has(rawSet.toLowerCase())
+      ? normalizeSetForSearch(rawSet, brand)
+      : '';
     const collectionForSearch = !GENERIC_COLLECTION_NAMES.has(rawCollection.toLowerCase())
       ? normalizeCollectionForSearch(rawCollection)
       : '';
@@ -1165,7 +1171,12 @@ export function getEbaySearchUrl(
   // Prefer the product Set name (e.g. "Holiday", "Series 1") over the generic
   // Collection name (e.g. "Base Set") that eBay sellers never write in titles.
   const rawCollection = collection || '';
-  const searchSetName = set ? normalizeSetForSearch(set, brand) : '';
+  const rawSet = set || '';
+  // Strip generic placeholder values from BOTH set and collection — see
+  // matching comment in searchCardValues above.
+  const searchSetName = rawSet && !GENERIC_COLLECTION_NAMES.has(rawSet.toLowerCase())
+    ? normalizeSetForSearch(rawSet, brand)
+    : '';
   const collectionForSearch = !GENERIC_COLLECTION_NAMES.has(rawCollection.toLowerCase())
     ? normalizeCollectionForSearch(rawCollection)
     : '';
@@ -1192,8 +1203,11 @@ export function getEbaySearchUrl(
     keywords += ' numbered';
   }
 
-  // Prefer an explicit variant (e.g. "Hidden Elf Variation") over the generic
-  // foilType when both exist — variant is the more specific descriptor.
+  // Prefer an explicit variant (e.g. "Hidden Elf Variation" or a
+  // user-confirmed parallel like "Sandglitter") over the generic foilType
+  // when both exist — variant is the more specific descriptor and, when it
+  // came from the picker, the user's word is ground truth. Use it verbatim:
+  // do NOT remap through getFoilSearchTerm which could shorten or drop it.
   if (variant && variant.trim()) {
     keywords += ` ${variant.trim()}`;
   } else if (foilType) {
@@ -1209,5 +1223,14 @@ export function getEbaySearchUrl(
   }
 
   // Encode for URL — sold/completed listings (last 90 days), sorted by most recent
-  return `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(keywords)}&_sacat=213&LH_Sold=1&LH_Complete=1&_sop=13`;
+  const finalUrl = `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(keywords)}&_sacat=213&LH_Sold=1&LH_Complete=1&_sop=13`;
+  console.log('[getEbaySearchUrl]', {
+    keywords,
+    variant: variant || null,
+    foilType: foilType || null,
+    set: set || null,
+    collection: collection || null,
+    gradeKeyword: gradeKeyword || null,
+  });
+  return finalUrl;
 }
