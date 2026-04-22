@@ -164,7 +164,9 @@ function TierColumn({
 
       {tier.empty ? (
         <div className="flex flex-col gap-2 mt-1">
-          <div className="text-sm text-slate-500 italic">No comps yet</div>
+          <div className="text-sm text-slate-500 italic">
+            {tier.dataType === "current" ? "No active listings yet" : "No comps yet"}
+          </div>
           {tier.searchUrl && (
             <a
               href={tier.searchUrl}
@@ -192,7 +194,7 @@ function TierColumn({
               {formatPrice(med)}
             </span>
             <span className="text-[11px] text-slate-500 uppercase tracking-wide">
-              {tier.dataType === "current" ? "listed" : "sold"} median
+              {tier.dataType === "current" ? "asking" : "sold"} median
             </span>
           </div>
           {low > 0 && high > 0 && low !== high && (
@@ -202,7 +204,7 @@ function TierColumn({
           )}
           <div className="flex items-center justify-between gap-2 mt-1">
             <span className="text-xs text-slate-500">
-              {tier.count} comp{tier.count === 1 ? "" : "s"}
+              {tier.count} listing{tier.count === 1 ? "" : "s"}
             </span>
             {tier.searchUrl && (
               <a
@@ -329,10 +331,10 @@ export default function GradedPriceBreakdown({
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <TrendingUp className="h-4 w-4" />
-            Comparable Sales
+            Comparable Listings
           </CardTitle>
           <p className="text-xs text-slate-500">
-            Gathering raw, at-grade, and PSA 10 comps from eBay\u2026
+            Gathering raw, at-grade, and PSA 10 listings from eBay…
           </p>
         </CardHeader>
         <CardContent>
@@ -353,7 +355,7 @@ export default function GradedPriceBreakdown({
     return (
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Comparable Sales</CardTitle>
+          <CardTitle className="text-base">Comparable Listings</CardTitle>
         </CardHeader>
         <CardContent>
           <p className="text-sm text-slate-500">{error}</p>
@@ -373,11 +375,12 @@ export default function GradedPriceBreakdown({
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base">
           <TrendingUp className="h-4 w-4" />
-          Comparable Sales
+          Comparable Listings
         </CardTitle>
         <p className="text-xs text-slate-500">
-          Recent eBay sold prices at three slab tiers. Median of comparable
-          listings \u2014 not an AI estimate.
+          Current eBay asking prices at three slab tiers. Median of active
+          listings — not an AI estimate. (Sold data coming once we're
+          approved for eBay Marketplace Insights.)
         </p>
       </CardHeader>
       <CardContent>

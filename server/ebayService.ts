@@ -637,11 +637,17 @@ export async function searchCardValues(
     }
     
     let keywords = buildKeywords();
-    console.log('Searching eBay sold listings with keywords:', keywords);
+    console.log('Searching eBay active listings with keywords:', keywords);
 
     const safePlayerName = playerName || '';
     let results: EbaySearchResult[] = [];
-    let dataType: 'sold' | 'current' = 'sold';
+    // PackScan is active-listings-only: eBay's Finding API findCompletedItems
+    // call was deprecated in 2020 and Marketplace Insights (the official sold
+    // replacement) requires business approval that hasn't landed yet. Until
+    // it does, we source all pricing from the Browse API (active asks). When
+    // MSI access is granted we'll gate a 'sold' path behind EBAY_MSI_ENABLED
+    // and flip the label automatically.
+    const dataType: 'sold' | 'current' = 'current';
     const fallbackSearchUrl = getEbaySearchUrl(safePlayerName, cardNumber, brand, year, collection, '', isNumbered, foilType, serialNumber, variant, set, gradeKeyword || undefined);
 
     // Use eBay Finding API (findCompletedItems) to get sold listings.
@@ -746,18 +752,11 @@ export async function searchCardValues(
       return errorId === '10001' || err?.response?.status === 500;
     };
 
-    // Wraps callEbaySoldSearch with a Browse API fallback on rate-limit
+    // Active-listings-only: route every pricing query through Browse API.
+    // callEbaySoldSearch / isFindingApiRateLimit are retained above for the
+    // day Marketplace Insights access unlocks sold data — do not delete.
     const callSearchWithFallback = async (query: string): Promise<EbaySearchResult[]> => {
-      try {
-        return await callEbaySoldSearch(query);
-      } catch (findingErr: any) {
-        if (isFindingApiRateLimit(findingErr)) {
-          console.log('[eBay] Finding API rate-limited — falling back to Browse API (active listings)');
-          dataType = 'current';
-          return await callEbayBrowseSearch(query);
-        }
-        throw findingErr;
-      }
+      return callEbayBrowseSearch(query);
     };
 
     try {
@@ -798,7 +797,7 @@ export async function searchCardValues(
         results: [],
         searchUrl: fallbackSearchUrl,
         errorMessage: 'Price data currently unavailable',
-        dataType: 'sold' as const
+        dataType: 'current' as const
       };
       searchCache.set(cacheKey, { data: errorResp, timestamp: Date.now(), isError: true });
       return errorResp;
@@ -809,7 +808,7 @@ export async function searchCardValues(
         averageValue: 0,
         results: [],
         searchUrl: fallbackSearchUrl,
-        errorMessage: dataType === 'sold' ? 'No sold listings found' : 'No active listings found',
+        errorMessage: 'No active listings found',
         dataType
       };
       searchCache.set(cacheKey, { data: emptyResp, timestamp: Date.now(), isError: true });
@@ -1222,8 +1221,12 @@ export function getEbaySearchUrl(
     keywords += ` ${gradeKeyword.trim()}`;
   }
 
-  // Encode for URL — sold/completed listings (last 90 days), sorted by most recent
-  const finalUrl = `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(keywords)}&_sacat=213&LH_Sold=1&LH_Complete=1&_sop=13`;
+  // Active listings only (PackScan sources pricing from the Browse API —
+  // sold access blocked behind Marketplace Insights approval). Sorted by
+  // newest listings so the outbound "View on eBay" link matches the asks
+  // the user just saw on the tier card. When MSI access lands, flip these
+  // back to LH_Sold=1&LH_Complete=1.
+  const finalUrl = `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(keywords)}&_sacat=213&_sop=10`;
   console.log('[getEbaySearchUrl]', {
     keywords,
     variant: variant || null,
