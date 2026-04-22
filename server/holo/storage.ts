@@ -7,7 +7,7 @@
 import { desc, eq } from "drizzle-orm";
 import { db } from "@db";
 import { scanGrades, type ScanGrade } from "@shared/schema";
-import type { HoloGrade } from "./cardGrader";
+import type { HoloGrade, HoloIdentification } from "./cardGrader";
 
 export type SaveGradeInput = {
   userId?: number | null;
@@ -15,6 +15,8 @@ export type SaveGradeInput = {
   frontImagePath?: string | null;
   backImagePath?: string | null;
   grade: HoloGrade;
+  /** Optional identification captured in the same Claude call. */
+  identification?: HoloIdentification | null;
 };
 
 export async function saveGrade(input: SaveGradeInput): Promise<ScanGrade> {
@@ -44,6 +46,11 @@ export async function saveGrade(input: SaveGradeInput): Promise<ScanGrade> {
       },
       model: grade.model,
       confidence: grade.confidence.toFixed(3),
+      identification: input.identification ?? null,
+      identificationConfidence:
+        input.identification?.confidence != null
+          ? input.identification.confidence.toFixed(3)
+          : null,
     })
     .returning();
   return row;
@@ -67,8 +74,14 @@ export async function getGradeById(id: number): Promise<ScanGrade | undefined> {
   return row;
 }
 
-/** Shape a DB row back into the same HoloGrade contract the UI consumes. */
-export function hydrateGrade(row: ScanGrade): HoloGrade & { id: number; createdAt: Date } {
+/** Shape a DB row back into the same HoloGrade + identification contract the UI consumes. */
+export function hydrateGrade(
+  row: ScanGrade,
+): HoloGrade & {
+  id: number;
+  createdAt: Date;
+  identification: HoloIdentification | null;
+} {
   const notes = (row.notes ?? {}) as Record<string, any>;
   return {
     id: row.id,
@@ -87,5 +100,6 @@ export function hydrateGrade(row: ScanGrade): HoloGrade & { id: number; createdA
     confidence: row.confidence != null ? Number(row.confidence) : 0,
     model: row.model,
     frontOnly: row.centeringBack == null,
+    identification: (row.identification as HoloIdentification | null) ?? null,
   };
 }

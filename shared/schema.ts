@@ -282,6 +282,12 @@ export const scanGrades = pgTable("scan_grades", {
   notes: jsonb("notes").notNull(),
   model: text("model").notNull(),                       // e.g. "claude-sonnet-4-5"
   confidence: numeric("confidence", { precision: 4, scale: 3 }),
+  // Identification captured alongside the grade in the same Claude call.
+  // Shape: { player, brand, setName, collection, year, cardNumber,
+  //          serialNumber, parallel, variant, cmpCode, sport, confidence }
+  // Null on legacy rows written before identification was added.
+  identification: jsonb("identification"),
+  identificationConfidence: numeric("identification_confidence", { precision: 4, scale: 3 }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => [
   index("scan_grades_user_idx").on(table.userId),
