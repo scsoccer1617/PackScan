@@ -74,6 +74,12 @@ export default function ScanResult() {
   // briefly sees hasResult=false, and bounces back to /scan.
   const [bootChecked, setBootChecked] = useState(false);
 
+  // Once the user has answered the "Is this a parallel?" prompt (Yes opens
+  // the picker; No prices as base), we must NOT re-prompt when the flow
+  // re-runs on the resulting cardData change — otherwise the confirm card
+  // stays visible alongside the picker / prices.
+  const [parallelDecided, setParallelDecided] = useState(false);
+
   const cardData = flow.cardData;
   const holoGrade = flow.holoGrade;
   const frontImage = flow.frontImage;
@@ -106,10 +112,16 @@ export default function ScanResult() {
   useEffect(() => {
     if (!cardData) return;
     // Resetting both flags first avoids flashing stale eBay results while
-    // we decide which prompt (if any) to show.
+    // we decide which prompt (if any) to show. We deliberately keep
+    // showParallelPicker as-is when a decision has been recorded: tapping
+    // Yes opens the picker AND updates cardData, which re-runs this
+    // effect — so clearing the picker flag here would close it on the
+    // same tick as opening it.
     setShowPriceResults(false);
-    setShowParallelConfirm(false);
-    setShowParallelPicker(false);
+    if (!parallelDecided) {
+      setShowParallelConfirm(false);
+      setShowParallelPicker(false);
+    }
     setShowCollectionPicker(false);
     runPostScanFlow(cardData).catch((err) => {
       // fetchParallels or any downstream helper failed — don't leave the
@@ -338,20 +350,26 @@ export default function ScanResult() {
   };
 
   const handleParallelConfirmYes = () => {
+    setParallelDecided(true);
     setShowParallelConfirm(false);
     setShowParallelPicker(true);
   };
 
   const handleParallelConfirmNo = () => {
     if (!cardData) return;
-    flow.setCardData({ ...cardData, foilType: "" });
+    setParallelDecided(true);
     setShowParallelConfirm(false);
+    setShowParallelPicker(false);
     setParallelOptions([]);
     setDetectedKeyword("");
     setShowPriceResults(true);
+    // Clear the OCR-detected foil so the downstream flow doesn't ask
+    // again and eBay searches run against the base card.
+    flow.setCardData({ ...cardData, foilType: "" });
   };
 
   const handleScanAnother = () => {
+    setParallelDecided(false);
     flow.reset();
     navigate("/scan");
   };
