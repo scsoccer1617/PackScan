@@ -30,6 +30,9 @@ import fs from 'fs';
 import { gunzipSync } from 'zlib';
 import { pool as sourcePool } from '../db';
 import { runPushToProdJob, makeInitialJobState, type PushJobState } from './pushToProd';
+import { gradeCard, HoloNotConfiguredError, type HoloGrade } from './holo/cardGrader';
+import { saveGrade, listGradesForUser, hydrateGrade } from './holo/storage';
+import { requireAuth } from './auth';
 
 // Configure multer for handling file uploads
 const upload = multer({
@@ -1022,7 +1025,53 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       console.log('Starting dual-image OCR + eBay price analysis...');
       console.log('ROUTE HANDLER IS DEFINITELY CALLED!');
-      
+
+      // Kick off Holo grading in parallel with OCR + eBay so it doesn't add latency.
+      // This promise is resolved (with a HoloGrade + id/createdAt) or null if grading fails.
+      const userId = (req.user as any)?.id as number | undefined;
+      const frontFileForHolo = files.frontImage?.[0];
+      const backFileForHolo = files.backImage?.[0];
+      const holoPromise: Promise<(HoloGrade & { id: number; createdAt: Date }) | null> = (async () => {
+        try {
+          if (!frontFileForHolo) {
+            console.log('Holo: no front image provided, skipping grading');
+            return null;
+          }
+          const frontInput = {
+            base64: frontFileForHolo.buffer.toString('base64'),
+            mediaType: (frontFileForHolo.mimetype || 'image/jpeg') as any,
+          };
+          const backInput = backFileForHolo
+            ? {
+                base64: backFileForHolo.buffer.toString('base64'),
+                mediaType: (backFileForHolo.mimetype || 'image/jpeg') as any,
+              }
+            : undefined;
+          console.log('Holo: starting grade analysis...');
+          const grade = await gradeCard(frontInput, backInput);
+          console.log('Holo: grade complete -', grade.label, `(${grade.overall})`);
+          try {
+            const row = await saveGrade({
+              userId: userId ?? null,
+              frontImagePath: frontFileForHolo.originalname || null,
+              backImagePath: backFileForHolo?.originalname || null,
+              grade,
+            });
+            return { ...grade, id: row.id, createdAt: row.createdAt };
+          } catch (persistErr) {
+            console.warn('Holo: failed to persist grade, returning in-memory:', persistErr);
+            return { ...grade, id: 0, createdAt: new Date() };
+          }
+        } catch (err) {
+          if (err instanceof HoloNotConfiguredError) {
+            console.log('Holo: ANTHROPIC_API_KEY not set, skipping grading');
+          } else {
+            console.error('Holo: grading failed, continuing scan without grade:', err);
+          }
+          return null;
+        }
+      })();
+
       // Analyze back image for detailed card information
       const backFile = files.backImage[0];
       console.log('Analyzing back image for card details...');
@@ -1064,6 +1113,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Dual-side analysis now handles rookie card detection automatically
 
       if (!backOcrResponse.success || !backOcrResponse.data) {
+        const holo = await holoPromise;
         return res.json({
           success: true,
           data: {
@@ -1074,7 +1124,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
               searchUrl: '',
               errorMessage: 'Could not analyze card for pricing',
               dataType: 'sold'
-            }
+            },
+            holo,
           }
         });
       }
@@ -1127,15 +1178,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
             updatedCardData.collection = ebayResults.discoveredCollection;
           }
           
+          const holo = await holoPromise;
           return res.json({
             success: true,
             data: {
               ...updatedCardData,
-              ebayResults: ebayResults
+              ebayResults: ebayResults,
+              holo,
             }
           });
         } else {
           console.log('Search query too short, skipping eBay lookup');
+          const holo = await holoPromise;
           return res.json({
             success: true,
             data: {
@@ -1147,12 +1201,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 searchUrl: '',
                 errorMessage: 'Insufficient card information for price lookup',
                 dataType: 'sold'
-              }
+              },
+              holo,
             }
           });
         }
       } catch (ebayError) {
         console.error('eBay search error:', ebayError);
+        const holo = await holoPromise;
         return res.json({
           success: true,
           data: {
@@ -1164,7 +1220,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
               searchUrl: '',
               errorMessage: 'eBay search failed',
               dataType: 'sold'
-            }
+            },
+            holo,
           }
         });
       }
@@ -1998,6 +2055,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (err: any) {
       console.error('Error fetching variation options:', err.message);
       return res.status(500).json({ error: 'Failed to fetch variation options' });
+    }
+  });
+
+  // Holo grade history for the authenticated user
+  app.get(`${apiPrefix}/scan-grades`, requireAuth, async (req, res) => {
+    try {
+      const userId = (req.user as any)?.id as number;
+      const limit = Math.min(Math.max(Number(req.query.limit) || 25, 1), 100);
+      const rows = await listGradesForUser(userId, limit);
+      const grades = rows.map(hydrateGrade);
+      return res.json({ success: true, grades });
+    } catch (err: any) {
+      console.error('Error fetching scan grades:', err);
+      return res.status(500).json({ success: false, error: 'Failed to fetch scan grades' });
     }
   });
 
