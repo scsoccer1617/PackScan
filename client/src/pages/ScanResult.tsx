@@ -11,7 +11,7 @@
 //   2. Grade & Pricing  (HoloGrade + graded price breakdown combined)
 //   3. Listings  (eBay comps)
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { useScanFlow } from "@/hooks/use-scan-flow";
 import { useToast } from "@/hooks/use-toast";
@@ -75,10 +75,12 @@ export default function ScanResult() {
   const [bootChecked, setBootChecked] = useState(false);
 
   // Once the user has answered the "Is this a parallel?" prompt (Yes opens
-  // the picker; No prices as base), we must NOT re-prompt when the flow
-  // re-runs on the resulting cardData change — otherwise the confirm card
-  // stays visible alongside the picker / prices.
-  const [parallelDecided, setParallelDecided] = useState(false);
+  // the picker; No prices as base), we must NOT re-prompt even if the
+  // in-flight runPostScanFlow later hits a `setShowParallelConfirm(true)`
+  // branch. A ref — not state — is required because runPostScanFlow is an
+  // async closure captured when the effect fired, so a useState latch
+  // wouldn't be visible to it after the user taps Yes/No mid-flight.
+  const parallelDecidedRef = useRef(false);
 
   const cardData = flow.cardData;
   const holoGrade = flow.holoGrade;
@@ -118,7 +120,9 @@ export default function ScanResult() {
     // effect — so clearing the picker flag here would close it on the
     // same tick as opening it.
     setShowPriceResults(false);
-    if (!parallelDecided) {
+    // If the user already answered Yes/No for this card, don't reset the
+    // picker/confirm flags on the same tick that Yes opened the picker.
+    if (!parallelDecidedRef.current) {
       setShowParallelConfirm(false);
       setShowParallelPicker(false);
     }
@@ -161,6 +165,18 @@ export default function ScanResult() {
    *  Step 3 — visual detector saw foil but no keyword hit
    *  Step 4 — `parallelSuspected` fallback with no color detected
    */
+  // Wrap setShowParallelConfirm so any branch in runPostScanFlow that
+  // wants to open the confirm card becomes a no-op after the user has
+  // already answered Yes/No. Critical because fetchParallels is async
+  // and may resolve after the user has tapped.
+  const requestShowParallelConfirm = (value: boolean) => {
+    if (value && parallelDecidedRef.current) {
+      console.log("[ScanResult] skip re-prompt, user already decided");
+      return;
+    }
+    setShowParallelConfirm(value);
+  };
+
   const runPostScanFlow = async (data: Partial<CardFormValues>) => {
     console.log("[ScanResult] runPostScanFlow", {
       brand: data.brand,
@@ -236,18 +252,18 @@ export default function ScanResult() {
           if (narrowed.length >= 2) {
             setParallelOptions(mergePreferringPrimary(narrowed, bySerial));
             setDetectedKeyword(extractKeyword(detected));
-            setShowParallelConfirm(true);
+            requestShowParallelConfirm(true);
             return;
           }
           setParallelOptions(bySerial);
           setDetectedKeyword(extractKeyword(detected));
-          setShowParallelConfirm(true);
+          requestShowParallelConfirm(true);
           return;
         }
         if (bySerial.length >= 2) {
           setParallelOptions(bySerial);
           setDetectedKeyword("");
-          setShowParallelConfirm(true);
+          requestShowParallelConfirm(true);
           return;
         }
       }
@@ -270,14 +286,14 @@ export default function ScanResult() {
         }
         setParallelOptions(mergePreferringPrimary(filtered, allForStatus));
         setDetectedKeyword(extractKeyword(detected));
-        setShowParallelConfirm(true);
+        requestShowParallelConfirm(true);
         return;
       }
       if (filtered.length >= 2) {
         const allForStatus = filterBySerialStatus(allOptions, !!detectedSerial && !!data.isNumbered);
         setParallelOptions(mergePreferringPrimary(filtered, allForStatus));
         setDetectedKeyword(extractKeyword(detected));
-        setShowParallelConfirm(true);
+        requestShowParallelConfirm(true);
         return;
       }
 
@@ -287,7 +303,7 @@ export default function ScanResult() {
         if (allForStatus.length >= 2) {
           setParallelOptions(allForStatus);
           setDetectedKeyword(extractKeyword(detected));
-          setShowParallelConfirm(true);
+          requestShowParallelConfirm(true);
           return;
         }
       }
@@ -298,7 +314,7 @@ export default function ScanResult() {
         if (allForStatus.length >= 1) {
           setParallelOptions(allForStatus);
           setDetectedKeyword("");
-          setShowParallelConfirm(true);
+          requestShowParallelConfirm(true);
           return;
         }
       }
@@ -350,14 +366,14 @@ export default function ScanResult() {
   };
 
   const handleParallelConfirmYes = () => {
-    setParallelDecided(true);
+    parallelDecidedRef.current = true;
     setShowParallelConfirm(false);
     setShowParallelPicker(true);
   };
 
   const handleParallelConfirmNo = () => {
     if (!cardData) return;
-    setParallelDecided(true);
+    parallelDecidedRef.current = true;
     setShowParallelConfirm(false);
     setShowParallelPicker(false);
     setParallelOptions([]);
@@ -369,7 +385,7 @@ export default function ScanResult() {
   };
 
   const handleScanAnother = () => {
-    setParallelDecided(false);
+    parallelDecidedRef.current = false;
     flow.reset();
     navigate("/scan");
   };
