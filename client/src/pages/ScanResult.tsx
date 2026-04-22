@@ -525,15 +525,16 @@ export default function ScanResult() {
         onConfirm={handleCollectionConfirm}
       />
 
-      {/* Tabs — two tabs now: Details (card info + scanned images) and
-          Prices / Listings (Holo grade + graded-tier breakdown + eBay comps
-          stacked vertically). We merged the old "Grade & Pricing" and
-          "Listings" tabs into one "Prices / Listings" tab so the user sees
-          grade, price bands, and raw comps in a single scroll without
-          tab-hopping. */}
+      {/* Tabs — three tabs:
+            1. Details            (card info + scanned images)
+            2. Grade              (Holo grade card only)
+            3. Prices / Listings  (graded-tier breakdown + eBay comps)
+          Grade is kept separate from pricing so the user can focus on
+          the predicted grade + reasoning without the listing noise. */}
       <Tabs defaultValue="details" className="pt-3">
-        <TabsList className="mx-4 grid grid-cols-2 bg-slate-100/60">
+        <TabsList className="mx-4 grid grid-cols-3 bg-slate-100/60">
           <TabsTrigger value="details" data-testid="tab-details">Details</TabsTrigger>
+          <TabsTrigger value="grade" data-testid="tab-grade">Grade</TabsTrigger>
           <TabsTrigger value="prices-listings" data-testid="tab-prices-listings">
             Prices / Listings
           </TabsTrigger>
@@ -547,8 +548,17 @@ export default function ScanResult() {
           />
         </TabsContent>
 
+        <TabsContent value="grade" className="mt-4 space-y-4 px-4">
+          {holoGrade ? (
+            <HoloGradeCard grade={holoGrade} />
+          ) : (
+            <div className="rounded-2xl border border-card-border bg-card p-4 text-sm text-slate-500">
+              No Holo grade returned for this scan.
+            </div>
+          )}
+        </TabsContent>
+
         <TabsContent value="prices-listings" className="mt-4 space-y-4 px-4">
-          {holoGrade && <HoloGradeCard grade={holoGrade} />}
           {holoGrade && (
             <GradedPriceBreakdown
               cardData={cardData}
@@ -573,11 +583,6 @@ export default function ScanResult() {
                 ? "Answer the prompt above to load pricing."
                 : "Looking up pricing…"}
             </div>
-          )}
-          {!holoGrade && (
-            <p className="text-xs text-slate-500 text-center">
-              No Holo grade returned for this scan.
-            </p>
           )}
         </TabsContent>
       </Tabs>
