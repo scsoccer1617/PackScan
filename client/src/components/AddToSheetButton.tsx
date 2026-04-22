@@ -186,7 +186,7 @@ export default function AddToSheetButton({ cardData, averageValue, searchUrl, fr
             className="flex items-center gap-2"
           >
             <Sheet className="h-4 w-4" />
-            {append.isPending ? 'Saving…' : 'Add to Google Sheet'}
+            {append.isPending ? 'Saving…' : 'Add to GSheet'}
           </Button>
           <div className="text-xs text-slate-600 flex items-center gap-1">
             Saving to: <span className="font-medium">{selectedSheet?.title || '—'}</span>
