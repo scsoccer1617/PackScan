@@ -9,6 +9,7 @@ import { useOCR } from "@/hooks/use-ocr";
 import { useToast } from "@/hooks/use-toast";
 import OCRResults from "@/components/OCRResults";
 import EbayPriceResults from "@/components/EbayPriceResults";
+import { HoloGradeCard, type HoloGrade } from "@/components/HoloGradeCard";
 import ParallelPickerSheet, { ParallelOption } from "@/components/ParallelPickerSheet";
 import CollectionPickerSheet, { CollectionCandidate } from "@/components/CollectionPickerSheet";
 import { CardFormValues } from "@shared/schema";
@@ -180,6 +181,7 @@ export default function PriceLookup() {
   const [collectionCandidates, setCollectionCandidates] = useState<CollectionCandidate[]>([]);
   const [analyzing, setAnalyzing] = useState<boolean>(false);
   const [useGeminiFirst, setUseGeminiFirst] = useState<boolean>(false);
+  const [holoGrade, setHoloGrade] = useState<HoloGrade | null>(null);
   const { toast } = useToast();
   
   const { loading: ocrLoading, error: ocrError, data: ocrData } = useOCR();
@@ -416,6 +418,14 @@ export default function PriceLookup() {
       const result = await response.json();
       
       if (result.success && result.data) {
+        // Holo grading runs server-side in parallel with OCR+eBay; attach
+        // whenever the backend returned a grade so the UI shows it next to
+        // identification/pricing.
+        if (result.data.holo) {
+          setHoloGrade(result.data.holo as HoloGrade);
+        } else {
+          setHoloGrade(null);
+        }
         await processCardData(result.data);
       } else {
         throw new Error(result.message || 'Analysis failed');
@@ -498,6 +508,7 @@ export default function PriceLookup() {
     setShowParallelConfirm(false);
     setParallelOptions([]);
     setCardData(null);
+    setHoloGrade(null);
   };
 
   // User said "Yes, this is a parallel" → show the picker
@@ -677,6 +688,7 @@ export default function PriceLookup() {
 
       {showPriceResults && cardData && (
         <div className="space-y-4">
+          {holoGrade && <HoloGradeCard grade={holoGrade} />}
           <EbayPriceResults 
             cardData={cardData} 
             frontImage={frontImage}
