@@ -169,8 +169,16 @@ function TierColumn({
             <a
               href={tier.searchUrl}
               target="_blank"
-              rel="noreferrer"
-              className="text-xs text-blue-600 hover:text-blue-800 inline-flex items-center gap-1"
+              rel="noopener noreferrer"
+              onClick={(e) => {
+                // Some mobile webviews (iOS PWA, in-app browsers) silently
+                // swallow target="_blank" on bare anchors. Force-open a new
+                // window in the same click tick as a fallback.
+                e.preventDefault();
+                window.open(tier.searchUrl, "_blank", "noopener,noreferrer");
+              }}
+              className="text-xs text-blue-600 hover:text-blue-800 inline-flex items-center gap-1 py-1 -my-1 cursor-pointer"
+              data-testid={`link-search-ebay-${variant}`}
             >
               <ExternalLink className="h-3 w-3" />
               Search eBay
@@ -200,8 +208,16 @@ function TierColumn({
               <a
                 href={tier.searchUrl}
                 target="_blank"
-                rel="noreferrer"
-                className="text-xs text-blue-600 hover:text-blue-800 inline-flex items-center gap-1"
+                rel="noopener noreferrer"
+                onClick={(e) => {
+                  // See note on the empty-state link above — webviews can
+                  // swallow bare target="_blank" taps. Force-open in the
+                  // same click tick.
+                  e.preventDefault();
+                  window.open(tier.searchUrl, "_blank", "noopener,noreferrer");
+                }}
+                className="text-xs text-blue-600 hover:text-blue-800 inline-flex items-center gap-1 py-1 -my-1 cursor-pointer"
+                data-testid={`link-view-ebay-${variant}`}
               >
                 <ExternalLink className="h-3 w-3" />
                 eBay
