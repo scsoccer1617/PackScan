@@ -197,7 +197,7 @@ function TierColumn({
           </div>
           {low > 0 && high > 0 && low !== high && (
             <div className="text-xs text-slate-500 tabular-nums">
-              {formatPrice(low)} \u2013 {formatPrice(high)}
+              {formatPrice(low)} – {formatPrice(high)}
             </div>
           )}
           <div className="flex items-center justify-between gap-2 mt-1">
