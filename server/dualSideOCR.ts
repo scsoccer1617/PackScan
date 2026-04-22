@@ -23,6 +23,16 @@ interface YearConfidenceFlags {
   _cardNumberLowConfidence?: boolean;
   _variationAmbiguous?: boolean;
   _variationOptions?: string[];
+  _collectionAmbiguous?: boolean;
+  _collectionCandidates?: Array<{
+    brand: string;
+    year: number;
+    collection: string;
+    set: string | null;
+    cardNumber: string;
+    playerName: string;
+    isRookieCard: boolean;
+  }>;
 }
 type CardFormWithFlags = CardFormValues & YearConfidenceFlags;
 
@@ -334,6 +344,11 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
               if (lookup.isRookieCard !== undefined) {
                 result.isRookieCard = lookup.isRookieCard;
                 source.isRookieCard = 'db';
+              }
+              if (lookup.collectionAmbiguous && lookup.collectionCandidates?.length) {
+                (result as CardFormWithFlags)._collectionAmbiguous = true;
+                (result as CardFormWithFlags)._collectionCandidates = lookup.collectionCandidates;
+                console.log(`[Engine] gemini-first: collection ambiguous (${lookup.collectionCandidates.length} candidates) — surfacing for user pick`);
               }
               // Catalog is authoritative for parallels. Three cases:
               //   1. DB picked exactly one → use it (overwrite Gemini's guess).
@@ -1439,6 +1454,11 @@ async function combineCardResults(
       // Mark so the post-detection pipeline clears any visual/text-detected foilType.
       dbConfirmsNoParallel = true;
       console.log('[CardDB] Catalog confirms no parallel for this card — will clear any detector-assigned foilType.');
+    }
+    if (dbResult.collectionAmbiguous && dbResult.collectionCandidates?.length) {
+      (combined as CardFormWithFlags)._collectionAmbiguous = true;
+      (combined as CardFormWithFlags)._collectionCandidates = dbResult.collectionCandidates;
+      console.log(`[CardDB] Collection ambiguous (${dbResult.collectionCandidates.length} candidates) — needs user pick`);
     }
     // Signal success so callers (e.g. the year-widening fallback loop) stop
     // trying additional years. Without this the function falls through to

@@ -10,6 +10,7 @@ import { useToast } from "@/hooks/use-toast";
 import OCRResults from "@/components/OCRResults";
 import EbayPriceResults from "@/components/EbayPriceResults";
 import ParallelPickerSheet, { ParallelOption } from "@/components/ParallelPickerSheet";
+import CollectionPickerSheet, { CollectionCandidate } from "@/components/CollectionPickerSheet";
 import { CardFormValues } from "@shared/schema";
 
 // Resize + JPEG-compress a dataURL before upload.
@@ -175,6 +176,8 @@ export default function PriceLookup() {
   const [showParallelConfirm, setShowParallelConfirm] = useState<boolean>(false);
   const [parallelOptions, setParallelOptions] = useState<ParallelOption[]>([]);
   const [detectedKeyword, setDetectedKeyword] = useState<string>("");
+  const [showCollectionPicker, setShowCollectionPicker] = useState<boolean>(false);
+  const [collectionCandidates, setCollectionCandidates] = useState<CollectionCandidate[]>([]);
   const [analyzing, setAnalyzing] = useState<boolean>(false);
   const [useGeminiFirst, setUseGeminiFirst] = useState<boolean>(false);
   const { toast } = useToast();
@@ -210,6 +213,20 @@ export default function PriceLookup() {
   // Called after scan completes — decides whether to show picker or go straight to eBay
   const processCardData = async (data: Partial<CardFormValues>) => {
     setCardData(data);
+
+    // Step 0 — Collection ambiguity. When the catalog has multiple distinct
+    // sets sharing the same brand+year+cardNumber and no signal disambiguated
+    // them (e.g. 2024 Topps Ohtani #1 → Big League / Chrome / Museum / Travis
+    // Scott …), prompt the user to pick the right Set BEFORE we show foil
+    // pickers or run eBay — the choice changes both the catalog narrowing
+    // and the eBay search query.
+    const collAmbig = (data as any)._collectionAmbiguous;
+    const collCands = (data as any)._collectionCandidates as CollectionCandidate[] | undefined;
+    if (collAmbig && collCands && collCands.length > 1) {
+      setCollectionCandidates(collCands);
+      setShowCollectionPicker(true);
+      return;
+    }
 
     const detected = data.foilType?.trim() || "";
     const detectedSerial = data.serialNumber?.trim() || "";
@@ -415,6 +432,38 @@ export default function PriceLookup() {
     }
   };
 
+  const handleCollectionConfirm = (picked: CollectionCandidate) => {
+    setShowCollectionPicker(false);
+    setCollectionCandidates([]);
+    setCardData(prev => {
+      if (!prev) return prev;
+      const next: any = {
+        ...prev,
+        collection: picked.collection,
+        set: picked.set || picked.collection,
+        brand: picked.brand,
+        year: picked.year,
+        cardNumber: picked.cardNumber,
+        isRookieCard: picked.isRookieCard,
+      };
+      // Adopt the canonical player name from the picked row when present.
+      const parts = (picked.playerName || "").trim().split(/\s+/);
+      if (parts.length >= 2) {
+        next.playerFirstName = parts[0];
+        next.playerLastName = parts.slice(1).join(" ");
+      } else if (parts.length === 1 && parts[0]) {
+        next.playerLastName = parts[0];
+      }
+      delete next._collectionAmbiguous;
+      delete next._collectionCandidates;
+      // Re-run the post-scan flow with the user's pick. processCardData calls
+      // setCardData itself, so the picked fields propagate before any parallel
+      // picker / eBay search runs.
+      processCardData(next);
+      return next;
+    });
+  };
+
   const handleParallelConfirm = (foilType: string, serialNumber?: string) => {
     setCardData(prev => {
       if (!prev) return prev;
@@ -613,6 +662,16 @@ export default function PriceLookup() {
           cardDescription={cardDescription}
           options={parallelOptions}
           onConfirm={handleParallelConfirm}
+        />
+      )}
+
+      {/* Collection picker — shown when the card # maps to multiple sets */}
+      {cardData && (
+        <CollectionPickerSheet
+          open={showCollectionPicker}
+          cardDescription={cardDescription}
+          candidates={collectionCandidates}
+          onConfirm={handleCollectionConfirm}
         />
       )}
 

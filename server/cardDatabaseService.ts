@@ -70,6 +70,24 @@ export interface CardLookupResult {
   /** True when multiple variations matched and the parallelHint did not
    * uniquely resolve to one of them. */
   variationAmbiguous?: boolean;
+  /** True when multiple distinct collection/set rows matched the same
+   * brand+year+cardNumber and neither OCR-text vocabulary nor player-name
+   * matching could uniquely pick one. The caller should prompt the user to
+   * choose from `collectionCandidates`. The default `collection`/`set` fields
+   * still hold the best-guess pick from the tiebreak ladder. */
+  collectionAmbiguous?: boolean;
+  /** Distinct candidate collection/set rows surfaced when
+   * `collectionAmbiguous` is true. Already deduped by collection+set and
+   * capped to a small number for UI display. */
+  collectionCandidates?: Array<{
+    brand: string;
+    year: number;
+    collection: string;
+    set: string | null;
+    cardNumber: string;
+    playerName: string;
+    isRookieCard: boolean;
+  }>;
 }
 
 export interface CsvImportResult {
@@ -584,8 +602,48 @@ export async function lookupCard(input: CardLookupInput): Promise<CardLookupResu
     // When still multiple hits, use the OCR player name to pick the best match.
     // The same card number often maps to different players across sets (e.g.
     // Bowman 2022 #91 = Scherzer in "Bowman Baseball", Turner in "Bowman Chrome Sapphire").
+    let collectionAmbiguousCandidates: typeof cardRows | null = null;
     if (cardRows.length > 1) {
       sortCandidatesByPreference(cardRows, 'card-number match');
+
+      // ── Collection-ambiguity detection ─────────────────────────────────
+      // When multiple non-specialty rows survive AND none of them has a
+      // unique signal advantage over the others, surface the top candidates
+      // so the caller can prompt the user to pick the right Set/Collection.
+      // Without this, the tiebreak ladder silently picks an arbitrary
+      // alphabetically-shortest set (e.g. Topps 2024 Ohtani #1 quietly
+      // resolved to "Big League" or "Chrome" with no way for the user to
+      // tell us they actually have a different one).
+      const nonSpecialty = cardRows.filter(r => !isSpecialtySubset(r.collection) && !r.collection.includes(' - '));
+      if (nonSpecialty.length >= 2) {
+        const ocrScores = nonSpecialty.map(r => ocrMatchScore(r));
+        const topOcr = Math.max(...ocrScores);
+        const ocrWinners = nonSpecialty.filter(r => ocrMatchScore(r) === topOcr);
+        const nameMatchCount = lastNameNormGlobal
+          ? nonSpecialty.filter(r => r.playerName.toLowerCase().includes(lastNameNormGlobal)).length
+          : 0;
+        const playerSignalUnique = lastNameNormGlobal &&
+          nameMatchCount > 0 && nameMatchCount < nonSpecialty.length;
+        const ocrSignalUnique = topOcr > 0 && ocrWinners.length === 1;
+        if (!ocrSignalUnique && !playerSignalUnique) {
+          // No signal differentiates the top candidates. Dedupe by
+          // (collection, set) — two CSV rows with the same set/collection
+          // and player are the same card from the user's perspective.
+          const seen = new Set<string>();
+          const deduped: typeof cardRows = [];
+          for (const r of nonSpecialty) {
+            const key = `${(r.collection || '').toLowerCase().trim()}||${(r.set || '').toLowerCase().trim()}||${(r.playerName || '').toLowerCase().trim()}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            deduped.push(r);
+            if (deduped.length >= 8) break;
+          }
+          if (deduped.length >= 2) {
+            collectionAmbiguousCandidates = deduped;
+            console.log(`[CardDB] Collection ambiguous: ${deduped.length} candidates with no disambiguating signal — will surface for user pick (top default: "${cardRows[0].set || cardRows[0].collection}")`);
+          }
+        }
+      }
     }
 
     // ── Step 1b: Prefix-match fallback ──────────────────────────────────
@@ -747,6 +805,18 @@ export async function lookupCard(input: CardLookupInput): Promise<CardLookupResu
       year: cardRow.year,
       cmpNumber: cardRow.cmpNumber || undefined,
       source: 'card_database',
+      collectionAmbiguous: !!collectionAmbiguousCandidates,
+      collectionCandidates: collectionAmbiguousCandidates
+        ? collectionAmbiguousCandidates.map(r => ({
+            brand: r.brand,
+            year: r.year,
+            collection: r.collection,
+            set: r.set,
+            cardNumber: r.cardNumberRaw,
+            playerName: r.playerName,
+            isRookieCard: !!(r.rookieFlag && r.rookieFlag.toLowerCase().includes('rookie')),
+          }))
+        : undefined,
     };
 
   } catch (err: any) {
