@@ -61,6 +61,18 @@ export default {
           border: "hsl(var(--sidebar-border))",
           ring: "hsl(var(--sidebar-ring))",
         },
+        // PackScan redesign palette (ink / paper / foil)
+        paper: "hsl(var(--ps-paper))",
+        ink: "hsl(var(--ps-ink))",
+        "card-border": "hsl(var(--ps-card-border))",
+        foil: {
+          violet: "hsl(var(--foil-violet))",
+          cyan: "hsl(var(--foil-cyan))",
+          gold: "hsl(var(--foil-gold))",
+          green: "hsl(var(--foil-green))",
+          amber: "hsl(var(--foil-amber))",
+          red: "hsl(var(--foil-red))",
+        },
       },
       keyframes: {
         "accordion-down": {

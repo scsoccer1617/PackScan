@@ -1,8 +1,6 @@
 import { useState, useEffect } from "react";
 import SimpleImageUploader from "@/components/SimpleImageUploader";
 import { Button } from "@/components/ui/button";
-import { Switch } from "@/components/ui/switch";
-import { Label } from "@/components/ui/label";
 import { Sparkles, ScanSearch } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useOCR } from "@/hooks/use-ocr";
@@ -181,7 +179,6 @@ export default function PriceLookup() {
   const [showCollectionPicker, setShowCollectionPicker] = useState<boolean>(false);
   const [collectionCandidates, setCollectionCandidates] = useState<CollectionCandidate[]>([]);
   const [analyzing, setAnalyzing] = useState<boolean>(false);
-  const [useGeminiFirst, setUseGeminiFirst] = useState<boolean>(false);
   const [holoGrade, setHoloGrade] = useState<HoloGrade | null>(null);
   const { toast } = useToast();
   
@@ -407,7 +404,7 @@ export default function PriceLookup() {
       const formData = new FormData();
       formData.append('backImage', backBlob, 'back.jpg');
       if (frontBlob) formData.append('frontImage', frontBlob, 'front.jpg');
-      formData.append('engine', useGeminiFirst ? 'gemini' : 'ocr');
+      formData.append('engine', 'ocr');
 
       const response = await fetch('/api/analyze-card-dual-images', {
         method: 'POST',
@@ -553,19 +550,6 @@ export default function PriceLookup() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="flex items-center justify-between rounded-md border bg-muted/30 px-3 py-2">
-              <div className="flex items-center gap-2">
-                <Sparkles className="h-4 w-4 text-purple-500" />
-                <Label htmlFor="gemini-first" className="cursor-pointer text-sm font-medium">
-                  Try Gemini first (beta)
-                </Label>
-              </div>
-              <Switch
-                id="gemini-first"
-                checked={useGeminiFirst}
-                onCheckedChange={setUseGeminiFirst}
-              />
-            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <h3 className="font-medium mb-2">Front of Card</h3>
