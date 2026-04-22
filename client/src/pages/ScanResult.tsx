@@ -516,10 +516,10 @@ export default function ScanResult() {
         onConfirm={handleCollectionConfirm}
       />
 
-      {/* Tabs — default to Grade & Pricing so the user sees the payoff of
-          the scan immediately (grade + comps). Details is a reference view
-          for verifying OCR identified the card correctly. */}
-      <Tabs defaultValue="grade-pricing" className="pt-3">
+      {/* Tabs — default to Details so the user lands on card info first
+          (brand, set, player, images) and can verify OCR before jumping
+          to grade/pricing or listings. */}
+      <Tabs defaultValue="details" className="pt-3">
         <TabsList className="mx-4 grid grid-cols-3 bg-slate-100/60">
           <TabsTrigger value="details" data-testid="tab-details">Details</TabsTrigger>
           <TabsTrigger value="grade-pricing" data-testid="tab-grade-pricing">
