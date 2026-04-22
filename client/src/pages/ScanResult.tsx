@@ -319,7 +319,9 @@ export default function ScanResult() {
 
   if (!cardData) {
     return (
-      <div className="p-6 text-sm text-slate-500">Loading scan result…</div>
+      <div className="p-6 text-sm text-slate-500">
+        {bootChecked ? "No scan in memory — redirecting…" : "Loading scan result…"}
+      </div>
     );
   }
 
@@ -441,8 +443,10 @@ export default function ScanResult() {
         onConfirm={handleCollectionConfirm}
       />
 
-      {/* Details-first tabs */}
-      <Tabs defaultValue="details" className="pt-3">
+      {/* Tabs — default to Grade & Pricing so the user sees the payoff of
+          the scan immediately (grade + comps). Details is a reference view
+          for verifying OCR identified the card correctly. */}
+      <Tabs defaultValue="grade-pricing" className="pt-3">
         <TabsList className="mx-4 grid grid-cols-3 bg-slate-100/60">
           <TabsTrigger value="details" data-testid="tab-details">Details</TabsTrigger>
           <TabsTrigger value="grade-pricing" data-testid="tab-grade-pricing">
@@ -460,14 +464,35 @@ export default function ScanResult() {
         </TabsContent>
 
         <TabsContent value="grade-pricing" className="mt-4 space-y-4 px-4">
-          {holoGrade ? (
-            <>
-              <HoloGradeCard grade={holoGrade} />
-              <GradedPriceBreakdown cardData={cardData} holoOverall={holoGrade.overall} />
-            </>
+          {holoGrade && <HoloGradeCard grade={holoGrade} />}
+          {holoGrade && (
+            <GradedPriceBreakdown
+              cardData={cardData}
+              holoOverall={holoGrade.overall}
+            />
+          )}
+          {showPriceResults ? (
+            <EbayPriceResults
+              cardData={cardData}
+              frontImage={frontImage}
+              backImage={backImage}
+              onCardDataUpdate={(updatedData) => {
+                // Re-run the disambiguation flow when the serial limit
+                // changed (e.g. user typed "041/150" OCR missed); otherwise
+                // just save the edits and re-price in place.
+                flow.setCardData(updatedData);
+              }}
+            />
           ) : (
-            <p className="text-sm text-slate-500">
-              No grade returned for this scan.
+            <div className="rounded-2xl border border-card-border bg-card p-4 text-sm text-slate-500">
+              {showParallelConfirm || showParallelPicker || showCollectionPicker
+                ? "Answer the prompt above to load pricing."
+                : "Looking up pricing…"}
+            </div>
+          )}
+          {!holoGrade && (
+            <p className="text-xs text-slate-500 text-center">
+              No Holo grade returned for this scan.
             </p>
           )}
         </TabsContent>
@@ -479,15 +504,7 @@ export default function ScanResult() {
               frontImage={frontImage}
               backImage={backImage}
               onCardDataUpdate={(updatedData) => {
-                // If the user edited the serial-number limit, re-run the
-                // disambiguation flow; otherwise just save the edits.
-                const prevLimit = extractSerialLimit((cardData.serialNumber || "").trim());
-                const nextLimit = extractSerialLimit((updatedData.serialNumber || "").trim());
-                if (nextLimit && nextLimit !== prevLimit) {
-                  flow.setCardData(updatedData);
-                } else {
-                  flow.setCardData(updatedData);
-                }
+                flow.setCardData(updatedData);
               }}
             />
           ) : (
