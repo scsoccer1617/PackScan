@@ -30,7 +30,15 @@ import fs from 'fs';
 import { gunzipSync } from 'zlib';
 import { pool as sourcePool } from '../db';
 import { runPushToProdJob, makeInitialJobState, type PushJobState } from './pushToProd';
-import { gradeCard, HoloNotConfiguredError, type HoloGrade } from './holo/cardGrader';
+import {
+  analyzeCard,
+  gradeCard,
+  identificationToCardData,
+  HoloNotConfiguredError,
+  type HoloGrade,
+  type HoloIdentification,
+  type HoloAnalysis,
+} from './holo/cardGrader';
 import { saveGrade, listGradesForUser, hydrateGrade } from './holo/storage';
 import { requireAuth } from './auth';
 
@@ -1026,15 +1034,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log('Starting dual-image OCR + eBay price analysis...');
       console.log('ROUTE HANDLER IS DEFINITELY CALLED!');
 
-      // Kick off Holo grading in parallel with OCR + eBay so it doesn't add latency.
-      // This promise is resolved (with a HoloGrade + id/createdAt) or null if grading fails.
+      // Holo (Claude) is now the PRIMARY identifier + grader. It runs in
+      // parallel with the legacy OCR/Gemini pipeline so we still get a
+      // response even if Claude is unavailable or low-confidence.
+      //
+      // Downstream logic:
+      //   - If Holo identification confidence >= HOLO_CONFIDENCE_THRESHOLD,
+      //     we merge Claude's fields on top of OCR fields as the source of
+      //     truth for eBay lookup and client display.
+      //   - Otherwise, OCR/Gemini remains authoritative and Holo only
+      //     contributes the condition grade.
+      //   - If Holo fails entirely (no key, API error, etc.), scan continues
+      //     with OCR/Gemini exactly as before (data.holo = null).
+      const HOLO_CONFIDENCE_THRESHOLD = 0.7;
       const userId = (req.user as any)?.id as number | undefined;
       const frontFileForHolo = files.frontImage?.[0];
       const backFileForHolo = files.backImage?.[0];
-      const holoPromise: Promise<(HoloGrade & { id: number; createdAt: Date }) | null> = (async () => {
+      type HoloResponse = (HoloGrade & {
+        id: number;
+        createdAt: Date;
+        identification: HoloIdentification | null;
+      }) | null;
+      const holoPromise: Promise<HoloResponse> = (async () => {
         try {
           if (!frontFileForHolo) {
-            console.log('Holo: no front image provided, skipping grading');
+            console.log('Holo: no front image provided, skipping analysis');
             return null;
           }
           const frontInput = {
@@ -1047,26 +1071,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 mediaType: (backFileForHolo.mimetype || 'image/jpeg') as any,
               }
             : undefined;
-          console.log('Holo: starting grade analysis...');
-          const grade = await gradeCard(frontInput, backInput);
-          console.log('Holo: grade complete -', grade.label, `(${grade.overall})`);
+          console.log('Holo: starting unified card analysis (identification + grade)...');
+          const { identification, grade }: HoloAnalysis = await analyzeCard(
+            frontInput,
+            backInput,
+          );
+          console.log(
+            'Holo: analysis complete -',
+            identification.player,
+            `(id conf ${identification.confidence.toFixed(2)})`,
+            '|',
+            grade.label,
+            `(${grade.overall}, grade conf ${grade.confidence.toFixed(2)})`,
+          );
           try {
             const row = await saveGrade({
               userId: userId ?? null,
               frontImagePath: frontFileForHolo.originalname || null,
               backImagePath: backFileForHolo?.originalname || null,
               grade,
+              identification,
             });
-            return { ...grade, id: row.id, createdAt: row.createdAt };
+            return {
+              ...grade,
+              id: row.id,
+              createdAt: row.createdAt,
+              identification,
+            };
           } catch (persistErr) {
-            console.warn('Holo: failed to persist grade, returning in-memory:', persistErr);
-            return { ...grade, id: 0, createdAt: new Date() };
+            console.warn('Holo: failed to persist, returning in-memory:', persistErr);
+            return {
+              ...grade,
+              id: 0,
+              createdAt: new Date(),
+              identification,
+            };
           }
         } catch (err) {
           if (err instanceof HoloNotConfiguredError) {
-            console.log('Holo: ANTHROPIC_API_KEY not set, skipping grading');
+            console.log('Holo: ANTHROPIC_API_KEY not set, skipping analysis');
           } else {
-            console.error('Holo: grading failed, continuing scan without grade:', err);
+            console.error('Holo: analysis failed, continuing scan without it:', err);
           }
           return null;
         }
@@ -1112,8 +1157,53 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Dual-side analysis now handles rookie card detection automatically
 
+      const holoResolved = await holoPromise;
+
+      // Merge helper: Claude identification is applied on top of OCR output
+      // when its confidence clears the threshold. Claude fills fields that
+      // OCR commonly misses (parallel, CMP, serial, exact collection) and
+      // overrides OCR for those fields; everything else stays OCR-derived.
+      const mergeHoloIntoCard = (ocrData: any): any => {
+        if (!holoResolved?.identification) return ocrData ?? {};
+        if (holoResolved.identification.confidence < HOLO_CONFIDENCE_THRESHOLD) {
+          return ocrData ?? {};
+        }
+        const holoCard = identificationToCardData(holoResolved.identification);
+        // Shallow-merge Claude over OCR, but keep OCR values where Claude
+        // returned falsy (null/empty) so we never wipe a known OCR field.
+        const merged: any = { ...(ocrData || {}) };
+        for (const [k, v] of Object.entries(holoCard)) {
+          if (v !== null && v !== undefined && v !== "") {
+            merged[k] = v;
+          }
+        }
+        merged._primarySource = 'holo';
+        return merged;
+      };
+
       if (!backOcrResponse.success || !backOcrResponse.data) {
-        const holo = await holoPromise;
+        // OCR failed. If Holo identified the card confidently, use it as the
+        // sole source of truth so the scan still returns usable data.
+        if (
+          holoResolved?.identification &&
+          holoResolved.identification.confidence >= HOLO_CONFIDENCE_THRESHOLD
+        ) {
+          const holoCard = identificationToCardData(holoResolved.identification);
+          return res.json({
+            success: true,
+            data: {
+              ...holoCard,
+              ebayResults: {
+                averageValue: 0,
+                results: [],
+                searchUrl: '',
+                errorMessage: 'Analysis via Holo only; eBay lookup skipped because OCR did not complete',
+                dataType: 'sold'
+              },
+              holo: holoResolved,
+            }
+          });
+        }
         return res.json({
           success: true,
           data: {
@@ -1125,7 +1215,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               errorMessage: 'Could not analyze card for pricing',
               dataType: 'sold'
             },
-            holo,
+            holo: holoResolved,
           }
         });
       }
@@ -1137,7 +1227,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // but they no longer alter the result of a fresh scan.
       console.log('OCR analysis successful, skipping confirmed-card override (DB lookup is authoritative)');
 
-      const cardData = backOcrResponse.data;
+      // Apply Holo identification on top of OCR when confidence is high.
+      // Everything downstream (eBay lookup, response, client UI) uses the
+      // merged object as cardData.
+      const cardData = mergeHoloIntoCard(backOcrResponse.data);
+      if ((cardData as any)._primarySource === 'holo') {
+        console.log('Holo: identification confidence >= threshold, using Holo fields as primary');
+      }
 
       console.log('Starting eBay price lookup...');
       
@@ -1178,18 +1274,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
             updatedCardData.collection = ebayResults.discoveredCollection;
           }
           
-          const holo = await holoPromise;
           return res.json({
             success: true,
             data: {
               ...updatedCardData,
               ebayResults: ebayResults,
-              holo,
+              holo: holoResolved,
             }
           });
         } else {
           console.log('Search query too short, skipping eBay lookup');
-          const holo = await holoPromise;
           return res.json({
             success: true,
             data: {
@@ -1202,13 +1296,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 errorMessage: 'Insufficient card information for price lookup',
                 dataType: 'sold'
               },
-              holo,
+              holo: holoResolved,
             }
           });
         }
       } catch (ebayError) {
         console.error('eBay search error:', ebayError);
-        const holo = await holoPromise;
         return res.json({
           success: true,
           data: {
@@ -1221,7 +1314,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               errorMessage: 'eBay search failed',
               dataType: 'sold'
             },
-            holo,
+            holo: holoResolved,
           }
         });
       }
