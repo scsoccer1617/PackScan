@@ -78,13 +78,13 @@ export default function EbayValueLookup({
     });
     console.log('eBay search query:', JSON.stringify(query));
     
-    // Construct the URL with search parameters
+    // Active listings only — PackScan sold-data access is pending eBay
+    // Marketplace Insights approval. Flip LH_Complete=1&LH_Sold=1 back
+    // in when that lands.
     const baseUrl = 'https://www.ebay.com/sch/i.html';
     const searchParams = new URLSearchParams({
       _nkw: query,
-      LH_Complete: '1',    // Completed listings
-      LH_Sold: '1',        // Sold listings
-      rt: 'nc',            // No "see other items" 
+      rt: 'nc',            // No "see other items"
       LH_PrefLoc: '1'      // Ships to US
     });
     
