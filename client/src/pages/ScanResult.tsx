@@ -68,18 +68,37 @@ export default function ScanResult() {
   const [collectionCandidates, setCollectionCandidates] = useState<CollectionCandidate[]>([]);
   const [showPriceResults, setShowPriceResults] = useState(false);
 
+  // Tracks whether we already gave the user a moment to let the analyze
+  // payload commit into context before considering a redirect. Avoids a
+  // race where /result mounts on the same microtask that set the data,
+  // briefly sees hasResult=false, and bounces back to /scan.
+  const [bootChecked, setBootChecked] = useState(false);
+
   const cardData = flow.cardData;
   const holoGrade = flow.holoGrade;
   const frontImage = flow.frontImage;
   const backImage = flow.backImage;
 
   // If the user hit /result directly (deep link, refresh, back-button from
-  // outside the app) without an analyze in memory, bounce to /scan.
+  // outside the app) without an analyze in memory, bounce to /scan. We
+  // wait one tick first to let analyze-side state commits settle, so a
+  // momentary hasResult=false on mount doesn't kick a valid scan back.
   useEffect(() => {
-    if (!flow.hasResult) {
-      navigate("/scan", { replace: true });
+    console.log("[ScanResult] mount-check", { hasResult: flow.hasResult });
+    if (flow.hasResult) {
+      setBootChecked(true);
+      return;
     }
-  }, [flow.hasResult, navigate]);
+    const t = setTimeout(() => {
+      if (!flow.hasResult) {
+        console.warn("[ScanResult] no result after 120ms — redirecting to /scan");
+        navigate("/scan", { replace: true });
+      }
+      setBootChecked(true);
+    }, 120);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flow.hasResult]);
 
   // Run the post-analyze disambiguation flow once when the result first
   // lands. Re-runs whenever the caller swaps cardData out (e.g. after a
@@ -92,7 +111,17 @@ export default function ScanResult() {
     setShowParallelConfirm(false);
     setShowParallelPicker(false);
     setShowCollectionPicker(false);
-    runPostScanFlow(cardData);
+    runPostScanFlow(cardData).catch((err) => {
+      // fetchParallels or any downstream helper failed — don't leave the
+      // page stuck in its pre-price state. Fall through to showing eBay
+      // prices with whatever OCR gave us so the user sees *something*.
+      console.error("[ScanResult] Post-scan flow threw, falling back:", err);
+      toast({
+        title: "Couldn't look up parallels",
+        description: "Showing prices for the detected card instead.",
+      });
+      setShowPriceResults(true);
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cardData]);
 
@@ -121,6 +150,15 @@ export default function ScanResult() {
    *  Step 4 — `parallelSuspected` fallback with no color detected
    */
   const runPostScanFlow = async (data: Partial<CardFormValues>) => {
+    console.log("[ScanResult] runPostScanFlow", {
+      brand: data.brand,
+      year: data.year,
+      foilType: data.foilType,
+      serialNumber: data.serialNumber,
+      isNumbered: data.isNumbered,
+      parallelSuspected: (data as any).parallelSuspected,
+      collectionAmbiguous: (data as any)._collectionAmbiguous,
+    });
     const collAmbig = (data as any)._collectionAmbiguous;
     const collCands = (data as any)._collectionCandidates as CollectionCandidate[] | undefined;
     if (collAmbig && collCands && collCands.length > 1) {
@@ -255,6 +293,7 @@ export default function ScanResult() {
     }
 
     // 0 DB matches — use the OCR-detected value as-is.
+    console.log("[ScanResult] flow fell through to setShowPriceResults(true)");
     setShowPriceResults(true);
   };
 
