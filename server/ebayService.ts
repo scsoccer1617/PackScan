@@ -459,6 +459,25 @@ function prioritizeListingsByCardMatch(
   }).sort((a, b) => (b as any).matchScore - (a as any).matchScore);
 }
 
+/**
+ * Options for searchCardValues that don't fit the positional signature.
+ *
+ * `gradeKeyword` is appended to the eBay query to filter results to slabbed
+ * listings of a specific grade (e.g. "PSA 10"). When present, we also
+ * disable the "exclude -autograph/-parallel/-refractor" filters so graded
+ * parallels & autos remain eligible — the slab label is the primary match
+ * signal.
+ *
+ * `excludeGraded` appends negative keywords (-PSA -BGS -SGC -CGC -graded)
+ * so raw-card searches don't get polluted by slabbed sales. This is the
+ * companion to `gradeKeyword` used for the "raw" tier of the graded price
+ * breakdown.
+ */
+export type SearchCardValuesOptions = {
+  gradeKeyword?: string;
+  excludeGraded?: boolean;
+};
+
 export async function searchCardValues(
   playerName: string,
   cardNumber: string,
@@ -472,7 +491,8 @@ export async function searchCardValues(
   variant?: string,
   isAutographed?: boolean,
   _isRetry?: boolean,
-  set?: string
+  set?: string,
+  options?: SearchCardValuesOptions
 ): Promise<EbayResponse> {
   try {
     // Strip middle names before any eBay query — sellers virtually always
@@ -500,7 +520,9 @@ export async function searchCardValues(
       console.log(`[eBay] Stripped middle name(s) for search: "${originalPlayerName}" → "${playerName}"`);
     }
     // Create cache key from search parameters including foil type and serial number
-    const cacheKey = `${playerName}-${cardNumber}-${brand}-${year}-${collection || ''}-${set || ''}-${isNumbered || ''}-${foilType || ''}-${serialNumber || ''}-${variant || ''}`;
+    const gradeKeyword = (options?.gradeKeyword || '').trim();
+    const excludeGraded = !!options?.excludeGraded;
+    const cacheKey = `${playerName}-${cardNumber}-${brand}-${year}-${collection || ''}-${set || ''}-${isNumbered || ''}-${foilType || ''}-${serialNumber || ''}-${variant || ''}-${gradeKeyword || ''}-${excludeGraded ? 'raw' : ''}`;
     const cached = searchCache.get(cacheKey);
     
     // Return cached result if still valid
@@ -552,11 +574,17 @@ export async function searchCardValues(
         excludes.push('-autograph', '-signed');
       }
 
-      // Exclude parallel-indicator terms for base cards.
-      // We deliberately skip standalone colours (blue, gold, etc.) to avoid
-      // accidentally excluding team-colour references in listing titles.
-      if (isBaseCard) {
+      // Exclude parallel-indicator terms for base cards — but only when we
+      // are NOT explicitly searching for a graded slab. A Holo user grading
+      // their PSA-10 refractor still wants to see the slab's comps.
+      if (isBaseCard && !gradeKeyword) {
         excludes.push('-parallel', '-refractor', '-xfractor', '-rainbow', '-mojo', '-holo');
+      }
+
+      // When the caller asked for the RAW price tier, strip slabbed sales
+      // so the average reflects ungraded card prices only.
+      if (excludeGraded) {
+        excludes.push('-PSA', '-BGS', '-SGC', '-CGC', '-graded', '-slab', '-slabbed');
       }
 
       return excludes.join(' ');
@@ -588,6 +616,12 @@ export async function searchCardValues(
         parts.push(serialSuffix);
       }
 
+      // Slab/grade keyword (e.g. "PSA 10"). Appended near the end so eBay
+      // treats it as a mandatory match term.
+      if (gradeKeyword) {
+        parts.push(gradeKeyword);
+      }
+
       if (includeNegatives) {
         const neg = buildNegativeKeywords();
         if (neg) parts.push(neg);
@@ -602,7 +636,7 @@ export async function searchCardValues(
     const safePlayerName = playerName || '';
     let results: EbaySearchResult[] = [];
     let dataType: 'sold' | 'current' = 'sold';
-    const fallbackSearchUrl = getEbaySearchUrl(safePlayerName, cardNumber, brand, year, collection, '', isNumbered, foilType, serialNumber, variant, set);
+    const fallbackSearchUrl = getEbaySearchUrl(safePlayerName, cardNumber, brand, year, collection, '', isNumbered, foilType, serialNumber, variant, set, gradeKeyword || undefined);
 
     // Use eBay Finding API (findCompletedItems) to get sold listings.
     // This API is accessible from Replit servers (unlike the web UI which hits Akamai bot protection).
@@ -1104,7 +1138,7 @@ export async function searchCardValues(
     return {
       averageValue: 0,
       results: [],
-      searchUrl: getEbaySearchUrl(playerName || '', cardNumber, brand, year, collection, '', isNumbered, foilType, serialNumber, variant, set),
+      searchUrl: getEbaySearchUrl(playerName || '', cardNumber, brand, year, collection, '', isNumbered, foilType, serialNumber, variant, set, options?.gradeKeyword || undefined),
       errorMessage: 'eBay search failed',
       dataType: 'sold' as const
     };
@@ -1125,7 +1159,8 @@ export function getEbaySearchUrl(
   foilType?: string,
   serialNumber?: string,
   variant?: string,
-  set?: string
+  set?: string,
+  gradeKeyword?: string
 ): string {
   // Prefer the product Set name (e.g. "Holiday", "Series 1") over the generic
   // Collection name (e.g. "Base Set") that eBay sellers never write in titles.
@@ -1164,6 +1199,13 @@ export function getEbaySearchUrl(
   } else if (foilType) {
     const foilSearchTerm = getFoilSearchTerm(foilType);
     keywords += ` ${foilSearchTerm || foilType}`;
+  }
+
+  // Grade filter (e.g. "PSA 10") for the graded-pricing breakdown’s empty
+  // state: the eBay fallback link should reflect the same tier the UI was
+  // looking for, not the generic raw search.
+  if (gradeKeyword && gradeKeyword.trim()) {
+    keywords += ` ${gradeKeyword.trim()}`;
   }
 
   // Encode for URL — sold/completed listings (last 90 days), sorted by most recent

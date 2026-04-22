@@ -20,6 +20,7 @@ import {
 import * as schema from '../shared/schema';
 import { storage } from './storage';
 import { searchCardValues, getEbaySearchUrl, clearEbayCache } from './ebayService';
+import { holoOverallToPsaInt, psaKeyword } from './holo/psaGrade';
 import { z } from 'zod';
 import { handleDualSideCardAnalysis } from './dualSideOCR';
 import { extractTextFromImage, analyzeSportsCardImage } from './googleVisionFetch';
@@ -1006,6 +1007,104 @@ export async function registerRoutes(app: Express): Promise<Server> {
         error: 'Failed to search eBay prices',
         results: [],
         averageValue: 0
+      });
+    }
+  });
+
+  // Graded-pricing lookup for Holo users. Given the same card identifiers
+  // as /api/ebay-search plus an optional Holo overall grade, runs three
+  // eBay queries in parallel and returns:
+  //   - raw      : the usual search, minus slabbed sales (-PSA -BGS -…)
+  //   - atGrade  : keywords + "PSA {predictedGrade}" (skipped if grade == 10)
+  //   - topGrade : keywords + "PSA 10"
+  //
+  // Each tier has the same shape as /api/ebay-search plus a `grade` label
+  // and a boolean `empty` flag (true when count === 0). The frontend uses
+  // empty tiers to render a clickable "No comps yet — browse eBay" link
+  // instead of AI-invented prices.
+  app.get(`${apiPrefix}/ebay-graded-search`, async (req, res) => {
+    try {
+      const {
+        playerName, cardNumber, brand, year, collection, set, condition,
+        isNumbered, foilType, serialNumber, variant, isAutographed, overall,
+      } = req.query;
+
+      if (!brand || !year) {
+        return res.status(400).json({ error: 'Missing required parameters: brand and year are required' });
+      }
+
+      const overallNum = overall !== undefined && overall !== ''
+        ? Number(overall)
+        : NaN;
+      const psaInt = Number.isFinite(overallNum) ? holoOverallToPsaInt(overallNum) : null;
+      const atGradeKeyword = psaKeyword(psaInt);
+      const topGradeKeyword = 'PSA 10';
+      const skipTopGrade = psaInt === 10; // at-grade IS top-grade — don't duplicate
+
+      const runTier = (opts: { gradeKeyword?: string; excludeGraded?: boolean }) =>
+        searchCardValues(
+          String(playerName || ''),
+          cardNumber as string || '',
+          brand as string,
+          parseInt(year as string, 10),
+          collection as string || '',
+          condition as string || '',
+          isNumbered === 'true',
+          foilType as string || undefined,
+          serialNumber as string || undefined,
+          variant as string || undefined,
+          isAutographed === 'true',
+          undefined,
+          set as string || undefined,
+          opts,
+        );
+
+      // Run up to three searches in parallel — each call hits the same
+      // keyword-builder under the hood, so the cost is network-bound rather
+      // than CPU-bound. searchCardValues is already cached, so repeated
+      // scans of the same card only pay the eBay cost once per tier.
+      const [rawRes, atGradeRes, topGradeRes] = await Promise.all([
+        runTier({ excludeGraded: true }),
+        atGradeKeyword ? runTier({ gradeKeyword: atGradeKeyword }) : Promise.resolve(null),
+        skipTopGrade ? Promise.resolve(null) : runTier({ gradeKeyword: topGradeKeyword }),
+      ]);
+
+      const toTier = (
+        r: Awaited<ReturnType<typeof searchCardValues>> | null,
+        label: string,
+      ) => {
+        if (!r) return null;
+        const count = r.results?.length || 0;
+        return {
+          grade: label,
+          averageValue: r.averageValue || 0,
+          count,
+          items: r.results || [],
+          searchUrl: r.searchUrl || '',
+          dataType: r.dataType || 'sold',
+          errorMessage: r.errorMessage,
+          empty: count === 0,
+        };
+      };
+
+      return res.json({
+        predictedPsaGrade: psaInt,
+        raw: toTier(rawRes, 'Raw'),
+        atGrade: toTier(atGradeRes, atGradeKeyword || ''),
+        // If at-grade IS PSA 10, mirror it into topGrade for the UI so the
+        // "Top grade (PSA 10)" column isn't empty when the card already
+        // earned a PSA-10 prediction.
+        topGrade: skipTopGrade
+          ? toTier(atGradeRes, 'PSA 10')
+          : toTier(topGradeRes, 'PSA 10'),
+      });
+    } catch (error: any) {
+      console.error('Error in graded eBay search:', error);
+      return res.status(500).json({
+        error: 'Failed to search graded eBay prices',
+        raw: null,
+        atGrade: null,
+        topGrade: null,
       });
     }
   });
