@@ -1,5 +1,5 @@
 import { useState } from "react";
-import packScanLogo from "@assets/ScanDeck_Final_Header_1776091120026.png";
+import Logo from "./Logo";
 import { Link, useLocation } from "wouter";
 import { Menu, X, Home, Camera, Search, Sheet, Settings, LogOut, User as UserIcon } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
@@ -27,8 +27,8 @@ export default function Header() {
       <header className="sticky top-0 z-30 bg-white shadow-sm">
         <div className="flex justify-between items-center px-4 py-4">
           <Link href="/" className="flex items-center space-x-2" onClick={() => setOpen(false)}>
-            <img src={packScanLogo} alt="PackScan" className="h-8 w-8 rounded" />
-            <h1 className="text-xl font-semibold text-primary-700">PackScan</h1>
+            <Logo className="h-8 w-8" tile />
+            <h1 className="font-display text-xl font-semibold tracking-tight text-ink">PackScan</h1>
           </Link>
           <button
             onClick={() => setOpen((o) => !o)}

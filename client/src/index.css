@@ -1,3 +1,6 @@
+/* PackScan redesign typography — Inter body + Space Grotesk display */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -45,6 +48,77 @@
     --sidebar-accent-foreground: 215 25% 27%;
     --sidebar-border: 214 32% 91%;
     --sidebar-ring: 221 83% 53%;
+
+    /* ------------------------------------------------------------------ */
+    /* PackScan redesign tokens (ink / paper / foil)                      */
+    /* Additive — existing tokens above remain for legacy components.    */
+    /* ------------------------------------------------------------------ */
+    --ps-paper: 36 24% 97%;         /* warm paper background           */
+    --ps-ink: 222 35% 11%;          /* deep ink body text              */
+    --ps-card-border: 220 13% 91%;
+    --ps-muted: 220 14% 96%;
+    --ps-muted-foreground: 220 9% 46%;
+
+    --foil-violet: 260 80% 55%;
+    --foil-cyan: 188 78% 50%;
+    --foil-gold: 43 92% 56%;
+    --foil-green: 152 60% 44%;
+    --foil-amber: 32 92% 54%;
+    --foil-red: 0 78% 58%;
+
+    --grad-foil: linear-gradient(135deg,
+      hsl(var(--foil-violet)) 0%,
+      hsl(220 85% 54%) 50%,
+      hsl(var(--foil-cyan)) 100%);
+    --grad-pack: linear-gradient(135deg,
+      hsl(230 45% 15%) 0%,
+      hsl(260 50% 20%) 100%);
+  }
+
+  /* Font family classes for redesign components */
+  .font-display {
+    font-family: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+    letter-spacing: -0.01em;
+  }
+
+  /* Gradient utilities for foil/pack surfaces */
+  .bg-foil { background: var(--grad-foil); }
+  .text-foil {
+    background: var(--grad-foil);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .bg-pack { background: var(--grad-pack); }
+
+  /* Subtle animated shimmer overlay for grade chips */
+  @keyframes ps-foil-shimmer {
+    0%, 100% { opacity: 0.0; transform: translateX(-40%); }
+    50%      { opacity: 0.6; transform: translateX(40%); }
+  }
+  .foil-shimmer { position: relative; overflow: hidden; }
+  .foil-shimmer::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(115deg, transparent 30%, rgba(255,255,255,0.45) 50%, transparent 70%);
+    animation: ps-foil-shimmer 4.5s ease-in-out infinite;
+    pointer-events: none;
+  }
+  .grade-halo {
+    box-shadow: 0 10px 24px -12px hsl(var(--foil-violet) / 0.35),
+                0 4px 10px -4px hsl(var(--foil-cyan) / 0.25);
+  }
+
+  /* Hover elevate helper for interactive rows/buttons */
+  .hover-elevate {
+    transition: background-color 0.15s ease, transform 0.15s ease;
+  }
+  .hover-elevate:hover {
+    background-color: hsl(var(--ps-muted));
+  }
+  .hover-elevate:active {
+    transform: translateY(1px);
   }
 
   .camera-container {
