@@ -63,6 +63,13 @@ export default function Scan() {
       if (!response.ok) throw new Error("Analysis failed");
 
       const result = await response.json();
+      console.log("[Scan] analyze response", {
+        ok: response.ok,
+        success: result?.success,
+        hasData: !!result?.data,
+        foilType: result?.data?.foilType,
+        hasHolo: !!result?.data?.holo,
+      });
       if (!result.success || !result.data) {
         throw new Error(result.message || "Analysis failed");
       }
@@ -75,7 +82,7 @@ export default function Scan() {
         cardData: result.data,
         holoGrade: (result.data.holo as HoloGrade) ?? null,
       });
-
+      console.log("[Scan] navigating to /result");
       navigate("/result");
     } catch (error) {
       console.error("Analysis error:", error);

@@ -68,18 +68,37 @@ export default function ScanResult() {
   const [collectionCandidates, setCollectionCandidates] = useState<CollectionCandidate[]>([]);
   const [showPriceResults, setShowPriceResults] = useState(false);
 
+  // Tracks whether we already gave the user a moment to let the analyze
+  // payload commit into context before considering a redirect. Avoids a
+  // race where /result mounts on the same microtask that set the data,
+  // briefly sees hasResult=false, and bounces back to /scan.
+  const [bootChecked, setBootChecked] = useState(false);
+
   const cardData = flow.cardData;
   const holoGrade = flow.holoGrade;
   const frontImage = flow.frontImage;
   const backImage = flow.backImage;
 
   // If the user hit /result directly (deep link, refresh, back-button from
-  // outside the app) without an analyze in memory, bounce to /scan.
+  // outside the app) without an analyze in memory, bounce to /scan. We
+  // wait one tick first to let analyze-side state commits settle, so a
+  // momentary hasResult=false on mount doesn't kick a valid scan back.
   useEffect(() => {
-    if (!flow.hasResult) {
-      navigate("/scan", { replace: true });
+    console.log("[ScanResult] mount-check", { hasResult: flow.hasResult });
+    if (flow.hasResult) {
+      setBootChecked(true);
+      return;
     }
-  }, [flow.hasResult, navigate]);
+    const t = setTimeout(() => {
+      if (!flow.hasResult) {
+        console.warn("[ScanResult] no result after 120ms — redirecting to /scan");
+        navigate("/scan", { replace: true });
+      }
+      setBootChecked(true);
+    }, 120);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flow.hasResult]);
 
   // Run the post-analyze disambiguation flow once when the result first
   // lands. Re-runs whenever the caller swaps cardData out (e.g. after a
@@ -92,7 +111,17 @@ export default function ScanResult() {
     setShowParallelConfirm(false);
     setShowParallelPicker(false);
     setShowCollectionPicker(false);
-    runPostScanFlow(cardData);
+    runPostScanFlow(cardData).catch((err) => {
+      // fetchParallels or any downstream helper failed — don't leave the
+      // page stuck in its pre-price state. Fall through to showing eBay
+      // prices with whatever OCR gave us so the user sees *something*.
+      console.error("[ScanResult] Post-scan flow threw, falling back:", err);
+      toast({
+        title: "Couldn't look up parallels",
+        description: "Showing prices for the detected card instead.",
+      });
+      setShowPriceResults(true);
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cardData]);
 
@@ -121,6 +150,15 @@ export default function ScanResult() {
    *  Step 4 — `parallelSuspected` fallback with no color detected
    */
   const runPostScanFlow = async (data: Partial<CardFormValues>) => {
+    console.log("[ScanResult] runPostScanFlow", {
+      brand: data.brand,
+      year: data.year,
+      foilType: data.foilType,
+      serialNumber: data.serialNumber,
+      isNumbered: data.isNumbered,
+      parallelSuspected: (data as any).parallelSuspected,
+      collectionAmbiguous: (data as any)._collectionAmbiguous,
+    });
     const collAmbig = (data as any)._collectionAmbiguous;
     const collCands = (data as any)._collectionCandidates as CollectionCandidate[] | undefined;
     if (collAmbig && collCands && collCands.length > 1) {
@@ -255,6 +293,7 @@ export default function ScanResult() {
     }
 
     // 0 DB matches — use the OCR-detected value as-is.
+    console.log("[ScanResult] flow fell through to setShowPriceResults(true)");
     setShowPriceResults(true);
   };
 
@@ -319,7 +358,9 @@ export default function ScanResult() {
 
   if (!cardData) {
     return (
-      <div className="p-6 text-sm text-slate-500">Loading scan result…</div>
+      <div className="p-6 text-sm text-slate-500">
+        {bootChecked ? "No scan in memory — redirecting…" : "Loading scan result…"}
+      </div>
     );
   }
 
@@ -441,8 +482,10 @@ export default function ScanResult() {
         onConfirm={handleCollectionConfirm}
       />
 
-      {/* Details-first tabs */}
-      <Tabs defaultValue="details" className="pt-3">
+      {/* Tabs — default to Grade & Pricing so the user sees the payoff of
+          the scan immediately (grade + comps). Details is a reference view
+          for verifying OCR identified the card correctly. */}
+      <Tabs defaultValue="grade-pricing" className="pt-3">
         <TabsList className="mx-4 grid grid-cols-3 bg-slate-100/60">
           <TabsTrigger value="details" data-testid="tab-details">Details</TabsTrigger>
           <TabsTrigger value="grade-pricing" data-testid="tab-grade-pricing">
@@ -460,14 +503,35 @@ export default function ScanResult() {
         </TabsContent>
 
         <TabsContent value="grade-pricing" className="mt-4 space-y-4 px-4">
-          {holoGrade ? (
-            <>
-              <HoloGradeCard grade={holoGrade} />
-              <GradedPriceBreakdown cardData={cardData} holoOverall={holoGrade.overall} />
-            </>
+          {holoGrade && <HoloGradeCard grade={holoGrade} />}
+          {holoGrade && (
+            <GradedPriceBreakdown
+              cardData={cardData}
+              holoOverall={holoGrade.overall}
+            />
+          )}
+          {showPriceResults ? (
+            <EbayPriceResults
+              cardData={cardData}
+              frontImage={frontImage}
+              backImage={backImage}
+              onCardDataUpdate={(updatedData) => {
+                // Re-run the disambiguation flow when the serial limit
+                // changed (e.g. user typed "041/150" OCR missed); otherwise
+                // just save the edits and re-price in place.
+                flow.setCardData(updatedData);
+              }}
+            />
           ) : (
-            <p className="text-sm text-slate-500">
-              No grade returned for this scan.
+            <div className="rounded-2xl border border-card-border bg-card p-4 text-sm text-slate-500">
+              {showParallelConfirm || showParallelPicker || showCollectionPicker
+                ? "Answer the prompt above to load pricing."
+                : "Looking up pricing…"}
+            </div>
+          )}
+          {!holoGrade && (
+            <p className="text-xs text-slate-500 text-center">
+              No Holo grade returned for this scan.
             </p>
           )}
         </TabsContent>
@@ -479,15 +543,7 @@ export default function ScanResult() {
               frontImage={frontImage}
               backImage={backImage}
               onCardDataUpdate={(updatedData) => {
-                // If the user edited the serial-number limit, re-run the
-                // disambiguation flow; otherwise just save the edits.
-                const prevLimit = extractSerialLimit((cardData.serialNumber || "").trim());
-                const nextLimit = extractSerialLimit((updatedData.serialNumber || "").trim());
-                if (nextLimit && nextLimit !== prevLimit) {
-                  flow.setCardData(updatedData);
-                } else {
-                  flow.setCardData(updatedData);
-                }
+                flow.setCardData(updatedData);
               }}
             />
           ) : (
