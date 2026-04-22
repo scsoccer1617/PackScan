@@ -110,6 +110,10 @@
                 0 4px 10px -4px hsl(var(--foil-cyan) / 0.25);
   }
 
+  /* Hide scrollbars on horizontal carousels (Recent scans etc.) */
+  .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+
   /* Hover elevate helper for interactive rows/buttons */
   .hover-elevate {
     transition: background-color 0.15s ease, transform 0.15s ease;

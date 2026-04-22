@@ -12,15 +12,21 @@ import ResetPassword from "@/pages/ResetPassword";
 import VerifyEmail from "@/pages/VerifyEmail";
 import MySheets from "@/pages/MySheets";
 import AccountSettings from "@/pages/AccountSettings";
-import Header from "@/components/Header";
-import Footer from "@/components/Footer";
+import Collection from "@/pages/Collection";
+import Stats from "@/pages/Stats";
+import AppShell from "@/components/AppShell";
 import { AuthProvider, useAuth } from "@/hooks/use-auth";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
-const PUBLIC_ROUTES = new Set(["/login", "/forgot-password", "/reset-password", "/verify-email"]);
+const PUBLIC_ROUTES = new Set([
+  "/login",
+  "/forgot-password",
+  "/reset-password",
+  "/verify-email",
+]);
 
 function VerificationBanner() {
   const { user, refresh } = useAuth();
@@ -31,64 +37,91 @@ function VerificationBanner() {
   const resend = async () => {
     setResending(true);
     try {
-      await apiRequest({ url: '/api/auth/resend-verification', method: 'POST' });
-      toast({ title: 'Verification email sent', description: `Check ${user.email}.` });
+      await apiRequest({ url: "/api/auth/resend-verification", method: "POST" });
+      toast({ title: "Verification email sent", description: `Check ${user.email}.` });
       await refresh();
     } catch {
-      toast({ title: 'Could not resend email', variant: 'destructive' });
-    } finally { setResending(false); }
+      toast({ title: "Could not resend email", variant: "destructive" });
+    } finally {
+      setResending(false);
+    }
   };
   return (
     <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 text-sm flex items-center gap-2 flex-wrap">
       <span className="text-amber-800">Please verify your email address.</span>
       <Button size="sm" variant="outline" onClick={resend} disabled={resending}>
-        {resending ? 'Sending…' : 'Resend verification'}
+        {resending ? "Sending…" : "Resend verification"}
       </Button>
-      <button onClick={() => setDismissed(true)} className="text-amber-700 text-xs ml-auto">Dismiss</button>
+      <button
+        onClick={() => setDismissed(true)}
+        className="text-amber-700 text-xs ml-auto"
+      >
+        Dismiss
+      </button>
     </div>
   );
 }
 
-function Gate({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth();
-  const [location] = useLocation();
-  const isPublic = PUBLIC_ROUTES.has(location) || location.startsWith('/reset-password') || location.startsWith('/verify-email');
-  if (loading) {
-    return <div className="p-8 text-center text-sm text-slate-500">Loading…</div>;
-  }
-  if (!user && !isPublic) {
-    return <Redirect to="/login" />;
-  }
-  if (user && location === '/login') {
-    return <Redirect to="/" />;
-  }
-  return <>{children}</>;
+function isPublicLocation(location: string) {
+  return (
+    PUBLIC_ROUTES.has(location) ||
+    location.startsWith("/reset-password") ||
+    location.startsWith("/verify-email")
+  );
 }
 
-function AppShell() {
+/**
+ * Redesign shell: Public routes (login, etc.) render bare — they own their
+ * own page layout. Authenticated routes render inside AppShell which
+ * provides the sticky TopBar and 5-tab BottomTabs chrome.
+ */
+function Router() {
+  const { user, loading } = useAuth();
+  const [location] = useLocation();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-paper flex items-center justify-center text-sm text-slate-500">
+        Loading…
+      </div>
+    );
+  }
+
+  const isPublic = isPublicLocation(location);
+
+  // Public routes (no auth required, no shell chrome)
+  if (isPublic) {
+    return (
+      <Switch>
+        <Route path="/login" component={() => (user ? <Redirect to="/" /> : <Login />)} />
+        <Route path="/forgot-password" component={ForgotPassword} />
+        <Route path="/reset-password" component={ResetPassword} />
+        <Route path="/verify-email" component={VerifyEmail} />
+      </Switch>
+    );
+  }
+
+  // Require auth for everything else
+  if (!user) {
+    return <Redirect to="/login" />;
+  }
+
+  // Authenticated routes — wrapped in new shell
   return (
-    <div className="max-w-lg mx-auto min-h-screen flex flex-col bg-white relative">
-      <Header />
+    <AppShell>
       <VerificationBanner />
-      <main className="flex-1 overflow-y-auto pb-4">
-        <Gate>
-          <Switch>
-            <Route path="/" component={() => <Home />} />
-            <Route path="/scan" component={() => <PriceLookup />} />
-            <Route path="/search" component={() => <CardSearch />} />
-            <Route path="/admin/card-database" component={() => <CardDatabaseAdmin />} />
-            <Route path="/login" component={() => <Login />} />
-            <Route path="/forgot-password" component={() => <ForgotPassword />} />
-            <Route path="/reset-password" component={() => <ResetPassword />} />
-            <Route path="/verify-email" component={() => <VerifyEmail />} />
-            <Route path="/sheets" component={() => <MySheets />} />
-            <Route path="/account" component={() => <AccountSettings />} />
-            <Route component={NotFound} />
-          </Switch>
-        </Gate>
-      </main>
-      <Footer />
-    </div>
+      <Switch>
+        <Route path="/" component={Home} />
+        <Route path="/scan" component={PriceLookup} />
+        <Route path="/search" component={CardSearch} />
+        <Route path="/collection" component={Collection} />
+        <Route path="/sheets" component={MySheets} />
+        <Route path="/stats" component={Stats} />
+        <Route path="/account" component={AccountSettings} />
+        <Route path="/admin/card-database" component={CardDatabaseAdmin} />
+        <Route component={NotFound} />
+      </Switch>
+    </AppShell>
   );
 }
 
@@ -96,7 +129,7 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <AppShell />
+        <Router />
       </AuthProvider>
     </QueryClientProvider>
   );
