@@ -58,7 +58,6 @@ let cvReadyPromise: Promise<any> | null = null;
 declare global {
   interface Window {
     cv?: any;
-    Module?: any;
   }
 }
 
@@ -81,31 +80,38 @@ export function ensureOpenCVReady(): Promise<any> {
       reject(new Error("OpenCV.js load timed out"));
     }, OPENCV_READY_TIMEOUT_MS);
 
-    // OpenCV.js looks for window.Module and calls Module.onRuntimeInitialized
-    // when the WASM is ready. We install our hook BEFORE injecting the script.
-    const existing = window.Module || {};
-    window.Module = {
-      ...existing,
-      onRuntimeInitialized: () => {
+    // OpenCV.js populates window.cv asynchronously after script evaluation
+    // AND a subsequent WASM instantiation. Rather than tangle with the
+    // Emscripten Module.onRuntimeInitialized hook (which requires us to set
+    // window.Module BEFORE the script runs and risks clobbering fields the
+    // script writes internally), we poll for `window.cv.Mat` to appear.
+    // This is resilient across OpenCV.js versions and can't stall the page.
+    const pollStart = Date.now();
+    let pollHandle: number | null = null;
+    const poll = () => {
+      if (window.cv && window.cv.Mat) {
         window.clearTimeout(timeout);
-        try {
-          existing.onRuntimeInitialized?.();
-        } catch {
-          /* ignore */
-        }
-        if (window.cv && window.cv.Mat) {
-          resolve(window.cv);
-        } else {
-          reject(new Error("OpenCV.js loaded but cv namespace missing"));
-        }
-      },
+        if (pollHandle !== null) window.clearTimeout(pollHandle);
+        resolve(window.cv);
+        return;
+      }
+      if (Date.now() - pollStart > OPENCV_READY_TIMEOUT_MS) {
+        // The outer timeout will fire shortly; just stop polling.
+        return;
+      }
+      pollHandle = window.setTimeout(poll, 50);
     };
 
     const script = document.createElement("script");
     script.async = true;
     script.src = OPENCV_CDN_URL;
+    script.onload = () => {
+      // Script has evaluated. WASM may still be loading — begin polling.
+      poll();
+    };
     script.onerror = () => {
       window.clearTimeout(timeout);
+      if (pollHandle !== null) window.clearTimeout(pollHandle);
       reject(new Error("OpenCV.js script failed to load"));
     };
     document.head.appendChild(script);
