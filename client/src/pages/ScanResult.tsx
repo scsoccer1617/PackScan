@@ -462,50 +462,107 @@ export default function ScanResult() {
       // through to the pre-existing local-DB fallback.
       if (parallelSuspected && !detected && !detectedSerial) {
         const canQueryScpForSuggested =
-          !!suggestedColor && !!data.brand && !!data.year && !!fullName;
+          !!data.brand && !!data.year && !!fullName;
+        let step4ScpReturnedSomething = false;
         if (canQueryScpForSuggested) {
           try {
-            const scpSuggested = await scpParallels.mutateAsync({
-              playerName: fullName,
-              year: (data.year as number | null | undefined) ?? null,
-              brand: data.brand ?? null,
-              collection: data.collection ?? null,
-              setName: data.set ?? null,
-              cardNumber: data.cardNumber ?? null,
-              colorFilter: suggestedColor,
-            });
-            if (scpSuggested.parallels.length === 1) {
-              // Unique colour match — auto-apply the SCP label.
-              const only = scpSuggested.parallels[0];
-              applyAndPrice({ ...data, foilType: only.label });
-              return;
-            }
-            if (scpSuggested.parallels.length >= 2) {
+            // First attempt: filter by Vision's suggested colour when we
+            // have one. This collapses a 50+ parallel dump to the 1-2
+            // plausible options for Petersen-style cards where Vision
+            // reads a real colour.
+            const scpSuggested = suggestedColor
+              ? await scpParallels.mutateAsync({
+                  playerName: fullName,
+                  year: (data.year as number | null | undefined) ?? null,
+                  brand: data.brand ?? null,
+                  collection: data.collection ?? null,
+                  setName: data.set ?? null,
+                  cardNumber: data.cardNumber ?? null,
+                  colorFilter: suggestedColor,
+                })
+              : null;
+
+            if (scpSuggested && scpSuggested.parallels.length >= 2) {
+              // Multiple colour-matched SCP parallels — always show the
+              // picker. (We no longer auto-apply on length===1 here:
+              // Vision's colour reading on rainbow/holo cards is
+              // unreliable enough that the dealer should always get a
+              // chance to see the full colour-bucketed options.)
               const scpOptions: ParallelOption[] = scpSuggested.parallels.map((p) => ({
                 variationOrParallel: p.label,
                 serialNumber: null,
               }));
               setParallelOptions(scpOptions);
               setDetectedKeyword(extractKeyword(suggestedColor));
+              step4ScpReturnedSomething = true;
               if (requestShowParallelConfirm(true)) return;
               setShowPriceResults(true);
               return;
             }
-            // scpSuggested.parallels.length === 0 — colour filter wiped
-            // SCP's list. Fall through to the local-DB dump rather than
-            // pricing as base: the user still needs to pick *something*.
+            if (scpSuggested && scpSuggested.parallels.length === 1) {
+              // Single colour match — still show picker (with the
+              // matched label pre-selected by virtue of being the only
+              // option) so the dealer can override to "Other".
+              const scpOptions: ParallelOption[] = scpSuggested.parallels.map((p) => ({
+                variationOrParallel: p.label,
+                serialNumber: null,
+              }));
+              setParallelOptions(scpOptions);
+              setDetectedKeyword(extractKeyword(suggestedColor));
+              step4ScpReturnedSomething = true;
+              if (requestShowParallelConfirm(true)) return;
+              setShowPriceResults(true);
+              return;
+            }
+
+            // Either no suggestedColor at all, or the colour filter
+            // returned zero. Retry UNFILTERED so the dealer sees the
+            // real parallel universe for this exact card. This is the
+            // Ohtani ASG-1 path: Vision read "Green Crackle Foil" (a
+            // misread of Rainbow Foil shimmer); the coloured query
+            // finds 0 matches, but the unfiltered query returns all 9
+            // ASG-1 parallels — exactly what the picker should show.
+            const scpUnfiltered = await scpParallels.mutateAsync({
+              playerName: fullName,
+              year: (data.year as number | null | undefined) ?? null,
+              brand: data.brand ?? null,
+              collection: data.collection ?? null,
+              setName: data.set ?? null,
+              cardNumber: data.cardNumber ?? null,
+              colorFilter: null,
+            });
+            if (scpUnfiltered.parallels.length >= 1) {
+              const scpOptions: ParallelOption[] = scpUnfiltered.parallels.map((p) => ({
+                variationOrParallel: p.label,
+                serialNumber: null,
+              }));
+              setParallelOptions(scpOptions);
+              // Clear the detected keyword — the coloured query missed,
+              // so pre-highlighting Vision's (wrong) guess would mislead
+              // the dealer.
+              setDetectedKeyword("");
+              step4ScpReturnedSomething = true;
+              if (requestShowParallelConfirm(true)) return;
+              setShowPriceResults(true);
+              return;
+            }
           } catch (err) {
-            console.warn("[ScanResult] STEP 4 SCP suggested-color lookup failed:", err);
+            console.warn("[ScanResult] STEP 4 SCP lookup failed:", err);
           }
         }
 
-        const allForStatus = filterBySerialStatus(allOptions, !!detectedSerial && !!data.isNumbered);
-        if (allForStatus.length >= 1) {
-          setParallelOptions(allForStatus);
-          setDetectedKeyword(suggestedColor ? extractKeyword(suggestedColor) : "");
-          if (requestShowParallelConfirm(true)) return;
-          setShowPriceResults(true);
-          return;
+        // Last resort: SCP unreachable or truly returned nothing for
+        // this card. Fall back to the local DB so the dealer still has
+        // *some* options to pick from.
+        if (!step4ScpReturnedSomething) {
+          const allForStatus = filterBySerialStatus(allOptions, !!detectedSerial && !!data.isNumbered);
+          if (allForStatus.length >= 1) {
+            setParallelOptions(allForStatus);
+            setDetectedKeyword(suggestedColor ? extractKeyword(suggestedColor) : "");
+            if (requestShowParallelConfirm(true)) return;
+            setShowPriceResults(true);
+            return;
+          }
         }
       }
     }
