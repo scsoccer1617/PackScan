@@ -43,7 +43,6 @@ import { requireAuth } from './auth';
 import { lookupCard as scpLookupCard, SOURCE_SLUG as SCP_SOURCE_SLUG } from './sportscardspro';
 import type { ScanQueryInput as ScpScanQueryInput } from './sportscardspro';
 import { discoverParallels } from './sportscardspro/parallels';
-import { detectCardQuad } from './vision/detectCardQuad';
 
 // Configure multer for handling file uploads
 const upload = multer({
@@ -913,70 +912,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     
     return handleDualSideCardAnalysis(req, res);
   });
-
-  // Card quadrilateral detection — asks a VLM to locate the 4 corners of a
-  // trading card in a photo. Client uses the returned corners to perspective-
-  // warp the image before running the full analyze pipeline.
-  //
-  // Input: multipart form-data with field 'image' (JPEG/PNG/WEBP, <= 12MB).
-  // Output: { ok: true, quad: {topLeft,topRight,bottomRight,bottomLeft} }
-  //      or { ok: false, reason: 'no_card_detected' | 'parse_error' | ... }
-  app.post(
-    `${apiPrefix}/vision/detect-card-quad`,
-    upload.single('image'),
-    async (req: Request, res: Response) => {
-      try {
-        const file = req.file;
-        if (!file || !file.buffer) {
-          return res.status(400).json({ ok: false, reason: 'missing_image' });
-        }
-        if (file.size > 12 * 1024 * 1024) {
-          return res.status(413).json({ ok: false, reason: 'image_too_large' });
-        }
-
-        // Narrow the mime type to what Anthropic accepts; default to jpeg.
-        const mime = (file.mimetype || 'image/jpeg').toLowerCase();
-        const mediaType: 'image/jpeg' | 'image/png' | 'image/webp' =
-          mime === 'image/png'
-            ? 'image/png'
-            : mime === 'image/webp'
-              ? 'image/webp'
-              : 'image/jpeg';
-
-        const base64 = file.buffer.toString('base64');
-        const result = await detectCardQuad(base64, mediaType);
-
-        if (!result.ok) {
-          // Log at debug volume only — expected on empty/ambiguous frames.
-          console.log('[detect-card-quad] miss', {
-            reason: result.reason,
-            latencyMs: result.latencyMs,
-            detail: 'detail' in result ? result.detail : undefined,
-          });
-          return res.status(200).json({
-            ok: false,
-            reason: result.reason,
-            latencyMs: result.latencyMs,
-          });
-        }
-
-        return res.status(200).json({
-          ok: true,
-          quad: result.quad,
-          confidence: result.confidence,
-          model: result.model,
-          latencyMs: result.latencyMs,
-        });
-      } catch (err) {
-        console.error('[detect-card-quad] unhandled error', err);
-        return res.status(500).json({
-          ok: false,
-          reason: 'server_error',
-          detail: err instanceof Error ? err.message : String(err),
-        });
-      }
-    },
-  );
 
   // eBay search endpoint
   app.get(`${apiPrefix}/search-ebay-values`, async (req, res) => {
