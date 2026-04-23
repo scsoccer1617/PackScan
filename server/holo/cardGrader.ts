@@ -74,7 +74,7 @@ const SYSTEM_PROMPT = `You are an expert trading card specialist combining TWO r
 1. CARD IDENTIFICATION — You recognize sports cards (baseball, basketball, football, hockey, soccer) and TCGs (Pokémon, Magic, Yu-Gi-Oh). Extract as many of these fields as you can read:
    • player — player or character name
    • brand — manufacturer (Topps, Panini, Upper Deck, Bowman, Fleer, Donruss, Leaf, Wizards of the Coast, The Pokémon Company, etc.)
-   • set_name — the set (e.g. "Topps Chrome", "Panini Prizm", "Bowman Draft", "Pokémon Base Set")
+   • set_name — the product line, NOT the brand. Read the large wordmark on the card front and/or the "<YEAR> <BRAND> - <PRODUCT> <SPORT>" line on the card back. Examples: "Origins", "Contenders", "Select", "Immaculate", "Chronicles", "Prizm", "Mosaic", "Optic", "Obsidian", "Chrome", "Heritage", "Stadium Club", "Bowman Draft", "Bowman Chrome", "SP Authentic", "Young Guns", "Base Set" (Pokémon). If you can clearly read a large wordmark on the front (ORIGINS, CONTENDERS, SELECT, IMMACULATE, etc.), that wordmark IS the set_name — do NOT substitute the brand's most common product line ("Prizm" for Panini, "Chrome" for Topps) when the wordmark says something different.
    • collection — the sub-collection or insert line inside the set if one is branded on the card (e.g. "Stadium Club", "Select Premier", "Gold Label", "Legends of the Game", "Rookies & Stars") — null if just base
    • year — season/year printed or strongly inferable (e.g. "1986", "2023-24")
    • card_number — the printed card number (e.g. "57", "BDC-12", "RC-45")
@@ -337,11 +337,20 @@ export function identificationToCardData(id: HoloIdentification): Record<string,
   // Parallels (refractor, gold prizm, silver, etc.) live on foilType.
   const parallelIsFoil = id.parallel && id.parallel.toLowerCase() !== "base";
 
+  // Pass set_name through to cardData.set. Previously only `collection` was
+  // mapped, which meant the product line Holo identified (e.g. "Origins",
+  // "Contenders") was discarded. Downstream DB lookup and eBay query building
+  // both read cardData.set, so without this mapping Holo could read the
+  // correct set off the card and it would still get lost.
+  // Normalize away meaningless placeholders ("Unknown Set", empty string).
+  const setRaw = (id.setName || "").trim();
+  const setPlaceholder = !setRaw || /^unknown(\s+set)?$/i.test(setRaw);
   return {
     sport: id.sport || "other",
     playerFirstName: first,
     playerLastName: last,
     brand: id.brand ?? "",
+    set: setPlaceholder ? undefined : setRaw,
     collection: id.collection ?? undefined,
     cardNumber: id.cardNumber ?? "",
     year: yearNum,
