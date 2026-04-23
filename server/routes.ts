@@ -1258,6 +1258,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const holoResolved = await holoPromise;
 
+      // Cross-check helper: compare Holo's cardNumber/year against OCR's. The
+      // back-of-card pipeline reads the copyright line and card# corner via
+      // Google Vision OCR, so when Claude and OCR disagree on a field it's a
+      // strong signal the vision model misread a digit. We keep Claude's
+      // value (Holo is the primary identifier per product design), but we
+      // attach a `_crossCheck` diagnostic listing mismatched fields so the
+      // ScanResult hero can surface a "verify this" hint and the editable #
+      // / year pills start pre-focused. This is strictly a flagging layer —
+      // it never overrides Claude silently.
+      const normalizeCardNum = (v: any): string => String(v ?? '').trim().toUpperCase().replace(/\s+/g, '').replace(/^#/, '');
+      const computeCrossCheck = (
+        holoCard: Record<string, any>,
+        ocrData: Record<string, any> | null | undefined,
+      ): { fields: string[]; detail: Record<string, { holo: any; ocr: any }> } | null => {
+        if (!ocrData) return null;
+        const mismatches: string[] = [];
+        const detail: Record<string, { holo: any; ocr: any }> = {};
+
+        // Card number: only compare when both sides produced a non-empty value.
+        const holoNum = normalizeCardNum(holoCard.cardNumber);
+        const ocrNum = normalizeCardNum(ocrData.cardNumber);
+        if (holoNum && ocrNum && holoNum !== ocrNum) {
+          mismatches.push('cardNumber');
+          detail.cardNumber = { holo: holoCard.cardNumber, ocr: ocrData.cardNumber };
+        }
+
+        // Year: compare as 4-digit ints. OCR year defaults to current year when
+        // nothing is extracted, so we only flag when OCR has a positive year
+        // that actually differs from Holo's.
+        const holoYear = Number(holoCard.year) || 0;
+        const ocrYear = Number(ocrData.year) || 0;
+        if (holoYear && ocrYear && holoYear !== ocrYear) {
+          mismatches.push('year');
+          detail.year = { holo: holoCard.year, ocr: ocrData.year };
+        }
+
+        return mismatches.length ? { fields: mismatches, detail } : null;
+      };
+
       // Merge helper: Claude identification is applied on top of OCR output
       // when its confidence clears the threshold. Claude fills fields that
       // OCR commonly misses (parallel, CMP, serial, exact collection) and
@@ -1268,6 +1307,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return ocrData ?? {};
         }
         const holoCard = identificationToCardData(holoResolved.identification);
+        // Diagnostic: log Holo's identified year/card# alongside OCR's so we
+        // can debug future mismatches from production logs without needing
+        // to replay the image. Keep compact — one line.
+        console.log(
+          `[MergeDebug] holo: year=${holoCard.year} card#="${holoCard.cardNumber ?? ''}" ` +
+            `conf=${holoResolved.identification.confidence.toFixed(2)} | ` +
+            `ocr: year=${ocrData?.year ?? 'none'} card#="${ocrData?.cardNumber ?? ''}" ` +
+            `yearFromCopyright=${!!ocrData?._yearFromCopyright}`,
+        );
         // Shallow-merge Claude over OCR, but keep OCR values where Claude
         // returned falsy (null/empty) so we never wipe a known OCR field.
         const merged: any = { ...(ocrData || {}) };
@@ -1277,6 +1325,77 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         }
         merged._primarySource = 'holo';
+
+        // OCR-wins overrides for the two fields Claude most commonly misreads.
+        //
+        // Year: Claude's vision repeatedly second-guessed legible 2026
+        // copyrights toward 2025 / 2023 even after prompt reorder, current-
+        // date grounding, and a model bump to Opus 4.7. Google Vision OCR
+        // reads the year from the copyright line AND/OR from the stats
+        // table on the back — either way it's reading pixels deterministic-
+        // ally. Any 4-digit year that OCR produces is more trustworthy than
+        // Claude's hallucinated interpretation, so OCR wins on year as
+        // long as OCR has a value and the two disagree. The OCR year source
+        // (`_yearFromCopyright`, `_yearFromBackOnly`, `_yearFromBareFallback`)
+        // is preserved in the merged payload for downstream diagnostics.
+        //
+        // Card number: Claude sometimes picks up a set/insert code printed
+        // near the card number (e.g. "T83", "SMLB-76", "BDC-12") instead of
+        // the plain base number. Heuristic: if Holo returned a cardNumber
+        // that starts with a letter prefix AND OCR returned a plain numeric
+        // card number, prefer OCR — the letter-prefix form is almost always
+        // an insert/subset ID, not the base #. (We keep Holo when OCR has
+        // no number or when both agree.)
+        const ocrYearNum = Number(ocrData?.year) || 0;
+        const holoYearNum = Number(holoCard.year) || 0;
+        if (ocrYearNum > 0 && ocrYearNum !== holoYearNum) {
+          merged.year = ocrYearNum;
+          const sourceLabel = ocrData?._yearFromCopyright
+            ? 'ocr-copyright'
+            : ocrData?._yearFromBackOnly
+              ? 'ocr-back-stats'
+              : ocrData?._yearFromBareFallback
+                ? 'ocr-bare-fallback'
+                : 'ocr-year';
+          merged._yearSource = sourceLabel;
+          console.log(
+            `[MergeOverride] year: OCR wins — ocr=${ocrYearNum} ` +
+              `beats holo=${holoYearNum} (source: ${sourceLabel}).`,
+          );
+        }
+
+        const holoCardNum = String(holoCard.cardNumber ?? '').trim();
+        const ocrCardNumRaw = String(ocrData?.cardNumber ?? '').trim();
+        const holoIsLetterPrefixed = /^[A-Za-z]+\d/.test(holoCardNum);
+        const ocrIsPlainNumeric = /^\d+$/.test(ocrCardNumRaw);
+        if (
+          holoIsLetterPrefixed &&
+          ocrIsPlainNumeric &&
+          holoCardNum.toUpperCase() !== ocrCardNumRaw.toUpperCase()
+        ) {
+          merged.cardNumber = ocrCardNumRaw;
+          merged._cardNumberSource = 'ocr-plain-numeric';
+          console.log(
+            `[MergeOverride] cardNumber: OCR plain numeric wins — ocr="${ocrCardNumRaw}" ` +
+              `beats holo="${holoCardNum}" (letter-prefixed Holo value looks like ` +
+              `an insert/subset code, not a base card #).`,
+          );
+        }
+
+        // Attach OCR cross-check diagnostic when Holo's cardNumber or year
+        // diverges from OCR's reading. Purely informational — does not mutate
+        // the chosen value beyond the overrides above. The client uses this
+        // to nudge the user to review.
+        const crossCheck = computeCrossCheck(holoCard, ocrData);
+        if (crossCheck) {
+          merged._crossCheck = crossCheck;
+          console.log(
+            `[CrossCheck] Holo vs OCR mismatch on ${crossCheck.fields.join(', ')} — ` +
+              Object.entries(crossCheck.detail)
+                .map(([f, v]) => `${f}: holo="${v.holo}" ocr="${v.ocr}"`)
+                .join(' | '),
+          );
+        }
         return merged;
       };
 
