@@ -34,6 +34,15 @@ interface CardCameraCaptureProps {
 // directly rather than re-implementing that math in JS.
 const GUIDE_ASPECT = 2.5 / 3.5;
 
+// Breathing room around the guide rect when we crop at capture time.
+// The guide is a *suggestion*, not a hard edge — users rarely nail the
+// alignment to the pixel, and a too-tight crop slices off corner ticks,
+// edge borders, or the tips of autograph signatures. 8% on each side
+// (so a guide that's 72% of container width expands to ~85% of what the
+// camera sees horizontally) preserves the visual framing without
+// breaking the "what's inside the guide is what gets saved" promise.
+const CROP_PADDING_FRAC = 0.08;
+
 // Shared MediaStream cached at module scope so reopening the camera (e.g.
 // front → back capture chain) reuses the same hardware stream and the
 // browser never has to re-prompt for permission within a session.
@@ -229,11 +238,23 @@ export default function CardCameraCapture({
       srcY = (vh - srcH) / 2;
     }
 
-    // --- Map the guide's container-relative rect into source pixel space.
-    const gLeftFrac = (guideRect.left - containerRect.left) / cw;
-    const gTopFrac = (guideRect.top - containerRect.top) / ch;
-    const gWidthFrac = guideRect.width / cw;
-    const gHeightFrac = guideRect.height / ch;
+    // --- Map the guide's container-relative rect into source pixel space,
+    // then pad outward by CROP_PADDING_FRAC on each side so the saved
+    // photo has a little breathing room around the guide outline. The
+    // padding is applied in container coordinates first, then mapped to
+    // source pixels, so padding stays visually consistent regardless of
+    // the video-vs-container aspect mismatch.
+    const padX = guideRect.width * CROP_PADDING_FRAC;
+    const padY = guideRect.height * CROP_PADDING_FRAC;
+    const paddedLeft = guideRect.left - containerRect.left - padX;
+    const paddedTop = guideRect.top - containerRect.top - padY;
+    const paddedWidth = guideRect.width + padX * 2;
+    const paddedHeight = guideRect.height + padY * 2;
+
+    const gLeftFrac = paddedLeft / cw;
+    const gTopFrac = paddedTop / ch;
+    const gWidthFrac = paddedWidth / cw;
+    const gHeightFrac = paddedHeight / ch;
 
     const cropX = Math.round(srcX + gLeftFrac * srcW);
     const cropY = Math.round(srcY + gTopFrac * srcH);

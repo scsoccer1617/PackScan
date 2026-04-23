@@ -66,12 +66,29 @@ export const MATCH_THRESHOLD = 65;
  * Order matters for legibility but SCP is unordered; we still put the
  * most-distinctive terms first because fewer-word queries also get less
  * aggressive stemming.
+ *
+ * Card-number inclusion (PR F-2a):
+ *   SCP's search endpoint caps results at 100 and sorts by an internal
+ *   popularity signal. For cards with many parallels (any modern Topps
+ *   flagship), the long tail of Chrome / insert / relic rows can shove
+ *   base-set parallels off the result page. Example: searching
+ *   "Nolan Arenado 2025 Topps" returns 100 rows but Arenado [Holiday]
+ *   #101 isn't among them; adding "101" to the query narrows SCP's
+ *   internal index enough that the full set (84 rows) comes back and
+ *   Holiday lands at position 12.
+ *
+ *   We include the card number by default. It's purely additive — SCP's
+ *   matcher treats it as a keyword, so products whose product-name
+ *   doesn't include the number still come back when other tokens match.
  */
 export function buildSearchQuery(input: ScanQueryInput): string {
   const parts: string[] = [];
   if (input.playerName) parts.push(input.playerName.trim());
   if (input.year) parts.push(String(input.year));
   if (input.brand) parts.push(input.brand.trim());
+  // Card number early so SCP's keyword matcher can use it to narrow the
+  // result page before its 100-cap truncates the long tail.
+  if (input.cardNumber) parts.push(input.cardNumber.trim());
   // Include BOTH collection and setName when they contribute different
   // tokens. SCP console-names are concatenations like
   // "Baseball Cards 2025 Topps Update All-Star Game", so dropping either
