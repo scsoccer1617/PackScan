@@ -233,6 +233,12 @@ export default function ScanResult() {
     const detectedSerial = data.serialNumber?.trim() || "";
     const isNumberedCard = !!data.isNumbered || /\d+\/\d+/.test(detectedSerial);
     const parallelSuspected = !!(data as any).parallelSuspected;
+    // Google Vision's rejected-but-confident colour reading, forwarded from
+    // the server when FoilDB gate says "yes there's foil, but I can't confirm
+    // *which* colour parallel this is". We don't trust it enough to apply as
+    // `foilType`, but it's plenty to ask SCP "what Pink parallels exist for
+    // this card?" which collapses a 52-option dump into a 2-option picker.
+    const suggestedColor = ((data as any).suggestedColor as string | undefined)?.trim() || "";
 
     if (!detected && !isNumberedCard && !parallelSuspected) {
       setShowPriceResults(true);
@@ -444,11 +450,59 @@ export default function ScanResult() {
       }
 
       // STEP 4 — parallelSuspected with no keyword/serial.
+      //
+      // Before falling back to the local-DB "everything we have" dump, give
+      // SCP a shot with the Vision-suggested colour as a filter. When the
+      // server attaches `suggestedColor` (e.g. "Pink Foil" from a rejected
+      // FoilDB gate) we have a strong directional hint even though the
+      // server declined to stamp it as the authoritative `foilType`. Asking
+      // SCP for "Pink parallels of this card" collapses a 50+ option dump
+      // into just the matching-colour parallels — exactly what the picker
+      // should surface. If SCP returns nothing or we lack context, we fall
+      // through to the pre-existing local-DB fallback.
       if (parallelSuspected && !detected && !detectedSerial) {
+        const canQueryScpForSuggested =
+          !!suggestedColor && !!data.brand && !!data.year && !!fullName;
+        if (canQueryScpForSuggested) {
+          try {
+            const scpSuggested = await scpParallels.mutateAsync({
+              playerName: fullName,
+              year: (data.year as number | null | undefined) ?? null,
+              brand: data.brand ?? null,
+              collection: data.collection ?? null,
+              setName: data.set ?? null,
+              cardNumber: data.cardNumber ?? null,
+              colorFilter: suggestedColor,
+            });
+            if (scpSuggested.parallels.length === 1) {
+              // Unique colour match — auto-apply the SCP label.
+              const only = scpSuggested.parallels[0];
+              applyAndPrice({ ...data, foilType: only.label });
+              return;
+            }
+            if (scpSuggested.parallels.length >= 2) {
+              const scpOptions: ParallelOption[] = scpSuggested.parallels.map((p) => ({
+                variationOrParallel: p.label,
+                serialNumber: null,
+              }));
+              setParallelOptions(scpOptions);
+              setDetectedKeyword(extractKeyword(suggestedColor));
+              if (requestShowParallelConfirm(true)) return;
+              setShowPriceResults(true);
+              return;
+            }
+            // scpSuggested.parallels.length === 0 — colour filter wiped
+            // SCP's list. Fall through to the local-DB dump rather than
+            // pricing as base: the user still needs to pick *something*.
+          } catch (err) {
+            console.warn("[ScanResult] STEP 4 SCP suggested-color lookup failed:", err);
+          }
+        }
+
         const allForStatus = filterBySerialStatus(allOptions, !!detectedSerial && !!data.isNumbered);
         if (allForStatus.length >= 1) {
           setParallelOptions(allForStatus);
-          setDetectedKeyword("");
+          setDetectedKeyword(suggestedColor ? extractKeyword(suggestedColor) : "");
           if (requestShowParallelConfirm(true)) return;
           setShowPriceResults(true);
           return;
