@@ -79,12 +79,14 @@ export function hydrateGrade(
   row: ScanGrade,
 ): HoloGrade & {
   id: number;
+  cardId: number | null;
   createdAt: Date;
   identification: HoloIdentification | null;
 } {
   const notes = (row.notes ?? {}) as Record<string, any>;
   return {
     id: row.id,
+    cardId: row.cardId ?? null,
     createdAt: row.createdAt,
     centering: { score: Number(row.centering), notes: String(notes.centering ?? "") },
     centeringBack:
