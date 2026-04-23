@@ -356,7 +356,39 @@ export default function ScanResult() {
             setShowPriceResults(true);
             return;
           }
-          // SCP returned 0 parallels — fall through to local DB below.
+
+          // STEP 2b — SCP returned 0 with the color/tier filter applied.
+          //
+          // This typically means Holo's detected value is wrong for this
+          // set (e.g. "Refractor" on a Topps flagship card, where no
+          // Refractors exist). Don't silently price with a bad label —
+          // retry SCP with NO color filter so the user sees the real
+          // parallel universe for this exact card and can pick manually.
+          const scpUnfiltered = await scpParallels.mutateAsync({
+            playerName: fullName,
+            year: (data.year as number | null | undefined) ?? null,
+            brand: data.brand ?? null,
+            collection: data.collection ?? null,
+            setName: data.set ?? null,
+            cardNumber: data.cardNumber ?? null,
+            colorFilter: null,
+          });
+          if (scpUnfiltered.parallels.length >= 2) {
+            const scpOptions: ParallelOption[] = scpUnfiltered.parallels.map((p) => ({
+              variationOrParallel: p.label,
+              serialNumber: null,
+            }));
+            setParallelOptions(scpOptions);
+            // Clear the detected keyword — we're showing the full list
+            // because the Holo-detected value didn't match SCP. Don't
+            // pre-highlight the wrong word in the picker.
+            setDetectedKeyword("");
+            if (requestShowParallelConfirm(true)) return;
+            setShowPriceResults(true);
+            return;
+          }
+
+          // Truly no SCP parallels at all for this card — fall through.
           scpHandled = true;
         } catch (err) {
           // SCP unreachable or threw — fall through to local DB.
