@@ -20,7 +20,12 @@
  */
 
 import { searchProducts } from "./client";
-import { buildSearchQuery, extractParallel, type ScanQueryInput } from "./match";
+import {
+  buildSearchQuery,
+  extractCardNumber,
+  extractParallel,
+  type ScanQueryInput,
+} from "./match";
 import {
   normalizeParallel,
   parallelsMatch,
@@ -28,8 +33,18 @@ import {
   type CanonicalParallel,
 } from "./colorSynonyms";
 
+/**
+ * Synthetic label for the no-bracket base entry SCP returns for a card.
+ * On many modern Topps inserts (Ohtani ASG-1, Mayer U90-9) the base IS
+ * the rainbow/multi-colour parallel that a dealer owns — so the picker
+ * must offer it as a first-class option rather than leaving it implicit.
+ * The label is displayed verbatim to the dealer.
+ */
+export const BASE_RAINBOW_LABEL = "Base / Rainbow Foil";
+
 export interface DiscoveredParallel {
-  /** Exact string from SCP's [brackets], e.g. "Pink Wave", "Gold Crackle Foil". */
+  /** Exact string from SCP's [brackets], e.g. "Pink Wave", "Gold Crackle Foil".
+   *  For the synthetic base entry this is `BASE_RAINBOW_LABEL`. */
   label: string;
   /** Canonical bucket per colorSynonyms, or null if un-bucketable. */
   canonical: CanonicalParallel | null;
@@ -105,10 +120,40 @@ export async function discoverParallels(
     return { parallels: [], filterFellBack: false, query };
   }
 
+  // Narrow candidates to ones that actually match the scanned card number
+  // (if provided). Without this, a search for Mayer U90-9 can pick up
+  // Mayer #MS1-1 or #200 base rows and incorrectly offer their
+  // parallels. When no card number is provided we keep everything —
+  // downstream match scoring still protects us.
+  const wantCardNumber = scan.cardNumber?.trim() || null;
+  const cardNumberMatches = (productName: string): boolean => {
+    if (!wantCardNumber) return true;
+    const got = extractCardNumber(productName);
+    if (!got) return false;
+    return got.toLowerCase() === wantCardNumber.toLowerCase();
+  };
+
   const seen = new Map<string, DiscoveredParallel>();
+  let baseEntry: DiscoveredParallel | null = null;
   for (const c of candidates) {
+    if (!cardNumberMatches(c["product-name"])) continue;
     const parallel = extractParallel(c["product-name"]);
-    if (!parallel) continue;
+    if (!parallel) {
+      // No-bracket row = the base listing. For Topps flagship/inserts
+      // the base IS often the visually-foily card a dealer has
+      // (Ohtani ASG-1, Mayer U90-9 are both "base = Rainbow Foil"),
+      // so we surface it in the picker rather than dropping it.
+      // Keep the first one we see for this card number.
+      if (!baseEntry) {
+        baseEntry = {
+          label: BASE_RAINBOW_LABEL,
+          canonical: "Rainbow",
+          productId: c.id,
+          consoleName: c["console-name"],
+        };
+      }
+      continue;
+    }
     const canonical = normalizeParallel(parallel);
     // De-dupe by the raw label (normalized whitespace/case only). We used
     // to key on canonical bucket, but that collapses genuinely distinct
@@ -130,26 +175,67 @@ export async function discoverParallels(
   let parallels = Array.from(seen.values());
 
   // Optional color-bucket filter.
+  //
+  // The filter's job is to NARROW, not to silently delete plausible
+  // options. On modern Topps sets a dealer scanning "blue" might really
+  // have any of:
+  //   - a bracketed blue parallel ([Holo Blue Foil], [Blue Rainbow Foil])
+  //   - the base card, which on inserts is often the Rainbow Foil
+  //   - a [Rainbow Foil] row (rainbow reflects blue depending on angle)
+  //   - a themed/unbucketed parallel that can look blue
+  //     ([Sandglitter], [Holiday], [Tinsel], [Ghost], [Clear], …)
+  //
+  // So when a colour filter is active we keep three classes:
+  //   1. Exact colour-bucket matches (Pink filter -> Pink family)
+  //   2. Rainbow-family entries + the synthetic base (always)
+  //   3. Un-bucketable entries (canonical === null) — themed parallels
+  //      like Sandglitter that have no colour identity of their own
+  //
+  // Non-colour filters (Refractor, Autograph) stay strict.
   let filterFellBack = false;
   if (opts.colorFilter) {
     const wantBucket = normalizeParallel(opts.colorFilter);
     if (wantBucket) {
-      const filtered = parallels.filter((p) =>
+      const colourMatches = parallels.filter((p) =>
         parallelsMatch(opts.colorFilter, p.label),
       );
-      if (filtered.length > 0) {
-        parallels = filtered;
-      } else if (isColorBucket(wantBucket)) {
-        // Soft fallback: don't leave the user with an empty picker.
-        filterFellBack = true;
+      if (isColorBucket(wantBucket)) {
+        const keep = parallels.filter((p) => {
+          if (parallelsMatch(opts.colorFilter, p.label)) return true;
+          // Always keep the Rainbow family when any colour is detected.
+          if (p.canonical === "Rainbow") return true;
+          // Always keep themed/un-bucketable parallels.
+          if (p.canonical === null) return true;
+          return false;
+        });
+        if (keep.length === 0) {
+          // Truly nothing plausible — soft fallback to the full list.
+          filterFellBack = true;
+        } else {
+          parallels = keep;
+          filterFellBack = colourMatches.length === 0;
+        }
       } else {
-        // Non-color filter (e.g. "Refractor") \u2014 respect strictness.
-        parallels = filtered;
+        // Non-colour filter (Refractor, Autograph, …) respects strictness.
+        parallels = colourMatches;
       }
     }
   }
 
+  // Always append the synthetic Base / Rainbow Foil entry so the dealer
+  // can pick it when the base IS the visually-foily card (Ohtani ASG-1,
+  // Mayer U90-9). When no colour filter is active this makes the base a
+  // first-class option instead of a hidden default.
+  if (baseEntry) {
+    const baseKey = BASE_RAINBOW_LABEL.toLowerCase();
+    if (!parallels.some((p) => p.label.toLowerCase() === baseKey)) {
+      parallels.push(baseEntry);
+    }
+  }
+
   // Sort: canonical buckets first (alphabetical), then un-bucketable by label.
+  // Base / Rainbow Foil goes to the top of the bucketed group via its
+  // "Rainbow" canonical — it's the most common dealer pick.
   parallels.sort((a, b) => {
     if (!!a.canonical !== !!b.canonical) return a.canonical ? -1 : 1;
     const av = a.canonical ?? a.label;
