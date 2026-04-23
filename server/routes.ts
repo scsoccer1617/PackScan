@@ -42,6 +42,8 @@ import {
 } from './holo/cardGrader';
 import { saveGrade, listGradesForUser, hydrateGrade } from './holo/storage';
 import { requireAuth } from './auth';
+import { lookupCard as scpLookupCard, SOURCE_SLUG as SCP_SOURCE_SLUG } from './sportscardspro';
+import type { ScanQueryInput as ScpScanQueryInput } from './sportscardspro';
 
 // Configure multer for handling file uploads
 const upload = multer({
@@ -1106,6 +1108,53 @@ export async function registerRoutes(app: Express): Promise<Server> {
         atGrade: null,
         topGrade: null,
       });
+    }
+  });
+
+  // =========================================================================
+  // Catalog match (SportsCardsPro overlay)
+  // =========================================================================
+  //
+  // Given a scan's structured fields, find the best SportsCardsPro product
+  // match and return its price curve. This is an ADDITIVE overlay — eBay
+  // comp pricing (above) remains the primary source for the UI; the
+  // catalog strip renders alongside as a market benchmark.
+  //
+  // Intentionally always returns HTTP 200. Clients render the catalog
+  // section only on status: "hit"; a "miss" response is a normal outcome
+  // for long-tail cards SCP doesn't cover, not an error.
+  //
+  // Auth: any signed-in user. We pass req.user.id into miss logging so
+  // we can trace whose scans keep missing.
+  const catalogMatchSchema = z.object({
+    playerName: z.string().trim().optional().nullable(),
+    year: z.number().int().optional().nullable(),
+    brand: z.string().trim().optional().nullable(),
+    collection: z.string().trim().optional().nullable(),
+    setName: z.string().trim().optional().nullable(),
+    cardNumber: z.string().trim().optional().nullable(),
+    parallel: z.string().trim().optional().nullable(),
+  });
+
+  app.post(`${apiPrefix}/catalog/match`, async (req: Request, res: Response) => {
+    const parsed = catalogMatchSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        status: 'miss', reason: 'bad_request',
+        error: parsed.error.issues.map((i) => i.message).join('; '),
+      });
+    }
+    try {
+      const userId = (req.user as any)?.id as number | undefined;
+      const input: ScpScanQueryInput = parsed.data;
+      const result = await scpLookupCard(input, { userId: userId ?? null });
+      return res.status(200).json(result);
+    } catch (err: any) {
+      // Defense-in-depth: the orchestrator is supposed to never throw,
+      // but a bug in the persistence layer could leak. Return a miss so
+      // the client renders normally.
+      console.error('[catalog/match] unexpected throw:', err?.message || err);
+      return res.status(200).json({ status: 'miss', reason: 'api_error' });
     }
   });
 
