@@ -16,7 +16,23 @@
  * Docs: https://www.sportscardspro.com/api-documentation
  */
 
+import { createHash } from "node:crypto";
+import { and, desc, eq, lt } from "drizzle-orm";
+import { db } from "@db";
+import { scpProductCache } from "@shared/schema";
+
 const BASE_URL = "https://www.sportscardspro.com";
+
+// Durable DB cache TTL — SCP regenerates prices once per 24h, so any
+// cached row younger than this is authoritative. Rows older than this
+// trigger a live refresh but remain in the table as an emergency
+// fallback in case SCP is unreachable (see readDurableCache).
+const DURABLE_TTL_MS = 24 * 60 * 60 * 1000;
+
+// Soft ceiling for how stale a row can be and still be served as an
+// emergency fallback. Past this, we'd rather return an error than a
+// wildly outdated price.
+const DURABLE_STALE_LIMIT_MS = 7 * 24 * 60 * 60 * 1000;
 
 // SCP's raw product response shape. Prices are integer pennies. Strings
 // may be "none" for unset fields like asin/upc.
@@ -204,26 +220,160 @@ async function request<T>(path: string, params: Record<string, string>): Promise
   return body as T;
 }
 
+// ---------------------------------------------------------------------------
+// Durable DB-backed cache (24h TTL, 7d emergency fallback)
+// ---------------------------------------------------------------------------
+// Layered under the 5-minute in-memory cache. Flow is:
+//   1. Check in-memory cache    (fastest, survives 5 min)
+//   2. Check scp_product_cache  (survives restarts, 24h fresh window)
+//   3. Live SCP fetch           (rate-limited, writes both caches)
+// If SCP fails on step 3, we fall back to a stale durable row if one
+// exists within DURABLE_STALE_LIMIT_MS — prefer stale data to an error.
+
+function hashQuery(kind: "search" | "product", queryText: string): string {
+  const normalized = `${kind}:${queryText.trim().toLowerCase().replace(/\s+/g, " ")}`;
+  return createHash("sha256").update(normalized).digest("hex").slice(0, 32);
+}
+
+interface DurableHit<T> {
+  value: T;
+  fetchedAt: Date;
+  ageMs: number;
+}
+
+async function readDurableCache<T>(
+  kind: "search" | "product",
+  queryText: string,
+): Promise<DurableHit<T> | null> {
+  try {
+    const hash = hashQuery(kind, queryText);
+    const rows = await db
+      .select()
+      .from(scpProductCache)
+      .where(and(eq(scpProductCache.kind, kind), eq(scpProductCache.queryHash, hash)))
+      .orderBy(desc(scpProductCache.fetchedAt))
+      .limit(1);
+    const hit = rows[0];
+    if (!hit) return null;
+    return {
+      value: hit.responseJson as T,
+      fetchedAt: hit.fetchedAt,
+      ageMs: Date.now() - hit.fetchedAt.getTime(),
+    };
+  } catch (err) {
+    // Best-effort: if the DB is down, we still want live calls to work.
+    console.warn("[SCP] durable cache read failed:", err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
+async function writeDurableCache(
+  kind: "search" | "product",
+  queryText: string,
+  value: unknown,
+): Promise<void> {
+  try {
+    const hash = hashQuery(kind, queryText);
+    // Upsert-ish: delete any existing row for this key, then insert. A
+    // true ON CONFLICT upsert would need a unique index; the pair
+    // (kind, query_hash) is logically unique but we only indexed it
+    // for lookup speed, not uniqueness (so manual re-scans can inspect
+    // history if needed). Delete-then-insert is fine at our volume.
+    await db
+      .delete(scpProductCache)
+      .where(and(eq(scpProductCache.kind, kind), eq(scpProductCache.queryHash, hash)));
+    await db.insert(scpProductCache).values({
+      kind,
+      queryHash: hash,
+      queryText,
+      responseJson: value as any,
+    });
+  } catch (err) {
+    console.warn("[SCP] durable cache write failed:", err instanceof Error ? err.message : err);
+  }
+}
+
+/** Periodic cleanup of rows older than the stale limit. Safe to call
+ *  from a cron; no-op if nothing to prune. */
+export async function pruneDurableCache(): Promise<number> {
+  try {
+    const cutoff = new Date(Date.now() - DURABLE_STALE_LIMIT_MS);
+    const result = await db
+      .delete(scpProductCache)
+      .where(lt(scpProductCache.fetchedAt, cutoff));
+    return (result as any)?.rowCount ?? 0;
+  } catch (err) {
+    console.warn("[SCP] durable cache prune failed:", err instanceof Error ? err.message : err);
+    return 0;
+  }
+}
+
 /**
  * Fetch a single product by its SCP numeric ID. Returns the full price
  * curve. Throws on error — the orchestrator is responsible for turning
  * errors into a silent fallback.
+ *
+ * Caching:
+ *   - Fresh durable cache hit (< 24h)      → returned immediately, no API call.
+ *   - Stale durable hit (24h < age < 7d)   → returned only if live SCP fetch fails.
+ *   - No durable hit                       → live SCP fetch, result written to cache.
  */
 export async function getProduct(id: string): Promise<ScpProduct> {
   if (!/^\d+$/.test(id)) {
     throw new Error(`Invalid SCP product id: ${id}`);
   }
-  return request<ScpProduct>("/api/product", { id });
+
+  const durable = await readDurableCache<ScpProduct>("product", id);
+  if (durable && durable.ageMs < DURABLE_TTL_MS) {
+    return durable.value;
+  }
+
+  try {
+    const live = await request<ScpProduct>("/api/product", { id });
+    // Fire-and-forget; writes are best-effort.
+    void writeDurableCache("product", id, live);
+    return live;
+  } catch (err) {
+    if (durable && durable.ageMs < DURABLE_STALE_LIMIT_MS) {
+      console.warn(
+        `[SCP] live product fetch failed, serving stale cache (${Math.round(durable.ageMs / 3600_000)}h old):`,
+        err instanceof Error ? err.message : err,
+      );
+      return durable.value;
+    }
+    throw err;
+  }
 }
 
 /**
  * Full-text search. SCP accepts natural queries like "tom brady rookie".
  * Returns up to ~100 partial product records (id + names) ordered by
  * SCP's internal relevance. Match scoring is done in match.ts.
+ *
+ * Cached with the same 24h durable policy as getProduct.
  */
 export async function searchProducts(query: string): Promise<ScpSearchResult["products"]> {
   const trimmed = query.trim();
   if (!trimmed) return [];
-  const resp = await request<ScpSearchResult>("/api/products", { q: trimmed });
-  return resp.products ?? [];
+
+  const durable = await readDurableCache<ScpSearchResult["products"]>("search", trimmed);
+  if (durable && durable.ageMs < DURABLE_TTL_MS) {
+    return durable.value;
+  }
+
+  try {
+    const resp = await request<ScpSearchResult>("/api/products", { q: trimmed });
+    const products = resp.products ?? [];
+    void writeDurableCache("search", trimmed, products);
+    return products;
+  } catch (err) {
+    if (durable && durable.ageMs < DURABLE_STALE_LIMIT_MS) {
+      console.warn(
+        `[SCP] live search failed, serving stale cache (${Math.round(durable.ageMs / 3600_000)}h old):`,
+        err instanceof Error ? err.message : err,
+      );
+      return durable.value;
+    }
+    throw err;
+  }
 }

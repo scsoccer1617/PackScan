@@ -371,53 +371,62 @@ export default function GradedPriceBreakdown({
   const atGradeSublabel = psa ? `predicted PSA ${psa}` : "predicted grade";
   const topGradeSublabel = psa === 10 ? "same as at-grade" : "ceiling";
 
+  // PR #38b: SCP is now the pricing hero; eBay comps are demoted to a
+  // "Recent sales" context section below. The old layout put eBay first
+  // with SCP as an inline benchmark strip — but dealers told us the
+  // cross-grade catalog prices (raw/8/9/10/etc.) are what they actually
+  // reference when pricing inventory, and the eBay asking-price grid is
+  // useful mainly as a sanity check. So: SCP rendered as its own full-
+  // width hero card, eBay rendered below it as a smaller supporting card.
+  //
+  // CatalogPriceStrip renders null on miss, so dealers without SCP
+  // coverage still see the eBay section as before (just without the
+  // hero promo above it). The eBay section title stays neutral
+  // ("Recent sales") so the page doesn't feel empty when SCP is absent.
   return (
-    <Card data-testid="card-graded-price-breakdown">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-base">
-          <TrendingUp className="h-4 w-4" />
-          Comparable Listings
-        </CardTitle>
-        <p className="text-xs text-slate-500">
-          Current eBay asking prices at three slab tiers. Median of active
-          listings — not an AI estimate. (Sold data coming once we're
-          approved for eBay Marketplace Insights.)
-        </p>
-      </CardHeader>
-      <CardContent>
-        {/*
-          Catalog price benchmark (SportsCardsPro). Renders inline above
-          the live eBay comp grid when SCP has a confident match for this
-          scan. Silent if no match / SCP unavailable. See PR #38a.
-        */}
-        <div className="mb-3">
-          <CatalogPriceStrip cardData={cardData} predictedPsaGrade={psa} />
-        </div>
-        <div className="flex flex-col md:flex-row gap-3">
-          <TierColumn
-            tier={data.raw}
-            label="Raw"
-            sublabel="ungraded"
-            variant="raw"
-          />
-          <TierColumn
-            tier={data.atGrade}
-            label="At grade"
-            sublabel={atGradeSublabel}
-            variant="atGrade"
-          />
-          <TierColumn
-            tier={data.topGrade}
-            label="Top grade"
-            sublabel={topGradeSublabel}
-            variant="topGrade"
-          />
-        </div>
-        <p className="text-[11px] text-slate-400 mt-3">
-          Graded tiers filter to PSA slabs only. Other grading companies may
-          price differently.
-        </p>
-      </CardContent>
-    </Card>
+    <div className="flex flex-col gap-3" data-testid="card-graded-price-breakdown">
+      {/* Hero: SportsCardsPro catalog benchmark */}
+      <CatalogPriceStrip cardData={cardData} predictedPsaGrade={psa} />
+
+      {/* Secondary: eBay comps, demoted */}
+      <Card data-testid="card-ebay-recent-sales">
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-sm text-slate-700">
+            <TrendingUp className="h-4 w-4" />
+            Recent sales
+          </CardTitle>
+          <p className="text-xs text-slate-500">
+            Live eBay asking prices at three slab tiers for context. Median
+            of active listings — not an AI estimate.
+          </p>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col md:flex-row gap-3">
+            <TierColumn
+              tier={data.raw}
+              label="Raw"
+              sublabel="ungraded"
+              variant="raw"
+            />
+            <TierColumn
+              tier={data.atGrade}
+              label="At grade"
+              sublabel={atGradeSublabel}
+              variant="atGrade"
+            />
+            <TierColumn
+              tier={data.topGrade}
+              label="Top grade"
+              sublabel={topGradeSublabel}
+              variant="topGrade"
+            />
+          </div>
+          <p className="text-[11px] text-slate-400 mt-3">
+            Graded tiers filter to PSA slabs only. Other grading companies
+            may price differently.
+          </p>
+        </CardContent>
+      </Card>
+    </div>
   );
 }

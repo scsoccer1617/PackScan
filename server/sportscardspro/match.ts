@@ -9,17 +9,33 @@
  *
  * Scoring weights (total = 100):
  *   year        20   — hard requirement; wrong year is almost always wrong card
- *   brand       20   — "Topps" vs "Panini" are never interchangeable
+ *   brand       15   — "Topps" vs "Panini" are never interchangeable
  *   cardNumber  25   — most specific signal when present
- *   playerName  20   — fuzzy (last-name + first-initial prefix)
- *   set         10   — "Chrome" vs base; often the discriminator
- *   parallel     5   — detected parallel in [brackets] of product-name
+ *   playerName  15   — fuzzy (last-name + first-initial prefix)
+ *   set          5   — "Chrome" vs base; often the discriminator
+ *   parallel    20   — canonical-bucket comparison via colorSynonyms
  *
- * Threshold: 65 out of 100. Tuned on eyeballing ~20 scans; we log
- * below-threshold misses to `scp_miss_log` for refinement.
+ * Parallel scoring is a signed range (-30..+20):
+ *    +20  scan + candidate normalize to same canonical parallel
+ *      0  both are "base"/no parallel
+ *    -20  scan has a parallel but candidate has none
+ *    -20  candidate has a parallel but scan has none (we don't want to
+ *         match a base card to a Gold Refractor just because the rest
+ *         fit)
+ *    -30  scan and candidate have different named parallels
+ *
+ * Why the big penalty? Before this rebalance, a Petersen US49 Pink scan
+ * could match the Gold Rainbow Foil candidate at ~95/100 because the
+ * player/year/brand/number all lined up and parallel was only worth 5.
+ * The price for Gold is 10x Pink, so a wrong parallel is the single
+ * worst mismatch we can present to a dealer.
+ *
+ * Threshold: 65 out of 100. Logged misses surface the breakdown so the
+ * relative weights can be retuned.
  */
 
 import type { ScpSearchResult } from "./client";
+import { normalizeParallel } from "./colorSynonyms";
 
 type Candidate = ScpSearchResult["products"][number];
 
@@ -198,13 +214,13 @@ export function scoreCandidate(
     breakdown.year = 10;
   }
 
-  // Brand — 20 pts. Exact or "contains" (Topps != Panini).
+  // Brand — 15 pts. Exact or "contains" (Topps != Panini).
   if (scan.brand && candBrand) {
-    if (eq(scan.brand, candBrand)) breakdown.brand = 20;
-    else if (contains(candidate["console-name"], scan.brand)) breakdown.brand = 15;
+    if (eq(scan.brand, candBrand)) breakdown.brand = 15;
+    else if (contains(candidate["console-name"], scan.brand)) breakdown.brand = 12;
     else breakdown.brand = 0;
   } else if (!scan.brand) {
-    breakdown.brand = 10;
+    breakdown.brand = 8;
   }
 
   // Card number — 25 pts. Exact match on the alphanumeric portion.
@@ -221,38 +237,75 @@ export function scoreCandidate(
     breakdown.cardNumber = 10;
   }
 
-  // Player — 20 pts (scorePlayer returns 0..100, we scale).
+  // Player — 15 pts (scorePlayer returns 0..100, we scale).
   if (scan.playerName) {
-    breakdown.playerName = Math.round((scorePlayer(scan.playerName, candidate["product-name"]) / 100) * 20);
+    breakdown.playerName = Math.round((scorePlayer(scan.playerName, candidate["product-name"]) / 100) * 15);
   }
 
-  // Set — 10 pts. collection OR setName, whichever is present, checked
+  // Set — 5 pts. collection OR setName, whichever is present, checked
   // against the full console-name (which includes "Topps Chrome" etc.).
   const setTerm = scan.setName?.trim() || scan.collection?.trim() || "";
   if (setTerm) {
-    if (contains(candidate["console-name"], setTerm)) breakdown.set = 10;
+    if (contains(candidate["console-name"], setTerm)) breakdown.set = 5;
     else breakdown.set = 0;
   } else {
-    breakdown.set = 5;
+    breakdown.set = 3;
   }
 
-  // Parallel — 5 pts. If scan says "Base" or no parallel, we actually
-  // prefer candidates WITHOUT a [bracketed] parallel. If scan detected
-  // a named parallel, we want a matching bracket.
-  const hasScanParallel = !!(scan.parallel && scan.parallel.trim() &&
-    scan.parallel.trim().toLowerCase() !== "base");
-  if (hasScanParallel && candParallel) {
-    if (contains(candParallel, scan.parallel!)) breakdown.parallel = 5;
-    else breakdown.parallel = 0;
-  } else if (!hasScanParallel && !candParallel) {
-    breakdown.parallel = 5;
-  } else {
-    // Mismatch: base scan but parallel candidate (or vice versa). No credit.
-    breakdown.parallel = 0;
-  }
+  // Parallel — 20 pts with signed mismatch penalties. Uses normalized
+  // canonical buckets so "hot pink" / "Pink Wave" / "[Pink]" all collapse
+  // to the same comparison. See colorSynonyms.ts.
+  breakdown.parallel = scoreParallel(scan.parallel, candParallel);
 
-  const score = Object.values(breakdown).reduce((a, b) => a + b, 0);
+  // Clamp to [0, 100] — the parallel axis is the only one that can go
+  // negative, and a single -30 penalty is enough to push a candidate
+  // well below threshold without producing a confusing negative total.
+  const raw = Object.values(breakdown).reduce((a, b) => a + b, 0);
+  const score = Math.max(0, Math.min(100, raw));
   return { candidate, score, breakdown };
+}
+
+/**
+ * Signed parallel score in [-30, +20]. Exported for targeted unit testing.
+ *
+ *   scan parallel    candidate parallel    result
+ *   ───────────────────────────────────────────────────────────────────
+ *   none / base      none / base            0  (both base — neutral)
+ *   none / base      has parallel         -20  (don't match base to Gold Refractor)
+ *   has parallel     none / base          -20  (scan says Pink, candidate is base)
+ *   has parallel     same canonical        +20
+ *   has parallel     different canonical   -30
+ *   has parallel     unrecognized          -10  (SCP parallel we couldn't bucket
+ *                                                 — possible false match, soft penalty)
+ *   unrecognized     has parallel          -10  (mirror; Holo detected something
+ *                                                 we couldn't bucket)
+ */
+export function scoreParallel(
+  scanParallel: string | null | undefined,
+  candidateParallel: string | null | undefined,
+): number {
+  const scanRaw = scanParallel?.trim() ?? "";
+  const candRaw = candidateParallel?.trim() ?? "";
+
+  const scanBase = !scanRaw || scanRaw.toLowerCase() === "base";
+  const candBase = !candRaw;
+
+  if (scanBase && candBase) return 0;
+  if (scanBase && !candBase) return -20;
+  if (!scanBase && candBase) return -20;
+
+  // Both have a parallel.
+  const scanBucket = normalizeParallel(scanRaw);
+  const candBucket = normalizeParallel(candRaw);
+
+  // Either side didn't map into a known bucket — give a soft penalty.
+  // We can't confidently say they match, but we don't want a hard -30
+  // either because the scanner often finds valid-but-uncatalogued parallels
+  // ("Sandglitter", etc.).
+  if (!scanBucket || !candBucket) return -10;
+
+  if (scanBucket === candBucket) return 20;
+  return -30;
 }
 
 /**

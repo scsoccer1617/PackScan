@@ -164,8 +164,13 @@ export default function CatalogPriceStrip({ cardData, predictedPsaGrade }: Props
   ]);
 
   if (loading) {
+    // PR #38b: hero skeleton \u2014 taller and rounded to match the promoted
+    // layout below. Still low-key enough not to cause flash if SCP misses.
     return (
-      <div className="rounded-lg ring-1 ring-slate-200 bg-slate-50 p-3 animate-pulse h-16" />
+      <div
+        className="rounded-xl ring-1 ring-indigo-200 bg-indigo-50/40 p-4 animate-pulse h-32"
+        aria-label="Loading catalog price"
+      />
     );
   }
 
@@ -180,30 +185,60 @@ export default function CatalogPriceStrip({ cardData, predictedPsaGrade }: Props
   ];
   const highlight = highlightKeyFromPsa(predictedPsaGrade);
 
+  // PR #38b: the "anchor" price is whichever tier Holo predicted \u2014 that's
+  // the most meaningful single number for this scan. Falls back to raw
+  // when Holo didn't run or predicted below grade 8.
+  const anchorTier = tiers.find((t) => t.key === highlight) ?? tiers[0];
+
   return (
     <div
-      className="rounded-lg ring-1 ring-indigo-200 bg-indigo-50/60 p-3"
+      className="rounded-xl ring-1 ring-indigo-300/70 bg-gradient-to-br from-indigo-50 to-white p-4 shadow-sm"
       data-testid="catalog-price-strip"
     >
-      <div className="flex items-center justify-between gap-2 mb-2">
-        <div className="flex items-center gap-1.5 text-xs font-medium text-indigo-900">
-          <Database className="h-3.5 w-3.5" />
-          Catalog benchmark
+      {/* Header: source badge + match confidence. Kept compact so the
+          numbers below carry the visual weight. */}
+      <div className="flex items-center justify-between gap-2 mb-3">
+        <div className="flex items-center gap-2 text-[13px] font-semibold text-indigo-950">
+          <Database className="h-4 w-4 text-indigo-700" />
+          Market Price
           <Badge
             variant="secondary"
-            className="text-[10px] px-1.5 py-0 h-4 bg-indigo-100 text-indigo-800 hover:bg-indigo-100"
+            className="text-[10px] px-1.5 py-0 h-4 bg-indigo-100 text-indigo-800 hover:bg-indigo-100 font-medium"
           >
             SportsCardsPro
           </Badge>
         </div>
         <div
-          className="flex items-center gap-1 text-[10px] text-indigo-700"
+          className="flex items-center gap-1 text-[11px] text-indigo-700"
           title={`Matched ${data.match.productName} \u2014 ${data.match.consoleName} (score ${data.match.matchScore}/100)`}
         >
           <Info className="h-3 w-3" />
-          <span className="hidden sm:inline">match {data.match.matchScore}/100</span>
+          <span className="hidden sm:inline tabular-nums">
+            match {data.match.matchScore}/100
+          </span>
         </div>
       </div>
+
+      {/* Anchor headline \u2014 the one number a dealer should read first. */}
+      <div className="flex items-baseline justify-between gap-3 mb-3">
+        <div className="min-w-0">
+          <div className="text-3xl font-bold tabular-nums text-indigo-950 leading-none">
+            {formatPrice(anchorTier.price)}
+          </div>
+          <div className="mt-1 text-[11px] uppercase tracking-wide text-indigo-700/80">
+            {highlight
+              ? `Predicted ${anchorTier.label.toLowerCase()} value`
+              : `${anchorTier.label.toLowerCase()} value`}
+          </div>
+        </div>
+        <div className="text-[10px] text-indigo-700/70 text-right shrink-0 max-w-[55%] truncate">
+          <div className="truncate">{data.match.productName}</div>
+          <div className="truncate">{data.match.consoleName}</div>
+        </div>
+      </div>
+
+      {/* Full price curve as pill cards. Predicted tier is filled
+          indigo; others are outlined. data-testid pattern preserved. */}
       <div className="grid grid-cols-4 gap-2">
         {tiers.map((t) => {
           const isHit = t.key === highlight;
@@ -211,9 +246,9 @@ export default function CatalogPriceStrip({ cardData, predictedPsaGrade }: Props
             <div
               key={t.key}
               className={[
-                "rounded-md px-2 py-1.5 text-center",
+                "rounded-lg px-2 py-2 text-center transition-colors",
                 isHit
-                  ? "bg-indigo-600 text-white ring-1 ring-indigo-700"
+                  ? "bg-indigo-600 text-white ring-1 ring-indigo-700 shadow-sm"
                   : "bg-white ring-1 ring-indigo-200 text-slate-900",
               ].join(" ")}
               data-testid={`catalog-tier-${t.key}`}
@@ -226,15 +261,16 @@ export default function CatalogPriceStrip({ cardData, predictedPsaGrade }: Props
               >
                 {t.label}
               </div>
-              <div className="text-sm font-semibold tabular-nums">
+              <div className="text-sm font-semibold tabular-nums mt-0.5">
                 {formatPrice(t.price)}
               </div>
             </div>
           );
         })}
       </div>
+
       {curve.salesVolume != null && curve.salesVolume > 0 && (
-        <p className="mt-2 text-[10px] text-indigo-700/80">
+        <p className="mt-3 text-[11px] text-indigo-700/80">
           {curve.salesVolume.toLocaleString()} yearly sales
           {curve.releaseDate ? ` \u00b7 released ${curve.releaseDate}` : ""}
         </p>
