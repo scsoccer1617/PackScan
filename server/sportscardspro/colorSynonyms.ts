@@ -143,6 +143,13 @@ const SYNONYMS: Record<CanonicalParallel, string[]> = {
 // Put the less-ambiguous labels first so a compound parallel like
 // "Gold Refractor" normalizes to "Refractor" (the more distinctive tier),
 // while a plain "Gold" still resolves to "Gold".
+//
+// Core colours (Pink, Red, Blue, …) are tested BEFORE "Holo" because
+// SCP uses "Holo" as a foil-finish modifier rather than a distinct
+// bucket. "Holo Pink Foil" is a pink card first; if we bucket it as
+// Holo the parallel picker's Pink filter silently drops it — which
+// caused the Petersen US49 regression where only [Pink Diamante Foil]
+// showed up instead of both pink options.
 const CANONICAL_ORDER: CanonicalParallel[] = [
   // Brand-specific tiers that should beat generic colors.
   "Superfractor",
@@ -166,8 +173,8 @@ const CANONICAL_ORDER: CanonicalParallel[] = [
   "Gold",
   "Silver",
   "Bronze",
-  "Holo",
-  // Core color wheel.
+  // Core color wheel — MUST come before Holo so "Holo Pink Foil"
+  // buckets as Pink, not as Holo.
   "Pink",
   "Red",
   "Orange",
@@ -177,6 +184,8 @@ const CANONICAL_ORDER: CanonicalParallel[] = [
   "Purple",
   "Black",
   "White",
+  // Finish-only modifier — only wins when no color is present in the label.
+  "Holo",
   // Sentinel.
   "Base",
 ];
