@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { requireAuth } from './auth';
 import {
   listUserSheets, getActiveSheet, createNewSheet, setActiveSheet,
-  renameSheet, unlinkSheet, appendCardRow, NotConnectedError,
+  renameSheet, unlinkSheet, appendCardRow, countRowsForSheet, NotConnectedError,
 } from './googleSheets';
 import { getEbaySearchUrl } from './ebayService';
 import { storage } from './storage';
@@ -58,6 +58,27 @@ export function registerSheetRoutes(app: Express) {
       if (err instanceof NotConnectedError) return res.status(409).json({ error: 'Connect Google to rename sheets.', code: 'GOOGLE_NOT_CONNECTED' });
       console.error('[sheets] rename:', err);
       res.status(500).json({ error: err.message || 'Failed to rename sheet' });
+    }
+  });
+
+  // Count the data rows in a specific sheet — used by the MySheets page to
+  // show an accurate "N cards" label for the active sheet. The legacy
+  // /api/collection/summary value reflects the local cards table which is
+  // no longer the source of truth now that every add writes to Google
+  // Sheets, so this endpoint reads from the spreadsheet directly.
+  app.get('/api/sheets/:id/count', requireAuth, async (req, res) => {
+    const userId = (req.user as any).id as number;
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ error: 'Invalid sheet id' });
+    try {
+      const count = await countRowsForSheet(userId, id);
+      res.json({ count });
+    } catch (err: any) {
+      if (err instanceof NotConnectedError) {
+        return res.status(409).json({ error: 'Connect Google first.', code: 'GOOGLE_NOT_CONNECTED' });
+      }
+      console.error('[sheets] count:', err);
+      res.status(500).json({ error: err.message || 'Failed to count rows' });
     }
   });
 

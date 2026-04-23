@@ -86,13 +86,6 @@ export default function ScanResult() {
     searchUrl: string | null;
   } | null>(null);
 
-  // Inline edit state for the card number in the sticky hero. The pencil
-  // next to "#123" toggles this on. On save we push the edit into the
-  // scan flow via setCardData — the main effect picks up the change and
-  // re-runs the post-scan flow (which re-queries eBay with the fixed #).
-  const [editingCardNumber, setEditingCardNumber] = useState(false);
-  const [cardNumberDraft, setCardNumberDraft] = useState("");
-
   // Once the user has answered the "Is this a parallel?" prompt (Yes opens
   // the picker; No prices as base), we must NOT re-prompt even if the
   // in-flight runPostScanFlow later hits a `setShowParallelConfirm(true)`
@@ -443,37 +436,53 @@ export default function ScanResult() {
     navigate("/scan");
   };
 
-  // Persist an edit to the card number into the scan flow. Triggers the
-  // main effect to re-run runPostScanFlow with the corrected #, which in
-  // turn re-queries eBay and updates the Price tab + the avg-price
-  // subtitle in the hero.
-  const handleSaveCardNumber = () => {
+  // Persist a full edit of the card fields into the scan flow. The user
+  // edits inside the Details tab's Card Info section (see DetailsTab's
+  // EditInfoPanel) and on Save we:
+  //   1) Log each changed field against /api/scan-corrections for future
+  //      Claude prompt tuning — best-effort, never blocks the UI.
+  //   2) Update scanFlow.cardData — the main effect on `cardData` kicks
+  //      off runPostScanFlow again, which re-queries parallels + eBay
+  //      with the corrected values. EbayPriceResults is keyed on those
+  //      fields via the pricing query, so the Price tab and the hero
+  //      avg-price subtitle both refresh automatically.
+  const handleSaveCardInfo = (patch: Partial<CardFormValues>) => {
     if (!cardData) return;
-    const next = cardNumberDraft.trim();
-    // Log the mismatch so we can roll this up later for Claude prompt
-    // tuning — keep the server stub payload minimal and best-effort;
-    // never block the UI on this.
-    if (next && next !== (cardData.cardNumber || "")) {
-      try {
-        fetch("/api/scan-corrections", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            field: "cardNumber",
-            detected: cardData.cardNumber || null,
-            corrected: next,
-            brand: cardData.brand,
-            year: cardData.year,
-            collection: cardData.collection,
-            set: (cardData as any).set,
-            playerFirstName: cardData.playerFirstName,
-            playerLastName: cardData.playerLastName,
-          }),
-        }).catch(() => {});
-      } catch {}
+    const before = cardData;
+    // Build the merged card in one shot so the effect sees a stable
+    // reference change exactly once.
+    const next: Partial<CardFormValues> = { ...before, ...patch };
+    const fieldsToLog: (keyof CardFormValues)[] = [
+      "cardNumber", "playerFirstName", "playerLastName", "year", "brand",
+      "collection", "set", "foilType", "variant", "serialNumber",
+    ];
+    for (const f of fieldsToLog) {
+      const oldVal = (before as any)[f] ?? null;
+      const newVal = (next as any)[f] ?? null;
+      if (String(oldVal ?? "") !== String(newVal ?? "")) {
+        try {
+          fetch("/api/scan-corrections", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              field: f,
+              detected: oldVal,
+              corrected: newVal,
+              brand: next.brand,
+              year: next.year,
+              collection: next.collection,
+              set: (next as any).set,
+              playerFirstName: next.playerFirstName,
+              playerLastName: next.playerLastName,
+            }),
+          }).catch(() => {});
+        } catch {}
+      }
     }
-    setEditingCardNumber(false);
-    flow.setCardData({ ...cardData, cardNumber: next });
+    // Reset the priceInfo so the hero subtitle doesn't flash a stale avg
+    // price while the re-priced query is in flight.
+    setPriceInfo(null);
+    flow.setCardData(next);
   };
 
   if (!cardData) {
@@ -536,64 +545,15 @@ export default function ScanResult() {
               </div>
             )}
             <div className="min-w-0 flex-1">
-              {/* Meta line: Year + Brand + inline-editable Card # */}
+              {/* Meta line: Year + Brand + Card # (read-only here; the
+                  user edits every field through the Edit info panel in
+                  the Details tab). */}
               <div className="text-[11px] text-slate-500 uppercase tracking-wider font-medium flex items-center gap-1 flex-wrap">
                 <span>
                   {cardData.year} {cardData.brand}
                 </span>
-                {editingCardNumber ? (
-                  <span className="inline-flex items-center gap-1 normal-case tracking-normal">
-                    <span className="text-slate-400">·</span>
-                    <span className="text-slate-500">#</span>
-                    <input
-                      type="text"
-                      value={cardNumberDraft}
-                      onChange={(e) => setCardNumberDraft(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") handleSaveCardNumber();
-                        if (e.key === "Escape") setEditingCardNumber(false);
-                      }}
-                      autoFocus
-                      className="w-16 h-6 px-1.5 rounded border border-card-border bg-paper text-ink text-xs font-medium focus:outline-none focus:ring-2 focus:ring-foil-violet/40"
-                      data-testid="input-card-number"
-                    />
-                    <button
-                      type="button"
-                      onClick={handleSaveCardNumber}
-                      className="w-6 h-6 rounded-md bg-foil-violet/10 text-foil-violet flex items-center justify-center hover-elevate"
-                      aria-label="Save card number"
-                      data-testid="button-save-card-number"
-                    >
-                      <Check className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setEditingCardNumber(false)}
-                      className="w-6 h-6 rounded-md bg-slate-100 text-slate-500 flex items-center justify-center hover-elevate"
-                      aria-label="Cancel"
-                      data-testid="button-cancel-card-number"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  </span>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setCardNumberDraft(cardData.cardNumber || "");
-                      setEditingCardNumber(true);
-                    }}
-                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md hover:bg-slate-100 text-slate-500 hover:text-ink transition-colors"
-                    data-testid="button-edit-card-number"
-                    title="Edit card number"
-                  >
-                    <span className="text-slate-400">·</span>
-                    <span>
-                      #{cardData.cardNumber || "?"}
-                    </span>
-                    <Pencil className="w-3 h-3 opacity-60" />
-                  </button>
-                )}
+                <span className="text-slate-400">·</span>
+                <span>#{cardData.cardNumber || "?"}</span>
               </div>
               <h1 className="font-display text-xl font-semibold tracking-tight leading-tight truncate text-ink">
                 {playerName(cardData) || "Unidentified card"}
@@ -706,6 +666,7 @@ export default function ScanResult() {
             cardData={cardData}
             frontImage={frontImage}
             backImage={backImage}
+            onSaveCardInfo={handleSaveCardInfo}
           />
         </TabsContent>
 
@@ -773,11 +734,24 @@ function DetailsTab({
   cardData,
   frontImage,
   backImage,
+  onSaveCardInfo,
 }: {
   cardData: Partial<CardFormValues>;
   frontImage: string;
   backImage: string;
+  onSaveCardInfo: (patch: Partial<CardFormValues>) => void;
 }) {
+  const [editing, setEditing] = useState(false);
+
+  // Local draft state mirrors the scan flow cardData while the panel is
+  // open. Reset from cardData every time the panel opens so cancelling
+  // throws the draft away and a re-open always starts from the latest
+  // ground truth (e.g. after a parallel picker update).
+  const [draft, setDraft] = useState<Partial<CardFormValues>>(cardData);
+  useEffect(() => {
+    if (editing) setDraft(cardData);
+  }, [editing, cardData]);
+
   const rows: [string, string][] = [
     ["Player", playerName(cardData) || "—"],
     ["Year", cardData.year ? String(cardData.year) : "—"],
@@ -789,6 +763,19 @@ function DetailsTab({
     ["Serial", cardData.serialNumber || "—"],
     ["Rookie", cardData.isRookieCard ? "Yes" : "No"],
   ];
+
+  const saveEdits = () => {
+    // Coerce year back to a number (the input binds to a string value).
+    const yearNum = draft.year != null && String(draft.year).length > 0
+      ? Number(draft.year)
+      : undefined;
+    const patch: Partial<CardFormValues> = {
+      ...draft,
+      year: Number.isFinite(yearNum as number) ? (yearNum as number) : cardData.year,
+    };
+    onSaveCardInfo(patch);
+    setEditing(false);
+  };
 
   return (
     <div className="px-4 space-y-3">
@@ -822,23 +809,178 @@ function DetailsTab({
       )}
 
       <div className="rounded-2xl bg-card border border-card-border overflow-hidden">
-        <div className="px-4 py-3 border-b border-card-border">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-card-border">
           <h2 className="text-sm font-semibold text-ink">Card info</h2>
-        </div>
-        <dl className="divide-y divide-card-border">
-          {rows.map(([k, v]) => (
-            <div
-              key={k}
-              className="flex items-center justify-between px-4 py-2.5 text-sm"
+          {!editing ? (
+            <button
+              type="button"
+              onClick={() => setEditing(true)}
+              className="inline-flex items-center gap-1 h-8 px-2.5 rounded-lg text-xs font-medium text-foil-violet hover:bg-foil-violet/10 transition-colors"
+              data-testid="button-edit-info"
             >
-              <dt className="text-slate-500">{k}</dt>
-              <dd className="font-medium text-ink text-right truncate max-w-[60%]">
-                {v}
-              </dd>
+              <Pencil className="w-3.5 h-3.5" /> Edit info
+            </button>
+          ) : (
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setEditing(false)}
+                className="h-8 px-2.5 rounded-lg text-xs font-medium text-slate-500 hover:bg-slate-100 transition-colors"
+                data-testid="button-cancel-edit-info"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={saveEdits}
+                className="inline-flex items-center gap-1 h-8 px-2.5 rounded-lg text-xs font-semibold bg-foil-violet text-white hover:brightness-110"
+                data-testid="button-save-edit-info"
+              >
+                <Check className="w-3.5 h-3.5" /> Save
+              </button>
             </div>
-          ))}
-        </dl>
+          )}
+        </div>
+
+        {editing ? (
+          // Inline edit grid — full-fidelity form that mutates scan flow
+          // state in place. On save, the parent's handleSaveCardInfo pushes
+          // the patch into cardData which re-triggers runPostScanFlow and
+          // re-queries eBay pricing with the corrected fields. We do NOT
+          // use the heavy EditCardModal here because that modal is wired
+          // to /api/cards (persisted-card editing) and would POST a DB
+          // write mid-scan, which we don't want for ephemeral scan edits.
+          <div className="p-4 space-y-3">
+            <EditField
+              label="First name"
+              value={draft.playerFirstName || ""}
+              onChange={(v) => setDraft((d) => ({ ...d, playerFirstName: v }))}
+              testId="edit-player-first"
+            />
+            <EditField
+              label="Last name"
+              value={draft.playerLastName || ""}
+              onChange={(v) => setDraft((d) => ({ ...d, playerLastName: v }))}
+              testId="edit-player-last"
+            />
+            <div className="grid grid-cols-2 gap-3">
+              <EditField
+                label="Year"
+                value={draft.year != null ? String(draft.year) : ""}
+                onChange={(v) => setDraft((d) => ({ ...d, year: v as any }))}
+                inputMode="numeric"
+                testId="edit-year"
+              />
+              <EditField
+                label="Brand"
+                value={draft.brand || ""}
+                onChange={(v) => setDraft((d) => ({ ...d, brand: v }))}
+                testId="edit-brand"
+              />
+            </div>
+            <EditField
+              label="Collection"
+              value={draft.collection || ""}
+              onChange={(v) => setDraft((d) => ({ ...d, collection: v }))}
+              testId="edit-collection"
+            />
+            <EditField
+              label="Set"
+              value={(draft as any).set || ""}
+              onChange={(v) => setDraft((d) => ({ ...d, set: v } as any))}
+              testId="edit-set"
+            />
+            <div className="grid grid-cols-2 gap-3">
+              <EditField
+                label="Card #"
+                value={draft.cardNumber || ""}
+                onChange={(v) => setDraft((d) => ({ ...d, cardNumber: v }))}
+                testId="edit-card-number"
+              />
+              <EditField
+                label="Serial"
+                value={draft.serialNumber || ""}
+                onChange={(v) => setDraft((d) => ({ ...d, serialNumber: v }))}
+                placeholder="e.g. 42/99"
+                testId="edit-serial"
+              />
+            </div>
+            <EditField
+              label="Parallel"
+              value={draft.foilType || ""}
+              onChange={(v) => setDraft((d) => ({ ...d, foilType: v, variant: v }))}
+              placeholder="e.g. Silver Prizm, Rainbow Foil"
+              testId="edit-parallel"
+            />
+            <label className="flex items-center gap-2 pt-1 text-sm text-ink">
+              <input
+                type="checkbox"
+                checked={!!draft.isRookieCard}
+                onChange={(e) => setDraft((d) => ({ ...d, isRookieCard: e.target.checked }))}
+                className="w-4 h-4 rounded border-card-border text-foil-violet focus:ring-foil-violet"
+                data-testid="edit-rookie"
+              />
+              Rookie card
+            </label>
+            <p className="text-[11px] text-slate-500 pt-1">
+              Saving refreshes pricing and the eBay search with your edits.
+            </p>
+          </div>
+        ) : (
+          <dl className="divide-y divide-card-border">
+            {rows.map(([k, v]) => (
+              <div
+                key={k}
+                className="flex items-center justify-between px-4 py-2.5 text-sm"
+              >
+                <dt className="text-slate-500">{k}</dt>
+                <dd className="font-medium text-ink text-right truncate max-w-[60%]">
+                  {v}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Minimal labeled input used inside the Edit info panel. Kept local to
+ * ScanResult because this form is bespoke (scan-flow state, no server
+ * round-trip) and doesn't share semantics with the persisted-card
+ * EditCardModal used elsewhere.
+ */
+function EditField({
+  label,
+  value,
+  onChange,
+  placeholder,
+  inputMode,
+  testId,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  inputMode?: "text" | "numeric" | "decimal";
+  testId?: string;
+}) {
+  return (
+    <div>
+      <label className="text-[11px] text-slate-500 uppercase tracking-wide font-medium">
+        {label}
+      </label>
+      <input
+        type="text"
+        inputMode={inputMode}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="mt-1 w-full h-10 rounded-xl bg-background border border-card-border px-3 text-sm outline-none focus:ring-2 focus:ring-foil-violet/30"
+        data-testid={testId}
+      />
     </div>
   );
 }

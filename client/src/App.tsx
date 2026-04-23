@@ -124,7 +124,18 @@ function Router() {
           <Route path="/sheets" component={MySheets} />
           <Route path="/stats" component={Stats} />
           <Route path="/account" component={AccountSettings} />
-          <Route path="/admin/card-database" component={CardDatabaseAdmin} />
+          {/* Admin route is mounted for everyone but redirects non-admin
+              users home. The server enforces email + password on every
+              admin API route — this is just UX polish to keep the page
+              from flashing for non-admins who stumble on the URL. */}
+          <Route
+            path="/admin/card-database"
+            component={() =>
+              user?.email?.trim().toLowerCase() === "daniel.j.holley@gmail.com"
+                ? <CardDatabaseAdmin />
+                : <Redirect to="/" />
+            }
+          />
           <Route component={NotFound} />
         </Switch>
       </AppShell>

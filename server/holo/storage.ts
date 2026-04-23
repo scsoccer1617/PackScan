@@ -74,6 +74,18 @@ export async function getGradeById(id: number): Promise<ScanGrade | undefined> {
   return row;
 }
 
+/**
+ * Legacy rows stored just the original client filename (e.g. "IMG_1234.jpg")
+ * in frontImagePath because the scan route didn't persist the image buffer.
+ * Newer rows store a served URL like "/uploads/scan_front_<uuid>.jpg". Only
+ * the latter is safe to hand back to the client as an <img src>, so we
+ * gate the public field behind a URL-shaped check.
+ */
+function asImageUrl(v: string | null | undefined): string | null {
+  if (!v) return null;
+  return v.startsWith("/uploads/") || v.startsWith("http://") || v.startsWith("https://") ? v : null;
+}
+
 /** Shape a DB row back into the same HoloGrade + identification contract the UI consumes. */
 export function hydrateGrade(
   row: ScanGrade,
@@ -82,6 +94,8 @@ export function hydrateGrade(
   cardId: number | null;
   createdAt: Date;
   identification: HoloIdentification | null;
+  frontImage: string | null;
+  backImage: string | null;
 } {
   const notes = (row.notes ?? {}) as Record<string, any>;
   return {
@@ -103,5 +117,7 @@ export function hydrateGrade(
     model: row.model,
     frontOnly: row.centeringBack == null,
     identification: (row.identification as HoloIdentification | null) ?? null,
+    frontImage: asImageUrl(row.frontImagePath),
+    backImage: asImageUrl(row.backImagePath),
   };
 }
