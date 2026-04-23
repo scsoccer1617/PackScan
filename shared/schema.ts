@@ -288,11 +288,19 @@ export const scanGrades = pgTable("scan_grades", {
   // Null on legacy rows written before identification was added.
   identification: jsonb("identification"),
   identificationConfidence: numeric("identification_confidence", { precision: 4, scale: 3 }),
+  // External catalog linkage. Set when a scan is successfully matched to a
+  // third-party catalog (currently SportsCardsPro). `externalCatalogId` is
+  // the vendor's product ID (opaque string), `externalCatalogSource` is the
+  // vendor slug (e.g. "sportscardspro") so we can add more sources later
+  // without re-reading every row.
+  externalCatalogId: text("external_catalog_id"),
+  externalCatalogSource: text("external_catalog_source"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => [
   index("scan_grades_user_idx").on(table.userId),
   index("scan_grades_card_idx").on(table.cardId),
   index("scan_grades_created_idx").on(table.createdAt),
+  index("scan_grades_ext_catalog_idx").on(table.externalCatalogSource, table.externalCatalogId),
 ]);
 
 export const scanGradesInsertSchema = createInsertSchema(scanGrades);
@@ -313,3 +321,44 @@ export const importHistory = pgTable("import_history", {
 });
 
 export type ImportHistoryEntry = typeof importHistory.$inferSelect;
+
+// =============================================
+// SportsCardsPro miss log (diagnostic)
+// =============================================
+// One row per catalog lookup that failed to find a confident match. Used
+// for tuning the match-score threshold and for an admin report of cards
+// SCP doesn't cover. Never contains PII beyond user_id; the query we sent
+// and the top-N candidates SCP returned (if any) are stored for
+// reproduction. Intentionally append-only — we never update rows.
+
+export const scpMissLog = pgTable("scp_miss_log", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").references(() => users.id, { onDelete: 'set null' }),
+  // Copy of the scan fields we built the query from. Intentionally denormalized
+  // so a miss row still makes sense after the scan is edited or deleted.
+  playerName: text("player_name"),
+  year: integer("year"),
+  brand: text("brand"),
+  collection: text("collection"),
+  setName: text("set_name"),
+  cardNumber: text("card_number"),
+  parallel: text("parallel"),
+  // The exact query string sent to SCP (/api/products?q=...) and the
+  // outcome. reason is one of: "no_results", "below_threshold", "api_error".
+  query: text("query").notNull(),
+  reason: text("reason", { enum: ["no_results", "below_threshold", "api_error"] }).notNull(),
+  // Top candidates returned by SCP (if any) with their match scores, for
+  // reproduction. Shape: [{ id, productName, consoleName, score }]
+  candidates: jsonb("candidates"),
+  // Score of the best candidate that still fell below the threshold. Null
+  // for no_results / api_error.
+  bestScore: numeric("best_score", { precision: 4, scale: 3 }),
+  errorMessage: text("error_message"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("scp_miss_log_created_idx").on(table.createdAt),
+  index("scp_miss_log_reason_idx").on(table.reason),
+]);
+
+export type ScpMissLogEntry = typeof scpMissLog.$inferSelect;
+export type ScpMissLogInsert = typeof scpMissLog.$inferInsert;

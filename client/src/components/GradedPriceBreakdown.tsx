@@ -9,6 +9,7 @@ import {
   ShoppingBag,
 } from "lucide-react";
 import type { CardFormValues } from "@shared/schema";
+import CatalogPriceStrip from "@/components/CatalogPriceStrip";
 
 /**
  * Shape of one tier returned by GET /api/ebay-graded-search. Mirrors
@@ -384,6 +385,14 @@ export default function GradedPriceBreakdown({
         </p>
       </CardHeader>
       <CardContent>
+        {/*
+          Catalog price benchmark (SportsCardsPro). Renders inline above
+          the live eBay comp grid when SCP has a confident match for this
+          scan. Silent if no match / SCP unavailable. See PR #38a.
+        */}
+        <div className="mb-3">
+          <CatalogPriceStrip cardData={cardData} predictedPsaGrade={psa} />
+        </div>
         <div className="flex flex-col md:flex-row gap-3">
           <TierColumn
             tier={data.raw}
