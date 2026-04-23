@@ -71,15 +71,19 @@ export default function SimpleImageUploader({
         )}
       </div>
 
-      <div className="mt-2 grid grid-cols-2 gap-2">
+      {/* Stacked vertically so the full labels fit inside the narrow
+          /scan 2-column slot (each uploader only has ~half the viewport).
+          Previously these were side-by-side and truncated to "Ta..." /
+          "Ph..." on typical phone widths. */}
+      <div className="mt-2 flex flex-col gap-2">
         <Button
           type="button"
           onClick={() => setCameraOpen(true)}
           variant="default"
           size="sm"
-          className="min-w-0 bg-slate-800 hover:bg-slate-900 active:bg-black text-white"
+          className="w-full bg-slate-800 hover:bg-slate-900 active:bg-black text-white"
         >
-          <Camera className="h-4 w-4 mr-1 shrink-0" />
+          <Camera className="h-4 w-4 mr-1.5 shrink-0" />
           <span className="truncate">
             {existingImage ? `Retake ${replaceLabel}` : 'Take Photo'}
           </span>
@@ -89,9 +93,9 @@ export default function SimpleImageUploader({
           onClick={() => fileInputRef.current?.click()}
           variant="outline"
           size="sm"
-          className="min-w-0"
+          className="w-full"
         >
-          <Upload className="h-4 w-4 mr-1 shrink-0" />
+          <Upload className="h-4 w-4 mr-1.5 shrink-0" />
           <span className="truncate">Photo Library</span>
         </Button>
       </div>
