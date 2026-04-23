@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
-import { Badge } from "@/components/ui/badge";
-import { Database, Info } from "lucide-react";
+import { Database } from "lucide-react";
 import type { CardFormValues } from "@shared/schema";
 
 /**
@@ -223,27 +222,16 @@ export default function CatalogPriceStrip({
       className="rounded-xl ring-1 ring-indigo-300/70 bg-gradient-to-br from-indigo-50 to-white p-4 shadow-sm"
       data-testid="catalog-price-strip"
     >
-      {/* Header: source badge + match confidence. Kept compact so the
-          numbers below carry the visual weight. */}
+      {/* Header: just the "Market Price" label. Source badge (SportsCardsPro)
+          and the match-confidence Info tooltip were removed — dealers don't
+          need to see the upstream data source or the internal match score
+          on the primary price surface. The matched product name / console
+          already appears below the anchor price for anyone who wants to
+          sanity-check the lookup. */}
       <div className="flex items-center justify-between gap-2 mb-3">
         <div className="flex items-center gap-2 text-[13px] font-semibold text-indigo-950">
           <Database className="h-4 w-4 text-indigo-700" />
           Market Price
-          <Badge
-            variant="secondary"
-            className="text-[10px] px-1.5 py-0 h-4 bg-indigo-100 text-indigo-800 hover:bg-indigo-100 font-medium"
-          >
-            SportsCardsPro
-          </Badge>
-        </div>
-        <div
-          className="flex items-center gap-1 text-[11px] text-indigo-700"
-          title={`Matched ${data.match.productName} \u2014 ${data.match.consoleName} (score ${data.match.matchScore}/100)`}
-        >
-          <Info className="h-3 w-3" />
-          <span className="hidden sm:inline tabular-nums">
-            match {data.match.matchScore}/100
-          </span>
         </div>
       </div>
 

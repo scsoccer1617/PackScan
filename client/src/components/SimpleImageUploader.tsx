@@ -15,6 +15,13 @@ interface SimpleImageUploaderProps {
    * Used by the parent to chain front → back capture.
    */
   openCameraSignal?: number;
+  /**
+   * Optional explicit label for the retake button (shown once a photo has
+   * been captured). Falls back to a derived "Retake <label>" string. Prefer
+   * passing an explicit short phrase (e.g. "Rescan Front") so the full
+   * label fits inside the narrow 2-column /scan slot without truncating.
+   */
+  retakeLabel?: string;
 }
 
 export default function SimpleImageUploader({
@@ -23,6 +30,7 @@ export default function SimpleImageUploader({
   existingImage,
   cameraTitle,
   openCameraSignal,
+  retakeLabel,
 }: SimpleImageUploaderProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [cameraOpen, setCameraOpen] = useState(false);
@@ -59,10 +67,15 @@ export default function SimpleImageUploader({
         } rounded-lg bg-slate-50 h-36 flex items-center justify-center overflow-hidden`}
       >
         {existingImage ? (
+          // `object-cover` center-crops the preview so the card fills the
+          // frame instead of being letterboxed inside a grey box. The raw
+          // capture already keeps the card well-centered, so cropping a
+          // few percent off each edge removes visible fingers/background
+          // without clipping the card itself.
           <img
             src={existingImage}
             alt={`${label} preview`}
-            className="object-contain w-full h-full"
+            className="object-cover w-full h-full"
           />
         ) : (
           <div className="flex flex-col items-center justify-center p-4">
@@ -85,7 +98,9 @@ export default function SimpleImageUploader({
         >
           <Camera className="h-4 w-4 mr-1.5 shrink-0" />
           <span className="truncate">
-            {existingImage ? `Retake ${replaceLabel}` : 'Take Photo'}
+            {existingImage
+              ? (retakeLabel ?? `Retake ${replaceLabel}`)
+              : 'Take Photo'}
           </span>
         </Button>
         <Button

@@ -209,6 +209,7 @@ export default function Scan() {
             label="Capture front"
             cameraTitle="Front of Card"
             existingImage={frontImage}
+            retakeLabel="Rescan Front"
           />
         </div>
         <div>
@@ -221,6 +222,7 @@ export default function Scan() {
             cameraTitle="Back of Card"
             existingImage={backImage}
             openCameraSignal={backCameraSignal}
+            retakeLabel="Rescan Back"
           />
         </div>
       </div>
