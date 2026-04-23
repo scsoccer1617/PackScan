@@ -569,6 +569,22 @@ export async function searchCardValues(
     const isBaseCard = !foilType || foilType.trim() === '';
     const isAuto     = !!isAutographed;
 
+    // Relic/memorabilia detection — used to strip Game-Used/Patch/Jersey/Bat
+    // listings that eBay's fuzzy matcher likes to pull in for modern
+    // players even when the scanned card is a plain base/parallel.
+    //
+    // Repro: scanning 2026 Topps Series 1 Nolan Arenado #193 Holiday
+    // Pink/Green Polka Dot returned a "1991 Relic Game-Used #91R-NA" listing
+    // because the listing's title also contains "2026 Topps Series 1 Nolan
+    // Arenado" and nothing penalised the relic words.
+    //
+    // We treat the user's card as relic-ish only when the variant/foilType
+    // literally says so (rare — most Holo users don't scan relics). Otherwise
+    // relic listings are excluded at query time AND hard-filtered from results.
+    const RELIC_KEYWORDS_RE = /\b(relic|memorabilia|game[-\s]?used|game[-\s]?worn|patch|jersey|bat\s+piece|bat\s+relic|dual\s+relic|triple\s+relic|swatch|button|laundry\s+tag)\b/i;
+    const ownVariantBlob = `${variant || ''} ${foilType || ''} ${collection || ''} ${set || ''}`;
+    const isRelicCard = RELIC_KEYWORDS_RE.test(ownVariantBlob);
+
     // Build eBay negative-keyword exclusions.
     // These are prefixed with "-" and appended to the query so eBay filters them
     // at the API level, well before our scoring step.
@@ -585,6 +601,14 @@ export async function searchCardValues(
       // their PSA-10 refractor still wants to see the slab's comps.
       if (isBaseCard && !gradeKeyword) {
         excludes.push('-parallel', '-refractor', '-xfractor', '-rainbow', '-mojo', '-holo');
+      }
+
+      // Exclude relic/memorabilia listings when our card isn't one. These
+      // regularly masquerade as normal base-card listings because the seller
+      // includes the year + product + player name in the title; only the
+      // "Relic" / "Game-Used" / "Patch" words give them away.
+      if (!isRelicCard) {
+        excludes.push('-relic', '-memorabilia', '-"game-used"', '-"game used"', '-patch', '-jersey');
       }
 
       // When the caller asked for the RAW price tier, strip slabbed sales
@@ -941,6 +965,34 @@ export async function searchCardValues(
           return re.test(t);
         });
         if (hasAuto) return false;
+      }
+
+      // Filter relic/memorabilia listings when our card isn't a relic.
+      // Even with the negative-keyword exclusion in the query, eBay's
+      // fuzzy matcher sometimes returns titles that still contain these
+      // terms (e.g. when the listing uses "Game Used" as a hyphenated
+      // phrase the token exclusion missed). This is the backstop.
+      if (!isRelicCard && RELIC_KEYWORDS_RE.test(t)) {
+        console.log(`  ↳ Hard-filtered (relic/memorabilia listing but scanned card isn't a relic): "${r.title}"`);
+        return false;
+      }
+
+      // Filter listings whose card number clearly doesn't match ours.
+      // Only runs when:
+      //   - we have a card number on the scan
+      //   - the listing title contains at least one explicit #ABC token
+      //   - none of those tokens match ours
+      // Serial-style tokens like "/150" are ignored here (they're handled
+      // elsewhere) — we only look at #-prefixed card numbers which uniquely
+      // identify the card within a product.
+      if (cardNumber && cardNumber.trim()) {
+        const own = cardNumber.trim().toLowerCase().replace(/^#/, '');
+        // Grab every "#ABC" token in the title (letters, digits, dashes).
+        const listingNumTokens = Array.from(t.matchAll(/#([a-z0-9][a-z0-9-]*)/gi)).map(m => m[1].toLowerCase());
+        if (listingNumTokens.length > 0 && !listingNumTokens.includes(own)) {
+          console.log(`  ↳ Hard-filtered (card-number mismatch): scanned #${own} but listing has #${listingNumTokens.join(', #')} — "${r.title}"`);
+          return false;
+        }
       }
 
       // Filter wrong-parallel listings when a specific parallel is requested.
