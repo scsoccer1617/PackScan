@@ -1134,17 +1134,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log('ROUTE HANDLER IS DEFINITELY CALLED!');
 
       // Holo (Claude) is now the PRIMARY identifier + grader. It runs in
-      // parallel with the legacy OCR/Gemini pipeline so we still get a
+      // parallel with the legacy OCR pipeline so we still get a
       // response even if Claude is unavailable or low-confidence.
       //
       // Downstream logic:
       //   - If Holo identification confidence >= HOLO_CONFIDENCE_THRESHOLD,
       //     we merge Claude's fields on top of OCR fields as the source of
       //     truth for eBay lookup and client display.
-      //   - Otherwise, OCR/Gemini remains authoritative and Holo only
+      //   - Otherwise, OCR remains authoritative and Holo only
       //     contributes the condition grade.
       //   - If Holo fails entirely (no key, API error, etc.), scan continues
-      //     with OCR/Gemini exactly as before (data.holo = null).
+      //     with OCR exactly as before (data.holo = null).
       const HOLO_CONFIDENCE_THRESHOLD = 0.7;
       const userId = (req.user as any)?.id as number | undefined;
       const frontFileForHolo = files.frontImage?.[0];
@@ -2369,7 +2369,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Scan correction log — captures user edits to OCR/Gemini-detected
+  // Scan correction log — captures user edits to OCR-detected
   // fields (card #, parallel, etc.) so we can review patterns later and
   // tune the vision prompts. Lightweight: log-only for now (writes a
   // line to server logs), never blocks the UI. Returns 202 on accept.

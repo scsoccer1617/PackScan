@@ -54,7 +54,6 @@ export default function Scan() {
       const formData = new FormData();
       formData.append("backImage", backBlob, "back.jpg");
       if (frontBlob) formData.append("frontImage", frontBlob, "front.jpg");
-      formData.append("engine", "ocr");
 
       const response = await fetch("/api/analyze-card-dual-images", {
         method: "POST",

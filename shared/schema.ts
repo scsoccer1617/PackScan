@@ -184,7 +184,7 @@ export const cardSchema = z.object({
   cmpNumber: z.string().optional(),
   set: z.string().optional(),
   team: z.string().optional(),
-  _engine: z.enum(['ocr', 'gemini']).optional(),
+  _engine: z.literal('ocr').optional(),
 });
 
 export type CardInsert = z.infer<typeof cardInsertSchema>;

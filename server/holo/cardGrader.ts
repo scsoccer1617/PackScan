@@ -12,7 +12,7 @@
  *
  * The model is instructed to emit strict JSON and to be honest about
  * uncertainty — callers inspect `identification.confidence` to decide whether
- * to trust Claude or fall back to PackScan's existing OCR/Gemini pipeline.
+ * to trust Claude or fall back to PackScan's existing OCR pipeline.
  *
  * Credentials: requires the `ANTHROPIC_API_KEY` environment variable. When it
  * is missing, callers receive a `HoloNotConfiguredError` so Holo can degrade
