@@ -1194,11 +1194,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
             grade.label,
             `(${grade.overall}, grade conf ${grade.confidence.toFixed(2)})`,
           );
+          // Persist the scanned images to /uploads so the Home screen's
+          // Recent Scans carousel can render a real thumbnail instead of a
+          // camera-icon placeholder. Multer runs in memoryStorage mode so
+          // the buffers are in RAM — we write them out ourselves with a
+          // uuid name, and what gets stored in scan_grades is the public
+          // `/uploads/...` URL (served by express.static in server/index.ts).
+          // Failures here are non-fatal: we fall back to the original
+          // filename-only behavior so a scan never breaks over disk I/O.
+          const uploadsDir = join(process.cwd(), 'uploads');
+          const persistScanImage = (file: Express.Multer.File, side: 'front' | 'back'): string | null => {
+            try {
+              if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+              const ext = (() => {
+                const fromName = (file.originalname || '').split('.').pop();
+                if (fromName && fromName.length <= 5) return fromName.toLowerCase();
+                const mt = (file.mimetype || '').split('/')[1] || 'jpg';
+                return mt.replace('jpeg', 'jpg');
+              })();
+              const filename = `scan_${side}_${randomUUID()}.${ext}`;
+              fs.writeFileSync(join(uploadsDir, filename), file.buffer);
+              return `/uploads/${filename}`;
+            } catch (writeErr) {
+              console.warn(`Holo: failed to persist ${side} scan image:`, writeErr);
+              return null;
+            }
+          };
+          const frontUrl = persistScanImage(frontFileForHolo, 'front');
+          const backUrl = backFileForHolo ? persistScanImage(backFileForHolo, 'back') : null;
           try {
             const row = await saveGrade({
               userId: userId ?? null,
-              frontImagePath: frontFileForHolo.originalname || null,
-              backImagePath: backFileForHolo?.originalname || null,
+              frontImagePath: frontUrl || frontFileForHolo.originalname || null,
+              backImagePath: backUrl || backFileForHolo?.originalname || null,
               grade,
               identification,
             });
@@ -1878,15 +1906,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ─── Card Database Routes ───────────────────────────────────────────────────
 
-  // ── Admin password middleware ───────────────────────────────────────────────
-  // Protects destructive card-database routes.  Reads ADMIN_PASSWORD from the
-  // environment; fails closed (500) when the secret is not configured so admin
-  // routes are never accidentally accessible in a misconfigured deployment.
+  // ── Admin gate middleware ───────────────────────────────────────────────────
+  // Protects destructive card-database routes with a two-factor gate:
+  //   1) The caller must be authenticated as the admin user (email match).
+  //   2) They must also supply the shared ADMIN_PASSWORD via x-admin-password.
+  //
+  // ADMIN_EMAIL defaults to daniel.j.holley@gmail.com (case-insensitive) so the
+  // owner's account is always authorized even in fresh deployments. Override
+  // with the ADMIN_EMAIL env var if the app is ever operated by a different
+  // user. Fails closed (500) when ADMIN_PASSWORD is missing so admin routes
+  // are never accidentally accessible in a misconfigured deployment.
+  const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || 'daniel.j.holley@gmail.com').toLowerCase();
   function requireAdminPassword(req: Request, res: Response, next: NextFunction) {
     const adminPassword = process.env.ADMIN_PASSWORD;
     if (!adminPassword) {
       // Secret not configured — fail closed so admin routes are never accidentally open.
       return res.status(500).json({ error: 'Admin password not configured on this server' });
+    }
+    // Must be signed in as the admin user first — password alone is not enough.
+    const userEmail = ((req.user as any)?.email || '').toString().toLowerCase();
+    if (!req.isAuthenticated?.() || !userEmail || userEmail !== ADMIN_EMAIL) {
+      return res.status(403).json({ error: 'Forbidden: admin access restricted' });
     }
     const provided = req.headers['x-admin-password'];
     if (!provided || provided !== adminPassword) {

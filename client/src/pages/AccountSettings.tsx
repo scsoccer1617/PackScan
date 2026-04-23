@@ -12,6 +12,7 @@ import {
   Check,
   X,
   Loader2,
+  Database,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
@@ -293,6 +294,19 @@ export default function AccountSettings() {
           </form>
         )}
 
+        {/* Admin — only rendered for the designated admin email. The server
+            also enforces email + password on every admin route, so hiding
+            this row from non-admins is purely UI polish, not security. */}
+        {isAdmin(user?.email) && (
+          <SettingRow
+            icon={<Database className="w-4 h-4" />}
+            label="Admin · Card database"
+            sub="Upload CSVs and manage the catalog"
+            href="/admin/card-database"
+            testId="row-admin"
+          />
+        )}
+
         <SettingRow
           icon={<Shield className="w-4 h-4" />}
           label="Privacy & data"
@@ -332,6 +346,17 @@ export default function AccountSettings() {
 
 const inputCls =
   "mt-1 w-full h-11 rounded-xl bg-background border border-card-border px-3 text-sm outline-none focus:ring-2 focus:ring-foil-violet/30";
+
+/**
+ * Admin gate — email match only. Must match the server's ADMIN_EMAIL
+ * (server/routes.ts). Kept in sync manually because the client has no
+ * reason to fetch a dedicated "am I admin?" endpoint; the server is the
+ * real enforcement point on every admin route.
+ */
+const ADMIN_EMAIL = "daniel.j.holley@gmail.com";
+function isAdmin(email: string | null | undefined): boolean {
+  return !!email && email.trim().toLowerCase() === ADMIN_EMAIL;
+}
 
 function getInitials(name: string | null, email: string | null): string {
   const source = name || email || "";

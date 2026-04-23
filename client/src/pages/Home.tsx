@@ -32,6 +32,10 @@ type ScanGradesResponse = {
       brand?: string | null;
       setName?: string | null;
     };
+    /** `/uploads/...` URL for the scanned front image, or null for legacy
+        rows that predate image persistence. */
+    frontImage?: string | null;
+    backImage?: string | null;
   }>;
 };
 
@@ -196,7 +200,17 @@ export default function Home() {
                   data-testid={`recent-${g.id}`}
                 >
                   <div className="aspect-[3/4] bg-muted relative flex items-center justify-center">
-                    <Camera className="w-8 h-8 text-slate-300" strokeWidth={1.5} />
+                    {g.frontImage ? (
+                      <img
+                        src={g.frontImage}
+                        alt={player}
+                        loading="lazy"
+                        className="absolute inset-0 w-full h-full object-cover"
+                        data-testid={`img-recent-front-${g.id}`}
+                      />
+                    ) : (
+                      <Camera className="w-8 h-8 text-slate-300" strokeWidth={1.5} />
+                    )}
                     <span
                       className={cn(
                         "absolute top-2 right-2 px-2 py-0.5 rounded-full text-[11px] font-semibold ring-1 backdrop-blur bg-white/90",

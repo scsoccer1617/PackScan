@@ -70,6 +70,29 @@ export default function MySheets() {
     enabled: !!user,
   });
 
+  // The "N cards" label on the active sheet used to come from
+  // /api/collection/summary, which reads the legacy local cards table.
+  // Every new save goes to Google Sheets now, so that table is empty
+  // for most users and the label stuck at 0. Fetch the actual row count
+  // from the spreadsheet so what we show matches what the user sees
+  // when they open the sheet.
+  const activeIdForCount = data?.activeSheetId ?? null;
+  const { data: activeCountData } = useQuery<{ count: number }>({
+    queryKey: ["/api/sheets", activeIdForCount, "count"],
+    queryFn: async () => {
+      if (activeIdForCount == null) return { count: 0 };
+      const res = await fetch(`/api/sheets/${activeIdForCount}/count`);
+      if (!res.ok) return { count: 0 };
+      return res.json();
+    },
+    enabled: !!user && activeIdForCount != null,
+    // Refresh silently when the user lands back on the page — adds
+    // shouldn't require a manual tap on Sync to update the count.
+    refetchOnWindowFocus: true,
+    staleTime: 30_000,
+  });
+  const activeCardCount = activeCountData?.count ?? summary?.cardCount ?? 0;
+
   const createMutation = useMutation({
     mutationFn: async (title: string) =>
       apiRequest({ url: "/api/sheets", method: "POST", body: JSON.stringify({ title }) }),
@@ -268,7 +291,7 @@ export default function MySheets() {
                         </div>
                         <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
                           {isActive
-                            ? `${summary?.cardCount ?? 0} cards · Syncing now`
+                            ? `${activeCardCount} ${activeCardCount === 1 ? "card" : "cards"} · Syncing now`
                             : "Linked to Google Sheets"}
                         </p>
                       </div>
@@ -373,7 +396,13 @@ function ConnectionCard({
         <p className="text-[11px] text-muted-foreground truncate">{user.email}</p>
       </div>
       <button
-        onClick={() => queryClient.invalidateQueries({ queryKey: ["/api/sheets"] })}
+        onClick={() => {
+          // Refetch both the list and every cached count query — the count
+          // query key includes the active sheet id so we invalidate the
+          // whole "/api/sheets" subtree in one call.
+          queryClient.invalidateQueries({ queryKey: ["/api/sheets"] });
+          queryClient.invalidateQueries({ queryKey: ["/api/collection/summary"] });
+        }}
         className="text-xs text-muted-foreground flex items-center gap-1 h-8 px-2 rounded-lg hover-elevate shrink-0"
         data-testid="button-sync-now"
       >

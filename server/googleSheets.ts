@@ -239,6 +239,45 @@ export function buildRow(input: CardRowInput): (string | number)[] {
   ];
 }
 
+/**
+ * Count the number of data rows (excluding the header row) in a user's
+ * spreadsheet. Used by the MySheets page so the "N cards" label reflects
+ * what's actually in the Google Sheet rather than the legacy local cards
+ * table — PackScan treats Sheets as the source of truth for saved cards,
+ * so only the sheet knows the real count.
+ *
+ * Returns 0 for empty sheets and — best-effort — 0 if the row read fails.
+ * Throws NotConnectedError if the user hasn't connected Google yet.
+ */
+export async function countRowsForSheet(
+  userId: number,
+  sheetRowId: number,
+): Promise<number> {
+  const [row] = await db
+    .select()
+    .from(userSheets)
+    .where(and(eq(userSheets.id, sheetRowId), eq(userSheets.userId, userId)))
+    .limit(1);
+  if (!row) return 0;
+  const { oauth } = await getOAuthClient(userId);
+  const sheets = sheetsFor(oauth);
+  try {
+    const got = await sheets.spreadsheets.values.get({
+      spreadsheetId: row.googleSheetId,
+      // Column A is always populated (Sport) for a valid data row.
+      range: 'A:A',
+      majorDimension: 'ROWS',
+    });
+    const values = got.data.values || [];
+    // Header row counts as 1; only non-empty rows beyond it are data rows.
+    const dataRows = values.slice(1).filter((r) => (r?.[0] || '').toString().trim().length > 0);
+    return dataRows.length;
+  } catch (err: any) {
+    console.error('[googleSheets] countRowsForSheet failed:', err?.message || err);
+    return 0;
+  }
+}
+
 export async function appendCardRow(
   userId: number,
   card: CardRowInput,
