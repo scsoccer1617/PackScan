@@ -1,6 +1,23 @@
+// Free-capture + smart-crop camera.
+//
+// UX goals (per PR F-1):
+// - No fixed card-shaped overlay to line up against. Shooter sees a plain
+//   full-frame viewfinder and taps the shutter whenever they're ready.
+// - After the shutter, we POST the frame to /api/vision/detect-card-quad,
+//   which asks a VLM to return the card's 4 corners. We then perspective-warp
+//   the photo to a clean 2.5:3.5 rectangle client-side and show that as the
+//   preview. User can Retake or Use.
+// - If detection fails (no card visible, parse error, timeout), we fall back
+//   to the original uncropped photo and surface a small "couldn't auto-crop"
+//   hint — the user can still Use the photo, which preserves the old behavior.
+//
+// This replaces the previous "line up inside brackets + hard-crop the overlay
+// rect" flow, which was frustrating for dealers bulk-scanning a box of cards.
+
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
-import { X, Image as ImageIcon, RotateCcw, Check } from 'lucide-react';
+import { X, Image as ImageIcon, RotateCcw, Check, Loader2 } from 'lucide-react';
+import { cropCardFromQuad, detectCardQuad, type NormalizedQuad } from '@/lib/cardQuadCrop';
 
 interface CardCameraCaptureProps {
   open: boolean;
@@ -8,8 +25,6 @@ interface CardCameraCaptureProps {
   onCapture: (dataUrl: string) => void;
   onClose: () => void;
 }
-
-const CARD_ASPECT = 2.5 / 3.5;
 
 // Shared MediaStream cached at module scope so reopening the camera (e.g.
 // front → back capture chain) reuses the same hardware stream and the
@@ -20,10 +35,6 @@ let sharedStreamReleaseTimer: number | null = null;
 function isStreamLive(stream: MediaStream | null): stream is MediaStream {
   if (!stream) return false;
   const tracks = stream.getVideoTracks();
-  // A track may report readyState='live' even after the OS has
-  // suspended the camera (iOS Safari does this when the app is
-  // backgrounded). Also reject tracks that are muted (Safari sets
-  // .muted=true while the camera is suspended) or disabled.
   return tracks.length > 0 && tracks.every(t =>
     t.readyState === 'live' && !t.muted && t.enabled
   );
@@ -44,9 +55,6 @@ function releaseSharedStreamSoon() {
   if (sharedStreamReleaseTimer !== null) {
     window.clearTimeout(sharedStreamReleaseTimer);
   }
-  // Hold the stream for a couple of minutes so the user can take front and
-  // back without hitting another camera-init delay. After that we stop the
-  // tracks to release the camera light/hardware.
   sharedStreamReleaseTimer = window.setTimeout(() => {
     if (sharedStream) {
       sharedStream.getTracks().forEach(t => t.stop());
@@ -71,22 +79,24 @@ export default function CardCameraCapture({
 }: CardCameraCaptureProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const overlayRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const capturedRef = useRef(false);
+  const detectAbortRef = useRef<AbortController | null>(null);
 
   const [error, setError] = useState<string | null>(null);
-  const [preview, setPreview] = useState<string | null>(null);
+  // rawImage = full-frame photo the camera just took (or the Library file).
+  // croppedImage = the warped 2.5:3.5 result. Null while detection is running.
+  const [rawImage, setRawImage] = useState<string | null>(null);
+  const [croppedImage, setCroppedImage] = useState<string | null>(null);
+  const [detecting, setDetecting] = useState(false);
+  const [detectionFailed, setDetectionFailed] = useState(false);
   const [starting, setStarting] = useState(false);
   const [focusing, setFocusing] = useState(false);
   const watchdogRef = useRef<number | null>(null);
   const startAttemptRef = useRef(0);
 
   const detachStream = useCallback(() => {
-    // Keep the shared stream alive — just detach it from the <video> so the
-    // next open re-attaches without another getUserMedia call (which is what
-    // makes some browsers re-prompt for permission).
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
@@ -101,13 +111,7 @@ export default function CardCameraCapture({
       window.clearTimeout(watchdogRef.current);
       watchdogRef.current = null;
     }
-    // After ~2.5s, verify the <video> is actually rendering frames.
-    // If the cached stream came back paused (iOS Safari after
-    // backgrounding) the video element stays black even though
-    // tracks report readyState='live'. In that case, drop the
-    // shared stream and re-acquire from scratch.
     watchdogRef.current = window.setTimeout(() => {
-      // If a newer attempt has started, this watchdog is stale.
       if (startAttemptRef.current !== attempt) return;
       const v = videoRef.current;
       const renderingFrames = !!v && v.readyState >= 2 && (v.videoWidth || 0) > 0;
@@ -115,10 +119,10 @@ export default function CardCameraCapture({
         console.warn('[Camera] Watchdog: no frames after 2.5s — refreshing stream');
         killSharedStream();
         streamRef.current = null;
-        // Trigger a fresh acquisition.
         startStream();
       }
     }, 2500);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const startStream = useCallback(async () => {
@@ -127,8 +131,6 @@ export default function CardCameraCapture({
     cancelSharedStreamRelease();
     const attempt = ++startAttemptRef.current;
 
-    // Reuse the cached stream if it's still live — avoids the OS prompt and
-    // the "Starting camera…" delay between front and back capture.
     if (isStreamLive(sharedStream)) {
       streamRef.current = sharedStream;
       if (videoRef.current) {
@@ -139,7 +141,6 @@ export default function CardCameraCapture({
           console.warn('[Camera] play() on cached stream rejected — refreshing', err);
           killSharedStream();
           streamRef.current = null;
-          // Fall through to fresh acquisition below.
         }
       }
       if (isStreamLive(sharedStream)) {
@@ -158,7 +159,6 @@ export default function CardCameraCapture({
         },
         audio: false,
       });
-      // If a newer attempt started while we awaited, discard this one.
       if (startAttemptRef.current !== attempt) {
         try { stream.getTracks().forEach(t => t.stop()); } catch {}
         return;
@@ -186,59 +186,82 @@ export default function CardCameraCapture({
     }
   }, [armWatchdog]);
 
-  const computeOverlayRectInVideo = useCallback(() => {
+  // Capture the full video frame — no cropping, no overlay math. The VLM will
+  // find the card inside whatever we send.
+  const grabFullFrame = useCallback((): string | null => {
     const video = videoRef.current;
-    const container = containerRef.current;
-    const overlay = overlayRef.current;
-    if (!video || !container || !overlay) return null;
+    if (!video || !video.videoWidth) return null;
     const vw = video.videoWidth;
     const vh = video.videoHeight;
-    if (!vw || !vh) return null;
-    const cw = container.clientWidth;
-    const ch = container.clientHeight;
-    const scale = Math.max(cw / vw, ch / vh);
-    const displayedW = vw * scale;
-    const displayedH = vh * scale;
-    const offsetX = (displayedW - cw) / 2;
-    const offsetY = (displayedH - ch) / 2;
-    const rect = overlay.getBoundingClientRect();
-    const cRect = container.getBoundingClientRect();
-    const rectX = rect.left - cRect.left;
-    const rectY = rect.top - cRect.top;
-    const rectW = rect.width;
-    const rectH = rect.height;
-    const srcX = Math.max(0, (rectX + offsetX) / scale);
-    const srcY = Math.max(0, (rectY + offsetY) / scale);
-    const srcW = Math.min(vw - srcX, rectW / scale);
-    const srcH = Math.min(vh - srcY, rectH / scale);
-    return { srcX, srcY, srcW, srcH };
+    const out = document.createElement('canvas');
+    out.width = vw;
+    out.height = vh;
+    const ctx = out.getContext('2d');
+    if (!ctx) return null;
+    ctx.drawImage(video, 0, 0, vw, vh);
+    return out.toDataURL('image/jpeg', 0.95);
+  }, []);
+
+  // Run quad detection on a raw image, then warp it to a clean rectangle.
+  // Sets `croppedImage` on success, or marks detection as failed (the user
+  // can still accept the raw image with a single tap).
+  const runDetectAndCrop = useCallback(async (raw: string) => {
+    setDetecting(true);
+    setDetectionFailed(false);
+    setCroppedImage(null);
+
+    // Cancel any in-flight detection from a prior capture.
+    detectAbortRef.current?.abort();
+    const ac = new AbortController();
+    detectAbortRef.current = ac;
+
+    let quad: NormalizedQuad | null = null;
+    try {
+      quad = await detectCardQuad(raw, { signal: ac.signal });
+    } catch (err) {
+      if ((err as any)?.name !== 'AbortError') {
+        console.warn('[CardCameraCapture] detect error', err);
+      }
+    }
+
+    if (ac.signal.aborted) return;
+
+    if (!quad) {
+      setDetectionFailed(true);
+      setDetecting(false);
+      return;
+    }
+
+    try {
+      const cropped = await cropCardFromQuad(raw, quad);
+      if (ac.signal.aborted) return;
+      setCroppedImage(cropped);
+    } catch (err) {
+      console.warn('[CardCameraCapture] warp error', err);
+      setDetectionFailed(true);
+    } finally {
+      setDetecting(false);
+    }
   }, []);
 
   const captureFrame = useCallback(() => {
     if (capturedRef.current) return;
-    const video = videoRef.current;
-    if (!video || !video.videoWidth) return;
-    const rect = computeOverlayRectInVideo();
-    if (!rect) return;
-    const out = document.createElement('canvas');
-    out.width = Math.round(rect.srcW);
-    out.height = Math.round(rect.srcH);
-    const ctx = out.getContext('2d');
-    if (!ctx) return;
-    ctx.drawImage(
-      video,
-      rect.srcX, rect.srcY, rect.srcW, rect.srcH,
-      0, 0, out.width, out.height
-    );
-    const dataUrl = out.toDataURL('image/jpeg', 0.95);
+    const raw = grabFullFrame();
+    if (!raw) return;
     capturedRef.current = true;
-    setPreview(dataUrl);
-  }, [computeOverlayRectInVideo]);
+    setRawImage(raw);
+    void runDetectAndCrop(raw);
+  }, [grabFullFrame, runDetectAndCrop]);
 
   useEffect(() => {
     if (!open) {
       detachStream();
-      setPreview(null);
+      setRawImage(null);
+      setCroppedImage(null);
+      setDetecting(false);
+      setDetectionFailed(false);
+      detectAbortRef.current?.abort();
+      detectAbortRef.current = null;
       if (watchdogRef.current !== null) {
         window.clearTimeout(watchdogRef.current);
         watchdogRef.current = null;
@@ -246,9 +269,6 @@ export default function CardCameraCapture({
       return;
     }
     startStream();
-    // When the page becomes visible again (iOS often suspends the
-    // camera while another app is foregrounded), refresh the stream
-    // so the viewfinder doesn't come back as a black rectangle.
     const onVisible = () => {
       if (document.visibilityState === 'visible') {
         if (!isStreamLive(sharedStream)) killSharedStream();
@@ -268,18 +288,16 @@ export default function CardCameraCapture({
     };
   }, [open, startStream, detachStream]);
 
-  // When the user hits "Retake", the <video> element is unmounted (it's
-  // hidden while preview is shown) and re-mounted with no srcObject. Re-
-  // attach the existing live stream so the viewfinder doesn't go black.
+  // Re-attach the live stream when coming back from a preview to the viewfinder.
   useEffect(() => {
-    if (!open || preview) return;
+    if (!open || rawImage) return;
     const video = videoRef.current;
     const stream = streamRef.current;
     if (video && stream && video.srcObject !== stream) {
       video.srcObject = stream;
       video.play().catch(() => {});
     }
-  }, [open, preview]);
+  }, [open, rawImage]);
 
   const handleTapFocus = useCallback(async (e: React.MouseEvent<HTMLDivElement>) => {
     const stream = streamRef.current;
@@ -288,8 +306,6 @@ export default function CardCameraCapture({
     if (!track) return;
     const caps: any = track.getCapabilities ? track.getCapabilities() : {};
     if (!caps.focusMode || !caps.focusMode.includes('single-shot')) {
-      // Best-effort focus nudge: brief pause + resume often re-triggers AF
-      // on iOS Safari (which doesn't support pointsOfInterest yet).
       setFocusing(true);
       try {
         await track.applyConstraints({ advanced: [{ focusMode: 'continuous' } as any] });
@@ -314,15 +330,24 @@ export default function CardCameraCapture({
     window.setTimeout(() => setFocusing(false), 700);
   }, []);
 
+  // "Use Photo" — prefer the auto-cropped version, fall back to raw if
+  // detection failed and the user still wants to proceed.
   const handleConfirm = () => {
-    if (preview) {
-      onCapture(preview);
-      setPreview(null);
-    }
+    const final = croppedImage ?? rawImage;
+    if (!final) return;
+    onCapture(final);
+    setRawImage(null);
+    setCroppedImage(null);
+    setDetectionFailed(false);
   };
 
   const handleRetake = () => {
-    setPreview(null);
+    detectAbortRef.current?.abort();
+    detectAbortRef.current = null;
+    setRawImage(null);
+    setCroppedImage(null);
+    setDetecting(false);
+    setDetectionFailed(false);
     capturedRef.current = false;
   };
 
@@ -330,6 +355,9 @@ export default function CardCameraCapture({
     fileInputRef.current?.click();
   };
 
+  // Library uploads go through the same detect+warp pipeline — keeps the
+  // downstream analyzer happy whether the photo came from the camera or a
+  // previously-taken library shot.
   const handleLibraryFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
@@ -337,12 +365,18 @@ export default function CardCameraCapture({
     const reader = new FileReader();
     reader.onload = ev => {
       const dataUrl = ev.target?.result as string;
-      onCapture(dataUrl);
+      if (!dataUrl) return;
+      capturedRef.current = true;
+      setRawImage(dataUrl);
+      void runDetectAndCrop(dataUrl);
     };
     reader.readAsDataURL(file);
   };
 
   if (!open) return null;
+
+  const previewImage = croppedImage ?? rawImage;
+  const inPreview = !!rawImage;
 
   return (
     <div className="fixed inset-0 z-50 bg-black flex flex-col">
@@ -354,8 +388,11 @@ export default function CardCameraCapture({
           size="icon"
           className="text-white hover:bg-white/10"
           onClick={() => {
+            detectAbortRef.current?.abort();
+            detectAbortRef.current = null;
             detachStream();
-            setPreview(null);
+            setRawImage(null);
+            setCroppedImage(null);
             onClose();
           }}
           aria-label="Close camera"
@@ -367,9 +404,9 @@ export default function CardCameraCapture({
       <div
         ref={containerRef}
         className="relative flex-1 overflow-hidden bg-black"
-        onClick={!preview ? handleTapFocus : undefined}
+        onClick={!inPreview ? handleTapFocus : undefined}
       >
-        {!preview && (
+        {!inPreview && (
           <video
             ref={videoRef}
             playsInline
@@ -378,47 +415,36 @@ export default function CardCameraCapture({
             className="absolute inset-0 w-full h-full object-cover"
           />
         )}
-        {preview && (
+        {inPreview && previewImage && (
           <img
-            src={preview}
+            src={previewImage}
             alt="Captured"
             className="absolute inset-0 w-full h-full object-contain bg-black"
           />
         )}
 
-        {!preview && (
+        {!inPreview && (
           <div
             className="absolute left-0 right-0 top-2 text-center text-white text-xs px-4 z-10 drop-shadow pointer-events-none"
           >
             {focusing
               ? 'Focusing…'
-              : 'Align card inside the brackets · tap to focus'}
+              : 'Fit the whole card in frame · tap to focus'}
           </div>
         )}
 
-        {!preview && (
-          <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-            <div
-              ref={overlayRef}
-              className="relative"
-              style={{
-                width: 'min(78vw, calc((100vh - 240px) * (2.5 / 3.5)))',
-                aspectRatio: '2.5 / 3.5',
-              }}
-            >
-              <div
-                className="absolute inset-0 rounded-md"
-                style={{
-                  borderWidth: 2,
-                  borderStyle: 'solid',
-                  borderColor: 'rgba(255,255,255,0.4)',
-                }}
-              />
-              <CornerBracket pos="tl" />
-              <CornerBracket pos="tr" />
-              <CornerBracket pos="bl" />
-              <CornerBracket pos="br" />
-            </div>
+        {/* Loading veil while the VLM locates the card. */}
+        {inPreview && detecting && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/50 text-white text-sm gap-2 pointer-events-none">
+            <Loader2 className="h-5 w-5 animate-spin" />
+            Finding card…
+          </div>
+        )}
+
+        {/* Non-blocking hint when auto-crop couldn't find a card. */}
+        {inPreview && !detecting && detectionFailed && (
+          <div className="absolute inset-x-4 top-4 bg-amber-500/95 text-black text-xs rounded-md px-3 py-2 shadow">
+            Couldn't auto-crop this photo. You can still use it, or retake.
           </div>
         )}
 
@@ -427,7 +453,7 @@ export default function CardCameraCapture({
             {error}
           </div>
         )}
-        {starting && !error && (
+        {starting && !error && !inPreview && (
           <div className="absolute inset-0 flex items-center justify-center text-white/70 text-sm">
             Starting camera…
           </div>
@@ -435,7 +461,7 @@ export default function CardCameraCapture({
       </div>
 
       <div className="bg-black/80 px-4 py-4 flex items-center justify-around z-10">
-        {!preview ? (
+        {!inPreview ? (
           <>
             <Button
               type="button"
@@ -474,8 +500,9 @@ export default function CardCameraCapture({
             </Button>
             <Button
               type="button"
-              className="bg-emerald-500 hover:bg-emerald-600 text-white"
+              className="bg-emerald-500 hover:bg-emerald-600 text-white disabled:opacity-50"
               onClick={handleConfirm}
+              disabled={detecting}
             >
               <Check className="h-5 w-5 mr-2" />
               Use Photo
@@ -493,15 +520,4 @@ export default function CardCameraCapture({
       />
     </div>
   );
-}
-
-function CornerBracket({ pos }: { pos: 'tl' | 'tr' | 'bl' | 'br' }) {
-  const base = 'absolute h-7 w-7 border-emerald-400';
-  const map: Record<typeof pos, string> = {
-    tl: 'top-0 left-0 border-t-4 border-l-4 rounded-tl-md',
-    tr: 'top-0 right-0 border-t-4 border-r-4 rounded-tr-md',
-    bl: 'bottom-0 left-0 border-b-4 border-l-4 rounded-bl-md',
-    br: 'bottom-0 right-0 border-b-4 border-r-4 rounded-br-md',
-  };
-  return <div className={`${base} ${map[pos]}`} />;
 }
