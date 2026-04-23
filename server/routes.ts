@@ -1344,34 +1344,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
             grade.label,
             `(${grade.overall}, grade conf ${grade.confidence.toFixed(2)})`,
           );
-          // Persist the scanned images to /uploads so the Home screen's
-          // Recent Scans carousel can render a real thumbnail instead of a
-          // camera-icon placeholder. Multer runs in memoryStorage mode so
-          // the buffers are in RAM — we write them out ourselves with a
-          // uuid name, and what gets stored in scan_grades is the public
-          // `/uploads/...` URL (served by express.static in server/index.ts).
-          // Failures here are non-fatal: we fall back to the original
-          // filename-only behavior so a scan never breaks over disk I/O.
-          const uploadsDir = join(process.cwd(), 'uploads');
-          const persistScanImage = (file: Express.Multer.File, side: 'front' | 'back'): string | null => {
+          // Persist the scanned images to Replit Object Storage (GCS-backed)
+          // so the Home screen's Recent Scans carousel can render a real
+          // thumbnail instead of a camera-icon placeholder. We used to write
+          // these to a local `./uploads/` dir under the container, but Replit
+          // Autoscale wipes the filesystem on every deploy and every new
+          // instance spawn — the DB row outlives the container, so old URLs
+          // 404ed immediately. Object Storage is persistent across deploys.
+          //
+          // `storage.saveImage` stores the blob under `/objects/uploads/<uuid>`,
+          // which is served by the GET /objects/:path handler registered in
+          // server/replit_integrations/object_storage/routes.ts. Failures
+          // are non-fatal: we fall back to the original filename-only
+          // behavior so a scan never breaks if Object Storage is unreachable.
+          const persistScanImage = async (
+            file: Express.Multer.File,
+            side: 'front' | 'back',
+          ): Promise<string | null> => {
             try {
-              if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
-              const ext = (() => {
-                const fromName = (file.originalname || '').split('.').pop();
-                if (fromName && fromName.length <= 5) return fromName.toLowerCase();
-                const mt = (file.mimetype || '').split('/')[1] || 'jpg';
-                return mt.replace('jpeg', 'jpg');
-              })();
-              const filename = `scan_${side}_${randomUUID()}.${ext}`;
-              fs.writeFileSync(join(uploadsDir, filename), file.buffer);
-              return `/uploads/${filename}`;
+              const contentType = file.mimetype || 'image/jpeg';
+              const dataUrl = `data:${contentType};base64,${file.buffer.toString('base64')}`;
+              const filename = `scan_${side}_${file.originalname || 'scan.jpg'}`;
+              return await storage.saveImage(dataUrl, filename);
             } catch (writeErr) {
-              console.warn(`Holo: failed to persist ${side} scan image:`, writeErr);
+              console.warn(`Holo: failed to persist ${side} scan image to Object Storage:`, writeErr);
               return null;
             }
           };
-          const frontUrl = persistScanImage(frontFileForHolo, 'front');
-          const backUrl = backFileForHolo ? persistScanImage(backFileForHolo, 'back') : null;
+          const [frontUrl, backUrl] = await Promise.all([
+            persistScanImage(frontFileForHolo, 'front'),
+            backFileForHolo ? persistScanImage(backFileForHolo, 'back') : Promise.resolve(null),
+          ]);
           try {
             const row = await saveGrade({
               userId: userId ?? null,
