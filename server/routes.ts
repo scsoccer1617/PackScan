@@ -44,6 +44,7 @@ import { saveGrade, listGradesForUser, hydrateGrade } from './holo/storage';
 import { requireAuth } from './auth';
 import { lookupCard as scpLookupCard, SOURCE_SLUG as SCP_SOURCE_SLUG } from './sportscardspro';
 import type { ScanQueryInput as ScpScanQueryInput } from './sportscardspro';
+import { discoverParallels } from './sportscardspro/parallels';
 
 // Configure multer for handling file uploads
 const upload = multer({
@@ -1155,6 +1156,52 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // the client renders normally.
       console.error('[catalog/match] unexpected throw:', err?.message || err);
       return res.status(200).json({ status: 'miss', reason: 'api_error' });
+    }
+  });
+
+  // ───────── SportsCardsPro parallel discovery (PR #38b) ─────────
+  // Returns the distinct parallel list for a card so the UI parallel
+  // picker can show ONLY parallels that SCP actually has for this card,
+  // optionally filtered by the scanner's detected color.
+  //
+  // Called by ScanResult's STEP 3 before it falls back to the local
+  // parallels DB. Read-through cache on searchProducts means a repeat
+  // scan of the same card hits zero outbound SCP calls.
+  //
+  // Intentionally always returns 200: an empty list is a normal result
+  // (no SCP coverage), not an error state.
+  const catalogParallelsSchema = z.object({
+    playerName: z.string().trim().optional().nullable(),
+    year: z.number().int().optional().nullable(),
+    brand: z.string().trim().optional().nullable(),
+    collection: z.string().trim().optional().nullable(),
+    setName: z.string().trim().optional().nullable(),
+    cardNumber: z.string().trim().optional().nullable(),
+    // Caller-supplied color filter. When omitted, returns all parallels.
+    colorFilter: z.string().trim().optional().nullable(),
+    limit: z.number().int().positive().max(200).optional(),
+  });
+
+  app.post(`${apiPrefix}/catalog/parallels`, async (req: Request, res: Response) => {
+    const parsed = catalogParallelsSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        parallels: [],
+        filterFellBack: false,
+        query: '',
+        error: parsed.error.issues.map((i) => i.message).join('; '),
+      });
+    }
+    try {
+      const { colorFilter, limit, ...scan } = parsed.data;
+      const result = await discoverParallels(scan as ScpScanQueryInput, {
+        colorFilter: colorFilter ?? null,
+        limit,
+      });
+      return res.status(200).json(result);
+    } catch (err: any) {
+      console.error('[catalog/parallels] unexpected throw:', err?.message || err);
+      return res.status(200).json({ parallels: [], filterFellBack: false, query: '' });
     }
   });
 

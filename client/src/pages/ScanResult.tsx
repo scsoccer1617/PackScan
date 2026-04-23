@@ -38,6 +38,7 @@ import {
   filterBySerialStatus,
   mergePreferringPrimary,
 } from "@/lib/scanFlow";
+import { useScpParallels } from "@/hooks/use-scp-parallels";
 
 /** Palette tone helper for the grade chip — maps numeric grade → token bg/text. */
 function gradeTone(grade: number): { bg: string; text: string; ring: string } {
@@ -64,6 +65,10 @@ export default function ScanResult() {
   const [showParallelPicker, setShowParallelPicker] = useState(false);
   const [showParallelConfirm, setShowParallelConfirm] = useState(false);
   const [parallelOptions, setParallelOptions] = useState<ParallelOption[]>([]);
+  // SCP-backed parallel discovery. Called in STEP 3 before the local-DB
+  // "show everything" fallback — filters by Holo's detected color so the
+  // picker only surfaces parallels that SCP actually has for this card.
+  const scpParallels = useScpParallels();
   const [detectedKeyword, setDetectedKeyword] = useState("");
   const [showCollectionPicker, setShowCollectionPicker] = useState(false);
   const [collectionCandidates, setCollectionCandidates] = useState<CollectionCandidate[]>([]);
@@ -332,8 +337,49 @@ export default function ScanResult() {
         return;
       }
 
-      // STEP 3 — detected but 0 DB keyword hits. Show full list if there is one.
+      // STEP 3 — detected but 0 DB keyword hits.
+      //
+      // Before falling through to "show every parallel in the DB" (the
+      // old behavior, which for a modern Topps set is hundreds of rows),
+      // ask SCP what parallels actually exist for this card and filter
+      // by the scanner's detected color. Only if SCP returns nothing do
+      // we fall back to the full local list.
       if (filtered.length === 0 && detected) {
+        try {
+          const fullName = [data.playerFirstName, data.playerLastName]
+            .filter(Boolean)
+            .join(" ")
+            .trim();
+          const scpResult = await scpParallels.mutateAsync({
+            playerName: fullName || null,
+            year: (data.year as number | null | undefined) ?? null,
+            brand: data.brand ?? null,
+            collection: data.collection ?? null,
+            setName: data.set ?? null,
+            cardNumber: data.cardNumber ?? null,
+            colorFilter: detected,
+          });
+          if (scpResult.parallels.length >= 1) {
+            // Shape SCP rows into the local ParallelOption contract. SCP
+            // doesn't expose per-parallel serial limits, so leave
+            // serialNumber null — the picker will accept custom serials.
+            const scpOptions: ParallelOption[] = scpResult.parallels.map((p) => ({
+              variationOrParallel: p.label,
+              serialNumber: null,
+            }));
+            setParallelOptions(scpOptions);
+            setDetectedKeyword(extractKeyword(detected));
+            if (requestShowParallelConfirm(true)) return;
+            setShowPriceResults(true);
+            return;
+          }
+        } catch (err) {
+          // SCP unreachable or threw — just fall through to the local
+          // fallback below. This path is non-critical for pricing.
+          console.warn("[ScanResult] SCP parallel discovery failed:", err);
+        }
+
+        // Local DB emergency fallback: show every parallel we know about.
         const allForStatus = filterBySerialStatus(allOptions, !!detectedSerial && !!data.isNumbered);
         if (allForStatus.length >= 2) {
           setParallelOptions(allForStatus);

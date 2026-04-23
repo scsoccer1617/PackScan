@@ -362,3 +362,39 @@ export const scpMissLog = pgTable("scp_miss_log", {
 
 export type ScpMissLogEntry = typeof scpMissLog.$inferSelect;
 export type ScpMissLogInsert = typeof scpMissLog.$inferInsert;
+
+// ── scp_product_cache ──────────────────────────────────────────────────────
+// Read-through cache for SCP API responses, keyed by a deterministic query
+// hash. Makes repeat scans of the same card free (no outbound API call, no
+// rate-limit cost) and gives us a resilient local copy of SCP data even if
+// their API is briefly unreachable. SCP regenerates their own data once per
+// 24h, so a 24h TTL matches upstream freshness exactly.
+//
+// Cache is keyed per *kind* of call ("search" vs "product") so we don't risk
+// collisions between a search for "michael jordan" and a product lookup for
+// product id 72584 that happens to hash to the same string.
+//
+// Writers set fetchedAt=now() on insert and on refresh. Readers treat rows
+// older than 24h as stale and trigger a refresh. A daily cron can prune rows
+// older than ~7 days; we keep stale rows around briefly as an emergency
+// fallback if SCP is unreachable (graceful degradation > hard failure).
+export const scpProductCache = pgTable("scp_product_cache", {
+  id: serial("id").primaryKey(),
+  // "search" (for /api/products?q=...) or "product" (for /api/product?id=...)
+  kind: text("kind", { enum: ["search", "product"] }).notNull(),
+  // Deterministic hash of the normalized query (lowercased, whitespace-collapsed).
+  // sha256 hex truncated to 32 chars — collision-proof enough for a cache.
+  queryHash: text("query_hash").notNull(),
+  // The exact query string or product id that produced this hash, for debugging.
+  queryText: text("query_text").notNull(),
+  // The full SCP response body as returned. For "search", this is the
+  // `products` array. For "product", this is the single product object.
+  responseJson: jsonb("response_json").notNull(),
+  fetchedAt: timestamp("fetched_at").defaultNow().notNull(),
+}, (table) => [
+  index("scp_cache_kind_hash_idx").on(table.kind, table.queryHash),
+  index("scp_cache_fetched_idx").on(table.fetchedAt),
+]);
+
+export type ScpProductCacheEntry = typeof scpProductCache.$inferSelect;
+export type ScpProductCacheInsert = typeof scpProductCache.$inferInsert;
