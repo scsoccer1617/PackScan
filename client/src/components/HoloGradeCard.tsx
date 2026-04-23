@@ -3,16 +3,11 @@ import {
   Award,
   CircleDot,
   Crown,
-  Hash,
-  Layers,
   RotateCcw,
   Scan,
   ShieldCheck,
   Sparkles,
   Square,
-  Target,
-  User,
-  Wand2,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -23,21 +18,6 @@ import { Badge } from "@/components/ui/badge";
  * by server/holo/storage.ts#hydrateGrade.
  */
 export type HoloSubGrade = { score: number; notes: string };
-
-export type HoloIdentification = {
-  player: string;
-  brand: string | null;
-  setName: string;
-  collection: string | null;
-  year: string;
-  cardNumber: string | null;
-  serialNumber: string | null;
-  parallel: string | null;
-  variant: string | null;
-  cmpCode: string | null;
-  sport: string;
-  confidence: number;
-};
 
 export type HoloGrade = {
   id?: number;
@@ -53,7 +33,6 @@ export type HoloGrade = {
   confidence: number;
   model: string;
   frontOnly: boolean;
-  identification?: HoloIdentification | null;
 };
 
 type Tone = "gold" | "cyan" | "green" | "amber" | "red";
@@ -149,140 +128,11 @@ export interface HoloGradeCardProps {
   grade: HoloGrade | null | undefined;
 }
 
-// Identification match tone buckets — mirror the grade tones but keyed on %.
-function matchTone(confidence: number): Tone {
-  if (confidence >= 0.95) return "gold";
-  if (confidence >= 0.85) return "cyan";
-  if (confidence >= 0.7) return "green";
-  if (confidence >= 0.5) return "amber";
-  return "red";
-}
-
-function IdField({
-  icon,
-  label,
-  value,
-  testId,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string | null | undefined;
-  testId: string;
-}) {
-  if (!value) return null;
-  return (
-    <div className="flex items-start gap-2" data-testid={testId}>
-      <span className="mt-0.5 text-muted-foreground">{icon}</span>
-      <div className="min-w-0">
-        <div className="text-[0.6rem] uppercase tracking-wider text-muted-foreground">
-          {label}
-        </div>
-        <div className="truncate text-sm font-medium">{value}</div>
-      </div>
-    </div>
-  );
-}
-
-function IdentificationPanel({ id }: { id: HoloIdentification }) {
-  const tone = TONE_STYLES[matchTone(id.confidence)];
-  const matchPct = Math.round(id.confidence * 100);
-  const yearPlusSet = [id.year, id.setName].filter(Boolean).join(" ");
-  return (
-    <div
-      className="relative mb-6 rounded-lg border bg-muted/30 p-4"
-      data-testid="holo-identification-panel"
-    >
-      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 text-xs uppercase tracking-wider text-muted-foreground">
-            <Wand2 className="h-3.5 w-3.5" />
-            Holo identification
-          </div>
-          <div className="mt-1.5 truncate text-xl font-semibold" data-testid="text-holo-player">
-            {id.player}
-          </div>
-          {yearPlusSet && (
-            <div className="text-sm text-muted-foreground" data-testid="text-holo-set">
-              {yearPlusSet}
-              {id.collection && <span className="ml-1.5">· {id.collection}</span>}
-            </div>
-          )}
-        </div>
-        <div className="shrink-0 text-right">
-          <div className="text-[0.6rem] uppercase tracking-wider text-muted-foreground">
-            Match
-          </div>
-          <div
-            className={`font-mono text-2xl font-semibold ${tone.text}`}
-            data-testid="text-holo-match"
-          >
-            {matchPct}%
-          </div>
-        </div>
-      </div>
-      {/* Match bar */}
-      <div className="mb-4 h-1 overflow-hidden rounded-full bg-muted">
-        <motion.div
-          className={`h-full ${tone.bar}`}
-          initial={{ width: 0 }}
-          animate={{ width: `${matchPct}%` }}
-          transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
-        />
-      </div>
-      {/* Field grid */}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        <IdField
-          icon={<Layers className="h-3.5 w-3.5" />}
-          label="Brand"
-          value={id.brand}
-          testId="id-field-brand"
-        />
-        <IdField
-          icon={<Hash className="h-3.5 w-3.5" />}
-          label="Card #"
-          value={id.cardNumber}
-          testId="id-field-card-number"
-        />
-        <IdField
-          icon={<Target className="h-3.5 w-3.5" />}
-          label="Sport"
-          value={id.sport && id.sport !== "other" ? id.sport.charAt(0).toUpperCase() + id.sport.slice(1) : null}
-          testId="id-field-sport"
-        />
-        <IdField
-          icon={<Sparkles className="h-3.5 w-3.5" />}
-          label="Parallel"
-          value={id.parallel}
-          testId="id-field-parallel"
-        />
-        <IdField
-          icon={<Hash className="h-3.5 w-3.5" />}
-          label="Serial"
-          value={id.serialNumber}
-          testId="id-field-serial"
-        />
-        <IdField
-          icon={<User className="h-3.5 w-3.5" />}
-          label="Variant"
-          value={id.variant}
-          testId="id-field-variant"
-        />
-        <IdField
-          icon={<Hash className="h-3.5 w-3.5" />}
-          label="CMP code"
-          value={id.cmpCode}
-          testId="id-field-cmp"
-        />
-      </div>
-      {matchPct < 70 && (
-        <div className="mt-3 rounded border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-400">
-          Low confidence — please verify the fields above. PackScan's OCR result
-          is still being used as the primary source.
-        </div>
-      )}
-    </div>
-  );
-}
+// Legacy IdentificationPanel removed in the grade-only refactor — OCR + SCP
+// now own identification, so Holo never returns player/brand/parallel fields.
+// The scan_grades.identification JSONB column still exists for backfill but
+// is always null for new rows. Keeping this comment as a breadcrumb in case
+// we ever reintroduce AI-assisted identification as a separate step.
 
 export function HoloGradeCard({ grade }: HoloGradeCardProps) {
   if (!grade) return null;
@@ -298,9 +148,6 @@ export function HoloGradeCard({ grade }: HoloGradeCardProps) {
     >
       <Card className={`relative overflow-hidden p-6 ring-1 ${tone.ring}`}>
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,hsl(var(--primary)/0.08),transparent_60%)]" />
-
-        {/* Identification panel (shown whenever Claude returned an ID) */}
-        {grade.identification && <IdentificationPanel id={grade.identification} />}
 
         {/* Hero: overall grade + label */}
         <div className="relative flex flex-wrap items-end justify-between gap-4">

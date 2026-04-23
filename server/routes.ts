@@ -34,10 +34,8 @@ import { runPushToProdJob, makeInitialJobState, type PushJobState } from './push
 import {
   analyzeCard,
   gradeCard,
-  identificationToCardData,
   HoloNotConfiguredError,
   type HoloGrade,
-  type HoloIdentification,
   type HoloAnalysis,
 } from './holo/cardGrader';
 import { saveGrade, listGradesForUser, hydrateGrade } from './holo/storage';
@@ -1240,26 +1238,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log('Starting dual-image OCR + eBay price analysis...');
       console.log('ROUTE HANDLER IS DEFINITELY CALLED!');
 
-      // Holo (Claude) is now the PRIMARY identifier + grader. It runs in
-      // parallel with the legacy OCR pipeline so we still get a
-      // response even if Claude is unavailable or low-confidence.
-      //
-      // Downstream logic:
-      //   - If Holo identification confidence >= HOLO_CONFIDENCE_THRESHOLD,
-      //     we merge Claude's fields on top of OCR fields as the source of
-      //     truth for eBay lookup and client display.
-      //   - Otherwise, OCR remains authoritative and Holo only
-      //     contributes the condition grade.
-      //   - If Holo fails entirely (no key, API error, etc.), scan continues
-      //     with OCR exactly as before (data.holo = null).
-      const HOLO_CONFIDENCE_THRESHOLD = 0.7;
+      // Holo (Claude) is now a GRADE-ONLY service. Identification is owned
+      // end-to-end by Google Vision OCR, the local card database, and the
+      // SportsCardsPro catalog — this avoids Sonnet hallucinating parallels
+      // that don't exist for a given set (e.g. "Pink Speckle Refractor" on
+      // Topps flagship, which has no refractors). Holo runs in parallel
+      // with the OCR pipeline so the scan still returns even if Claude is
+      // unavailable; `identification` is always persisted as null.
       const userId = (req.user as any)?.id as number | undefined;
       const frontFileForHolo = files.frontImage?.[0];
       const backFileForHolo = files.backImage?.[0];
       type HoloResponse = (HoloGrade & {
         id: number;
         createdAt: Date;
-        identification: HoloIdentification | null;
+        identification: null;
       }) | null;
       const holoPromise: Promise<HoloResponse> = (async () => {
         try {
@@ -1277,16 +1269,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 mediaType: (backFileForHolo.mimetype || 'image/jpeg') as any,
               }
             : undefined;
-          console.log('Holo: starting unified card analysis (identification + grade)...');
-          const { identification, grade }: HoloAnalysis = await analyzeCard(
+          console.log('Holo: starting grade-only analysis...');
+          const { grade }: HoloAnalysis = await analyzeCard(
             frontInput,
             backInput,
           );
           console.log(
-            'Holo: analysis complete -',
-            identification.player,
-            `(id conf ${identification.confidence.toFixed(2)})`,
-            '|',
+            'Holo: grade complete -',
             grade.label,
             `(${grade.overall}, grade conf ${grade.confidence.toFixed(2)})`,
           );
@@ -1324,13 +1313,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
               frontImagePath: frontUrl || frontFileForHolo.originalname || null,
               backImagePath: backUrl || backFileForHolo?.originalname || null,
               grade,
-              identification,
+              identification: null,
             });
             return {
               ...grade,
               id: row.id,
               createdAt: row.createdAt,
-              identification,
+              identification: null,
             };
           } catch (persistErr) {
             console.warn('Holo: failed to persist, returning in-memory:', persistErr);
@@ -1338,7 +1327,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               ...grade,
               id: 0,
               createdAt: new Date(),
-              identification,
+              identification: null,
             };
           }
         } catch (err) {
@@ -1395,174 +1384,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const holoResolved = await holoPromise;
       console.timeEnd('holo-claude');
 
-      // Cross-check helper: compare Holo's cardNumber/year against OCR's. The
-      // back-of-card pipeline reads the copyright line and card# corner via
-      // Google Vision OCR, so when Claude and OCR disagree on a field it's a
-      // strong signal the vision model misread a digit. We keep Claude's
-      // value (Holo is the primary identifier per product design), but we
-      // attach a `_crossCheck` diagnostic listing mismatched fields so the
-      // ScanResult hero can surface a "verify this" hint and the editable #
-      // / year pills start pre-focused. This is strictly a flagging layer —
-      // it never overrides Claude silently.
-      const normalizeCardNum = (v: any): string => String(v ?? '').trim().toUpperCase().replace(/\s+/g, '').replace(/^#/, '');
-      const computeCrossCheck = (
-        holoCard: Record<string, any>,
-        ocrData: Record<string, any> | null | undefined,
-      ): { fields: string[]; detail: Record<string, { holo: any; ocr: any }> } | null => {
-        if (!ocrData) return null;
-        const mismatches: string[] = [];
-        const detail: Record<string, { holo: any; ocr: any }> = {};
-
-        // Card number: only compare when both sides produced a non-empty value.
-        const holoNum = normalizeCardNum(holoCard.cardNumber);
-        const ocrNum = normalizeCardNum(ocrData.cardNumber);
-        if (holoNum && ocrNum && holoNum !== ocrNum) {
-          mismatches.push('cardNumber');
-          detail.cardNumber = { holo: holoCard.cardNumber, ocr: ocrData.cardNumber };
-        }
-
-        // Year: compare as 4-digit ints. OCR year defaults to current year when
-        // nothing is extracted, so we only flag when OCR has a positive year
-        // that actually differs from Holo's.
-        const holoYear = Number(holoCard.year) || 0;
-        const ocrYear = Number(ocrData.year) || 0;
-        if (holoYear && ocrYear && holoYear !== ocrYear) {
-          mismatches.push('year');
-          detail.year = { holo: holoCard.year, ocr: ocrData.year };
-        }
-
-        return mismatches.length ? { fields: mismatches, detail } : null;
-      };
-
-      // Merge helper: Claude identification is applied on top of OCR output
-      // when its confidence clears the threshold. Claude fills fields that
-      // OCR commonly misses (parallel, CMP, serial, exact collection) and
-      // overrides OCR for those fields; everything else stays OCR-derived.
-      const mergeHoloIntoCard = (ocrData: any): any => {
-        if (!holoResolved?.identification) return ocrData ?? {};
-        if (holoResolved.identification.confidence < HOLO_CONFIDENCE_THRESHOLD) {
-          return ocrData ?? {};
-        }
-        const holoCard = identificationToCardData(holoResolved.identification);
-        // Diagnostic: log Holo's identified year/card# alongside OCR's so we
-        // can debug future mismatches from production logs without needing
-        // to replay the image. Keep compact — one line.
-        console.log(
-          `[MergeDebug] holo: year=${holoCard.year} card#="${holoCard.cardNumber ?? ''}" ` +
-            `conf=${holoResolved.identification.confidence.toFixed(2)} | ` +
-            `ocr: year=${ocrData?.year ?? 'none'} card#="${ocrData?.cardNumber ?? ''}" ` +
-            `yearFromCopyright=${!!ocrData?._yearFromCopyright}`,
-        );
-        // Shallow-merge Claude over OCR, but keep OCR values where Claude
-        // returned falsy (null/empty) so we never wipe a known OCR field.
-        const merged: any = { ...(ocrData || {}) };
-        for (const [k, v] of Object.entries(holoCard)) {
-          if (v !== null && v !== undefined && v !== "") {
-            merged[k] = v;
-          }
-        }
-        merged._primarySource = 'holo';
-
-        // OCR-wins overrides for the two fields Claude most commonly misreads.
-        //
-        // Year: Claude's vision repeatedly second-guessed legible 2026
-        // copyrights toward 2025 / 2023 even after prompt reorder, current-
-        // date grounding, and a model bump to Opus 4.7. Google Vision OCR
-        // reads the year from the copyright line AND/OR from the stats
-        // table on the back — either way it's reading pixels deterministic-
-        // ally. Any 4-digit year that OCR produces is more trustworthy than
-        // Claude's hallucinated interpretation, so OCR wins on year as
-        // long as OCR has a value and the two disagree. The OCR year source
-        // (`_yearFromCopyright`, `_yearFromBackOnly`, `_yearFromBareFallback`)
-        // is preserved in the merged payload for downstream diagnostics.
-        //
-        // Card number: Claude sometimes picks up a set/insert code printed
-        // near the card number (e.g. "T83", "SMLB-76", "BDC-12") instead of
-        // the plain base number. Heuristic: if Holo returned a cardNumber
-        // that starts with a letter prefix AND OCR returned a plain numeric
-        // card number, prefer OCR — the letter-prefix form is almost always
-        // an insert/subset ID, not the base #. (We keep Holo when OCR has
-        // no number or when both agree.)
-        const ocrYearNum = Number(ocrData?.year) || 0;
-        const holoYearNum = Number(holoCard.year) || 0;
-        if (ocrYearNum > 0 && ocrYearNum !== holoYearNum) {
-          merged.year = ocrYearNum;
-          const sourceLabel = ocrData?._yearFromCopyright
-            ? 'ocr-copyright'
-            : ocrData?._yearFromBackOnly
-              ? 'ocr-back-stats'
-              : ocrData?._yearFromBareFallback
-                ? 'ocr-bare-fallback'
-                : 'ocr-year';
-          merged._yearSource = sourceLabel;
-          console.log(
-            `[MergeOverride] year: OCR wins — ocr=${ocrYearNum} ` +
-              `beats holo=${holoYearNum} (source: ${sourceLabel}).`,
-          );
-        }
-
-        const holoCardNum = String(holoCard.cardNumber ?? '').trim();
-        const ocrCardNumRaw = String(ocrData?.cardNumber ?? '').trim();
-        const holoIsLetterPrefixed = /^[A-Za-z]+\d/.test(holoCardNum);
-        const ocrIsPlainNumeric = /^\d+$/.test(ocrCardNumRaw);
-        if (
-          holoIsLetterPrefixed &&
-          ocrIsPlainNumeric &&
-          holoCardNum.toUpperCase() !== ocrCardNumRaw.toUpperCase()
-        ) {
-          merged.cardNumber = ocrCardNumRaw;
-          merged._cardNumberSource = 'ocr-plain-numeric';
-          console.log(
-            `[MergeOverride] cardNumber: OCR plain numeric wins — ocr="${ocrCardNumRaw}" ` +
-              `beats holo="${holoCardNum}" (letter-prefixed Holo value looks like ` +
-              `an insert/subset code, not a base card #).`,
-          );
-        }
-
-        // Attach OCR cross-check diagnostic when Holo's cardNumber or year
-        // diverges from OCR's reading. Purely informational — does not mutate
-        // the chosen value beyond the overrides above. The client uses this
-        // to nudge the user to review.
-        const crossCheck = computeCrossCheck(holoCard, ocrData);
-        if (crossCheck) {
-          merged._crossCheck = crossCheck;
-          console.log(
-            `[CrossCheck] Holo vs OCR mismatch on ${crossCheck.fields.join(', ')} — ` +
-              Object.entries(crossCheck.detail)
-                .map(([f, v]) => `${f}: holo="${v.holo}" ocr="${v.ocr}"`)
-                .join(' | '),
-          );
-        }
-        return merged;
-      };
-
+      // Holo is grade-only now — identification comes exclusively from the
+      // OCR pipeline (Google Vision → local card DB → SCP catalog). If OCR
+      // fails we still return whatever partial data it produced so the
+      // client can show the user what was read and let them retry.
       if (!backOcrResponse.success || !backOcrResponse.data) {
-        // OCR failed. If Holo identified the card confidently, use it as the
-        // sole source of truth so the scan still returns usable data.
-        if (
-          holoResolved?.identification &&
-          holoResolved.identification.confidence >= HOLO_CONFIDENCE_THRESHOLD
-        ) {
-          const holoCard = identificationToCardData(holoResolved.identification);
-          return res.json({
-            success: true,
-            data: {
-              ...holoCard,
-              ebayResults: {
-                averageValue: 0,
-                results: [],
-                searchUrl: '',
-                errorMessage: 'Analysis via Holo only; eBay lookup skipped because OCR did not complete',
-                dataType: 'sold'
-              },
-              holo: holoResolved,
-            }
-          });
-        }
         return res.json({
           success: true,
           data: {
-            ...backOcrResponse.data,
+            ...(backOcrResponse?.data || {}),
             ebayResults: {
               averageValue: 0,
               results: [],
@@ -1582,13 +1412,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // but they no longer alter the result of a fresh scan.
       console.log('OCR analysis successful, skipping confirmed-card override (DB lookup is authoritative)');
 
-      // Apply Holo identification on top of OCR when confidence is high.
-      // Everything downstream (eBay lookup, response, client UI) uses the
-      // merged object as cardData.
-      const cardData = mergeHoloIntoCard(backOcrResponse.data);
-      if ((cardData as any)._primarySource === 'holo') {
-        console.log('Holo: identification confidence >= threshold, using Holo fields as primary');
-      }
+      // OCR output flows straight through as card identification. Holo
+      // contributes only the grade (attached as `data.holo` below).
+      const cardData = backOcrResponse.data;
 
       console.log('Starting eBay price lookup...');
       
