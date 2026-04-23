@@ -5,7 +5,7 @@
 // JPEG data URL by sampling the source quadrilateral onto a rectangular
 // canvas.
 //
-// Design choices (PR #51):
+// Design choices (PR #51 + #52):
 // - Output dimensions are DERIVED FROM THE DETECTED QUAD, not forced to 2.5:3.5.
 //   Warping a slightly-narrow quad onto a forced-wide canvas stretches pixels
 //   horizontally and clips content on patterned cards (Sandglitter, Tinsel,
@@ -15,9 +15,15 @@
 //   This trades a slightly looser crop for a guarantee we never clip the
 //   physical card edge even when Haiku's quad falls a few pixels inside the
 //   real border. Matches Lens's generous bracket behavior.
-// - The server's aspect-ratio guard now rejects quads more than ±18% off,
-//   so anything wildly wrong falls back to the uncropped original instead of
-//   producing a stretched crop.
+// - PR #52: the padded quad is then CANONICALIZED to an upright rotated
+//   rectangle. Haiku sometimes returns a sheared parallelogram (TR and BL
+//   displaced along a diagonal) which the old bilinear sampler would map to
+//   an axis-aligned output, visually tilting the card. We instead compute
+//   the card's dominant up-axis from the average of the two vertical edges,
+//   then construct a true rotated rectangle around the quad centroid sized
+//   to the original edge lengths. Result: card always comes out level.
+// - The server's aspect-ratio guard rejects quads more than ±18% off so
+//   anything wildly wrong falls back to the uncropped original.
 //
 // Uses an inverse bilinear mapping: for each output pixel (u,v) in [0,1]^2,
 // sample the source image at
@@ -70,6 +76,66 @@ function padQuadOutward(
   };
 }
 
+// Replace a possibly-sheared parallelogram with a TRUE rotated rectangle
+// centered on the quad centroid. The rectangle's rotation matches the card's
+// dominant up-axis (average of the left and right edge directions) and its
+// width/height match the average top/bottom and left/right edge lengths.
+//
+// This is what fixes the "crop came out tilted" failure mode from IMG_4997:
+// Haiku's quad was a parallelogram where TR was placed too high relative to
+// TL. Mapping that parallelogram's corners straight to axis-aligned output
+// corners produced a tilted-looking card. By building a proper rectangle
+// first, the bilinear warp samples along the card's own orthogonal axes and
+// the output is always level.
+function canonicalizeQuadToUprightRect(quad: {
+  TL: Point;
+  TR: Point;
+  BR: Point;
+  BL: Point;
+}): { TL: Point; TR: Point; BR: Point; BL: Point } {
+  const cx = (quad.TL.x + quad.TR.x + quad.BR.x + quad.BL.x) / 4;
+  const cy = (quad.TL.y + quad.TR.y + quad.BR.y + quad.BL.y) / 4;
+
+  // The card's "down" direction is the average of the two vertical edges
+  // (TL→BL and TR→BR). Averaging two independent estimates makes this
+  // robust to Haiku placing any single corner slightly off.
+  const leftDownX = quad.BL.x - quad.TL.x;
+  const leftDownY = quad.BL.y - quad.TL.y;
+  const rightDownX = quad.BR.x - quad.TR.x;
+  const rightDownY = quad.BR.y - quad.TR.y;
+  const downX = (leftDownX + rightDownX) / 2;
+  const downY = (leftDownY + rightDownY) / 2;
+  const downLen = Math.hypot(downX, downY) || 1;
+  // Unit "down" vector (dx, dy).
+  const dx = downX / downLen;
+  const dy = downY / downLen;
+  // Perpendicular "right" vector. Image coords have +y going down, so the
+  // card's "right" is "down" rotated 90° clockwise: right = (dy, -dx).
+  // Verify: down=(0,1) gives right=(1,0) ✓; down=(1,0) (card lying on its
+  // side) gives right=(0,-1) which points "up" in image coords, i.e. the
+  // direction from centroid to the card's top-right corner when the card is
+  // rotated 90° clockwise in the frame. ✓
+  const rx = dy;
+  const ry = -dx;
+
+  // Half-width = avg of top and bottom edge lengths / 2.
+  // Half-height = avg of left and right edge lengths / 2.
+  const topLen = Math.hypot(quad.TR.x - quad.TL.x, quad.TR.y - quad.TL.y);
+  const bottomLen = Math.hypot(quad.BR.x - quad.BL.x, quad.BR.y - quad.BL.y);
+  const leftLen = Math.hypot(leftDownX, leftDownY);
+  const rightLen = Math.hypot(rightDownX, rightDownY);
+  const halfW = (topLen + bottomLen) / 4;
+  const halfH = (leftLen + rightLen) / 4;
+
+  // Corners = centroid ± halfW*right ± halfH*down.
+  return {
+    TL: { x: cx - halfW * rx - halfH * dx, y: cy - halfW * ry - halfH * dy },
+    TR: { x: cx + halfW * rx - halfH * dx, y: cy + halfW * ry - halfH * dy },
+    BR: { x: cx + halfW * rx + halfH * dx, y: cy + halfW * ry + halfH * dy },
+    BL: { x: cx - halfW * rx + halfH * dx, y: cy - halfW * ry + halfH * dy },
+  };
+}
+
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -106,17 +172,23 @@ export async function cropCardFromQuad(
   };
 
   // Push each corner 8% outward from the centroid so we never clip the true
-  // card edge when Haiku's estimate is slightly tight. Then clamp back inside
-  // the source image bounds so we don't try to sample off-image pixels.
+  // card edge when Haiku's estimate is slightly tight.
   const padded = padQuadOutward(rawCorners, QUAD_OUTWARD_PAD);
+
+  // Replace the (possibly sheared) parallelogram with a true rotated
+  // rectangle so the output crop is always level. This is what fixes the
+  // "card came out tilted" case reported after PR #51. Clamp corners back
+  // inside the source image AFTER rectangularization so the rectangle can
+  // rotate freely before being bounded.
+  const canonical = canonicalizeQuadToUprightRect(padded);
   const clamp = (p: Point): Point => ({
     x: Math.max(0, Math.min(sw - 1, p.x)),
     y: Math.max(0, Math.min(sh - 1, p.y)),
   });
-  const TL = clamp(padded.TL);
-  const TR = clamp(padded.TR);
-  const BR = clamp(padded.BR);
-  const BL = clamp(padded.BL);
+  const TL = clamp(canonical.TL);
+  const TR = clamp(canonical.TR);
+  const BR = clamp(canonical.BR);
+  const BL = clamp(canonical.BL);
 
   // Derive OUTPUT dimensions from the padded quad's actual edge lengths.
   // Do NOT force 2.5:3.5 — that's what produced the stretched crops. We use
