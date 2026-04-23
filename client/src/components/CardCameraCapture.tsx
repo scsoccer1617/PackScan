@@ -230,6 +230,15 @@ export default function CardCameraCapture({
   //   2. Server VLM (Haiku) — handles cases where the card edge is too
   //      low-contrast against the background for Canny to find it
   //   3. Fall back to uncropped photo + amber toast
+  //
+  // Hard timeouts (PR #55):
+  //   - OpenCV detect:    6s   (load + pipeline). WASM assertions or a slow
+  //                            CDN used to hang findContours forever.
+  //   - VLM detect:       10s  (fetch). Haiku usually responds in ~1-2s; if
+  //                            the API is down we don't want to freeze the UI.
+  //   - Overall watchdog: 20s  Belt-and-braces. If anything slips past the
+  //                            inner timeouts we still release `detecting`
+  //                            so the user can use the raw photo.
   const runDetectAndCrop = useCallback(async (raw: string) => {
     setDetecting(true);
     setDetectionFailed(false);
@@ -243,14 +252,42 @@ export default function CardCameraCapture({
     const ac = new AbortController();
     detectAbortRef.current = ac;
 
+    // Overall watchdog — guarantees we exit the "Finding card…" state even
+    // if every inner code path hangs (OpenCV WASM assertion, server
+    // unreachable with no TCP RST, browser throttling a background tab, etc.).
+    // Fires setDetecting(false) and marks detection as failed so the user
+    // always has the raw photo as a fallback.
+    let watchdogFired = false;
+    const overallWatchdog = window.setTimeout(() => {
+      watchdogFired = true;
+      console.warn('[CardCameraCapture] overall detection watchdog fired after 20s — forcing fallback to raw');
+      try { ac.abort(); } catch {}
+      setDetectionFailed(true);
+      setDetecting(false);
+      setDetectReason('timeout');
+    }, 20000);
+
+    const clearWatchdog = () => {
+      window.clearTimeout(overallWatchdog);
+    };
+
     let quad: NormalizedQuad | null = null;
     let detectSource: 'opencv' | 'vlm' | null = null;
 
-    // --- Step 1: OpenCV.js on-device detection ---
+    // --- Step 1: OpenCV.js on-device detection (hard 6s cap) ---
+    console.log('[CardCameraCapture] step 1: OpenCV detect (6s timeout)');
     try {
       const cvStart = performance.now();
-      const cvQuad = await detectCardQuadWithCV(raw);
-      if (ac.signal.aborted) return;
+      const cvQuad = await Promise.race<NormalizedQuad | null>([
+        detectCardQuadWithCV(raw),
+        new Promise<NormalizedQuad | null>((resolve) =>
+          window.setTimeout(() => {
+            console.warn('[CardCameraCapture] OpenCV detect timed out after 6s — falling through to VLM');
+            resolve(null);
+          }, 6000),
+        ),
+      ]);
+      if (ac.signal.aborted || watchdogFired) { clearWatchdog(); return; }
       if (cvQuad) {
         quad = cvQuad;
         detectSource = 'opencv';
@@ -259,34 +296,48 @@ export default function CardCameraCapture({
           quad: cvQuad,
         });
       } else {
-        console.log('[CardCameraCapture] OpenCV found no quad, trying VLM');
+        console.log('[CardCameraCapture] OpenCV found no quad (or timed out), trying VLM');
       }
     } catch (err) {
       console.warn('[CardCameraCapture] OpenCV detect threw', err);
     }
 
-    // --- Step 2: VLM fallback if OpenCV came up empty ---
-    if (!quad) {
+    // --- Step 2: VLM fallback if OpenCV came up empty (hard 10s cap) ---
+    if (!quad && !watchdogFired) {
+      console.log('[CardCameraCapture] step 2: VLM detect (10s timeout)');
+      const vlmStart = performance.now();
+      const vlmTimer = window.setTimeout(() => {
+        console.warn('[CardCameraCapture] VLM detect timed out after 10s — aborting fetch');
+        try { ac.abort(); } catch {}
+      }, 10000);
       try {
         const result = await detectCardQuad(raw, { signal: ac.signal });
         if (result.ok) {
           quad = result.quad;
           detectSource = 'vlm';
+          console.log('[CardCameraCapture] VLM detected quad', {
+            latencyMs: Math.round(performance.now() - vlmStart),
+          });
         } else {
+          console.log('[CardCameraCapture] VLM returned no quad', result.reason);
           setDetectReason(result.reason);
         }
       } catch (err) {
         if ((err as any)?.name !== 'AbortError') {
           console.warn('[CardCameraCapture] VLM detect error', err);
         }
+      } finally {
+        window.clearTimeout(vlmTimer);
       }
     }
 
-    if (ac.signal.aborted) return;
+    if (ac.signal.aborted || watchdogFired) { clearWatchdog(); return; }
 
     if (!quad) {
+      console.log('[CardCameraCapture] both detectors returned null — falling back to raw');
       setDetectionFailed(true);
       setDetecting(false);
+      clearWatchdog();
       return;
     }
     // Log which detector we're crediting — handy for field triage.
@@ -303,14 +354,16 @@ export default function CardCameraCapture({
           return null;
         }),
       ]);
-      if (ac.signal.aborted) return;
+      if (ac.signal.aborted || watchdogFired) { clearWatchdog(); return; }
       setCroppedImage(cropped);
       setDebugImage(debug);
+      console.log('[CardCameraCapture] warp complete, preview ready');
     } catch (err) {
       console.warn('[CardCameraCapture] warp error', err);
       setDetectionFailed(true);
     } finally {
       setDetecting(false);
+      clearWatchdog();
     }
   }, []);
 
