@@ -31,7 +31,7 @@ export interface CardLookupInput {
   serialNumber?: string;
   playerLastName?: string;  // used to disambiguate when prefix-matching finds multiple candidates
   /**
-   * Optional hint (typically Gemini's `parallel` field) used to pick one
+   * Optional hint (a parallel/variant name guessed upstream) used to pick one
    * variation when the serial-based or NULL-serial DB lookup returns multiple
    * candidates. e.g. multiple base-line variations could exist for a set; if
    * the hint matches one of their names (token overlap), that one is picked.
@@ -995,7 +995,7 @@ function pickByHint(
  * List every distinct `variation_or_parallel` name in card_variations for a
  * given brand+year (optionally narrowed by collection). Used to verify a
  * detector- or model-supplied parallel name against the catalog even when the
- * specific card row was not found in card_database (e.g. Gemini guessed a
+ * specific card row was not found in card_database (e.g. the identifier guessed a
  * card # that isn't in our catalog, but we still want to veto a parallel
  * name that doesn't exist for the brand/year).
  *
