@@ -7,9 +7,9 @@
 // with no result in memory.
 //
 // Tabs follow the redesigned mobile IA:
-//   1. Details   (default — card info + scanned images)
-//   2. Grade & Pricing  (HoloGrade + graded price breakdown combined)
-//   3. Listings  (eBay comps)
+//   1. Details  (default — card info + scanned images)
+//   2. Grade    (HoloGrade only)
+//   3. Price    (graded price breakdown + eBay active listings)
 
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -19,13 +19,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import EbayPriceResults from "@/components/EbayPriceResults";
 import { HoloGradeCard } from "@/components/HoloGradeCard";
 import GradedPriceBreakdown from "@/components/GradedPriceBreakdown";
+import AddToSheetButton from "@/components/AddToSheetButton";
 import ParallelPickerSheet, {
   type ParallelOption,
 } from "@/components/ParallelPickerSheet";
 import CollectionPickerSheet, {
   type CollectionCandidate,
 } from "@/components/CollectionPickerSheet";
-import { Camera, ScanLine, ScanSearch } from "lucide-react";
+import { Camera, Check, Pencil, ScanLine, ScanSearch, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { CardFormValues } from "@shared/schema";
 import {
@@ -74,6 +75,24 @@ export default function ScanResult() {
   // briefly sees hasResult=false, and bounces back to /scan.
   const [bootChecked, setBootChecked] = useState(false);
 
+  // Latest pricing result bubbled up from EbayPriceResults. Drives the
+  // avg-asking-price subtitle under the player name in the sticky hero
+  // and the ebaySearchUrl payload on the compact Add-to-Sheet button
+  // (so when the user taps Add-to-Sheet in the hero we include the same
+  // eBay link that Price-tab listings are built from).
+  const [priceInfo, setPriceInfo] = useState<{
+    averageValue: number;
+    dataType: 'sold' | 'current';
+    searchUrl: string | null;
+  } | null>(null);
+
+  // Inline edit state for the card number in the sticky hero. The pencil
+  // next to "#123" toggles this on. On save we push the edit into the
+  // scan flow via setCardData — the main effect picks up the change and
+  // re-runs the post-scan flow (which re-queries eBay with the fixed #).
+  const [editingCardNumber, setEditingCardNumber] = useState(false);
+  const [cardNumberDraft, setCardNumberDraft] = useState("");
+
   // Once the user has answered the "Is this a parallel?" prompt (Yes opens
   // the picker; No prices as base), we must NOT re-prompt even if the
   // in-flight runPostScanFlow later hits a `setShowParallelConfirm(true)`
@@ -86,6 +105,13 @@ export default function ScanResult() {
   const holoGrade = flow.holoGrade;
   const frontImage = flow.frontImage;
   const backImage = flow.backImage;
+
+  // Reset the priceInfo cache whenever the underlying card data changes
+  // so the hero doesn't briefly show a stale avg price for the previous
+  // query while the new lookup is in flight.
+  useEffect(() => {
+    setPriceInfo(null);
+  }, [cardData?.cardNumber, cardData?.foilType, cardData?.variant, cardData?.serialNumber, cardData?.brand, cardData?.year]);
 
   // If the user hit /result directly (deep link, refresh, back-button from
   // outside the app) without an analyze in memory, bounce to /scan. We
@@ -399,6 +425,39 @@ export default function ScanResult() {
     navigate("/scan");
   };
 
+  // Persist an edit to the card number into the scan flow. Triggers the
+  // main effect to re-run runPostScanFlow with the corrected #, which in
+  // turn re-queries eBay and updates the Price tab + the avg-price
+  // subtitle in the hero.
+  const handleSaveCardNumber = () => {
+    if (!cardData) return;
+    const next = cardNumberDraft.trim();
+    // Log the mismatch so we can roll this up later for Claude prompt
+    // tuning — keep the server stub payload minimal and best-effort;
+    // never block the UI on this.
+    if (next && next !== (cardData.cardNumber || "")) {
+      try {
+        fetch("/api/scan-corrections", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            field: "cardNumber",
+            detected: cardData.cardNumber || null,
+            corrected: next,
+            brand: cardData.brand,
+            year: cardData.year,
+            collection: cardData.collection,
+            set: (cardData as any).set,
+            playerFirstName: cardData.playerFirstName,
+            playerLastName: cardData.playerLastName,
+          }),
+        }).catch(() => {});
+      } catch {}
+    }
+    setEditingCardNumber(false);
+    flow.setCardData({ ...cardData, cardNumber: next });
+  };
+
   if (!cardData) {
     return (
       <div className="p-6 text-sm text-slate-500">
@@ -418,6 +477,16 @@ export default function ScanResult() {
     .join(" · ");
 
   const tone = holoGrade ? gradeTone(holoGrade.overall) : null;
+
+  // Formatted avg-asking-price label for the hero subtitle. Only shows
+  // after the first price lookup returns a non-zero average.
+  const avgPriceLabel = priceInfo && priceInfo.averageValue > 0
+    ? `${priceInfo.dataType === 'current' ? 'Avg asking' : 'Avg sold'} ${new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: 'USD',
+        maximumFractionDigits: 0,
+      }).format(priceInfo.averageValue)}`
+    : null;
 
   return (
     <div className="pb-6">
@@ -446,13 +515,76 @@ export default function ScanResult() {
               </div>
             )}
             <div className="min-w-0 flex-1">
-              <p className="text-[11px] text-slate-500 uppercase tracking-wider font-medium">
-                {cardData.year} {cardData.brand}
-                {cardData.cardNumber ? ` · #${cardData.cardNumber}` : ""}
-              </p>
+              {/* Meta line: Year + Brand + inline-editable Card # */}
+              <div className="text-[11px] text-slate-500 uppercase tracking-wider font-medium flex items-center gap-1 flex-wrap">
+                <span>
+                  {cardData.year} {cardData.brand}
+                </span>
+                {editingCardNumber ? (
+                  <span className="inline-flex items-center gap-1 normal-case tracking-normal">
+                    <span className="text-slate-400">·</span>
+                    <span className="text-slate-500">#</span>
+                    <input
+                      type="text"
+                      value={cardNumberDraft}
+                      onChange={(e) => setCardNumberDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleSaveCardNumber();
+                        if (e.key === "Escape") setEditingCardNumber(false);
+                      }}
+                      autoFocus
+                      className="w-16 h-6 px-1.5 rounded border border-card-border bg-paper text-ink text-xs font-medium focus:outline-none focus:ring-2 focus:ring-foil-violet/40"
+                      data-testid="input-card-number"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleSaveCardNumber}
+                      className="w-6 h-6 rounded-md bg-foil-violet/10 text-foil-violet flex items-center justify-center hover-elevate"
+                      aria-label="Save card number"
+                      data-testid="button-save-card-number"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditingCardNumber(false)}
+                      className="w-6 h-6 rounded-md bg-slate-100 text-slate-500 flex items-center justify-center hover-elevate"
+                      aria-label="Cancel"
+                      data-testid="button-cancel-card-number"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCardNumberDraft(cardData.cardNumber || "");
+                      setEditingCardNumber(true);
+                    }}
+                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md hover:bg-slate-100 text-slate-500 hover:text-ink transition-colors"
+                    data-testid="button-edit-card-number"
+                    title="Edit card number"
+                  >
+                    <span className="text-slate-400">·</span>
+                    <span>
+                      #{cardData.cardNumber || "?"}
+                    </span>
+                    <Pencil className="w-3 h-3 opacity-60" />
+                  </button>
+                )}
+              </div>
               <h1 className="font-display text-xl font-semibold tracking-tight leading-tight truncate text-ink">
                 {playerName(cardData) || "Unidentified card"}
               </h1>
+              {avgPriceLabel && (
+                <p
+                  className="text-xs text-slate-600 font-medium mt-0.5 truncate tabular-nums"
+                  data-testid="text-hero-avg-price"
+                >
+                  {avgPriceLabel}
+                </p>
+              )}
               {cardData.foilType && (
                 <p className="text-xs text-foil-violet font-medium mt-0.5 truncate">
                   {cardData.foilType}
@@ -463,14 +595,22 @@ export default function ScanResult() {
               )}
             </div>
           </div>
-          <div className="flex gap-2 mt-3">
+          <div className="flex items-start justify-end gap-2 mt-3">
             <button
               onClick={handleScanAnother}
-              className="h-10 px-4 rounded-xl bg-slate-100 text-ink text-sm font-medium flex items-center gap-1.5 hover-elevate ml-auto"
+              className="h-10 px-4 rounded-xl bg-slate-100 text-ink text-sm font-medium flex items-center gap-1.5 hover-elevate"
               data-testid="button-scan-another"
             >
               <ScanLine className="w-4 h-4" /> Scan another
             </button>
+            <AddToSheetButton
+              compact
+              cardData={cardData}
+              averageValue={priceInfo?.averageValue ?? 0}
+              searchUrl={priceInfo?.searchUrl || undefined}
+              frontImage={frontImage}
+              backImage={backImage}
+            />
           </div>
         </div>
       </section>
@@ -535,8 +675,8 @@ export default function ScanResult() {
         <TabsList className="mx-4 grid grid-cols-3 bg-slate-100/60">
           <TabsTrigger value="details" data-testid="tab-details">Details</TabsTrigger>
           <TabsTrigger value="grade" data-testid="tab-grade">Grade</TabsTrigger>
-          <TabsTrigger value="prices-listings" data-testid="tab-prices-listings">
-            Prices / Listings
+          <TabsTrigger value="price" data-testid="tab-price">
+            Price
           </TabsTrigger>
         </TabsList>
 
@@ -558,7 +698,7 @@ export default function ScanResult() {
           )}
         </TabsContent>
 
-        <TabsContent value="prices-listings" className="mt-4 space-y-4 px-4">
+        <TabsContent value="price" className="mt-4 space-y-4 px-4">
           {holoGrade && (
             <GradedPriceBreakdown
               cardData={cardData}
@@ -570,6 +710,8 @@ export default function ScanResult() {
               cardData={cardData}
               frontImage={frontImage}
               backImage={backImage}
+              pricingOnly
+              onPriceData={setPriceInfo}
               onCardDataUpdate={(updatedData) => {
                 // Re-run the disambiguation flow when the serial limit
                 // changed (e.g. user typed "041/150" OCR missed); otherwise
