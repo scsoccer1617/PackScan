@@ -112,8 +112,26 @@ export default function CardCameraCapture({
   const [detectionFailed, setDetectionFailed] = useState(false);
   const [starting, setStarting] = useState(false);
   const [focusing, setFocusing] = useState(false);
+  // On-screen debug HUD rendered inside the "Finding card…" veil so we can
+  // diagnose hangs on mobile (iOS Safari, no devtools). Shows the current
+  // pipeline stage and the elapsed ms since detection started. Updated via
+  // a ref-driven tick so re-renders don't cost us anything noticeable.
+  const [detectStage, setDetectStage] = useState<string>('idle');
+  const [detectElapsedMs, setDetectElapsedMs] = useState<number>(0);
+  const detectStartRef = useRef<number>(0);
+  const detectTickRef = useRef<number | null>(null);
   const watchdogRef = useRef<number | null>(null);
   const startAttemptRef = useRef(0);
+
+  // OpenCV-first detection is opt-in via `?cv=1` in the URL. We briefly made
+  // it the default in PR #53 but it kept causing trouble on iOS Safari — the
+  // WASM calls are SYNCHRONOUS and block the main thread, which means our
+  // Promise.race timeouts can't fire until findContours yields. Defaulting
+  // to VLM-primary (server-side Haiku) is dramatically more reliable. The
+  // OpenCV path is still wired up for dev testing and a future Web Worker
+  // move, we just don't run it on the hot path by default.
+  const enableOpenCV = typeof window !== 'undefined'
+    && /[?&]cv=1\b/.test(window.location.search);
 
   const detachStream = useCallback(() => {
     if (videoRef.current) {
@@ -226,19 +244,23 @@ export default function CardCameraCapture({
   // can still accept the raw image with a single tap).
   //
   // Detection order:
-  //   1. OpenCV.js Canny+contour on-device (pixel-accurate, ~50ms warm)
-  //   2. Server VLM (Haiku) — handles cases where the card edge is too
-  //      low-contrast against the background for Canny to find it
+  //   1. (opt-in, ?cv=1) OpenCV.js Canny+contour on-device
+  //   2. Server VLM (Haiku) — the default / primary detector
   //   3. Fall back to uncropped photo + amber toast
   //
-  // Hard timeouts (PR #55):
-  //   - OpenCV detect:    6s   (load + pipeline). WASM assertions or a slow
-  //                            CDN used to hang findContours forever.
-  //   - VLM detect:       10s  (fetch). Haiku usually responds in ~1-2s; if
-  //                            the API is down we don't want to freeze the UI.
-  //   - Overall watchdog: 20s  Belt-and-braces. If anything slips past the
-  //                            inner timeouts we still release `detecting`
-  //                            so the user can use the raw photo.
+  // Hard timeouts (PR #55 + PR #57):
+  //   - OpenCV detect:    4s   (only runs when ?cv=1 is set). Kept short
+  //                            because synchronous WASM can block the main
+  //                            thread and starve timers.
+  //   - VLM detect:       8s   (fetch). Haiku usually responds in ~1-2s;
+  //                            we abort at 8s if the API is slow.
+  //   - Overall watchdog: 12s  Belt-and-braces. Guarantees we exit the
+  //                            "Finding card…" state within 12s worst case.
+  //
+  // On-screen debug HUD (PR #57):
+  //   Each pipeline stage updates `detectStage` and a 100ms tick updates
+  //   `detectElapsedMs` so the spinner shows "VLM detect · 2.4s" in real
+  //   time. Lets us diagnose field hangs without devtools.
   const runDetectAndCrop = useCallback(async (raw: string) => {
     setDetecting(true);
     setDetectionFailed(false);
@@ -246,6 +268,25 @@ export default function CardCameraCapture({
     setCroppedImage(null);
     setDebugImage(null);
     setShowDebugView(false);
+    setDetectStage('starting');
+    setDetectElapsedMs(0);
+    detectStartRef.current = performance.now();
+
+    // Start a ~10Hz ticker that drives the on-screen elapsed-ms readout in
+    // the "Finding card…" veil. Cheap re-renders; we clear it as soon as
+    // detection finishes one way or another.
+    if (detectTickRef.current !== null) {
+      window.clearInterval(detectTickRef.current);
+    }
+    detectTickRef.current = window.setInterval(() => {
+      setDetectElapsedMs(Math.round(performance.now() - detectStartRef.current));
+    }, 100);
+    const stopTicker = () => {
+      if (detectTickRef.current !== null) {
+        window.clearInterval(detectTickRef.current);
+        detectTickRef.current = null;
+      }
+    };
 
     // Cancel any in-flight detection from a prior capture.
     detectAbortRef.current?.abort();
@@ -260,12 +301,14 @@ export default function CardCameraCapture({
     let watchdogFired = false;
     const overallWatchdog = window.setTimeout(() => {
       watchdogFired = true;
-      console.warn('[CardCameraCapture] overall detection watchdog fired after 20s — forcing fallback to raw');
+      console.warn('[CardCameraCapture] overall detection watchdog fired after 12s — forcing fallback to raw');
       try { ac.abort(); } catch {}
       setDetectionFailed(true);
       setDetecting(false);
       setDetectReason('timeout');
-    }, 20000);
+      setDetectStage('timeout');
+      stopTicker();
+    }, 12000);
 
     const clearWatchdog = () => {
       window.clearTimeout(overallWatchdog);
@@ -274,42 +317,47 @@ export default function CardCameraCapture({
     let quad: NormalizedQuad | null = null;
     let detectSource: 'opencv' | 'vlm' | null = null;
 
-    // --- Step 1: OpenCV.js on-device detection (hard 6s cap) ---
-    console.log('[CardCameraCapture] step 1: OpenCV detect (6s timeout)');
-    try {
-      const cvStart = performance.now();
-      const cvQuad = await Promise.race<NormalizedQuad | null>([
-        detectCardQuadWithCV(raw),
-        new Promise<NormalizedQuad | null>((resolve) =>
-          window.setTimeout(() => {
-            console.warn('[CardCameraCapture] OpenCV detect timed out after 6s — falling through to VLM');
-            resolve(null);
-          }, 6000),
-        ),
-      ]);
-      if (ac.signal.aborted || watchdogFired) { clearWatchdog(); return; }
-      if (cvQuad) {
-        quad = cvQuad;
-        detectSource = 'opencv';
-        console.log('[CardCameraCapture] OpenCV detected quad', {
-          latencyMs: Math.round(performance.now() - cvStart),
-          quad: cvQuad,
-        });
-      } else {
-        console.log('[CardCameraCapture] OpenCV found no quad (or timed out), trying VLM');
+    // --- Step 1: OpenCV.js on-device detection (opt-in, hard 4s cap) ---
+    if (enableOpenCV) {
+      setDetectStage('opencv');
+      console.log('[CardCameraCapture] step 1: OpenCV detect (4s timeout, opt-in via ?cv=1)');
+      try {
+        const cvStart = performance.now();
+        const cvQuad = await Promise.race<NormalizedQuad | null>([
+          detectCardQuadWithCV(raw),
+          new Promise<NormalizedQuad | null>((resolve) =>
+            window.setTimeout(() => {
+              console.warn('[CardCameraCapture] OpenCV detect timed out after 4s — falling through to VLM');
+              resolve(null);
+            }, 4000),
+          ),
+        ]);
+        if (ac.signal.aborted || watchdogFired) { clearWatchdog(); stopTicker(); return; }
+        if (cvQuad) {
+          quad = cvQuad;
+          detectSource = 'opencv';
+          console.log('[CardCameraCapture] OpenCV detected quad', {
+            latencyMs: Math.round(performance.now() - cvStart),
+          });
+        } else {
+          console.log('[CardCameraCapture] OpenCV found no quad (or timed out), trying VLM');
+        }
+      } catch (err) {
+        console.warn('[CardCameraCapture] OpenCV detect threw', err);
       }
-    } catch (err) {
-      console.warn('[CardCameraCapture] OpenCV detect threw', err);
+    } else {
+      console.log('[CardCameraCapture] OpenCV disabled by default (enable with ?cv=1)');
     }
 
-    // --- Step 2: VLM fallback if OpenCV came up empty (hard 10s cap) ---
+    // --- Step 2: VLM detection (hard 8s cap) ---
     if (!quad && !watchdogFired) {
-      console.log('[CardCameraCapture] step 2: VLM detect (10s timeout)');
+      setDetectStage('vlm');
+      console.log('[CardCameraCapture] step 2: VLM detect (8s timeout)');
       const vlmStart = performance.now();
       const vlmTimer = window.setTimeout(() => {
-        console.warn('[CardCameraCapture] VLM detect timed out after 10s — aborting fetch');
+        console.warn('[CardCameraCapture] VLM detect timed out after 8s — aborting fetch');
         try { ac.abort(); } catch {}
-      }, 10000);
+      }, 8000);
       try {
         const result = await detectCardQuad(raw, { signal: ac.signal });
         if (result.ok) {
@@ -331,17 +379,19 @@ export default function CardCameraCapture({
       }
     }
 
-    if (ac.signal.aborted || watchdogFired) { clearWatchdog(); return; }
+    if (ac.signal.aborted || watchdogFired) { clearWatchdog(); stopTicker(); return; }
 
     if (!quad) {
-      console.log('[CardCameraCapture] both detectors returned null — falling back to raw');
+      console.log('[CardCameraCapture] no quad — falling back to raw');
       setDetectionFailed(true);
       setDetecting(false);
+      setDetectStage('failed');
       clearWatchdog();
+      stopTicker();
       return;
     }
-    // Log which detector we're crediting — handy for field triage.
     console.log('[CardCameraCapture] using quad from', detectSource);
+    setDetectStage('warping');
 
     try {
       // Render both the warped crop AND the debug overlay concurrently —
@@ -354,18 +404,21 @@ export default function CardCameraCapture({
           return null;
         }),
       ]);
-      if (ac.signal.aborted || watchdogFired) { clearWatchdog(); return; }
+      if (ac.signal.aborted || watchdogFired) { clearWatchdog(); stopTicker(); return; }
       setCroppedImage(cropped);
       setDebugImage(debug);
+      setDetectStage('done');
       console.log('[CardCameraCapture] warp complete, preview ready');
     } catch (err) {
       console.warn('[CardCameraCapture] warp error', err);
       setDetectionFailed(true);
+      setDetectStage('warp_error');
     } finally {
       setDetecting(false);
       clearWatchdog();
+      stopTicker();
     }
-  }, []);
+  }, [enableOpenCV]);
 
   const captureFrame = useCallback(() => {
     if (capturedRef.current) return;
@@ -580,11 +633,35 @@ export default function CardCameraCapture({
           </div>
         )}
 
-        {/* Loading veil while the VLM locates the card. */}
+        {/* Loading veil while detection runs. Shows the current stage and
+            an elapsed-time readout so hangs are self-diagnosing on mobile
+            (no devtools on iOS). The "Use original" escape hatch appears
+            after 3s so the user never has to wait to bail out. */}
         {inPreview && detecting && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/50 text-white text-sm gap-2 pointer-events-none">
-            <Loader2 className="h-5 w-5 animate-spin" />
-            Finding card…
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/55 text-white gap-2">
+            <div className="flex items-center gap-2 pointer-events-none">
+              <Loader2 className="h-5 w-5 animate-spin" />
+              <span className="text-sm">Finding card…</span>
+            </div>
+            <div className="text-[11px] text-white/70 pointer-events-none tabular-nums">
+              {detectStage} · {(detectElapsedMs / 1000).toFixed(1)}s
+            </div>
+            {detectElapsedMs > 3000 && rawImage && (
+              <button
+                type="button"
+                onClick={() => {
+                  console.log('[CardCameraCapture] user skipped detection, using raw');
+                  detectAbortRef.current?.abort();
+                  setDetecting(false);
+                  setDetectionFailed(true);
+                  setDetectReason('skipped');
+                  setDetectStage('skipped');
+                }}
+                className="mt-2 bg-white/15 hover:bg-white/25 text-white text-xs rounded-full px-3 py-1.5"
+              >
+                Use original photo
+              </button>
+            )}
           </div>
         )}
 
