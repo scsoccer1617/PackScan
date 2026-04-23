@@ -1,9 +1,23 @@
-// Client-side perspective-warp crop.
+// Client-side perspective-warp crop (Google-Lens style: aspect-preserving).
 //
 // Given a source image (data URL or blob URL) and 4 normalized corner points
-// (0..1) describing the trading card inside that image, produces a clean
-// 2.5:3.5 cropped JPEG data URL by sampling the source quadrilateral onto a
-// rectangular canvas.
+// (0..1) describing the trading card inside that image, produces a cropped
+// JPEG data URL by sampling the source quadrilateral onto a rectangular
+// canvas.
+//
+// Design choices (PR #51):
+// - Output dimensions are DERIVED FROM THE DETECTED QUAD, not forced to 2.5:3.5.
+//   Warping a slightly-narrow quad onto a forced-wide canvas stretches pixels
+//   horizontally and clips content on patterned cards (Sandglitter, Tinsel,
+//   etc.). We now preserve whatever aspect ratio Haiku returned so pixels are
+//   never resampled to a different shape than they came in.
+// - Before warping, every corner is pushed 8% OUTWARD from the quad centroid.
+//   This trades a slightly looser crop for a guarantee we never clip the
+//   physical card edge even when Haiku's quad falls a few pixels inside the
+//   real border. Matches Lens's generous bracket behavior.
+// - The server's aspect-ratio guard now rejects quads more than ±18% off,
+//   so anything wildly wrong falls back to the uncropped original instead of
+//   producing a stretched crop.
 //
 // Uses an inverse bilinear mapping: for each output pixel (u,v) in [0,1]^2,
 // sample the source image at
@@ -11,8 +25,7 @@
 // This isn't a true projective warp, but for cards photographed roughly
 // head-on (which is the overwhelming dealer use case) it's visually
 // indistinguishable from one and runs in pure JS on the main thread with no
-// dependencies. The output is already axis-aligned, which is all Vision / Holo
-// care about.
+// dependencies.
 
 export type NormalizedQuad = {
   topLeft: { x: number; y: number };
@@ -21,9 +34,41 @@ export type NormalizedQuad = {
   bottomLeft: { x: number; y: number };
 };
 
-// Card aspect ratio: real cards are 2.5" x 3.5" = 5:7.
+// Fraction of the quad's half-diagonal that each corner is pushed outward
+// from the centroid before warping. 8% is enough to absorb small Haiku
+// mis-estimates of the card edge without pulling in a distracting amount of
+// background.
+const QUAD_OUTWARD_PAD = 0.08;
+
+// Cap the longest output edge so huge source photos don't yield 3000px crops.
+// ~1400px on the long side is plenty of resolution for downstream Vision/Holo
+// calls and keeps the output JPEG small.
+const MAX_OUTPUT_EDGE = 1400;
+
+// Kept as legacy exports (other modules still reference these symbols). They
+// no longer define the output size — see derivation below.
 export const CARD_OUTPUT_WIDTH = 900;
 export const CARD_OUTPUT_HEIGHT = 1260;
+
+type Point = { x: number; y: number };
+
+function padQuadOutward(
+  quad: { TL: Point; TR: Point; BR: Point; BL: Point },
+  padFraction: number,
+): { TL: Point; TR: Point; BR: Point; BL: Point } {
+  const cx = (quad.TL.x + quad.TR.x + quad.BR.x + quad.BL.x) / 4;
+  const cy = (quad.TL.y + quad.TR.y + quad.BR.y + quad.BL.y) / 4;
+  const push = (p: Point): Point => ({
+    x: p.x + (p.x - cx) * padFraction,
+    y: p.y + (p.y - cy) * padFraction,
+  });
+  return {
+    TL: push(quad.TL),
+    TR: push(quad.TR),
+    BR: push(quad.BR),
+    BL: push(quad.BL),
+  };
+}
 
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -52,20 +97,57 @@ export async function cropCardFromQuad(
   const sw = img.naturalWidth;
   const sh = img.naturalHeight;
 
-  // Pixel-space corners.
-  const TL = { x: quad.topLeft.x * sw, y: quad.topLeft.y * sh };
-  const TR = { x: quad.topRight.x * sw, y: quad.topRight.y * sh };
-  const BR = { x: quad.bottomRight.x * sw, y: quad.bottomRight.y * sh };
-  const BL = { x: quad.bottomLeft.x * sw, y: quad.bottomLeft.y * sh };
+  // Pixel-space corners from Haiku's normalized quad.
+  const rawCorners = {
+    TL: { x: quad.topLeft.x * sw, y: quad.topLeft.y * sh },
+    TR: { x: quad.topRight.x * sw, y: quad.topRight.y * sh },
+    BR: { x: quad.bottomRight.x * sw, y: quad.bottomRight.y * sh },
+    BL: { x: quad.bottomLeft.x * sw, y: quad.bottomLeft.y * sh },
+  };
+
+  // Push each corner 8% outward from the centroid so we never clip the true
+  // card edge when Haiku's estimate is slightly tight. Then clamp back inside
+  // the source image bounds so we don't try to sample off-image pixels.
+  const padded = padQuadOutward(rawCorners, QUAD_OUTWARD_PAD);
+  const clamp = (p: Point): Point => ({
+    x: Math.max(0, Math.min(sw - 1, p.x)),
+    y: Math.max(0, Math.min(sh - 1, p.y)),
+  });
+  const TL = clamp(padded.TL);
+  const TR = clamp(padded.TR);
+  const BR = clamp(padded.BR);
+  const BL = clamp(padded.BL);
+
+  // Derive OUTPUT dimensions from the padded quad's actual edge lengths.
+  // Do NOT force 2.5:3.5 — that's what produced the stretched crops. We use
+  // the average of the top/bottom edge (width) and the average of the
+  // left/right edge (height) to get a robust size even under mild perspective
+  // skew. Then scale down to fit within MAX_OUTPUT_EDGE.
+  const topEdgeLen = Math.hypot(TR.x - TL.x, TR.y - TL.y);
+  const bottomEdgeLen = Math.hypot(BR.x - BL.x, BR.y - BL.y);
+  const leftEdgeLen = Math.hypot(BL.x - TL.x, BL.y - TL.y);
+  const rightEdgeLen = Math.hypot(BR.x - TR.x, BR.y - TR.y);
+  const avgW = Math.max(8, (topEdgeLen + bottomEdgeLen) / 2);
+  const avgH = Math.max(8, (leftEdgeLen + rightEdgeLen) / 2);
+
+  let outW = Math.round(avgW);
+  let outH = Math.round(avgH);
+  const longest = Math.max(outW, outH);
+  if (longest > MAX_OUTPUT_EDGE) {
+    const scale = MAX_OUTPUT_EDGE / longest;
+    outW = Math.max(8, Math.round(outW * scale));
+    outH = Math.max(8, Math.round(outH * scale));
+  }
 
   const out = document.createElement("canvas");
-  out.width = CARD_OUTPUT_WIDTH;
-  out.height = CARD_OUTPUT_HEIGHT;
+  out.width = outW;
+  out.height = outH;
   const ctx = out.getContext("2d");
   if (!ctx) throw new Error("Canvas 2D context unavailable");
 
   // Fast path: if the quad is almost a rectangle (edges nearly axis-aligned),
-  // skip the bilinear sampler and use a single drawImage call.
+  // skip the bilinear sampler and use a single drawImage call. Because output
+  // size now matches input quad size, drawImage does no stretching.
   const maxSkew = Math.max(
     Math.abs(TL.y - TR.y) / sh,
     Math.abs(BL.y - BR.y) / sh,
@@ -99,15 +181,15 @@ export async function cropCardFromQuad(
 
   // Per-row loop, computing the row's left/right edge points once via
   // linear interpolation, then walking u across them.
-  for (let j = 0; j < CARD_OUTPUT_HEIGHT; j++) {
-    const v = j / (CARD_OUTPUT_HEIGHT - 1);
+  for (let j = 0; j < outH; j++) {
+    const v = j / (outH - 1);
     const leftX = TL.x + (BL.x - TL.x) * v;
     const leftY = TL.y + (BL.y - TL.y) * v;
     const rightX = TR.x + (BR.x - TR.x) * v;
     const rightY = TR.y + (BR.y - TR.y) * v;
 
-    for (let i = 0; i < CARD_OUTPUT_WIDTH; i++) {
-      const u = i / (CARD_OUTPUT_WIDTH - 1);
+    for (let i = 0; i < outW; i++) {
+      const u = i / (outW - 1);
       const sx = leftX + (rightX - leftX) * u;
       const sy = leftY + (rightY - leftY) * u;
 
@@ -131,7 +213,7 @@ export async function cropCardFromQuad(
       const w01 = (1 - fx) * fy;
       const w11 = fx * fy;
 
-      const outIdx = (j * CARD_OUTPUT_WIDTH + i) * 4;
+      const outIdx = (j * outW + i) * 4;
       outPix[outIdx] =
         srcPix[i00] * w00 +
         srcPix[i10] * w10 +

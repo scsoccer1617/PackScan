@@ -177,9 +177,14 @@ export async function detectCardQuad(
 
   // Aspect-ratio sanity check. Real trading cards are 2.5:3.5 (≈0.714
   // portrait, or ≈1.4 landscape). Use the average of top/bottom edge lengths
-  // and left/right edge lengths — robust to mild perspective skew. Reject
-  // anything more than ±35% off, which is what bit us on the Sandglitter
-  // card that came back clipped (way too narrow to be a real card).
+  // and left/right edge lengths — robust to mild perspective skew.
+  //
+  // PR #51: tightened from ±35% to ±18%. The client no longer forces the
+  // output to 2.5:3.5 (we preserve whatever aspect Haiku returned), so a
+  // badly-proportioned quad now WILL produce a visibly wrong crop rather than
+  // a merely-stretched one. Rejecting harder here pushes those cases into the
+  // uncropped-fallback path instead. ±18% still allows for real perspective
+  // foreshortening and for landscape-oriented cards.
   const TARGET_PORTRAIT = 2.5 / 3.5; // 0.7143
   const dist = (p: QuadPoint, q: QuadPoint) =>
     Math.hypot(p.x - q.x, p.y - q.y);
@@ -195,7 +200,7 @@ export async function detectCardQuad(
     const landscapeErr =
       Math.abs(ratio - 1 / TARGET_PORTRAIT) / (1 / TARGET_PORTRAIT);
     const minErr = Math.min(portraitErr, landscapeErr);
-    if (minErr > 0.35) {
+    if (minErr > 0.18) {
       return {
         ok: false,
         reason: "no_card_detected",
