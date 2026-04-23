@@ -15,6 +15,7 @@
 
 import type { CardFormValues } from '@shared/schema';
 import type { CatalogLookupResult } from './sportscardspro';
+import type { FoilDetectionResult } from './visualFoilDetector';
 
 export interface PendingScanEntry {
   /** Partial front-side analyzer output (CardFormValues subset). */
@@ -30,6 +31,15 @@ export interface PendingScanEntry {
    *  has already returned to the client — consumers must tolerate this
    *  being `undefined` (lookup still in flight) or a miss result. */
   scpResult?: CatalogLookupResult | null;
+  /** F-3c: Preliminary visual-foil hint. Computed during the preliminary
+   *  endpoint by running `detectFoilFromImage` on the front image buffer
+   *  with `isNumbered: false` (we don't have the back-side serial yet).
+   *  The main dual-image handler consumes this to skip the second visual
+   *  foil Vision call inside `combineCardResults`. When this is present
+   *  the hint is treated as authoritative for visual detection; FoilDB
+   *  validation / rejection logic downstream still runs against it using
+   *  whatever back-side context is available when the main handler runs. */
+  visualFoilPrelim?: FoilDetectionResult | null;
   /** Absolute epoch ms at which this entry becomes invalid. */
   expiresAt: number;
 }

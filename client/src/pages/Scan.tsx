@@ -44,8 +44,32 @@ async function firePreliminaryScan(scanId: string, frontImageDataUrl: string): P
     const form = new FormData();
     form.append("frontImage", blob, "front.jpg");
     form.append("scanId", scanId);
-    // Intentionally not awaiting the response object — we fire and move on.
-    await fetch("/api/scan/preliminary", { method: "POST", body: form });
+    const response = await fetch("/api/scan/preliminary", {
+      method: "POST",
+      body: form,
+    });
+    // F-3c: read the response so we can log the visual-foil hint the server
+    // computed during preliminary. The main scan flow's UI still fires from
+    // /result based on the authoritative dual-image analyze response, but
+    // surfacing this hint here gives us an observation point if we later
+    // want to show a "parallel detected" cue before the back shutter.
+    try {
+      const body = (await response.json()) as {
+        success?: boolean;
+        visualFoil?: {
+          isFoil: boolean;
+          foilType: string | null;
+          confidence: number;
+        } | null;
+      };
+      if (body?.visualFoil) {
+        console.debug(
+          `[preliminary] visualFoil hint: isFoil=${body.visualFoil.isFoil} foilType=${body.visualFoil.foilType ?? 'none'} confidence=${body.visualFoil.confidence?.toFixed?.(2) ?? body.visualFoil.confidence}`,
+        );
+      }
+    } catch {
+      // Body parse failures don't matter — server still cached the hint.
+    }
   } catch (err) {
     // Silent — any failure here just means the main handler does what it
     // already does today (runs front OCR + analyzer inline). No user impact.

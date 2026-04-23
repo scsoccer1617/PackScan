@@ -1244,15 +1244,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { normalizeImageOrientation, runFrontSideAnalyzer } = await import('./dualSideOCR');
       const normalized = await normalizeImageOrientation(file.buffer, 'front');
 
+      // ── F-3c: Preliminary visual-foil detection ───────────────────────
+      // Run the front-side OCR + analyzer AND the visual-foil detector in
+      // parallel on the same normalized buffer. The main dual-image handler
+      // uses the cached hint to skip its own `detectFoilFromImage` Vision
+      // call inside `combineCardResults`, shaving ~300-600ms off the total
+      // scan latency (foil detection is a separate Vision API round trip).
+      //
+      // `isNumbered: false` because we don't yet have the back-side serial.
+      // The confidence thresholds and FoilDB validation that depend on
+      // back-side context still run in `combineCardResults` at their
+      // existing spot; the preliminary hint is just the raw visual signal.
+      const { detectFoilFromImage } = await import('./visualFoilDetector');
       console.time(`preliminary-analyze-${scanId}`);
-      const { result: frontResult, ocrText: frontOCRText } = await runFrontSideAnalyzer(normalized);
+      const [
+        { result: frontResult, ocrText: frontOCRText },
+        visualFoilPrelimSettled,
+      ] = await Promise.all([
+        runFrontSideAnalyzer(normalized),
+        detectFoilFromImage(normalized.toString('base64'), {
+          isNumbered: false,
+          imageBuffer: normalized,
+        }).then(
+          (r) => ({ ok: true as const, value: r }),
+          // Never fail the preliminary call on a visual-foil detector error
+          // — just stash `null` and let the main handler run its own pass.
+          (err) => {
+            console.warn(`[preliminary-foil-${scanId}] failed:`, err?.message || err);
+            return { ok: false as const, value: null };
+          },
+        ),
+      ]);
       console.timeEnd(`preliminary-analyze-${scanId}`);
+      const visualFoilPrelim = visualFoilPrelimSettled.value;
 
       const { putPendingScan, updatePendingScan } = await import('./scanSession');
       putPendingScan(scanId, {
         frontResult,
         frontOCRText,
         frontImageBuffer: normalized,
+        visualFoilPrelim,
       });
 
       // ── F-3b: Speculative SportsCardsPro lookup ─────────────────────────
@@ -1306,7 +1337,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       logPrelimTotal('ok');
-      return res.status(200).json({ success: true });
+      // Expose a minimal slice of the visual-foil hint in the response so
+      // the client can surface a "parallel detected" UI earlier if desired.
+      // The full detection result (including indicators + regional evidence)
+      // lives in the pending entry for the main handler to consume.
+      return res.status(200).json({
+        success: true,
+        visualFoil: visualFoilPrelim
+          ? {
+              isFoil: visualFoilPrelim.isFoil,
+              foilType: visualFoilPrelim.foilType,
+              confidence: visualFoilPrelim.confidence,
+            }
+          : null,
+      });
     } catch (err: any) {
       // Never bubble an error to the client — this is a speculative fetch.
       console.error('[preliminary] unexpected error:', err?.message || err);
