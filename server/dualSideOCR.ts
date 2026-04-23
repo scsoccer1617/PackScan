@@ -576,45 +576,54 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
     let frontOCRText = '';
     let backOCRText = '';
 
-    // Analyze front image if provided
-    if (frontImage) {
+    // Run front + back analyzers in parallel. Each analyzer reads from the
+    // per-request OCR cache populated by batchExtractTextFromImages() above,
+    // so neither side performs its own Vision API call — the work inside
+    // analyzeSportsCardImage is pure text + DB lookups that don't share
+    // mutable state across sides. Running them sequentially added ~1–2s to
+    // every scan for no benefit.
+    //
+    // The brand-detection text is the same fullText the analyzer itself
+    // extracts internally, so we re-use the OCR cache rather than calling
+    // extractTextForBrandDetection() (which re-awaited the cached result
+    // and dynamic-imported on every scan).
+    console.time('dual-analyzers');
+    const { extractTextFromImage } = await import('./googleVisionFetch');
+    const analyzeSide = async (
+      side: 'front' | 'back',
+      image: MulterFile | undefined,
+    ): Promise<{ result: Partial<CardFormValues>; ocrText: string }> => {
+      if (!image) return { result: {}, ocrText: '' };
       try {
-        const frontBase64 = frontImage.buffer.toString('base64');
-        
-        // Get raw OCR text for foil detection
-        frontOCRText = await extractTextForBrandDetection(frontBase64);
-        
-        // Use dynamic analyzer that can handle all card types
-        console.log(`Front text detection: ${frontOCRText.substring(0, 200)}`);
-        console.log('Using dynamic analyzer for front image');
-        frontResult = await Promise.race([analyzeSportsCardImage(frontBase64, 'front'), createTimeout()]);
-        console.log('Front image analysis returned:', frontResult);
-        console.log('Front image analysis complete');
-      } catch (error) {
-        console.error('Error analyzing front image:', error);
-        console.error('Front image analysis error details:', error.message);
+        const base64 = image.buffer.toString('base64');
+        // Pull OCR text directly (cache hit after the batch call above)
+        const ocrText = (await extractTextFromImage(base64)).fullText || '';
+        console.log(`${side === 'front' ? 'Front' : 'Back'} text detection: ${ocrText.substring(0, 200)}`);
+        console.log(`Using dynamic analyzer for ${side} image`);
+        const result = await Promise.race([
+          analyzeSportsCardImage(base64, side),
+          createTimeout(),
+        ]);
+        console.log(`${side === 'front' ? 'Front' : 'Back'} image analysis returned:`, result);
+        console.log(`${side === 'front' ? 'Front' : 'Back'} image analysis complete`);
+        return { result, ocrText };
+      } catch (error: any) {
+        console.error(`Error analyzing ${side} image:`, error);
+        const errMsg = error && typeof error === 'object' && 'message' in error ? (error as any).message : String(error);
+        console.error(`${side === 'front' ? 'Front' : 'Back'} image analysis error details:`, errMsg);
+        return { result: {}, ocrText: '' };
       }
-    }
+    };
 
-    // Analyze back image if provided
-    if (backImage) {
-      try {
-        const backBase64 = backImage.buffer.toString('base64');
-        
-        // Get raw OCR text for foil detection
-        backOCRText = await extractTextForBrandDetection(backBase64);
-        
-        // Use dynamic analyzer that can handle all card types
-        console.log(`Back text detection: ${backOCRText.substring(0, 200)}`);
-        console.log('Using dynamic analyzer for back image');
-        backResult = await Promise.race([analyzeSportsCardImage(backBase64, 'back'), createTimeout()]);
-        console.log('Back image analysis returned:', backResult);
-        console.log('Back image analysis complete');
-      } catch (error) {
-        console.error('Error analyzing back image:', error);
-        console.error('Back image analysis error details:', error.message);
-      }
-    }
+    const [frontSide, backSide] = await Promise.all([
+      analyzeSide('front', frontImage),
+      analyzeSide('back', backImage),
+    ]);
+    frontResult = frontSide.result;
+    frontOCRText = frontSide.ocrText;
+    backResult = backSide.result;
+    backOCRText = backSide.ocrText;
+    console.timeEnd('dual-analyzers');
 
     // Combine the results with priority to front image for player name, number, and rookie status
     // and priority to back image for copyright year, stats, and detailed information
