@@ -25,7 +25,7 @@ export type DetectCardQuadResult =
 
 const MODEL = process.env.QUAD_MODEL ?? "claude-haiku-4-5";
 
-const SYSTEM_PROMPT = `You are a precise image geometry tool. You will be shown a photograph that may contain a trading card. Your only job is to locate the 4 corners of the card in the image.
+const SYSTEM_PROMPT = `You are a precise image geometry tool. You will be shown a photograph that may contain a trading card. Your only job is to locate the 4 outer corners of the card's physical rectangle in the image.
 
 Return a single JSON object and nothing else, in this exact shape:
 {
@@ -37,11 +37,15 @@ Return a single JSON object and nothing else, in this exact shape:
   "bottom_left":  {"x": number, "y": number}
 }
 
-Rules:
+Rules for locating the corners:
 - All x and y values are NORMALIZED to the image: x in [0,1] from left edge, y in [0,1] from top edge.
-- The four corners must describe the outer edge of the card itself — not the artwork inside, not a slab holder window, not the border of a photo frame. For raw (non-slab) cards, this is the card's physical edge.
-- Order matters: top_left / top_right / bottom_right / bottom_left, as the card appears in the image (follow the card's orientation, not the image's — if the card is rotated, top_left is still the card's top-left corner).
-- If no card is visible, set card_present=false, confidence=0, and return any placeholder corners.
+- The four corners describe the OUTER physical edge of the card — the paper boundary. Modern trading cards often have full-bleed artwork, colored borders, holographic patterns (Sandglitter, Tinsel, Rainbow Foil, polka dots, etc.), or foil backgrounds that extend all the way to the physical edge. The corners are the corners of the card's rectangular paper stock, EVEN WHEN the design pattern goes right up to the edge.
+- DO NOT clip at the inner artwork, the player image, the nameplate, or any internal design element. The card's title text, player name, and team logos are usually several millimeters INSIDE the actual edge — your corners should be outside all of those.
+- Look for the transition between the card and whatever is behind it (a hand, a table, a surface). That transition is the edge.
+- If a corner is uncertain, err on the side of INCLUDING a few pixels of background rather than clipping the card. It is much better to have a slightly loose crop than to chop off part of the card.
+- Order matters: top_left / top_right / bottom_right / bottom_left, as the card appears in the image (follow the card's orientation, not the image's — if the card is rotated or tilted, top_left is still the card's own top-left corner).
+- A real trading card has an aspect ratio near 2.5:3.5 (≈0.71 width:height when portrait). Use this as a sanity check on your answer: the quad you return should be roughly that shape when un-rotated.
+- If no card is visible, or you are not confident you can find all four edges, set card_present=false, confidence<0.5, and return any placeholder corners.
 - Output RAW JSON only. No prose, no markdown, no code fences.`;
 
 // Parse a permissive JSON-looking string — strips code fences if Haiku ever
@@ -169,6 +173,36 @@ export async function detectCardQuad(
     );
   if (area < 0.05) {
     return { ok: false, reason: "no_card_detected", latencyMs: Date.now() - started };
+  }
+
+  // Aspect-ratio sanity check. Real trading cards are 2.5:3.5 (≈0.714
+  // portrait, or ≈1.4 landscape). Use the average of top/bottom edge lengths
+  // and left/right edge lengths — robust to mild perspective skew. Reject
+  // anything more than ±35% off, which is what bit us on the Sandglitter
+  // card that came back clipped (way too narrow to be a real card).
+  const TARGET_PORTRAIT = 2.5 / 3.5; // 0.7143
+  const dist = (p: QuadPoint, q: QuadPoint) =>
+    Math.hypot(p.x - q.x, p.y - q.y);
+  const topEdge = dist(tl, tr);
+  const bottomEdge = dist(bl, br);
+  const leftEdge = dist(tl, bl);
+  const rightEdge = dist(tr, br);
+  const avgW = (topEdge + bottomEdge) / 2;
+  const avgH = (leftEdge + rightEdge) / 2;
+  if (avgW > 0 && avgH > 0) {
+    const ratio = avgW / avgH;
+    const portraitErr = Math.abs(ratio - TARGET_PORTRAIT) / TARGET_PORTRAIT;
+    const landscapeErr =
+      Math.abs(ratio - 1 / TARGET_PORTRAIT) / (1 / TARGET_PORTRAIT);
+    const minErr = Math.min(portraitErr, landscapeErr);
+    if (minErr > 0.35) {
+      return {
+        ok: false,
+        reason: "no_card_detected",
+        latencyMs: Date.now() - started,
+        detail: `aspect ratio ${ratio.toFixed(3)} too far from card shape`,
+      };
+    }
   }
 
   const confidence = coerceNum(parsed.confidence) ?? 0.7;

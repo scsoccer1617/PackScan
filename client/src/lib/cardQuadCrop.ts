@@ -155,14 +155,19 @@ export async function cropCardFromQuad(
   return out.toDataURL("image/jpeg", quality);
 }
 
+export type DetectResult =
+  | { ok: true; quad: NormalizedQuad; confidence: number; latencyMs: number }
+  | { ok: false; reason: string; latencyMs?: number; detail?: string };
+
 /**
  * Send a data URL to the quad-detection endpoint. Returns the detected quad
- * or null on miss / error — callers should fall back to the original image.
+ * + confidence on success, or a structured failure reason. Callers should
+ * fall back to the original image on failure.
  */
 export async function detectCardQuad(
   sourceImage: string,
   opts: { maxEdge?: number; signal?: AbortSignal } = {},
-): Promise<NormalizedQuad | null> {
+): Promise<DetectResult> {
   const maxEdge = opts.maxEdge ?? 1280;
 
   // Downscale before POSTing so the VLM call is cheap and the upload is fast.
@@ -181,21 +186,83 @@ export async function detectCardQuad(
     });
   } catch (err) {
     console.warn("[cardQuadCrop] detect request failed", err);
-    return null;
+    return { ok: false, reason: "network_error" };
   }
   if (!resp.ok) {
     console.warn("[cardQuadCrop] detect endpoint HTTP error", resp.status);
-    return null;
+    return { ok: false, reason: `http_${resp.status}` };
   }
   const json = (await resp.json().catch(() => null)) as
-    | { ok: true; quad: NormalizedQuad }
-    | { ok: false; reason: string }
+    | { ok: true; quad: NormalizedQuad; confidence?: number; latencyMs?: number }
+    | { ok: false; reason: string; latencyMs?: number; detail?: string }
     | null;
-  if (!json || !json.ok) {
-    console.log("[cardQuadCrop] no card detected", json);
-    return null;
+  if (!json) {
+    return { ok: false, reason: "invalid_response" };
   }
-  return json.quad;
+  if (!json.ok) {
+    console.log("[cardQuadCrop] no card detected", json);
+    return json;
+  }
+  console.log("[cardQuadCrop] quad detected", {
+    confidence: json.confidence,
+    latencyMs: json.latencyMs,
+    quad: json.quad,
+  });
+  return {
+    ok: true,
+    quad: json.quad,
+    confidence: json.confidence ?? 0.7,
+    latencyMs: json.latencyMs ?? 0,
+  };
+}
+
+/**
+ * Render a debug view: the raw image with the detected quad outlined on top.
+ * Used by the dev overlay to eyeball what Haiku returned when a crop looks
+ * wrong.
+ */
+export async function renderQuadDebugOverlay(
+  sourceImage: string,
+  quad: NormalizedQuad,
+): Promise<string> {
+  const img = await loadImage(sourceImage);
+  const canvas = document.createElement("canvas");
+  canvas.width = img.naturalWidth;
+  canvas.height = img.naturalHeight;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas 2D context unavailable");
+  ctx.drawImage(img, 0, 0);
+
+  const pts = [
+    { x: quad.topLeft.x * canvas.width, y: quad.topLeft.y * canvas.height, label: "TL" },
+    { x: quad.topRight.x * canvas.width, y: quad.topRight.y * canvas.height, label: "TR" },
+    { x: quad.bottomRight.x * canvas.width, y: quad.bottomRight.y * canvas.height, label: "BR" },
+    { x: quad.bottomLeft.x * canvas.width, y: quad.bottomLeft.y * canvas.height, label: "BL" },
+  ];
+
+  // Thick green outline of the detected quad.
+  ctx.strokeStyle = "#00ff88";
+  ctx.lineWidth = Math.max(6, canvas.width * 0.006);
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x, pts[0].y);
+  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+  ctx.closePath();
+  ctx.stroke();
+
+  // Dots + labels at each corner.
+  const dotR = Math.max(10, canvas.width * 0.012);
+  ctx.font = `bold ${Math.max(28, canvas.width * 0.028)}px system-ui, sans-serif`;
+  ctx.textBaseline = "middle";
+  for (const p of pts) {
+    ctx.fillStyle = "#00ff88";
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, dotR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#000";
+    ctx.fillText(p.label, p.x + dotR + 6, p.y);
+  }
+
+  return canvas.toDataURL("image/jpeg", 0.88);
 }
 
 async function downscaleToJpegBlob(
