@@ -1885,9 +1885,13 @@ async function combineCardResults(
             // parallel colour for this set, but we can't pin down which one
             // without corroboration. Surface a "suspected parallel" hint so
             // the UI prompts the user to choose from the catalog instead of
-            // silently treating the card as base.
+            // silently treating the card as base. Preserve the Vision colour
+            // as `suggestedColor` so the picker can narrow SCP's parallel
+            // list to just the detected-colour family (e.g. Pink → the two
+            // Pink parallels for this set) instead of dumping all 52 options.
             (combined as any).parallelSuspected = true;
-            console.log(`[FoilDB] Visual foil "${visualFoilResult.foilType}" rejected — color exists in DB but no corroborating evidence (no serial detected and color name not in OCR text). Flagging parallelSuspected so UI can prompt for parallel selection.`);
+            (combined as any).suggestedColor = visualFoilResult.foilType;
+            console.log(`[FoilDB] Visual foil "${visualFoilResult.foilType}" rejected — color exists in DB but no corroborating evidence (no serial detected and color name not in OCR text). Flagging parallelSuspected + suggestedColor="${visualFoilResult.foilType}" so UI can show a colour-filtered picker.`);
           } else if (colorMatchFound) {
             combined.foilType = null;
             combined.isFoil = false;
@@ -1901,7 +1905,12 @@ async function combineCardResults(
             // pick the right parallel from the catalog.
             if (visualFoilResult.confidence >= 0.55) {
               (combined as any).parallelSuspected = true;
-              console.log(`[FoilDB] Visual foil "${visualFoilResult.foilType}" rejected — color keywords [${colorKeywords.join(', ')}] not found in ${setVariations.length} known variations for ${brand} ${year} "${collection}". Flagging parallelSuspected (visual confidence ${visualFoilResult.confidence.toFixed(2)} ≥ 0.55).`);
+              // Even though the colour name doesn't match any known DB
+              // variation for this set, SCP's catalog may well have it —
+              // keep the Vision colour as a suggestion so the picker can
+              // ask SCP to filter on it rather than dumping every parallel.
+              (combined as any).suggestedColor = visualFoilResult.foilType;
+              console.log(`[FoilDB] Visual foil "${visualFoilResult.foilType}" rejected — color keywords [${colorKeywords.join(', ')}] not found in ${setVariations.length} known variations for ${brand} ${year} "${collection}". Flagging parallelSuspected + suggestedColor="${visualFoilResult.foilType}" (visual confidence ${visualFoilResult.confidence.toFixed(2)} ≥ 0.55).`);
             } else {
               console.log(`[FoilDB] Visual foil "${visualFoilResult.foilType}" rejected — color keywords [${colorKeywords.join(', ')}] not found in ${setVariations.length} known variations for ${brand} ${year} "${collection}"`);
             }
