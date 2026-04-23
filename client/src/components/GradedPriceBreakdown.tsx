@@ -386,7 +386,15 @@ export default function GradedPriceBreakdown({
   return (
     <div className="flex flex-col gap-3" data-testid="card-graded-price-breakdown">
       {/* Hero: SportsCardsPro catalog benchmark */}
-      <CatalogPriceStrip cardData={cardData} predictedPsaGrade={psa} />
+      {/* F-3b: forward the server's speculative SCP result (fetched during
+          the front-shutter preliminary call) so the strip can short-circuit
+          its own /api/catalog/match round trip when present. Falls back to
+          the client-side fetch path when the field is absent/null. */}
+      <CatalogPriceStrip
+        cardData={cardData}
+        predictedPsaGrade={psa}
+        speculativeCatalog={(cardData as any).speculativeCatalog ?? null}
+      />
 
       {/* Secondary: eBay comps, demoted */}
       <Card data-testid="card-ebay-recent-sales">
