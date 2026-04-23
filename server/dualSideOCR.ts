@@ -49,7 +49,7 @@ type CardFormWithFlags = CardFormValues & YearConfidenceFlags;
  * Returns the original buffer unchanged on any failure so a bad input never
  * blocks the scan.
  */
-async function normalizeImageOrientation(buffer: Buffer, label: string): Promise<Buffer> {
+export async function normalizeImageOrientation(buffer: Buffer, label: string): Promise<Buffer> {
   try {
     const before = await sharp(buffer).metadata();
     const orientation = before.orientation ?? 1;
@@ -159,6 +159,44 @@ type MulterRequest = Request & {
   files?: { [fieldname: string]: MulterFile[] };
 }
 
+// ── Front-only analyzer (shared between preliminary + dual handlers) ─────────
+// Runs Google Vision OCR + the dynamic card analyzer on a single (front) image
+// and returns both the raw OCR text and the partial CardFormValues result.
+// Callers are responsible for normalizing EXIF orientation beforehand so this
+// helper can be used on already-normalized buffers without re-rotating.
+export async function runFrontSideAnalyzer(
+  frontBuffer: Buffer,
+): Promise<{ result: Partial<CardFormValues>; ocrText: string }> {
+  const { batchExtractTextFromImages } = await import('./googleVisionFetch');
+  const { extractTextFromImage } = await import('./googleVisionFetch');
+
+  // Prime the per-request OCR cache with a batch call. This is equivalent to
+  // what handleDualSideCardAnalysis does at the top of each scan, but scoped
+  // to a single image — so a subsequent analyzeSportsCardImage() call hits
+  // the cache for free.
+  const base64 = frontBuffer.toString('base64');
+  try {
+    await batchExtractTextFromImages([{ base64, label: 'front' }]);
+  } catch (batchErr: any) {
+    console.warn('[preliminary] Batch Vision call failed, falling back to direct extract:', batchErr?.message);
+  }
+
+  const ocrText = (await extractTextFromImage(base64)).fullText || '';
+  console.log(`[preliminary] Front text detection: ${ocrText.substring(0, 200)}`);
+
+  // Match the 30 s timeout used by the main dual-handler so the preliminary
+  // call can never hang a server slot indefinitely.
+  const timeout = new Promise<never>((_, reject) => {
+    setTimeout(() => reject(new Error('Preliminary front analysis timed out after 30 seconds')), 30000);
+  });
+
+  const result = await Promise.race([
+    analyzeSportsCardImage(base64, 'front'),
+    timeout,
+  ]);
+  return { result, ocrText };
+}
+
 /**
  * Handle OCR analysis for both front and back card images
  * This handler combines data from both sides for more accurate results
@@ -179,6 +217,38 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
     // Get front and back images if available
     const frontImage = req.files['frontImage']?.[0];
     const backImage = req.files['backImage']?.[0];
+
+    // ── F-3a: pull preliminary front-side result (if any) ────────────────
+    // The client generates a scanId when the user starts capturing and fires
+    // POST /api/scan/preliminary on front shutter. By the time the back shutter
+    // fires and the dual upload arrives, the preliminary OCR + front analyzer
+    // usually has already finished — in which case we short-circuit the front
+    // leg of this handler. If the preliminary is still in-flight we wait up to
+    // 2 s; if it never appears, we fall back to running front OCR + analyzer
+    // inline exactly like today (zero functional regression).
+    const scanId: string | undefined = typeof (req.body as any)?.scanId === 'string'
+      ? (req.body as any).scanId
+      : undefined;
+    let preliminaryEntry: import('./scanSession').PendingScanEntry | null = null;
+    if (scanId) {
+      const { waitForPendingScan } = await import('./scanSession');
+      console.time('preliminary-wait');
+      preliminaryEntry = await waitForPendingScan(scanId, 2000);
+      console.timeEnd('preliminary-wait');
+      if (preliminaryEntry) {
+        console.log(`[scanSession] hit scanId=${scanId} — skipping front OCR + analyzer`);
+        // Replace the uploaded front buffer with the already-normalized
+        // preliminary buffer so any downstream consumer (visual foil detector,
+        // crop routines, etc.) operates on the exact same bytes that produced
+        // the cached OCR text and analyzer result.
+        if (frontImage) {
+          frontImage.buffer = preliminaryEntry.frontImageBuffer;
+          frontImage.size = preliminaryEntry.frontImageBuffer.length;
+        }
+      } else {
+        console.log(`[scanSession] miss scanId=${scanId} — falling back to inline front analysis`);
+      }
+    }
 
     if (!frontImage && !backImage) {
       return res.status(400).json({
@@ -223,7 +293,9 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
     // every downstream consumer (batch Vision call, per-side analyzer, foil
     // detector) sees correctly-oriented data.
     await Promise.all([
-      frontImage
+      // Preliminary front buffer is already orientation-normalized — skip the
+      // redundant sharp.rotate() pass.
+      frontImage && !preliminaryEntry
         ? normalizeImageOrientation(frontImage.buffer, 'front').then(b => { frontImage.buffer = b; frontImage.size = b.length; })
         : Promise.resolve(),
       backImage
@@ -241,7 +313,9 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
     clearOcrCache();
     try {
       const batchImages: { base64: string; label: string }[] = [];
-      if (frontImage) batchImages.push({ base64: frontImage.buffer.toString('base64'), label: 'front' });
+      // Skip front when we already have a cached preliminary OCR result — no
+      // need to re-run Vision on an image whose text we already have.
+      if (frontImage && !preliminaryEntry) batchImages.push({ base64: frontImage.buffer.toString('base64'), label: 'front' });
       if (backImage)  batchImages.push({ base64: backImage.buffer.toString('base64'),  label: 'back'  });
       if (batchImages.length > 0) {
         console.time('vision-batch');
@@ -305,8 +379,15 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
       }
     };
 
+    // Reuse the preliminary front result when present; otherwise run the front
+    // analyzer inline alongside the back analyzer (original behaviour).
+    const frontAnalysisPromise: Promise<{ result: Partial<CardFormValues>; ocrText: string }> =
+      preliminaryEntry
+        ? Promise.resolve({ result: preliminaryEntry.frontResult, ocrText: preliminaryEntry.frontOCRText })
+        : analyzeSide('front', frontImage);
+
     const [frontSide, backSide] = await Promise.all([
-      analyzeSide('front', frontImage),
+      frontAnalysisPromise,
       analyzeSide('back', backImage),
     ]);
     frontResult = frontSide.result;
