@@ -502,7 +502,10 @@ export default function ScanResult() {
     ? `${priceInfo.dataType === 'current' ? 'Avg asking' : 'Avg sold'} ${new Intl.NumberFormat('en-US', {
         style: 'currency',
         currency: 'USD',
-        maximumFractionDigits: 0,
+        // Match the Price tab formatter (EbayPriceResults.formatPrice) which
+        // uses the default currency fraction digits (2 decimals). Previously
+        // the hero rounded to whole dollars (e.g. "$1" vs "$1.31"), which
+        // looked inconsistent with the listings total on the Price tab.
       }).format(priceInfo.averageValue)}`
     : null;
 
@@ -716,7 +719,21 @@ export default function ScanResult() {
           )}
         </TabsContent>
 
-        <TabsContent value="price" className="mt-4 space-y-4 px-4">
+        {/*
+          forceMount keeps the Price tab content mounted even when it isn't
+          the active tab. This is what lets EbayPriceResults kick off its
+          eBay fetch as soon as /result loads — without forceMount, Radix
+          Tabs unmounts inactive content, so the pricing request wouldn't
+          fire until the user tapped the Price tab and they'd see
+          "Looking up pricing…" every time they switched over.
+          Radix adds the native `hidden` attribute when inactive, so the
+          panel stays invisible on Details/Grade but its effects still run.
+        */}
+        <TabsContent
+          value="price"
+          forceMount
+          className="mt-4 space-y-4 px-4 data-[state=inactive]:hidden"
+        >
           {holoGrade && (
             <GradedPriceBreakdown
               cardData={cardData}
