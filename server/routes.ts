@@ -1203,6 +1203,68 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ── F-3a: Preliminary front-side scan ─────────────────────────────────────
+  // Fires from the client on front shutter (before the user flips the card).
+  // Runs Google Vision OCR + the dynamic card analyzer on the front image
+  // only, then stashes the result in an in-memory session cache keyed by
+  // scanId. When the final dual upload arrives, /analyze-card-dual-images
+  // pulls the cached result and skips the front leg of the OCR pipeline.
+  //
+  // Response is intentionally minimal — the client just needs to know the
+  // stash succeeded (or silently failed). All error paths return 200 so a
+  // hiccup in this optimization can never block the main scan flow.
+  app.post(`${apiPrefix}/scan/preliminary`, upload.single('frontImage'), async (req, res) => {
+    const prelimStart = Date.now();
+    const logPrelimTotal = (tag: string) => {
+      console.log(`[preliminary-total] ${tag} took ${Date.now() - prelimStart}ms`);
+    };
+    try {
+      const scanId = typeof (req.body as any)?.scanId === 'string' ? (req.body as any).scanId : '';
+      const file = (req as any).file as Express.Multer.File | undefined;
+
+      if (!scanId || !/^[a-zA-Z0-9_-]{8,64}$/.test(scanId)) {
+        logPrelimTotal('bad-scanid');
+        return res.status(200).json({ success: false, reason: 'invalid_scan_id' });
+      }
+      if (!file) {
+        logPrelimTotal('no-file');
+        return res.status(200).json({ success: false, reason: 'missing_front_image' });
+      }
+      if (file.size > 20 * 1024 * 1024) {
+        logPrelimTotal('too-large');
+        return res.status(200).json({ success: false, reason: 'file_too_large' });
+      }
+      if (!file.mimetype?.startsWith('image/')) {
+        logPrelimTotal('bad-mime');
+        return res.status(200).json({ success: false, reason: 'invalid_mime' });
+      }
+
+      // Normalize EXIF orientation once so the cached buffer is drop-in
+      // replaceable when the main handler runs later.
+      const { normalizeImageOrientation, runFrontSideAnalyzer } = await import('./dualSideOCR');
+      const normalized = await normalizeImageOrientation(file.buffer, 'front');
+
+      console.time(`preliminary-analyze-${scanId}`);
+      const { result: frontResult, ocrText: frontOCRText } = await runFrontSideAnalyzer(normalized);
+      console.timeEnd(`preliminary-analyze-${scanId}`);
+
+      const { putPendingScan } = await import('./scanSession');
+      putPendingScan(scanId, {
+        frontResult,
+        frontOCRText,
+        frontImageBuffer: normalized,
+      });
+
+      logPrelimTotal('ok');
+      return res.status(200).json({ success: true });
+    } catch (err: any) {
+      // Never bubble an error to the client — this is a speculative fetch.
+      console.error('[preliminary] unexpected error:', err?.message || err);
+      logPrelimTotal('error');
+      return res.status(200).json({ success: false, reason: 'internal_error' });
+    }
+  });
+
   // Dual-image OCR + eBay price lookup endpoint (front for RC, back for details)
   app.post(`${apiPrefix}/analyze-card-dual-images`, upload.fields([
     { name: 'frontImage', maxCount: 1 },

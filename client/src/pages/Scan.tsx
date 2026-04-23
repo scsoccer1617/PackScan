@@ -7,7 +7,7 @@
 // This is the capture half of the split that replaced the old monolithic
 // PriceLookup.tsx. The results half is ScanResult.tsx.
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useLocation } from "wouter";
 import SimpleImageUploader from "@/components/SimpleImageUploader";
 import { useToast } from "@/hooks/use-toast";
@@ -16,6 +16,42 @@ import { compressImage } from "@/lib/scanFlow";
 import type { HoloGrade } from "@/components/HoloGradeCard";
 import { ScanLine, RotateCw } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+// ── F-3a: preliminary front OCR during card flip ─────────────────────────
+// Generate a fresh scanId per scan session (front shutter → back shutter →
+// analyze). We include this in both the preliminary fire-and-forget call and
+// the final /analyze-card-dual-images upload so the server can stitch them
+// together. A new id is minted after every reset() so stale server-side
+// cache entries never collide with a later scan.
+function mintScanId(): string {
+  // crypto.randomUUID is available in all modern browsers + the iOS webview
+  // PackScan ships in. Fall back to a timestamp+random string for safety.
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+// Fire the preliminary OCR call in the background. Resolves/rejects are
+// swallowed — the main scan flow has zero dependency on this succeeding.
+// We still compress the image first (same path as the real upload) so the
+// payload the preliminary handler analyzes is byte-identical to what the
+// main handler will see, which means any OCR/analyzer output the preliminary
+// produced is directly reusable by the main pipeline.
+async function firePreliminaryScan(scanId: string, frontImageDataUrl: string): Promise<void> {
+  try {
+    const blob = await compressImage(frontImageDataUrl);
+    const form = new FormData();
+    form.append("frontImage", blob, "front.jpg");
+    form.append("scanId", scanId);
+    // Intentionally not awaiting the response object — we fire and move on.
+    await fetch("/api/scan/preliminary", { method: "POST", body: form });
+  } catch (err) {
+    // Silent — any failure here just means the main handler does what it
+    // already does today (runs front OCR + analyzer inline). No user impact.
+    console.debug("[preliminary] skipped:", err);
+  }
+}
 
 export default function Scan() {
   const [, navigate] = useLocation();
@@ -29,6 +65,11 @@ export default function Scan() {
   const [backImage, setBackImage] = useState<string>("");
   const [backCameraSignal, setBackCameraSignal] = useState<number>(0);
   const [analyzing, setAnalyzing] = useState<boolean>(false);
+
+  // Ref (not state) so updating the scanId on front capture doesn't trigger
+  // a re-render. Null until the first front capture mints one; reset to a
+  // new id whenever the user retakes the front.
+  const scanIdRef = useRef<string | null>(null);
 
   const ready = !!backImage;
 
@@ -54,6 +95,12 @@ export default function Scan() {
       const formData = new FormData();
       formData.append("backImage", backBlob, "back.jpg");
       if (frontBlob) formData.append("frontImage", frontBlob, "front.jpg");
+      // Include the scanId so the server can pair this upload with a
+      // preliminary front-side result if one was cached. When the ref is
+      // unset (edge case: no front image captured), skip it.
+      if (scanIdRef.current) {
+        formData.append("scanId", scanIdRef.current);
+      }
 
       const response = await fetch("/api/analyze-card-dual-images", {
         method: "POST",
@@ -75,6 +122,9 @@ export default function Scan() {
 
       // Clear any prior scan's leftovers, then seed the fresh payload.
       reset();
+      // Consume the scanId: a retry after this point should mint a new one
+      // (the server cache is consume-once anyway, but this keeps state tidy).
+      scanIdRef.current = null;
       setAll({
         frontImage,
         backImage,
@@ -115,6 +165,16 @@ export default function Scan() {
           <SimpleImageUploader
             onImageCaptured={(img, source) => {
               setFrontImage(img);
+              // Mint a fresh scanId for every new front capture (including
+              // retakes) so the server-side cache never serves stale OCR
+              // against a different image than what the user ultimately
+              // uploads for analysis.
+              const scanId = mintScanId();
+              scanIdRef.current = scanId;
+              // Fire-and-forget preliminary OCR so the server starts analyzing
+              // the front while the user flips the card. Errors are ignored
+              // entirely — the main /analyze call has zero dependency on this.
+              void firePreliminaryScan(scanId, img);
               // Auto-chain into the back camera only when the user captured
               // the front via live camera — if they uploaded from library,
               // they probably want to upload the back the same way.
