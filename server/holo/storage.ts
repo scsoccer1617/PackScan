@@ -77,13 +77,22 @@ export async function getGradeById(id: number): Promise<ScanGrade | undefined> {
 /**
  * Legacy rows stored just the original client filename (e.g. "IMG_1234.jpg")
  * in frontImagePath because the scan route didn't persist the image buffer.
- * Newer rows store a served URL like "/uploads/scan_front_<uuid>.jpg". Only
- * the latter is safe to hand back to the client as an <img src>, so we
- * gate the public field behind a URL-shaped check.
+ * Old rows (pre-Object-Storage) stored a local `/uploads/scan_front_<uuid>.jpg`
+ * URL that pointed at the ephemeral container disk — those 404 after a redeploy.
+ * Current rows store a durable `/objects/uploads/<uuid>` URL backed by Replit
+ * Object Storage. Only URL-shaped values are safe to hand the client as an
+ * <img src>, so we gate the public field behind a URL-shaped check.
  */
 function asImageUrl(v: string | null | undefined): string | null {
   if (!v) return null;
-  return v.startsWith("/uploads/") || v.startsWith("http://") || v.startsWith("https://") ? v : null;
+  return (
+    v.startsWith("/objects/") ||
+    v.startsWith("/uploads/") ||
+    v.startsWith("http://") ||
+    v.startsWith("https://")
+  )
+    ? v
+    : null;
 }
 
 /** Shape a DB row back into the same HoloGrade + identification contract the UI consumes. */
