@@ -5,6 +5,7 @@ import { analyzeSportsCardImage, extractAllYearCandidates } from './dynamicCardA
 import { lookupCard } from './cardDatabaseService';
 import { extractProductLine } from './productLineExtractor';
 import { batchExtractTextFromImages, clearOcrCache } from './googleVisionFetch';
+import type { FoilDetectionResult } from './visualFoilDetector';
 import { db } from '@db';
 import { cardVariations, cardDatabase } from '@shared/schema';
 import { and, eq, sql, inArray } from 'drizzle-orm';
@@ -411,7 +412,18 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
       console.log('Front result before combine:', JSON.stringify(frontResult, null, 2));
       console.log('Back result before combine:', JSON.stringify(backResult, null, 2));
       console.time('combine-card-results');
-      combinedResult = await combineCardResults(frontResult, backResult, frontOCRText, backOCRText, frontImage?.buffer, backImage?.buffer);
+      // F-3c: pass the preliminary visual-foil hint through so the combine
+      // step can skip its own `detectFoilFromImage` Vision call when the
+      // preliminary endpoint already computed one.
+      combinedResult = await combineCardResults(
+        frontResult,
+        backResult,
+        frontOCRText,
+        backOCRText,
+        frontImage?.buffer,
+        backImage?.buffer,
+        preliminaryEntry?.visualFoilPrelim ?? null,
+      );
       console.timeEnd('combine-card-results');
       console.log('combineCardResults completed. Result:', JSON.stringify(combinedResult, null, 2));
     } catch (error) {
@@ -482,7 +494,13 @@ async function combineCardResults(
   frontOCRText: string = '',
   backOCRText: string = '',
   frontImageBuffer?: Buffer,
-  backImageBuffer?: Buffer
+  backImageBuffer?: Buffer,
+  // F-3c: Optional preloaded visual-foil detection result from the
+  // preliminary endpoint. When provided, the expensive `detectFoilFromImage`
+  // Vision call below is skipped and this hint is used as the authoritative
+  // visual-detection output. FoilDB validation / rejection logic downstream
+  // still runs against it.
+  preloadedVisualFoil?: FoilDetectionResult | null,
 ): Promise<Partial<CardFormValues>> {
   console.log('=== COMBINE CARD RESULTS STARTED ===');
   console.log('COMBINE FUNCTION IS DEFINITELY BEING CALLED!');
@@ -1855,9 +1873,39 @@ async function combineCardResults(
     const { detectFoilFromImage } = await import('./visualFoilDetector');
     
     // Use front image primarily for visual foil detection (that's where foil effects are most visible)
-    let visualFoilResult = null;
-    
-    if (frontImageBuffer) {
+    let visualFoilResult: FoilDetectionResult | null = null;
+
+    // F-3c: prefer the preloaded hint from /api/scan/preliminary when the
+    // client started a scan session. The preliminary endpoint ran this
+    // exact detector on the exact same normalized front buffer, so reusing
+    // its result saves a Vision API round trip on the critical scan path.
+    //
+    // Correctness guard: the preliminary ran with `isNumbered: false` (we
+    // didn't have the back-side serial yet). The only downstream branch
+    // that actually consumes `isNumbered` is a leniency path that *adds*
+    // a foil-detection signal for numbered cards with modest tint coverage
+    // (see visualFoilDetector.ts `hasNumberedCardEvidence`). So if the
+    // back-side OCR determined this IS a numbered card AND the preloaded
+    // hint said not-foil, re-run the pass with `isNumbered: true` to give
+    // that leniency path a chance. If the preloaded hint already said
+    // isFoil=true, the flag wouldn't change the answer, so reuse it.
+    if (preloadedVisualFoil !== undefined && preloadedVisualFoil !== null) {
+      const mustRerunForNumberedLeniency =
+        !!combined.isNumbered &&
+        !preloadedVisualFoil.isFoil &&
+        !!frontImageBuffer;
+      if (mustRerunForNumberedLeniency && frontImageBuffer) {
+        console.log('[F-3c] Preloaded visual-foil hint said not-foil but card is numbered — re-running detector with isNumbered=true for leniency');
+        visualFoilResult = await detectFoilFromImage(frontImageBuffer.toString('base64'), {
+          isNumbered: true,
+          imageBuffer: frontImageBuffer,
+        });
+        console.log('[F-3c] Re-run visual detection result:', visualFoilResult);
+      } else {
+        console.log('[F-3c] Reusing preloaded visual-foil hint from preliminary endpoint');
+        visualFoilResult = preloadedVisualFoil;
+      }
+    } else if (frontImageBuffer) {
       console.log('Running visual foil detection on front image buffer...');
       const frontBase64 = frontImageBuffer.toString('base64');
       console.log('Base64 conversion successful, calling visual detector...');

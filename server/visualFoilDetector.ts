@@ -1,7 +1,7 @@
 import { ImageAnnotatorClient } from '@google-cloud/vision';
 import { analyzeRegionalFoilEvidence, hueBucketToColorName, type RegionalFoilEvidence } from './regionalFoilAnalyzer';
 
-interface FoilDetectionResult {
+export interface FoilDetectionResult {
   isFoil: boolean;
   foilType: string | null;
   confidence: number;
