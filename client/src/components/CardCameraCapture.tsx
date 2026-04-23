@@ -30,7 +30,6 @@ import {
 } from '@/lib/cardQuadCrop';
 import {
   detectCardQuadWithCV,
-  ensureOpenCVReady,
 } from '@/lib/openCVDetect';
 
 interface CardCameraCaptureProps {
@@ -343,12 +342,12 @@ export default function CardCameraCapture({
       return;
     }
     startStream();
-    // Pre-warm OpenCV.js so the WASM is ready by the time the user taps the
-    // shutter. First call fetches the ~8MB script from CDN; subsequent calls
-    // (same session or cached) are near-instant.
-    ensureOpenCVReady().catch((err) => {
-      console.warn('[CardCameraCapture] OpenCV pre-warm failed', err);
-    });
+    // Note: we intentionally do NOT pre-warm OpenCV.js here. Doing so ran
+    // the 8MB WASM download concurrently with getUserMedia on low-power
+    // mobile devices and stalled the camera at "Starting camera…" (PR #54
+    // regression fix). OpenCV is now lazy-loaded on first capture instead;
+    // the tradeoff is a ~500ms delay the first time the user shoots a card,
+    // which is strictly better than the camera not coming up at all.
     const onVisible = () => {
       if (document.visibilityState === 'visible') {
         if (!isStreamLive(sharedStream)) killSharedStream();
