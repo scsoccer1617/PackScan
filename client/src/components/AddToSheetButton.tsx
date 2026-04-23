@@ -41,6 +41,13 @@ interface Props {
   searchUrl?: string;
   frontImage?: string;
   backImage?: string;
+  /**
+   * When true, render a slim pill-sized button that fits inside the
+   * ScanResult sticky hero next to "Scan another" instead of the full
+   * card with a chevron picker. Shows the destination sheet as a tiny
+   * chip directly below the button.
+   */
+  compact?: boolean;
 }
 
 function buildAppendPayload(cardData: Partial<CardFormValues>, averageValue: number, searchUrl?: string, frontImage?: string, backImage?: string): AppendCardPayload {
@@ -70,7 +77,7 @@ function buildAppendPayload(cardData: Partial<CardFormValues>, averageValue: num
   };
 }
 
-export default function AddToSheetButton({ cardData, averageValue, searchUrl, frontImage, backImage }: Props) {
+export default function AddToSheetButton({ cardData, averageValue, searchUrl, frontImage, backImage, compact = false }: Props) {
   const { user } = useAuth();
   const { toast } = useToast();
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -150,6 +157,18 @@ export default function AddToSheetButton({ cardData, averageValue, searchUrl, fr
   });
 
   if (!user) {
+    if (compact) {
+      // Sticky-hero variant: tiny sign-in hint instead of a full card.
+      return (
+        <Link
+          href="/login"
+          className="h-10 px-3 rounded-xl bg-slate-100 text-ink text-sm font-medium flex items-center gap-1.5 hover-elevate"
+          data-testid="link-signin-to-save"
+        >
+          <Sheet className="w-4 h-4" /> Sign in to save
+        </Link>
+      );
+    }
     return (
       <Card>
         <CardContent className="pt-4 flex items-center gap-3 text-sm text-slate-700">
@@ -161,6 +180,17 @@ export default function AddToSheetButton({ cardData, averageValue, searchUrl, fr
   }
 
   if (!user.googleConnected) {
+    if (compact) {
+      return (
+        <a
+          href="/api/auth/google/connect"
+          className="h-10 px-3 rounded-xl bg-slate-100 text-ink text-sm font-medium flex items-center gap-1.5 hover-elevate"
+          data-testid="link-connect-google"
+        >
+          <Sheet className="w-4 h-4" /> Connect Google
+        </a>
+      );
+    }
     return (
       <Card>
         <CardContent className="pt-4 space-y-2">
@@ -173,6 +203,35 @@ export default function AddToSheetButton({ cardData, averageValue, searchUrl, fr
           </a>
         </CardContent>
       </Card>
+    );
+  }
+
+  if (compact) {
+    // Compact variant for the ScanResult sticky hero: same size/shape as
+    // the adjacent "Scan another" button, with a small destination-sheet
+    // chip directly beneath. Omits the picker — users can change the
+    // destination sheet from Account Settings or the full variant.
+    return (
+      <div className="flex flex-col items-end gap-1">
+        <button
+          onClick={() => append.mutate()}
+          disabled={append.isPending || !cardData}
+          className="h-10 px-4 rounded-xl bg-foil text-white text-sm font-medium flex items-center gap-1.5 hover-elevate disabled:opacity-60 disabled:cursor-not-allowed"
+          data-testid="button-add-to-sheet"
+        >
+          <Sheet className="w-4 h-4" />
+          {append.isPending ? 'Saving…' : 'Add to Sheet'}
+        </button>
+        {selectedSheet && (
+          <span
+            className="text-[10px] text-slate-500 truncate max-w-[180px] leading-none"
+            title={`Saving to ${selectedSheet.title}`}
+            data-testid="text-active-sheet"
+          >
+            → <span className="text-ink font-medium">{selectedSheet.title}</span>
+          </span>
+        )}
+      </div>
     );
   }
 

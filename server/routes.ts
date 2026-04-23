@@ -2250,6 +2250,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Scan correction log — captures user edits to OCR/Gemini-detected
+  // fields (card #, parallel, etc.) so we can review patterns later and
+  // tune the vision prompts. Lightweight: log-only for now (writes a
+  // line to server logs), never blocks the UI. Returns 202 on accept.
+  app.post(`${apiPrefix}/scan-corrections`, async (req, res) => {
+    try {
+      const {
+        field, detected, corrected,
+        brand, year, collection, set,
+        playerFirstName, playerLastName,
+      } = (req.body || {}) as Record<string, any>;
+      console.log('[ScanCorrection]', JSON.stringify({
+        field, detected, corrected,
+        brand, year, collection, set,
+        player: [playerFirstName, playerLastName].filter(Boolean).join(' ').trim() || null,
+        ts: new Date().toISOString(),
+      }));
+      return res.status(202).json({ ok: true });
+    } catch (err: any) {
+      // Correction logging is best-effort — never 500 back to the client.
+      console.warn('[ScanCorrection] log failed:', err?.message);
+      return res.status(202).json({ ok: false });
+    }
+  });
+
   // Holo grade history for the authenticated user
   app.get(`${apiPrefix}/scan-grades`, requireAuth, async (req, res) => {
     try {

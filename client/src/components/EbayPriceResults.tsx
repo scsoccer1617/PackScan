@@ -35,9 +35,22 @@ interface EbayPriceResultsProps {
   frontImage?: string;
   backImage?: string;
   onCardDataUpdate?: (updatedData: Partial<CardFormValues>) => void;
+  /**
+   * Optional callback — fires whenever a fresh price lookup completes.
+   * ScanResult wires this to the sticky-hero subtitle ("Avg asking $NNN").
+   */
+  onPriceData?: (info: { averageValue: number; dataType: 'sold' | 'current'; searchUrl: string | null }) => void;
+  /**
+   * When true, render only the pricing-related sections (average price
+   * banner + listings table). Card Information, Uploaded Card Images and
+   * the Add-to-Sheet button are rendered by the parent (ScanResult) so
+   * the Price tab stays focused on pricing. Defaults to false for
+   * backward-compat with any legacy callers.
+   */
+  pricingOnly?: boolean;
 }
 
-export default function EbayPriceResults({ cardData, frontImage, backImage, onCardDataUpdate }: EbayPriceResultsProps) {
+export default function EbayPriceResults({ cardData, frontImage, backImage, onCardDataUpdate, onPriceData, pricingOnly = false }: EbayPriceResultsProps) {
   const [loading, setLoading] = useState(true);
   const [results, setResults] = useState<EbaySearchResult[]>([]);
   const [averageValue, setAverageValue] = useState(0);
@@ -169,6 +182,15 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
         setDataType(data.dataType || 'current');
         if (data.errorMessage) {
           setError(data.errorMessage);
+        }
+        // Bubble up to ScanResult so the hero can render an avg-price
+        // subtitle under the player name without double-fetching.
+        if (onPriceData) {
+          onPriceData({
+            averageValue: data.averageValue,
+            dataType: data.dataType || 'current',
+            searchUrl: data.searchUrl || null,
+          });
         }
         setLoading(false);
       } catch (err) {
@@ -563,7 +585,7 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
     if (isNoResults) {
       return (
         <div className="space-y-4">
-          {renderCardInfoSection()}
+          {!pricingOnly && renderCardInfoSection()}
           <Card className="border-slate-200">
             <CardHeader>
               <CardTitle className="text-slate-600 text-base">No Active Listings Found</CardTitle>
@@ -590,7 +612,7 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
 
     return (
       <div className="space-y-4">
-        {renderCardInfoSection()}
+        {!pricingOnly && renderCardInfoSection()}
         
         <Card className={isRateLimit ? "border-yellow-200 bg-yellow-50" : ""}>
           <CardHeader>
@@ -635,7 +657,7 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
 
   return (
     <div className="space-y-4">
-      {renderCardInfoSection()}
+      {!pricingOnly && renderCardInfoSection()}
 
       {averageValue > 0 && (
         <Card className="bg-green-50 border-green-200">
@@ -655,13 +677,15 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
         </Card>
       )}
 
-      <AddToSheetButton
-        cardData={cardData}
-        averageValue={averageValue}
-        searchUrl={searchUrl || undefined}
-        frontImage={frontImage}
-        backImage={backImage}
-      />
+      {!pricingOnly && (
+        <AddToSheetButton
+          cardData={cardData}
+          averageValue={averageValue}
+          searchUrl={searchUrl || undefined}
+          frontImage={frontImage}
+          backImage={backImage}
+        />
+      )}
 
 
       <Card>
