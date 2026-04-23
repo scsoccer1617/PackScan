@@ -18,6 +18,98 @@ interface OCRResult {
 }
 
 /**
+ * Shared blocklist of tokens that should never qualify as a player name.
+ *
+ * Hoisted to module scope so every branch of player-name detection
+ * (`extractPlayerName`’s line-based pass, early-line pass, top-pattern pass,
+ * and regex fallback) consults the SAME exhaustive list instead of each
+ * maintaining a partial inline duplicate. Prior to this unification, the
+ * narrower inline lists in the “early line” and “top pattern” branches were
+ * missing common city/state tokens (NEW, YORK, LOS, ANGELES, SAN, CHICAGO,
+ * BOSTON, PHILADELPHIA, KANSAS, CITY, …) so an OCR hit like “NEW YORK” — read
+ * as “EW YORK” when the leading “N” fell off the crop — was getting accepted
+ * as `playerFirstName=“Ew” playerLastName=“York”` on Topps Series Two fronts.
+ *
+ * Content: publishers/brands, product/collection words, every MLB/NBA/NFL/NHL
+ * team name, team-city tokens, positions, stat/bio abbreviations, biographical
+ * prose, and English stopwords likely to surface on card backs.
+ */
+const PLAYER_NAME_BLOCKLIST: ReadonlySet<string> = new Set([
+  'TOPPS', 'LOPPS', 'OPPS', 'TOPPE', 'CHROME', 'BOWMAN', 'FLEER', 'DONRUSS', 'PANINI', 'SCORE', 'LEAF',
+  'UPPER', 'DECK', 'SERIES', 'ONE', 'TWO', 'THREE', 'OPENING', 'DAY', 'STADIUM', 'CLUB',
+  'BASEBALL', 'FOOTBALL', 'BASKETBALL', 'HOCKEY', 'SOCCER',
+  'CARD', 'ROOKIE', 'STARS', 'MLB', 'NBA', 'NFL', 'NHL', 'MLS', 'TILB', 'SMLB',
+  'MAJOR', 'LEAGUE', 'BATTING', 'RECORD', 'PITCHING', 'FIELDING',
+  'OUTFIELDER', 'INFIELDER', 'PITCHER', 'CATCHER', 'SHORTSTOP', 'DESIGNATED', 'HITTER',
+  'FIRST', 'SECOND', 'THIRD', 'BASEMAN', 'LEFT', 'RIGHT', 'CENTER', 'FIELDER',
+  'OF', 'SS', 'DH', 'SP', 'RP', 'CF', 'LF', 'RF',
+  'QB', 'WR', 'RB', 'TE', 'LB', 'CB', 'DE', 'DT', 'OL', 'OT', 'OG',
+  'PG', 'SG', 'SF', 'PF',
+  'KC', 'TB', 'LA', 'NY', 'SF', 'SD', 'STL', 'CLE', 'DET', 'MIN', 'CHC', 'CHW', 'CWS',
+  'MIL', 'PIT', 'CIN', 'ATL', 'MIA', 'PHI', 'NYM', 'NYY', 'BOS', 'BAL', 'TOR',
+  'HOU', 'TEX', 'SEA', 'OAK', 'LAA', 'LAD', 'ARI', 'COL',
+  'PHILLIES', 'PHILLIE', 'YANKEES', 'DODGERS', 'METS', 'CUBS', 'RED', 'SOX', 'BRAVES',
+  'ASTROS', 'RANGERS', 'PADRES', 'GIANTS', 'CARDINALS', 'NATIONALS', 'ORIOLES', 'GUARDIANS',
+  'TWINS', 'RAYS', 'MARLINS', 'PIRATES', 'REDS', 'BREWERS', 'TIGERS', 'ROYALS', 'ATHLETICS',
+  'MARINERS', 'ANGELS', 'ROCKIES', 'DIAMONDBACKS', 'INDIANS',
+  'PHILADELPHIA', 'CHICAGO', 'BOSTON', 'ANGELES', 'YORK',
+  'NEW', 'SAN', 'LOS', 'SAINT', 'LOUIS', 'KANSAS', 'CITY',
+  'SLG', 'OPS', 'AVG', 'WHIP', 'IP', 'AB',
+  'BATS', 'THROWS', 'DRAFTED', 'BORN', 'HOME', 'ACQ', 'FREE', 'AGENT',
+  'HT', 'WT', 'HEIGHT', 'WEIGHT', 'PRINTED', 'USA',
+  'ALL', 'STAR', 'COLLECTION', 'FLAGSHIP', 'HERITAGE', 'PRIZM', 'SELECT', 'MOSAIC',
+  'REFRACTOR', 'FOIL', 'GOLD', 'SILVER', 'BRONZE', 'PLATINUM', 'SAPPHIRE', 'BLACK',
+  'OFFICIALLY', 'LICENSED', 'PRODUCT', 'TRADEMARKS', 'COPYRIGHTS', 'RESERVED', 'RIGHTS',
+  'REGISTERED', 'COMPANY', 'INC', 'VISIT', 'CODE', 'WWW', 'COM',
+  'THE', 'AND', 'FOR', 'WITH', 'FROM', 'THAT', 'THIS', 'WAS', 'OVER', 'WENT',
+  'KEPT', 'GOING', 'REACHED', 'BASE', 'CLIP', 'THOSE', 'MONTHS', 'PLAYERS',
+  // Common short English stopwords — block bogus 2-word "names" pulled
+  // from biographical prose on the card back (e.g. "IS NO" from
+  // "JERSEY NUMBER IS NO. 00", "HE WAS", "IT IS", "AS A").
+  'IS', 'NO', 'IN', 'ON', 'AT', 'TO', 'BY', 'IT', 'HE', 'AS', 'OR', 'AN',
+  'IF', 'SO', 'UP', 'US', 'WE', 'MY', 'ME', 'AM', 'GO', 'DO', 'BE', 'HIS',
+  'HER', 'HAS', 'HAD', 'BUT', 'WHO', 'WHY', 'HOW', 'OUR', 'OUT', 'NOT',
+  'YES', 'YET', 'ANY', 'NOW', 'TOO', 'ARE', 'WHEN', 'WHERE',
+  'WHAT', 'BEEN', 'BEING', 'HAVE', 'HAVING', 'WILL', 'WOULD', 'COULD',
+  'SHOULD', 'WHILE', 'BECAUSE', 'AFTER', 'BEFORE', 'DURING', 'INTO',
+  // Biographical / narrative words that commonly appear in card-back
+  // prose — generic enough to not collide with real player names.
+  'PREFERRED', 'JERSEY', 'NUMBER', 'OPTED', 'JOINED', 'MADE', 'SWITCH',
+  'RESPECT', 'DONS', 'DIGITS', 'FRANCHISE', 'ICONIC', 'HEADED', 'HUMANOID',
+  'EARNED', 'INDUCTED', 'MASCOT', 'HALL', 'FAME', 'INTENTIONALLY', 'WALKED',
+  'RECEIVED', 'KIND', 'TREATMENT', 'GAME', 'RECENTLY', 'TALK', 'ABOUT',
+  'PLAYED', 'PLAYING', 'BECAME', 'NAMED', 'WINNING', 'WINNER', 'AWARD',
+  'CAREER', 'SEASON', 'TEAM', 'TEAMS', 'TIMES', 'YEAR', 'YEARS', 'MOST',
+  'ONLY', 'FIVE', 'FOUR', 'NINE', 'EIGHT', 'SEVEN', 'TEN', 'HUNDRED',
+  'THOUSAND', 'MILLION', 'AGAINST', 'SINCE', 'UNTIL', 'THROUGH',
+  'JUNE', 'JULY', 'MAY', 'AUGUST', 'SEPTEMBER', 'OCTOBER',
+  'HUGE', 'PART', 'LEADOFF', 'MAN', 'OBP', 'ERA', 'RBI', 'WAR',
+  'CHOICE', 'WEB', 'PLAYERA', 'TAPPS', 'XTOPPS', 'ITALICS', 'LEADER', 'TIE',
+  'TOTALS', 'MAJ', 'LEA',
+  // Common birthplace/hometown abbreviations that look like names
+  'VENEZ', 'VENEZUELA', 'DOMINICAN', 'REPUBLIC', 'MEXICO', 'CUBA', 'PANAMA', 'COLOMBIA',
+  'CANADA', 'JAPAN', 'KOREA', 'AUSTRALIA', 'PUERTO', 'RICO',
+  // Set/product/collection words that can be confused for player names
+  'PIXEL', 'PORTRAITS', 'PORTRAIT', 'FINEST', 'FUTURES', 'ROOKIES', 'GALLERY',
+  'ICONS', 'CONTENDERS', 'PRESTIGE', 'CHRONICLES', 'HARDWARE', 'ELITE',
+  'IMMACULATE', 'LUMINANCE', 'SPECTRA', 'OBSIDIAN', 'NOIR', 'OPTIC',
+  'THREADS', 'CERTIFIED', 'ABSOLUTE', 'LIMITED', 'TRIBUTE', 'BRILLIANCE',
+  'CLASSICS', 'LEGENDS', 'PROSPECTS', 'SIGNATURES', 'AUTOGRAPHS', 'PARALLELS',
+  'AUTOGRAPH', 'ISSUE', 'ISSUES',
+  'VALUED', 'PRIVATE', 'EXCLUSIVE', 'PREMIER', 'PRIME',
+  'NATIONAL', 'DIGITAL', 'VINTAGE', 'RETRO', 'REVIVAL', 'REPRINT',
+  // Stat/bio terms that appear on card backs and can look like 2-word names
+  'AVERAGE', 'OPPONENT', 'BATTERS', 'FACED',
+  'INNINGS', 'PITCHED', 'STRIKEOUT', 'STRIKEOUTS', 'COMPLETE', 'SHUTOUT',
+  'GAMES', 'STARTED', 'HOLDS', 'SAVES', 'WALKS', 'ALLOWED',
+  'ALSO', 'PACED', 'PACES', 'LED', 'THEIR',
+  'POSTED', 'HELPED', 'AMONG', 'RANKED',
+  'PITTSBURGH', 'HOUSTON', 'TORONTO', 'SEATTLE', 'OAKLAND', 'TAMPA', 'MIAMI',
+  'MINNESOTA', 'CINCINNATI', 'MILWAUKEE', 'DETROIT', 'CLEVELAND', 'BALTIMORE',
+  'ARIZONA', 'COLORADO', 'TEXAS', 'DENVER', 'MONTREAL', 'WASHINGTON',
+]);
+
+/**
  * Extract every plausible 4-digit year that appears next to a copyright
  * marker (©, (C), &copy;), an OCR-garbled copyright marker (LO/IO/O/Q
  * immediately adjacent to the digits), or a publisher imprint
@@ -314,81 +406,12 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
     const lines = text.split('\n');
     
     console.log('Starting enhanced player name detection across full text...');
-    
-    const nonNameWords = new Set([
-      'TOPPS', 'LOPPS', 'OPPS', 'TOPPE', 'CHROME', 'BOWMAN', 'FLEER', 'DONRUSS', 'PANINI', 'SCORE', 'LEAF',
-      'UPPER', 'DECK', 'SERIES', 'ONE', 'TWO', 'THREE', 'OPENING', 'DAY', 'STADIUM', 'CLUB',
-      'BASEBALL', 'FOOTBALL', 'BASKETBALL', 'HOCKEY', 'SOCCER',
-      'CARD', 'ROOKIE', 'STARS', 'MLB', 'NBA', 'NFL', 'NHL', 'MLS', 'TILB', 'SMLB',
-      'MAJOR', 'LEAGUE', 'BATTING', 'RECORD', 'PITCHING', 'FIELDING',
-      'OUTFIELDER', 'INFIELDER', 'PITCHER', 'CATCHER', 'SHORTSTOP', 'DESIGNATED', 'HITTER',
-      'FIRST', 'SECOND', 'THIRD', 'BASEMAN', 'LEFT', 'RIGHT', 'CENTER', 'FIELDER',
-      'OF', 'SS', 'DH', 'SP', 'RP', 'CF', 'LF', 'RF',
-      'QB', 'WR', 'RB', 'TE', 'LB', 'CB', 'DE', 'DT', 'OL', 'OT', 'OG',
-      'PG', 'SG', 'SF', 'PF',
-      'KC', 'TB', 'LA', 'NY', 'SF', 'SD', 'STL', 'CLE', 'DET', 'MIN', 'CHC', 'CHW', 'CWS',
-      'MIL', 'PIT', 'CIN', 'ATL', 'MIA', 'PHI', 'NYM', 'NYY', 'BOS', 'BAL', 'TOR',
-      'HOU', 'TEX', 'SEA', 'OAK', 'LAA', 'LAD', 'ARI', 'COL',
-      'PHILLIES', 'PHILLIE', 'YANKEES', 'DODGERS', 'METS', 'CUBS', 'RED', 'SOX', 'BRAVES',
-      'ASTROS', 'RANGERS', 'PADRES', 'GIANTS', 'CARDINALS', 'NATIONALS', 'ORIOLES', 'GUARDIANS',
-      'TWINS', 'RAYS', 'MARLINS', 'PIRATES', 'REDS', 'BREWERS', 'TIGERS', 'ROYALS', 'ATHLETICS',
-      'MARINERS', 'ANGELS', 'ROCKIES', 'DIAMONDBACKS', 'INDIANS',
-      'PHILADELPHIA', 'CHICAGO', 'BOSTON', 'ANGELES', 'YORK',
-      'NEW', 'SAN', 'LOS', 'SAINT', 'LOUIS', 'KANSAS', 'CITY',
-      'SLG', 'OPS', 'AVG', 'WHIP', 'IP', 'AB',
-      'BATS', 'THROWS', 'DRAFTED', 'BORN', 'HOME', 'ACQ', 'FREE', 'AGENT',
-      'HT', 'WT', 'HEIGHT', 'WEIGHT', 'PRINTED', 'USA',
-      'ALL', 'STAR', 'COLLECTION', 'FLAGSHIP', 'HERITAGE', 'PRIZM', 'SELECT', 'MOSAIC',
-      'REFRACTOR', 'FOIL', 'GOLD', 'SILVER', 'BRONZE', 'PLATINUM', 'SAPPHIRE', 'BLACK',
-      'OFFICIALLY', 'LICENSED', 'PRODUCT', 'TRADEMARKS', 'COPYRIGHTS', 'RESERVED', 'RIGHTS',
-      'REGISTERED', 'COMPANY', 'INC', 'VISIT', 'CODE', 'WWW', 'COM',
-      'THE', 'AND', 'FOR', 'WITH', 'FROM', 'THAT', 'THIS', 'WAS', 'OVER', 'WENT',
-      'KEPT', 'GOING', 'REACHED', 'BASE', 'CLIP', 'THOSE', 'MONTHS', 'PLAYERS',
-      // Common short English stopwords — block bogus 2-word "names" pulled
-      // from biographical prose on the card back (e.g. "IS NO" from
-      // "JERSEY NUMBER IS NO. 00", "HE WAS", "IT IS", "AS A").
-      'IS', 'NO', 'IN', 'ON', 'AT', 'TO', 'BY', 'IT', 'HE', 'AS', 'OR', 'AN',
-      'IF', 'SO', 'UP', 'US', 'WE', 'MY', 'ME', 'AM', 'GO', 'DO', 'BE', 'HIS',
-      'HER', 'HAS', 'HAD', 'BUT', 'WHO', 'WHY', 'HOW', 'OUR', 'OUT', 'NOT',
-      'YES', 'YET', 'ALL', 'ANY', 'NOW', 'TOO', 'WAS', 'ARE', 'WHEN', 'WHERE',
-      'WHAT', 'BEEN', 'BEING', 'HAVE', 'HAVING', 'WILL', 'WOULD', 'COULD',
-      'SHOULD', 'WHILE', 'BECAUSE', 'AFTER', 'BEFORE', 'DURING', 'INTO',
-      // Biographical / narrative words that commonly appear in card-back
-      // prose — generic enough to not collide with real player names.
-      'PREFERRED', 'JERSEY', 'NUMBER', 'OPTED', 'JOINED', 'MADE', 'SWITCH',
-      'RESPECT', 'DONS', 'DIGITS', 'FRANCHISE', 'ICONIC', 'HEADED', 'HUMANOID',
-      'EARNED', 'INDUCTED', 'MASCOT', 'HALL', 'FAME', 'INTENTIONALLY', 'WALKED',
-      'RECEIVED', 'KIND', 'TREATMENT', 'GAME', 'RECENTLY', 'TALK', 'ABOUT',
-      'PLAYED', 'PLAYING', 'BECAME', 'NAMED', 'WINNING', 'WINNER', 'AWARD',
-      'CAREER', 'SEASON', 'TEAM', 'TEAMS', 'TIMES', 'YEAR', 'YEARS', 'MOST',
-      'ONLY', 'FIVE', 'FOUR', 'NINE', 'EIGHT', 'SEVEN', 'TEN', 'HUNDRED',
-      'THOUSAND', 'MILLION', 'AGAINST', 'SINCE', 'UNTIL', 'THROUGH',
-      'JUNE', 'JULY', 'MAY', 'AUGUST', 'SEPTEMBER', 'OCTOBER',
-      'HUGE', 'PART', 'LEADOFF', 'MAN', 'OBP', 'ERA', 'AVG', 'RBI', 'WAR',
-      'CHOICE', 'WEB', 'PLAYERA', 'TAPPS', 'XTOPPS', 'ITALICS', 'LEADER', 'TIE',
-      'TOTALS', 'MAJ', 'LEA', 'CUBS', 'NATIONALS',
-      // Common birthplace/hometown abbreviations that look like names
-      'VENEZ', 'VENEZUELA', 'DOMINICAN', 'REPUBLIC', 'MEXICO', 'CUBA', 'PANAMA', 'COLOMBIA',
-      'CANADA', 'JAPAN', 'KOREA', 'AUSTRALIA', 'PUERTO', 'RICO',
-      // Set/product/collection words that can be confused for player names
-      'PIXEL', 'PORTRAITS', 'PORTRAIT', 'FINEST', 'FUTURES', 'ROOKIES', 'GALLERY',
-      'ICONS', 'CONTENDERS', 'PRESTIGE', 'CHRONICLES', 'HARDWARE', 'ELITE',
-      'IMMACULATE', 'LUMINANCE', 'SPECTRA', 'OBSIDIAN', 'NOIR', 'OPTIC',
-      'THREADS', 'CERTIFIED', 'ABSOLUTE', 'LIMITED', 'TRIBUTE', 'BRILLIANCE',
-      'CLASSICS', 'LEGENDS', 'PROSPECTS', 'SIGNATURES', 'AUTOGRAPHS', 'PARALLELS',
-      'AUTOGRAPH', 'ISSUE', 'ISSUES',
-      'VALUED', 'PRIVATE', 'EXCLUSIVE', 'PREMIER', 'PRIME',
-      'NATIONAL', 'DIGITAL', 'VINTAGE', 'RETRO', 'REVIVAL', 'REPRINT',
-      // Stat/bio terms that appear on card backs and can look like 2-word names
-      'AVERAGE', 'AGAINST', 'EARNED', 'OPPONENT', 'BATTERS', 'FACED',
-      'INNINGS', 'PITCHED', 'STRIKEOUT', 'STRIKEOUTS', 'COMPLETE', 'SHUTOUT',
-      'GAMES', 'STARTED', 'HOLDS', 'SAVES', 'WALKS', 'ALLOWED',
-      'ALSO', 'PACED', 'PACES', 'LED', 'HIS', 'WHILE', 'DURING', 'THEIR',
-      'POSTED', 'HELPED', 'BECAME', 'AMONG', 'MADE', 'RANKED', 'NAMED',
-      'PITTSBURGH', 'HOUSTON', 'TORONTO', 'SEATTLE', 'OAKLAND', 'TAMPA', 'MIAMI',
-      'MINNESOTA', 'CINCINNATI', 'MILWAUKEE', 'DETROIT', 'CLEVELAND', 'BALTIMORE',
-      'ARIZONA', 'COLORADO', 'TEXAS', 'DENVER', 'MONTREAL', 'WASHINGTON',
-    ]);
+
+    // Shared blocklist lives at module scope (see PLAYER_NAME_BLOCKLIST) so
+    // every branch below consults the same exhaustive list — previously each
+    // branch maintained a partial inline copy, which is how team tokens like
+    // "NEW YORK" leaked through as `Ew York` on Topps Series Two fronts.
+    const nonNameWords = PLAYER_NAME_BLOCKLIST;
     
     const isNonNameWord = (word: string): boolean => {
       const cleaned = word.toUpperCase().replace(/(?:TM|™|®|\.+)$/gi, '');
@@ -693,26 +716,18 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
         continue;
       }
       
-      const nonNameWords = [
-        'PITCHER','CATCHER','INFIELDER','OUTFIELDER','DESIGNATED','HITTER',
-        'BATS','THROWS','THROW','LEFT','RIGHT','SWITCH',
-        'HEIGHT','WEIGHT','BORN','BIRTH','DOB',
-        'MAJOR','LEAGUE','CLUB','RECORD','COMPLETE','ERA',
-        'POSITION','TEAM','OF','THE',
-        'TOPPS','LOPPS','LAPPS','BOWMAN','DONRUSS','PANINI','FLEER','SCORE','LEAF',
-        'SERIES','CHROME','METS','YANKEES','DODGERS','CUBS','PHILLIES','BRAVES',
-        'ASTROS','RANGERS','PADRES','GIANTS','CARDINALS','NATIONALS','ORIOLES',
-        'GUARDIANS','TWINS','RAYS','ROYALS','BREWERS','TIGERS','REDS','PIRATES',
-        'BASEBALL','FOOTBALL','BASKETBALL','HOCKEY','MLB','STARS','ROOKIE',
-        'SLG','OPS','AVG','WHIP','RBI','WAR','TOTALS'
-      ];
-      let isNonNameLine = false;
-      for (const word of nonNameWords) {
-        if (line.includes(word)) {
-          isNonNameLine = true;
-          break;
-        }
-      }
+      // Use the shared module-scoped blocklist (see PLAYER_NAME_BLOCKLIST)
+      // instead of a narrow inline array — otherwise team-city tokens like
+      // "NEW YORK" fall through here and "EW YORK" (N dropped by OCR crop)
+      // gets split into playerFirstName="Ew" playerLastName="York".
+      //
+      // The original pass used `line.includes(word)` (substring match) which
+      // was safe only because the inline list was narrow. The shared blocklist
+      // contains short English stopwords (IS, NO, BE, AS, …) that would falsely
+      // substring-match real names like "GLEYBER TORRES" (contains "BE"), so
+      // tokenize the line first and check each token against the Set.
+      const lineTokens = line.toUpperCase().split(/[^A-Z0-9]+/).filter(Boolean);
+      const isNonNameLine = lineTokens.some((tok) => PLAYER_NAME_BLOCKLIST.has(tok));
       if (isNonNameLine) continue;
       
       // Check for lines that look like "FIRST LAST" or "FIRST MIDDLE LAST"
@@ -743,15 +758,12 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
       const firstName = topNameMatch[1].trim();
       const lastName = topNameMatch[2].trim();
       
-      const nonNameWords = ['PITCHER', 'CATCHER', 'COMPLETE', 'RECORD', 'MAJOR', 'LEAGUE', 'CLUB', 'ERA',
-        'TOPPS', 'LOPPS', 'LAPPS', 'BOWMAN', 'DONRUSS', 'PANINI', 'FLEER', 'SCORE', 'LEAF',
-        'SERIES', 'CHROME', 'METS', 'YANKEES', 'DODGERS', 'CUBS', 'PHILLIES', 'BRAVES',
-        'ASTROS', 'RANGERS', 'PADRES', 'GIANTS', 'CARDINALS', 'NATIONALS', 'ORIOLES',
-        'GUARDIANS', 'TWINS', 'RAYS', 'ROYALS', 'BREWERS', 'TIGERS', 'REDS', 'PIRATES',
-        'MARLINS', 'ATHLETICS', 'MARINERS', 'ANGELS', 'ROCKIES', 'DIAMONDBACKS',
-        'BASEBALL', 'FOOTBALL', 'BASKETBALL', 'HOCKEY', 'ROOKIE', 'STARS', 'MLB',
-        'SLG', 'OPS', 'AVG', 'WHIP', 'RBI', 'WAR', 'TOTALS', 'MAJ', 'LEA'];
-      if (!nonNameWords.includes(firstName) && !nonNameWords.includes(lastName)) {
+      // Use the shared module-scoped blocklist instead of a narrow inline
+      // array so team/city tokens (NEW, YORK, LOS, ANGELES, etc.) reject
+      // cleanly here — this is the branch that was emitting
+      // "Detected player name from name pattern: Ew York" on Topps Series
+      // Two fronts where OCR dropped the leading "N" from "NEW YORK".
+      if (!PLAYER_NAME_BLOCKLIST.has(firstName) && !PLAYER_NAME_BLOCKLIST.has(lastName)) {
         cardDetails.playerFirstName = firstName.toLowerCase()
           .split(' ')
           .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
