@@ -110,10 +110,14 @@ export async function discoverParallels(
     const parallel = extractParallel(c["product-name"]);
     if (!parallel) continue;
     const canonical = normalizeParallel(parallel);
-    // De-dupe key: prefer canonical bucket so "Pink Wave" and "[Pink]"
-    // collapse. Fall back to the raw label when un-bucketable so odd
-    // named parallels like "Sandglitter" still each get their own entry.
-    const key = canonical ?? parallel.toLowerCase();
+    // De-dupe by the raw label (normalized whitespace/case only). We used
+    // to key on canonical bucket, but that collapses genuinely distinct
+    // parallels in the same colour family — e.g. [Holo Pink Foil] and
+    // [Pink Diamante Foil] on 2025 Topps Update are different physical
+    // cards at different prices ($1.40 vs $2.87) and both must survive
+    // a Pink colour filter. Exact-label dedupe still collapses SCP
+    // duplicates (same label returned twice) without losing variants.
+    const key = parallel.toLowerCase().replace(/\s+/g, " ").trim();
     if (seen.has(key)) continue;
     seen.set(key, {
       label: parallel,
