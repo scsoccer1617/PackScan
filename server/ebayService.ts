@@ -1233,44 +1233,62 @@ export function getEbaySearchUrl(
     : '';
   const searchProductLine = searchSetName || collectionForSearch;
 
+  // When we're building the URL for a graded tier (e.g. "PSA 10"), use a
+  // deliberately leaner keyword set. The eBay web UI treats every _nkw
+  // token as an AND-match against the title, so appending card # + variant
+  // name + serial + foil color on top of "PSA 10" regularly zeroes out
+  // results even when the Browse API (which we use for tier pricing) found
+  // matches with fuzzier tokenization. Most PSA-slab titles read:
+  //     2026 Topps Nolan Arenado #193 PSA 10
+  // or  2026 Topps Series 1 Arenado PSA 10
+  // — the buyer's variant language almost never appears verbatim. Keep the
+  // query to the fields that are reliably in slab titles: year + brand +
+  // product line + player + grade. Drop card #, variant, foil, and serial.
+  const isGradedTier = !!(gradeKeyword && gradeKeyword.trim());
+
   const parts: string[] = [];
   if (year > 0) parts.push(String(year));
   if (brand) parts.push(brand);
   if (searchProductLine) parts.push(searchProductLine);
   parts.push(playerName);
-  if (cardNumber) parts.push(/^\d+$/.test(cardNumber) ? `#${cardNumber}` : cardNumber);
+  if (!isGradedTier && cardNumber) {
+    parts.push(/^\d+$/.test(cardNumber) ? `#${cardNumber}` : cardNumber);
+  }
 
   let keywords = parts.filter(Boolean).join(' ');
 
-  // Add serial number suffix for serialized cards (e.g., "/399" instead of "numbered")
-  if (isNumbered && serialNumber && serialNumber.includes('/')) {
-    const serialMatch = serialNumber.match(/\/(\d+)$/);
-    if (serialMatch) {
-      keywords += ` /${serialMatch[1]}`;
-    } else {
+  if (!isGradedTier) {
+    // Add serial number suffix for serialized cards (e.g., "/399" instead of "numbered")
+    if (isNumbered && serialNumber && serialNumber.includes('/')) {
+      const serialMatch = serialNumber.match(/\/(\d+)$/);
+      if (serialMatch) {
+        keywords += ` /${serialMatch[1]}`;
+      } else {
+        keywords += ' numbered';
+      }
+    } else if (isNumbered) {
       keywords += ' numbered';
     }
-  } else if (isNumbered) {
-    keywords += ' numbered';
+
+    // Prefer an explicit variant (e.g. "Hidden Elf Variation" or a
+    // user-confirmed parallel like "Sandglitter") over the generic foilType
+    // when both exist — variant is the more specific descriptor and, when it
+    // came from the picker, the user's word is ground truth. Use it verbatim:
+    // do NOT remap through getFoilSearchTerm which could shorten or drop it.
+    if (variant && variant.trim()) {
+      keywords += ` ${variant.trim()}`;
+    } else if (foilType) {
+      const foilSearchTerm = getFoilSearchTerm(foilType);
+      keywords += ` ${foilSearchTerm || foilType}`;
+    }
   }
 
-  // Prefer an explicit variant (e.g. "Hidden Elf Variation" or a
-  // user-confirmed parallel like "Sandglitter") over the generic foilType
-  // when both exist — variant is the more specific descriptor and, when it
-  // came from the picker, the user's word is ground truth. Use it verbatim:
-  // do NOT remap through getFoilSearchTerm which could shorten or drop it.
-  if (variant && variant.trim()) {
-    keywords += ` ${variant.trim()}`;
-  } else if (foilType) {
-    const foilSearchTerm = getFoilSearchTerm(foilType);
-    keywords += ` ${foilSearchTerm || foilType}`;
-  }
-
-  // Grade filter (e.g. "PSA 10") for the graded-pricing breakdown’s empty
-  // state: the eBay fallback link should reflect the same tier the UI was
-  // looking for, not the generic raw search.
-  if (gradeKeyword && gradeKeyword.trim()) {
-    keywords += ` ${gradeKeyword.trim()}`;
+  // Grade filter (e.g. "PSA 10") for the graded-pricing breakdown’s tier
+  // links. Wrap in quotes so eBay treats "PSA 10" as a single phrase rather
+  // than two independent AND tokens (sellers sometimes write "PSA10" or put
+  // the grade on its own line, which the quoted form still matches).
+  if (isGradedTier) {
+    keywords += ` "${gradeKeyword!.trim()}"`;
   }
 
   // Active listings only (PackScan sources pricing from the Browse API —
