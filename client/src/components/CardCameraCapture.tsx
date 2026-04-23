@@ -16,8 +16,13 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
-import { X, Image as ImageIcon, RotateCcw, Check, Loader2 } from 'lucide-react';
-import { cropCardFromQuad, detectCardQuad, type NormalizedQuad } from '@/lib/cardQuadCrop';
+import { X, Image as ImageIcon, RotateCcw, Check, Loader2, Eye, Crop } from 'lucide-react';
+import {
+  cropCardFromQuad,
+  detectCardQuad,
+  renderQuadDebugOverlay,
+  type NormalizedQuad,
+} from '@/lib/cardQuadCrop';
 
 interface CardCameraCaptureProps {
   open: boolean;
@@ -87,8 +92,14 @@ export default function CardCameraCapture({
   const [error, setError] = useState<string | null>(null);
   // rawImage = full-frame photo the camera just took (or the Library file).
   // croppedImage = the warped 2.5:3.5 result. Null while detection is running.
+  // debugImage = rawImage with the detected quad drawn on top. Shown when the
+  //   user taps the "Show original" toggle in the preview — lets us eyeball
+  //   exactly which corners Haiku picked when a crop looks wrong.
   const [rawImage, setRawImage] = useState<string | null>(null);
   const [croppedImage, setCroppedImage] = useState<string | null>(null);
+  const [debugImage, setDebugImage] = useState<string | null>(null);
+  const [detectReason, setDetectReason] = useState<string | null>(null);
+  const [showDebugView, setShowDebugView] = useState(false);
   const [detecting, setDetecting] = useState(false);
   const [detectionFailed, setDetectionFailed] = useState(false);
   const [starting, setStarting] = useState(false);
@@ -208,7 +219,10 @@ export default function CardCameraCapture({
   const runDetectAndCrop = useCallback(async (raw: string) => {
     setDetecting(true);
     setDetectionFailed(false);
+    setDetectReason(null);
     setCroppedImage(null);
+    setDebugImage(null);
+    setShowDebugView(false);
 
     // Cancel any in-flight detection from a prior capture.
     detectAbortRef.current?.abort();
@@ -217,7 +231,12 @@ export default function CardCameraCapture({
 
     let quad: NormalizedQuad | null = null;
     try {
-      quad = await detectCardQuad(raw, { signal: ac.signal });
+      const result = await detectCardQuad(raw, { signal: ac.signal });
+      if (result.ok) {
+        quad = result.quad;
+      } else {
+        setDetectReason(result.reason);
+      }
     } catch (err) {
       if ((err as any)?.name !== 'AbortError') {
         console.warn('[CardCameraCapture] detect error', err);
@@ -233,9 +252,19 @@ export default function CardCameraCapture({
     }
 
     try {
-      const cropped = await cropCardFromQuad(raw, quad);
+      // Render both the warped crop AND the debug overlay concurrently —
+      // they're both pure-canvas operations and we want the debug view
+      // ready instantly if the user taps "Show original".
+      const [cropped, debug] = await Promise.all([
+        cropCardFromQuad(raw, quad),
+        renderQuadDebugOverlay(raw, quad).catch((err) => {
+          console.warn('[CardCameraCapture] debug render failed', err);
+          return null;
+        }),
+      ]);
       if (ac.signal.aborted) return;
       setCroppedImage(cropped);
+      setDebugImage(debug);
     } catch (err) {
       console.warn('[CardCameraCapture] warp error', err);
       setDetectionFailed(true);
@@ -258,6 +287,9 @@ export default function CardCameraCapture({
       detachStream();
       setRawImage(null);
       setCroppedImage(null);
+      setDebugImage(null);
+      setShowDebugView(false);
+      setDetectReason(null);
       setDetecting(false);
       setDetectionFailed(false);
       detectAbortRef.current?.abort();
@@ -331,14 +363,19 @@ export default function CardCameraCapture({
   }, []);
 
   // "Use Photo" — prefer the auto-cropped version, fall back to raw if
-  // detection failed and the user still wants to proceed.
+  // detection failed or the user explicitly chose to use the original.
   const handleConfirm = () => {
-    const final = croppedImage ?? rawImage;
+    const final = showDebugView
+      ? (rawImage ?? croppedImage)
+      : (croppedImage ?? rawImage);
     if (!final) return;
     onCapture(final);
     setRawImage(null);
     setCroppedImage(null);
+    setDebugImage(null);
+    setShowDebugView(false);
     setDetectionFailed(false);
+    setDetectReason(null);
   };
 
   const handleRetake = () => {
@@ -346,6 +383,9 @@ export default function CardCameraCapture({
     detectAbortRef.current = null;
     setRawImage(null);
     setCroppedImage(null);
+    setDebugImage(null);
+    setShowDebugView(false);
+    setDetectReason(null);
     setDetecting(false);
     setDetectionFailed(false);
     capturedRef.current = false;
@@ -375,8 +415,15 @@ export default function CardCameraCapture({
 
   if (!open) return null;
 
-  const previewImage = croppedImage ?? rawImage;
+  // Which image the user is currently looking at in the preview pane:
+  // - Default: the auto-cropped result (or the raw frame if detection failed)
+  // - Toggled: the raw frame with the detected quad drawn on top (if available)
+  //   or the plain raw frame (if detection failed)
+  const previewImage = showDebugView
+    ? (debugImage ?? rawImage)
+    : (croppedImage ?? rawImage);
   const inPreview = !!rawImage;
+  const canToggleDebug = !!rawImage && !detecting;
 
   return (
     <div className="fixed inset-0 z-50 bg-black flex flex-col">
@@ -444,7 +491,39 @@ export default function CardCameraCapture({
         {/* Non-blocking hint when auto-crop couldn't find a card. */}
         {inPreview && !detecting && detectionFailed && (
           <div className="absolute inset-x-4 top-4 bg-amber-500/95 text-black text-xs rounded-md px-3 py-2 shadow">
-            Couldn't auto-crop this photo. You can still use it, or retake.
+            Couldn't auto-crop this photo{detectReason ? ` (${detectReason})` : ''}. You can still use it, or retake.
+          </div>
+        )}
+
+        {/* Debug-view toggle — lets the user flip between the cropped result
+            and the raw frame with the detected quad drawn on top. Only shown
+            when detection succeeded (so there's something to compare). */}
+        {inPreview && !detecting && canToggleDebug && croppedImage && debugImage && (
+          <button
+            type="button"
+            onClick={() => setShowDebugView((v) => !v)}
+            className="absolute top-3 right-3 z-20 bg-black/70 hover:bg-black/85 text-white text-xs rounded-full px-3 py-1.5 flex items-center gap-1.5 shadow"
+            aria-label={showDebugView ? 'Show cropped card' : 'Show original with detected edges'}
+          >
+            {showDebugView ? (
+              <>
+                <Crop className="h-3.5 w-3.5" />
+                Show cropped
+              </>
+            ) : (
+              <>
+                <Eye className="h-3.5 w-3.5" />
+                Show original
+              </>
+            )}
+          </button>
+        )}
+
+        {/* Tiny status strip at the bottom of the preview area when showing
+            the debug view, so it's obvious which image you're looking at. */}
+        {inPreview && showDebugView && debugImage && (
+          <div className="absolute inset-x-4 bottom-3 bg-black/70 text-white text-[11px] rounded-md px-3 py-1.5 text-center pointer-events-none">
+            Original photo · green outline = detected card edges
           </div>
         )}
 
