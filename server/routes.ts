@@ -1331,10 +1331,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Year: Claude's vision repeatedly second-guessed legible 2026
         // copyrights toward 2025 / 2023 even after prompt reorder, current-
         // date grounding, and a model bump to Opus 4.7. Google Vision OCR
-        // extracts the year directly from the copyright line and flags it
-        // via `_yearFromCopyright`; when that flag is set, OCR has actually
-        // read the digits off the card and is far more trustworthy than
-        // Claude's interpretation. Override Holo's year with OCR's.
+        // reads the year from the copyright line AND/OR from the stats
+        // table on the back — either way it's reading pixels deterministic-
+        // ally. Any 4-digit year that OCR produces is more trustworthy than
+        // Claude's hallucinated interpretation, so OCR wins on year as
+        // long as OCR has a value and the two disagree. The OCR year source
+        // (`_yearFromCopyright`, `_yearFromBackOnly`, `_yearFromBareFallback`)
+        // is preserved in the merged payload for downstream diagnostics.
         //
         // Card number: Claude sometimes picks up a set/insert code printed
         // near the card number (e.g. "T83", "SMLB-76", "BDC-12") instead of
@@ -1343,19 +1346,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // card number, prefer OCR — the letter-prefix form is almost always
         // an insert/subset ID, not the base #. (We keep Holo when OCR has
         // no number or when both agree.)
-        const ocrYearFromCopyright = !!ocrData?._yearFromCopyright;
         const ocrYearNum = Number(ocrData?.year) || 0;
         const holoYearNum = Number(holoCard.year) || 0;
-        if (
-          ocrYearFromCopyright &&
-          ocrYearNum > 0 &&
-          ocrYearNum !== holoYearNum
-        ) {
+        if (ocrYearNum > 0 && ocrYearNum !== holoYearNum) {
           merged.year = ocrYearNum;
-          merged._yearSource = 'ocr-copyright';
+          const sourceLabel = ocrData?._yearFromCopyright
+            ? 'ocr-copyright'
+            : ocrData?._yearFromBackOnly
+              ? 'ocr-back-stats'
+              : ocrData?._yearFromBareFallback
+                ? 'ocr-bare-fallback'
+                : 'ocr-year';
+          merged._yearSource = sourceLabel;
           console.log(
-            `[MergeOverride] year: OCR copyright wins — ocr=${ocrYearNum} ` +
-              `beats holo=${holoYearNum} (OCR read the © line directly).`,
+            `[MergeOverride] year: OCR wins — ocr=${ocrYearNum} ` +
+              `beats holo=${holoYearNum} (source: ${sourceLabel}).`,
           );
         }
 
