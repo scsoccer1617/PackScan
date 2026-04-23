@@ -623,13 +623,44 @@ export default function CardCameraCapture({
           />
         )}
 
+        {/* Faint 2.5:3.5 aiming zone. Not a crop — the camera still streams
+            full-bleed and we keep detecting off the full frame. This is just
+            a visual target so the user knows where the VLM prefers the card
+            to land. All pointer-events-none so tap-to-focus still works
+            anywhere in the viewfinder. */}
+        {!inPreview && (
+          <div className="absolute inset-0 z-10 pointer-events-none flex items-center justify-center">
+            {/* Sized relative to viewfinder: width-first so it fits in
+                portrait camera views, capped so it doesn't overwhelm
+                landscape. The aspect-ratio locks it to 2.5:3.5. */}
+            <div
+              className="relative"
+              style={{
+                width: 'min(72%, calc(60vh * 2.5 / 3.5))',
+                aspectRatio: '2.5 / 3.5',
+              }}
+            >
+              {/* Soft full outline — low-opacity so it reads as a guide,
+                  not a frame. */}
+              <div className="absolute inset-0 rounded-md border border-white/35" />
+              {/* Corner ticks — brighter at the corners so the aiming zone
+                  registers at a glance even when the outline blends into a
+                  busy background. */}
+              <div className="absolute -top-px -left-px w-5 h-5 border-t-2 border-l-2 border-white/80 rounded-tl-md" />
+              <div className="absolute -top-px -right-px w-5 h-5 border-t-2 border-r-2 border-white/80 rounded-tr-md" />
+              <div className="absolute -bottom-px -left-px w-5 h-5 border-b-2 border-l-2 border-white/80 rounded-bl-md" />
+              <div className="absolute -bottom-px -right-px w-5 h-5 border-b-2 border-r-2 border-white/80 rounded-br-md" />
+            </div>
+          </div>
+        )}
+
         {!inPreview && (
           <div
             className="absolute left-0 right-0 top-2 text-center text-white text-xs px-4 z-10 drop-shadow pointer-events-none"
           >
             {focusing
               ? 'Focusing…'
-              : 'Fit the whole card in frame · tap to focus'}
+              : 'Align card inside the guide · tap to focus'}
           </div>
         )}
 
