@@ -3,16 +3,21 @@
 // UX goals (per PR F-1):
 // - No fixed card-shaped overlay to line up against. Shooter sees a plain
 //   full-frame viewfinder and taps the shutter whenever they're ready.
-// - After the shutter, we POST the frame to /api/vision/detect-card-quad,
-//   which asks a VLM to return the card's 4 corners. We then perspective-warp
-//   the photo to a clean 2.5:3.5 rectangle client-side and show that as the
-//   preview. User can Retake or Use.
-// - If detection fails (no card visible, parse error, timeout), we fall back
-//   to the original uncropped photo and surface a small "couldn't auto-crop"
-//   hint — the user can still Use the photo, which preserves the old behavior.
+// - After the shutter, we run classical CV edge detection (OpenCV.js) on the
+//   photo to find the actual pixels where the card ends. This is the
+//   Google-Lens approach: Canny → findContours → largest quad → minAreaRect.
+//   If OpenCV fails (couldn't load, no contour found), we fall back to the
+//   server-side VLM quad detector, then fall back to the uncropped photo.
+// - We then perspective-warp the photo to a clean rectangle client-side and
+//   show that as the preview. User can Retake or Use.
+// - OpenCV.js (~8MB WASM) is lazy-loaded on camera open so the runtime is
+//   already warm by the time the user taps the shutter.
 //
 // This replaces the previous "line up inside brackets + hard-crop the overlay
 // rect" flow, which was frustrating for dealers bulk-scanning a box of cards.
+// It also replaces the VLM-primary detection from PRs #49-52, which kept
+// failing on patterned cards in novel ways because an LLM doesn't actually
+// see pixel edges — it guesses at coordinates.
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
@@ -23,6 +28,10 @@ import {
   renderQuadDebugOverlay,
   type NormalizedQuad,
 } from '@/lib/cardQuadCrop';
+import {
+  detectCardQuadWithCV,
+  ensureOpenCVReady,
+} from '@/lib/openCVDetect';
 
 interface CardCameraCaptureProps {
   open: boolean;
@@ -216,6 +225,12 @@ export default function CardCameraCapture({
   // Run quad detection on a raw image, then warp it to a clean rectangle.
   // Sets `croppedImage` on success, or marks detection as failed (the user
   // can still accept the raw image with a single tap).
+  //
+  // Detection order:
+  //   1. OpenCV.js Canny+contour on-device (pixel-accurate, ~50ms warm)
+  //   2. Server VLM (Haiku) — handles cases where the card edge is too
+  //      low-contrast against the background for Canny to find it
+  //   3. Fall back to uncropped photo + amber toast
   const runDetectAndCrop = useCallback(async (raw: string) => {
     setDetecting(true);
     setDetectionFailed(false);
@@ -230,16 +245,41 @@ export default function CardCameraCapture({
     detectAbortRef.current = ac;
 
     let quad: NormalizedQuad | null = null;
+    let detectSource: 'opencv' | 'vlm' | null = null;
+
+    // --- Step 1: OpenCV.js on-device detection ---
     try {
-      const result = await detectCardQuad(raw, { signal: ac.signal });
-      if (result.ok) {
-        quad = result.quad;
+      const cvStart = performance.now();
+      const cvQuad = await detectCardQuadWithCV(raw);
+      if (ac.signal.aborted) return;
+      if (cvQuad) {
+        quad = cvQuad;
+        detectSource = 'opencv';
+        console.log('[CardCameraCapture] OpenCV detected quad', {
+          latencyMs: Math.round(performance.now() - cvStart),
+          quad: cvQuad,
+        });
       } else {
-        setDetectReason(result.reason);
+        console.log('[CardCameraCapture] OpenCV found no quad, trying VLM');
       }
     } catch (err) {
-      if ((err as any)?.name !== 'AbortError') {
-        console.warn('[CardCameraCapture] detect error', err);
+      console.warn('[CardCameraCapture] OpenCV detect threw', err);
+    }
+
+    // --- Step 2: VLM fallback if OpenCV came up empty ---
+    if (!quad) {
+      try {
+        const result = await detectCardQuad(raw, { signal: ac.signal });
+        if (result.ok) {
+          quad = result.quad;
+          detectSource = 'vlm';
+        } else {
+          setDetectReason(result.reason);
+        }
+      } catch (err) {
+        if ((err as any)?.name !== 'AbortError') {
+          console.warn('[CardCameraCapture] VLM detect error', err);
+        }
       }
     }
 
@@ -250,6 +290,8 @@ export default function CardCameraCapture({
       setDetecting(false);
       return;
     }
+    // Log which detector we're crediting — handy for field triage.
+    console.log('[CardCameraCapture] using quad from', detectSource);
 
     try {
       // Render both the warped crop AND the debug overlay concurrently —
@@ -301,6 +343,12 @@ export default function CardCameraCapture({
       return;
     }
     startStream();
+    // Pre-warm OpenCV.js so the WASM is ready by the time the user taps the
+    // shutter. First call fetches the ~8MB script from CDN; subsequent calls
+    // (same session or cached) are near-instant.
+    ensureOpenCVReady().catch((err) => {
+      console.warn('[CardCameraCapture] OpenCV pre-warm failed', err);
+    });
     const onVisible = () => {
       if (document.visibilityState === 'visible') {
         if (!isStreamLive(sharedStream)) killSharedStream();
