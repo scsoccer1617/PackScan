@@ -72,11 +72,31 @@ export function buildSearchQuery(input: ScanQueryInput): string {
   if (input.playerName) parts.push(input.playerName.trim());
   if (input.year) parts.push(String(input.year));
   if (input.brand) parts.push(input.brand.trim());
-  // Prefer the more specific sub-set when both are present. SCP's
-  // console-name contains the full concatenation ("Baseball Cards 2023
-  // Topps Chrome") so listing both usually over-constrains.
-  const setTerm = (input.setName?.trim() || input.collection?.trim() || "").trim();
-  if (setTerm) parts.push(setTerm);
+  // Include BOTH collection and setName when they contribute different
+  // tokens. SCP console-names are concatenations like
+  // "Baseball Cards 2025 Topps Update All-Star Game", so dropping either
+  // half can route the query to the wrong console. Example that
+  // motivated this: Ohtani ASG-1 has collection="2025 All-Star Game"
+  // and set="Update Series"; using only setName queried the plain
+  // "Topps Update" console and missed every ASG parallel.
+  //
+  // We still dedupe overlapping tokens so "Topps Chrome" (collection)
+  // + "Chrome" (setName) doesn't emit "Topps Chrome Chrome".
+  const collection = input.collection?.trim() || "";
+  const setName = input.setName?.trim() || "";
+  const seen = new Set<string>();
+  const pushUniqueTokens = (src: string) => {
+    for (const tok of src.split(/\s+/)) {
+      const key = tok.toLowerCase();
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      parts.push(tok);
+    }
+  };
+  if (collection) pushUniqueTokens(collection);
+  if (setName && setName.toLowerCase() !== collection.toLowerCase()) {
+    pushUniqueTokens(setName);
+  }
   return parts.filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
 }
 
