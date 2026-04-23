@@ -1114,6 +1114,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     { name: 'frontImage', maxCount: 1 },
     { name: 'backImage', maxCount: 1 }
   ]), async (req, res) => {
+    // ── Scan-wide latency instrumentation ─────────────────────────────────────
+    // Single wall-clock timer around the whole handler so mobile dev-log tailing
+    // always gets one authoritative "scan-total" number no matter which exit
+    // path the response takes (success, empty eBay, eBay error, 400, 500).
+    // Individual phase timers (vision-batch, dual-analyzers, combine-card-
+    // results, holo-claude, ebay-main-search) are started inline below.
+    const scanStart = Date.now();
+    const logScanTotal = (tag: string) => {
+      console.log(`[scan-total] ${tag} took ${Date.now() - scanStart}ms`);
+    };
     try {
       console.log('=== DUAL IMAGE ROUTE CALLED ===');
       console.log('Request received at:', new Date().toISOString());
@@ -1123,6 +1133,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       if (!files || !files.backImage || !files.backImage[0]) {
         console.log('Missing back image - returning error');
+        logScanTotal('400-missing-back');
         return res.status(400).json({ 
           success: false,
           message: 'Back image is required for card analysis',
@@ -1256,7 +1267,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Dual-side analysis now handles rookie card detection automatically
 
+      console.time('holo-claude');
       const holoResolved = await holoPromise;
+      console.timeEnd('holo-claude');
 
       // Cross-check helper: compare Holo's cardNumber/year against OCR's. The
       // back-of-card pipeline reads the copyright line and card# corner via
@@ -1462,6 +1475,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           console.log('Searching eBay with query:', searchQuery);
           
           const playerName = `${cardData.playerFirstName} ${cardData.playerLastName}`.trim();
+          console.time('ebay-main-search');
           const ebayResults = await searchCardValues(
             playerName,
             cardData.cardNumber || '',
@@ -1477,6 +1491,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             undefined,
             cardData.set
           );
+          console.timeEnd('ebay-main-search');
           
           console.log('eBay search results:', ebayResults);
           
@@ -1492,6 +1507,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             updatedCardData.collection = ebayResults.discoveredCollection;
           }
           
+          logScanTotal('ok');
           return res.json({
             success: true,
             data: {
@@ -1502,6 +1518,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           });
         } else {
           console.log('Search query too short, skipping eBay lookup');
+          logScanTotal('ok-query-too-short');
           return res.json({
             success: true,
             data: {
@@ -1520,6 +1537,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       } catch (ebayError) {
         console.error('eBay search error:', ebayError);
+        logScanTotal('ok-ebay-error');
         return res.json({
           success: true,
           data: {
@@ -1539,6 +1557,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     } catch (error: any) {
       console.error('Error in dual-image analysis:', error);
+      logScanTotal('500-handler-error');
       return res.status(500).json({
         success: false,
         message: error.message || 'Dual-image analysis failed',
