@@ -1248,12 +1248,62 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { result: frontResult, ocrText: frontOCRText } = await runFrontSideAnalyzer(normalized);
       console.timeEnd(`preliminary-analyze-${scanId}`);
 
-      const { putPendingScan } = await import('./scanSession');
+      const { putPendingScan, updatePendingScan } = await import('./scanSession');
       putPendingScan(scanId, {
         frontResult,
         frontOCRText,
         frontImageBuffer: normalized,
       });
+
+      // ── F-3b: Speculative SportsCardsPro lookup ─────────────────────────
+      // Most of a successful SCP hit's cost is network latency to the SCP
+      // API (~hundreds of ms). If the front alone gave us enough identity
+      // to form a reasonable query, kick off the lookup NOW so its result
+      // is waiting in the pending entry by the time the user presses "Use
+      // photo" on the back. The main /analyze-card-dual-images handler
+      // will attach any completed result to its response as
+      // `speculativeCatalog`, and the client short-circuits the separate
+      // /api/catalog/match round trip when present.
+      //
+      // Gate: playerName + at least one of (brand | year | cardNumber).
+      // Most flagship cards have brand on the back only, so `year` or
+      // `cardNumber` on the front are the common triggers here.
+      const hasSpecGate =
+        !!frontResult.playerFirstName &&
+        !!frontResult.playerLastName &&
+        (!!frontResult.brand || !!frontResult.year || !!frontResult.cardNumber);
+      if (hasSpecGate) {
+        const userId = (req.user as any)?.id as number | undefined;
+        const specInput: ScpScanQueryInput = {
+          playerName: `${frontResult.playerFirstName} ${frontResult.playerLastName}`.trim(),
+          year: frontResult.year ?? null,
+          brand: frontResult.brand || null,
+          collection: frontResult.collection || null,
+          setName: (frontResult as any).set || null,
+          cardNumber: frontResult.cardNumber || null,
+          parallel: frontResult.foilType || frontResult.variant || null,
+        };
+        // Fire-and-forget. Never await — the preliminary response returns
+        // immediately so the client isn't blocked on SCP latency.
+        (async () => {
+          const specStart = Date.now();
+          try {
+            const specResult = await scpLookupCard(specInput, { userId: userId ?? null });
+            updatePendingScan(scanId, { scpResult: specResult });
+            console.log(
+              `[preliminary-scp-${scanId}] ${specResult.status}` +
+              (specResult.status === 'miss' ? ` (${specResult.reason})` : ` score=${specResult.match.matchScore}`) +
+              ` took ${Date.now() - specStart}ms`,
+            );
+          } catch (err: any) {
+            // Shouldn't happen — scpLookupCard is supposed to never throw —
+            // but belt-and-suspenders since this runs detached.
+            console.warn(`[preliminary-scp-${scanId}] threw unexpectedly:`, err?.message || err);
+          }
+        })();
+      } else {
+        console.log(`[preliminary-scp-${scanId}] skipped — insufficient front fields`);
+      }
 
       logPrelimTotal('ok');
       return res.status(200).json({ success: true });
@@ -1481,6 +1531,62 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // contributes only the grade (attached as `data.holo` below).
       const cardData = backOcrResponse.data;
 
+      // ── F-3b: Surface any speculative SportsCardsPro result ───────────────
+      // The preliminary handler fires an SCP lookup in the background when
+      // the front OCR has enough identity to form a query. By the time the
+      // user finishes capturing the back and the dual upload arrives, that
+      // lookup has typically already resolved. Peek (don't take) the entry
+      // here and forward the result to the client so the ScanResult page
+      // renders SCP pricing immediately without a second /api/catalog/match
+      // round trip. TTL/GC handles eviction — we never consume. On miss or
+      // still-in-flight (no scpResult yet), the client falls through to its
+      // existing fetch path with zero regression.
+      let speculativeCatalog: any = null;
+      const dualScanId: string | undefined =
+        typeof (req.body as any)?.scanId === 'string' ? (req.body as any).scanId : undefined;
+      if (dualScanId) {
+        try {
+          const { peekPendingScan } = await import('./scanSession');
+          const entry = peekPendingScan(dualScanId);
+          if (entry && entry.scpResult) {
+            // Sanity check: only forward a HIT whose player name matches the
+            // final merged cardData. If the back OCR flipped the player (rare
+            // but possible on a misread), the speculative result is stale
+            // and we let the client's fresh lookup run.
+            if (entry.scpResult.status === 'hit') {
+              const specPlayerFirst = (entry.frontResult.playerFirstName || '').toLowerCase();
+              const specPlayerLast = (entry.frontResult.playerLastName || '').toLowerCase();
+              const finalFirst = (cardData.playerFirstName || '').toLowerCase();
+              const finalLast = (cardData.playerLastName || '').toLowerCase();
+              const playerMatches =
+                specPlayerFirst === finalFirst && specPlayerLast === finalLast;
+              if (playerMatches) {
+                speculativeCatalog = entry.scpResult;
+                console.log(
+                  `[scanSession] forwarding speculative SCP hit for scanId=${dualScanId}` +
+                  ` (score ${entry.scpResult.match.matchScore})`,
+                );
+              } else {
+                console.log(
+                  `[scanSession] discarding speculative SCP for scanId=${dualScanId}` +
+                  ` — player identity changed (${specPlayerFirst} ${specPlayerLast} → ${finalFirst} ${finalLast})`,
+                );
+              }
+            } else {
+              // Forward the miss too — saves the client a redundant round
+              // trip for a query we already know SCP can't match.
+              speculativeCatalog = entry.scpResult;
+              console.log(
+                `[scanSession] forwarding speculative SCP miss (${entry.scpResult.reason}) for scanId=${dualScanId}`,
+              );
+            }
+          }
+        } catch (specErr: any) {
+          // Never let a speculative-cache hiccup fail the main scan.
+          console.warn('[scanSession] speculativeCatalog peek failed:', specErr?.message || specErr);
+        }
+      }
+
       console.log('Starting eBay price lookup...');
       
       try {
@@ -1529,6 +1635,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               ...updatedCardData,
               ebayResults: ebayResults,
               holo: holoResolved,
+              speculativeCatalog,
             }
           });
         } else {
@@ -1547,6 +1654,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 dataType: 'sold'
               },
               holo: holoResolved,
+              speculativeCatalog,
             }
           });
         }
@@ -1566,6 +1674,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               dataType: 'sold'
             },
             holo: holoResolved,
+            speculativeCatalog,
           }
         });
       }

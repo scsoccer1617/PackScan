@@ -14,6 +14,7 @@
 // inline) with zero functional regression.
 
 import type { CardFormValues } from '@shared/schema';
+import type { CatalogLookupResult } from './sportscardspro';
 
 export interface PendingScanEntry {
   /** Partial front-side analyzer output (CardFormValues subset). */
@@ -23,6 +24,12 @@ export interface PendingScanEntry {
   /** Rotation-normalized front image buffer — reused as-is by the main
    *  handler so it doesn't re-run `sharp.rotate()` on the same bytes. */
   frontImageBuffer: Buffer;
+  /** F-3b: Speculative SportsCardsPro lookup, fired in background during
+   *  preliminary if the front OCR had enough identifying fields. Populated
+   *  asynchronously via `updatePendingScan` after the preliminary response
+   *  has already returned to the client — consumers must tolerate this
+   *  being `undefined` (lookup still in flight) or a miss result. */
+  scpResult?: CatalogLookupResult | null;
   /** Absolute epoch ms at which this entry becomes invalid. */
   expiresAt: number;
 }
@@ -68,6 +75,26 @@ export function putPendingScan(
     expiresAt: Date.now() + TTL_MS,
   });
   console.log(`[scanSession] stored scanId=${scanId} (${pendingScans.size} pending)`);
+}
+
+/**
+ * Merge a partial patch into an existing pending entry in place. Used by F-3b
+ * to attach the speculative SCP result once its background lookup resolves.
+ * Silent no-op if the entry has already been evicted (TTL, GC, or a retry
+ * minted a new scanId) — the speculative result is purely an optimization.
+ */
+export function updatePendingScan(
+  scanId: string,
+  patch: Partial<Omit<PendingScanEntry, 'expiresAt'>>,
+): void {
+  const entry = pendingScans.get(scanId);
+  if (!entry) return;
+  // Preserve TTL — updating shouldn't extend the window.
+  if (entry.expiresAt <= Date.now()) {
+    pendingScans.delete(scanId);
+    return;
+  }
+  Object.assign(entry, patch);
 }
 
 /**

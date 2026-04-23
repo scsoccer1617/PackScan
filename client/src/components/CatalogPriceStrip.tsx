@@ -65,6 +65,16 @@ interface Props {
   /** Holo's predicted PSA grade integer (1..10) if any \u2014 used to highlight
    *  the matching catalog tier. */
   predictedPsaGrade?: number | null;
+  /**
+   * F-3b: Optional pre-fetched catalog result forwarded by the server on the
+   * main scan response. The server fires SCP speculatively during the
+   * preliminary front-OCR call while the user flips the card, so by the time
+   * this page mounts the lookup has usually resolved. When present we skip
+   * the /api/catalog/match round trip entirely \u2014 rendering SCP pricing
+   * immediately on result-page load. Absent / `null` falls through to the
+   * existing client-side fetch path with zero regression.
+   */
+  speculativeCatalog?: CatalogResponse | null;
 }
 
 function formatPrice(price: number): string {
@@ -88,13 +98,30 @@ function highlightKeyFromPsa(psa: number | null | undefined): string | null {
   return null;
 }
 
-export default function CatalogPriceStrip({ cardData, predictedPsaGrade }: Props) {
-  const [loading, setLoading] = useState(true);
-  const [data, setData] = useState<CatalogResponse | null>(null);
+export default function CatalogPriceStrip({
+  cardData,
+  predictedPsaGrade,
+  speculativeCatalog,
+}: Props) {
+  // F-3b: seed state from the server-forwarded speculative result when present.
+  // This lets the hero render immediately on mount without a skeleton flash,
+  // and skips the client-side /api/catalog/match fetch entirely below.
+  const [loading, setLoading] = useState(!speculativeCatalog);
+  const [data, setData] = useState<CatalogResponse | null>(speculativeCatalog ?? null);
 
   useEffect(() => {
     let cancelled = false;
     const run = async () => {
+      // F-3b: short-circuit \u2014 server already handed us a completed result.
+      // The speculative lookup used the same OCR identity that drives cardData
+      // here, and the server's sanity check already confirmed player identity
+      // matches before forwarding, so this is safe to trust directly.
+      if (speculativeCatalog) {
+        setData(speculativeCatalog);
+        setLoading(false);
+        return;
+      }
+
       setLoading(true);
       // Same gate as GradedPriceBreakdown \u2014 don't even attempt a query
       // we know is too weak to match. Reduces noise in scp_miss_log.
@@ -161,6 +188,7 @@ export default function CatalogPriceStrip({ cardData, predictedPsaGrade }: Props
     (cardData as any).set,
     cardData.foilType,
     cardData.variant,
+    speculativeCatalog,
   ]);
 
   if (loading) {
