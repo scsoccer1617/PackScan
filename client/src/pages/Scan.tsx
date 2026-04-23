@@ -10,12 +10,61 @@
 import { useRef, useState } from "react";
 import { useLocation } from "wouter";
 import SimpleImageUploader from "@/components/SimpleImageUploader";
+import VoiceLookup, { type ExtractedCardFields } from "@/components/VoiceLookup";
 import { useToast } from "@/hooks/use-toast";
 import { useScanFlow } from "@/hooks/use-scan-flow";
 import { compressImage } from "@/lib/scanFlow";
+import type { CardFormValues } from "@shared/schema";
 import type { HoloGrade } from "@/components/HoloGradeCard";
 import { ScanLine, RotateCw } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+// Split a spoken player name into first/last for CardFormValues. Mirrors the
+// server-side splitPlayerName() so the UI preview (if any) and the server
+// agree. Suffixes like Jr/Sr attach to the last name so downstream eBay name
+// handling stays consistent.
+function splitPlayerName(playerName: string | null | undefined): { first: string; last: string } {
+  if (!playerName) return { first: "", last: "" };
+  const tokens = playerName.trim().split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return { first: "", last: "" };
+  if (tokens.length === 1) return { first: tokens[0], last: "" };
+  const suffixRe = /^(jr|sr|ii|iii|iv|v)\.?$/i;
+  const lastToken = tokens[tokens.length - 1];
+  if (suffixRe.test(lastToken) && tokens.length >= 3) {
+    return { first: tokens[0], last: `${tokens[tokens.length - 2]} ${lastToken}` };
+  }
+  return { first: tokens[0], last: tokens.slice(1).join(" ") };
+}
+
+// Map voice-extracted fields onto the CardFormValues shape that the
+// ScanFlow context + /result page already know how to handle. Required
+// fields (playerFirstName/lastName/cardNumber/brand/year) get fallback
+// strings/zero so Zod doesn't blow up downstream; /result's runPostScanFlow
+// handles missing data gracefully by surfacing eBay results with whatever
+// identity it has.
+function fieldsToCardData(fields: ExtractedCardFields): Partial<CardFormValues> {
+  const { first, last } = splitPlayerName(fields.playerName);
+  return {
+    sport: fields.sport || "Baseball",
+    playerFirstName: first,
+    playerLastName: last,
+    brand: fields.brand || "",
+    collection: fields.collection || "",
+    set: fields.setName || fields.collection || "",
+    cardNumber: fields.cardNumber || "",
+    year: fields.year ?? 0,
+    variant: fields.parallel || "",
+    serialNumber: fields.serialNumber || "",
+    notes: fields.notes || "",
+    isNumbered: !!fields.serialNumber,
+    isFoil: false,
+    foilType: null,
+    isRookieCard: false,
+    isAutographed: false,
+    frontImage: "",
+    backImage: "",
+  };
+}
 
 // ── F-3a: preliminary front OCR during card flip ─────────────────────────
 // Generate a fresh scanId per scan session (front shutter → back shutter →
@@ -96,6 +145,22 @@ export default function Scan() {
   const scanIdRef = useRef<string | null>(null);
 
   const ready = !!backImage;
+
+  // Voice lookup handoff — maps extracted fields to CardFormValues, seeds
+  // the ScanFlow context with no images + no Holo grade, and navigates to
+  // /result. The result page's existing runPostScanFlow picks it up and
+  // runs the same SCP + eBay pipeline an image scan would.
+  const handleVoiceConfirm = (fields: ExtractedCardFields) => {
+    reset();
+    scanIdRef.current = null;
+    setAll({
+      frontImage: "",
+      backImage: "",
+      cardData: fieldsToCardData(fields),
+      holoGrade: null,
+    });
+    navigate("/result");
+  };
 
   const handleAnalyze = async () => {
     if (!backImage) {
@@ -179,6 +244,17 @@ export default function Scan() {
           Capture front and back. We'll analyze, grade and pull comps in
           seconds.
         </p>
+      </div>
+
+      <div className="px-4">
+        <VoiceLookup onConfirm={handleVoiceConfirm} disabled={analyzing} />
+        <div className="mt-2 flex items-center gap-3">
+          <div className="h-px bg-slate-200 flex-1" />
+          <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">
+            Or scan
+          </span>
+          <div className="h-px bg-slate-200 flex-1" />
+        </div>
       </div>
 
       <div className="px-4 grid grid-cols-2 gap-3">

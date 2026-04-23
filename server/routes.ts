@@ -1203,6 +1203,68 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ── Voice Lookup: transcribe + extract structured card fields ─────────────
+  // Public endpoint — user speaks a card ("2025 Topps Series One Nolan
+  // Arenado card number 193 pink green polka dots"), we send the audio to
+  // Gemini 2.5 Flash which transcribes and returns a structured
+  // ExtractedCardFields object. The client renders those fields in a
+  // confirm sheet, then maps them into the existing ScanFlow cardData and
+  // navigates to /result where runPostScanFlow handles SCP + eBay. No
+  // image pipeline, no Holo grading — just identity → price.
+  //
+  // The endpoint never throws a 5xx; errors come back as
+  // { success: false, reason, message } so the client can show a friendly
+  // toast. Multer accepts any mimetype here (audio/webm, audio/mp4, etc.)
+  // and voiceLookup.ts guards against non-audio uploads.
+  app.post(
+    `${apiPrefix}/voice-lookup/extract`,
+    upload.single('audio'),
+    async (req, res) => {
+      const voiceStart = Date.now();
+      try {
+        const file = (req as any).file as Express.Multer.File | undefined;
+        if (!file) {
+          return res
+            .status(200)
+            .json({ success: false, reason: 'missing_audio', message: 'No audio file was uploaded.' });
+        }
+        // Size guard — 15s of compressed audio should be well under 2MB.
+        // The multer limit is 60MB for image uploads, so this is our own
+        // tighter check for the audio surface.
+        if (file.size > 10 * 1024 * 1024) {
+          return res
+            .status(200)
+            .json({
+              success: false,
+              reason: 'file_too_large',
+              message: 'Audio clip is too large. Try a shorter recording.',
+            });
+        }
+        const { extractCardFromAudio } = await import('./voiceLookup');
+        const result = await extractCardFromAudio(file.buffer, file.mimetype || 'audio/webm');
+        console.log(
+          `[voice-lookup] extract ${result.status} in ${Date.now() - voiceStart}ms` +
+            (result.status === 'error' ? ` (${result.reason})` : ''),
+        );
+        if (result.status === 'ok') {
+          return res
+            .status(200)
+            .json({ success: true, transcript: result.transcript, fields: result.fields });
+        }
+        return res
+          .status(200)
+          .json({ success: false, reason: result.reason, message: result.message });
+      } catch (err) {
+        console.error('[voice-lookup] unhandled error:', err);
+        return res.status(200).json({
+          success: false,
+          reason: 'internal_error',
+          message: 'Voice lookup failed. Please try again.',
+        });
+      }
+    },
+  );
+
   // ── F-3a: Preliminary front-side scan ─────────────────────────────────────
   // Fires from the client on front shutter (before the user flips the card).
   // Runs Google Vision OCR + the dynamic card analyzer on the front image
