@@ -1895,7 +1895,21 @@ async function combineCardResults(
           } else if (colorMatchFound) {
             combined.foilType = null;
             combined.isFoil = false;
-            console.log(`[FoilDB] Visual foil "${visualFoilResult.foilType}" color exists in DB but not vivid enough (avgSat=${avgSaturation} < 90, strongIndicators=${hasStrongIndicators}) — rejecting as false positive`);
+            // Not vivid + no strong indicators → don't auto-apply the detected
+            // colour as the parallel, but the detector DID see enough to name a
+            // colour that maps to a known parallel for this set. That's too
+            // much signal to silently discard — surface a colour-filtered
+            // picker so the user can confirm or override, same as the
+            // no-corroboration branch above. (PR F-2b: Petersen scan surfaced
+            // as "no parallel" even though the detector returned Purple Foil
+            // at 0.60 confidence because this branch dropped the hint.)
+            if (visualFoilResult.confidence >= 0.55) {
+              (combined as any).parallelSuspected = true;
+              (combined as any).suggestedColor = visualFoilResult.foilType;
+              console.log(`[FoilDB] Visual foil "${visualFoilResult.foilType}" color exists in DB but not vivid enough (avgSat=${avgSaturation} < 90, strongIndicators=${hasStrongIndicators}) — not auto-applying, but flagging parallelSuspected + suggestedColor="${visualFoilResult.foilType}" (confidence ${visualFoilResult.confidence.toFixed(2)} ≥ 0.55) so UI can show a colour-filtered picker.`);
+            } else {
+              console.log(`[FoilDB] Visual foil "${visualFoilResult.foilType}" color exists in DB but not vivid enough (avgSat=${avgSaturation} < 90, strongIndicators=${hasStrongIndicators}) — rejecting as false positive`);
+            }
           } else {
             combined.foilType = null;
             combined.isFoil = false;
@@ -1927,7 +1941,17 @@ async function combineCardResults(
           } else {
             combined.foilType = null;
             combined.isFoil = false;
-            console.log(`[FoilDB] No DB variations for ${brand} ${year} "${collection}" — rejecting visual foil (confidence ${visualFoilResult.confidence.toFixed(2)} < ${HIGH_CONFIDENCE_THRESHOLD}): ${visualFoilResult.foilType}`);
+            // Even without auto-applying, a mid-confidence colour call is
+            // worth surfacing so the user can pick from SCP's catalog filtered
+            // to that colour family. (PR F-2b: same rationale as the
+            // colorMatchFound-but-not-vivid branch above.)
+            if (visualFoilResult.confidence >= 0.55) {
+              (combined as any).parallelSuspected = true;
+              (combined as any).suggestedColor = visualFoilResult.foilType;
+              console.log(`[FoilDB] No DB variations for ${brand} ${year} "${collection}" — not auto-applying visual foil (confidence ${visualFoilResult.confidence.toFixed(2)} < ${HIGH_CONFIDENCE_THRESHOLD}), but flagging parallelSuspected + suggestedColor="${visualFoilResult.foilType}" (≥ 0.55) so UI can show a colour-filtered picker.`);
+            } else {
+              console.log(`[FoilDB] No DB variations for ${brand} ${year} "${collection}" — rejecting visual foil (confidence ${visualFoilResult.confidence.toFixed(2)} < ${HIGH_CONFIDENCE_THRESHOLD}): ${visualFoilResult.foilType}`);
+            }
           }
         }
       } else {
