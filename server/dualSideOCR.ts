@@ -3,10 +3,11 @@ import sharp from 'sharp';
 import { CardFormValues } from '@shared/schema';
 import { analyzeSportsCardImage, extractAllYearCandidates } from './dynamicCardAnalyzer';
 import { lookupCard } from './cardDatabaseService';
+import { extractProductLine } from './productLineExtractor';
 import { batchExtractTextFromImages, clearOcrCache } from './googleVisionFetch';
 import { db } from '@db';
 import { cardVariations, cardDatabase } from '@shared/schema';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, sql, inArray } from 'drizzle-orm';
 
 // Internal year-confidence flags attached to per-side and combined OCR
 // results so the dual-side combiner and downstream lookup loop can reason
@@ -944,8 +945,42 @@ async function combineCardResults(
       console.log('Detected collection from fragmented OCR text: 35th Anniversary');
     }
   }
-  
-  
+
+  // ── Product-line extractor ────────────────────────────────────────────
+  // Authoritative source for cardData.set. Reads the back-of-card
+  // copyright line ("2020 PANINI - ORIGINS FOOTBALL") and the front
+  // wordmark against a whitelist of current Panini/Topps/Bowman/UD
+  // product lines. This fires BEFORE the DB lookup so the DB gets a
+  // correctly-scoped brand+set when possible, and fires regardless of
+  // whether OCR/Holo already guessed a set — if the back copyright line
+  // resolves, it overrides, because that line is the most reliable
+  // on-card identifier.
+  {
+    const productLine = extractProductLine(frontOCRText, backOCRText, combined.brand);
+    if (productLine) {
+      const isBackCopyright = productLine.source === 'back-copyright';
+      const oldSet = combined.set;
+      const oldBrand = combined.brand;
+      // Back copyright line overrides; front/back wordmark only fills when empty.
+      if (isBackCopyright || !combined.set) {
+        combined.set = productLine.productLine;
+      }
+      // Brand: only fill when empty — OCR's brand read is usually fine.
+      if (!combined.brand) {
+        combined.brand = productLine.brand;
+      }
+      console.log(`[ProductLine] ${productLine.source} → brand="${productLine.brand}" product="${productLine.productLine}" (evidence: "${productLine.evidence}")`);
+      if (oldSet && oldSet !== combined.set) {
+        console.log(`[ProductLine] Overrode prior set "${oldSet}" → "${combined.set}" (back copyright line is authoritative).`);
+      }
+      if (oldBrand !== combined.brand) {
+        console.log(`[ProductLine] Filled brand "${oldBrand || '(empty)'}" → "${combined.brand}".`);
+      }
+    } else {
+      console.log('[ProductLine] No match from back copyright line, front wordmark, or back wordmark scan.');
+    }
+  }
+
   // Handle other fields with no specific priority
   const otherFields: (keyof CardFormValues)[] = [
     'condition', 'estimatedValue', 'isAutographed', 'isNumbered', 'notes'
@@ -1585,7 +1620,7 @@ async function combineCardResults(
               .from(cardDatabase)
               .where(and(
                 sql`lower(${cardDatabase.brand}) = ${brandLower}`,
-                sql`${cardDatabase.year} = ANY(${uniqueYears})`,
+                inArray(cardDatabase.year, uniqueYears),
                 sql`lower(${cardDatabase.playerName}) LIKE ${'%' + fs + '%'}`,
               ))
               .limit(10);

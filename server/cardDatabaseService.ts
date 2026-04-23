@@ -9,7 +9,7 @@
 
 import { db } from '../db';
 import { cardDatabase, cardVariations } from '../shared/schema';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, sql, inArray } from 'drizzle-orm';
 import { parse } from 'csv-parse/sync';
 import { parse as parseStream } from 'csv-parse';
 import { readFileSync, existsSync } from 'fs';
@@ -347,6 +347,14 @@ export async function lookupCard(input: CardLookupInput): Promise<CardLookupResu
     // Match on brand (fuzzy), year, and card number. Collection is optional
     // since OCR sometimes misreads or misses collection names.
 
+    // Loosen separator/whitespace variants for LL-LL autograph / insert
+    // codes so OCR reads of "RA-JE" / "RA JE" / "RAJE" all resolve to the
+    // same DB row. Pure numeric numbers are not loosened.
+    const cardNumVariants = cardNumberVariants(cardNumNorm);
+    if (cardNumVariants.length > 1) {
+      console.log(`[CardDB] Loosening card# "${cardNumNorm}" → trying variants [${cardNumVariants.join(', ')}]`);
+    }
+
     let cardRows = await db
       .select()
       .from(cardDatabase)
@@ -354,7 +362,10 @@ export async function lookupCard(input: CardLookupInput): Promise<CardLookupResu
         and(
           sql`lower(${cardDatabase.brand}) = lower(${brandNorm})`,
           eq(cardDatabase.year, year),
-          sql`lower(${cardDatabase.cardNumberRaw}) = lower(${cardNumNorm})`
+          inArray(
+            sql`lower(${cardDatabase.cardNumberRaw})`,
+            cardNumVariants.map(v => v.toLowerCase())
+          )
         )
       )
       .limit(200);
@@ -383,7 +394,10 @@ export async function lookupCard(input: CardLookupInput): Promise<CardLookupResu
           and(
             sql`lower(${cardDatabase.brand}) = lower(${brandNorm})`,
             eq(cardDatabase.year, shifted),
-            sql`lower(${cardDatabase.cardNumberRaw}) = lower(${cardNumNorm})`
+            inArray(
+              sql`lower(${cardDatabase.cardNumberRaw})`,
+              cardNumVariants.map(v => v.toLowerCase())
+            )
           )
         )
         .limit(10);
@@ -726,8 +740,18 @@ export async function lookupCard(input: CardLookupInput): Promise<CardLookupResu
     // in card_database for this brand+year and let the OCR-text vocabulary
     // tiebreak (further down) pick the correct collection/set (e.g. the
     // back text "PANINI-REVOLUTION" disambiguates Revolution from Prizm).
+    // Recognise autograph/insert card-number shapes across separator
+    // variants: "RA-JE", "RA JE", "RAJE", "EZA-JHT", etc. The regex below
+    // checks the original OCR form; `cardNumVariants` (computed above)
+    // expanded it to every separator-equivalent form.
+    const looksLikeAutoCode =
+      /^[A-Z]+(?:[\s\-._]+[A-Z0-9]+)+$/i.test(cardNumNorm) ||
+      // No-separator run of letters that's too long to be a jersey or
+      // base card number (e.g. "RAJE" ← "RA JE", "EZAJHT" ← "EZA-JHT")
+      // but not a full word. Guard: 3–8 letters, all caps, no digits.
+      /^[A-Z]{3,8}$/i.test(cardNumNorm);
     let autographFallbackUsed = false;
-    if (cardRows.length === 0 && playerLastName && /^[A-Z]+(?:-[A-Z]+)+$/i.test(cardNumNorm)) {
+    if (cardRows.length === 0 && playerLastName && looksLikeAutoCode) {
       const lastNameNorm = playerLastName.trim().toLowerCase();
       if (lastNameNorm.length >= 2) {
         const playerRows = await db
@@ -784,13 +808,23 @@ export async function lookupCard(input: CardLookupInput): Promise<CardLookupResu
     const resolvedSet = cardRow.set || variationResult.picked?.set || undefined;
 
     // When the autograph-parallel fallback was used, the matched DB row is
-    // the player's *base* card (e.g. Revolution #46) — used only to discover
-    // the right collection/set/team. The card number actually printed on the
-    // card is the autograph code we OCR'd (e.g. EZA-JHT), so preserve it
-    // rather than overwriting with the base row's card number.
+    // the player's *base* card (e.g. Revolution #46) — but we cannot trust
+    // its set/collection as authoritative for the card we actually scanned.
+    // The card number the OCR read (e.g. RA-JE, EZA-JHT) is a parallel /
+    // insert code that does not appear in the base catalog, so the row we
+    // picked is just "some card this player appears on for this brand+year".
+    // Injecting that row's set/collection into the final cardData is what
+    // caused the 2020 Panini Origins Jacob Eason card to be mis-identified
+    // as 2020 Panini Prizm.
+    //
+    // Aggressive rule: in the autograph fallback, preserve the OCR card
+    // number and emit the player/team/rookie data for identity validation,
+    // but DO NOT emit collection/set/variation from the unmatched row.
+    // Holo + the front-wordmark product-line extractor own set/collection
+    // in this path.
     const resolvedCardNumber = autographFallbackUsed ? cardNumNorm : cardRow.cardNumberRaw;
     if (autographFallbackUsed) {
-      console.log(`[CardDB] Autograph-parallel fallback: preserving OCR'd card number "${cardNumNorm}" instead of base row #${cardRow.cardNumberRaw}`);
+      console.log(`[CardDB] Autograph-parallel fallback: preserving OCR'd card number "${cardNumNorm}" and NOT injecting set/collection from unmatched row (was "${cardRow.set || cardRow.collection}").`);
     }
 
     return {
@@ -798,12 +832,12 @@ export async function lookupCard(input: CardLookupInput): Promise<CardLookupResu
       playerFirstName: firstName,
       playerLastName: lastName,
       team: cardRow.team || undefined,
-      collection: cardRow.collection,
-      set: resolvedSet || undefined,
+      collection: autographFallbackUsed ? undefined : cardRow.collection,
+      set: autographFallbackUsed ? undefined : (resolvedSet || undefined),
       cardNumber: resolvedCardNumber,
-      variation: variationResult.picked?.variationOrParallel,
-      variationOptions: variationResult.options,
-      variationAmbiguous: variationResult.ambiguous,
+      variation: autographFallbackUsed ? undefined : variationResult.picked?.variationOrParallel,
+      variationOptions: autographFallbackUsed ? undefined : variationResult.options,
+      variationAmbiguous: autographFallbackUsed ? undefined : variationResult.ambiguous,
       serialNumber: variationResult.picked?.serialNumber || serialNumber,
       isRookieCard,
       brand: cardRow.brand,
@@ -1033,6 +1067,32 @@ function normalizeBrand(brand: string): string {
 
 function normalizeCardNumber(num: string): string {
   return num.trim().replace(/^#/, '');
+}
+
+/**
+ * For autograph / insert card numbers in LL-LL form (e.g. "RA-JE",
+ * "EZA-JHT", "BDC-12"), OCR often reads them with different separators
+ * depending on kerning and foil: "RA-JE", "RA JE", "RAJE", "RA.JE".
+ * Return every equivalent form so the lookup can try each. When the input
+ * does not contain a separator-joined alphanumeric pair, returns [input].
+ */
+function cardNumberVariants(raw: string): string[] {
+  const norm = raw.trim();
+  if (!norm) return [];
+  // Extract letter/digit groups separated by [- . _ space]
+  const groups = norm.split(/[\s\-._\u2013\u2014]+/).filter(Boolean);
+  if (groups.length < 2) return [norm];
+  // Only loosen when at least one group is letters-only (the autograph /
+  // insert pattern). Purely-numeric card numbers like "12-34" are real and
+  // shouldn't be collapsed.
+  const hasLetters = groups.some(g => /^[A-Za-z]+$/.test(g));
+  if (!hasLetters) return [norm];
+  const variants = new Set<string>();
+  variants.add(norm);
+  variants.add(groups.join('-'));
+  variants.add(groups.join(' '));
+  variants.add(groups.join(''));
+  return Array.from(variants);
 }
 
 function normalizeSerial(raw: string): string | null {
