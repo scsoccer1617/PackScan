@@ -784,7 +784,31 @@ export async function searchCardValues(
     };
 
     try {
-      results = await callSearchWithFallback(keywords);
+      // ── Waterfall, parallelized ─────────────────────────────────────────────
+      // Previous behavior: pass1 → (if empty) pass2a → (if empty) pass2b →
+      // (if empty) pass3, strictly serial. That put most zero-hit scans on
+      // the hook for 3–4 eBay round-trips back-to-back.
+      //
+      // Since the eBay Browse API bills per-call (not per-byte), there's no
+      // cost to speculatively firing pass1 AND pass2b together and then
+      // picking whichever came back useful. This saves ~1–2s on every scan
+      // where pass1 would have zeroed out — which is the common case for
+      // modern rookies, inserts, and anything whose card# format differs
+      // from how eBay sellers write it.
+      //
+      // Pass2a (foil color-only) is still conditional on the variant having
+      // a distinct color keyword, so we keep that inline after pass1 rather
+      // than pre-firing it. Pass3 (no-negatives broadest) stays strictly
+      // last-resort — it tends to return noisy/off-card matches that we
+      // don't want to prefer over a clean empty result.
+      const broaderKeywords = buildKeywords({ includeCardNumber: false, includeVariant: false, includeSerial: false });
+      const canFireBroader = !!broaderKeywords && broaderKeywords !== keywords;
+
+      const [pass1Results, broaderResults] = await Promise.all([
+        callSearchWithFallback(keywords),
+        canFireBroader ? callSearchWithFallback(broaderKeywords) : Promise.resolve([] as EbaySearchResult[]),
+      ]);
+      results = pass1Results;
 
       if (results.length === 0 && !isBaseCard && foilColorKeyword && foilColorKeyword.toLowerCase() !== variantKeyword.toLowerCase()) {
         // Pass 2a (parallel only): full foil name had no results → try just the color keyword
@@ -796,13 +820,11 @@ export async function searchCardValues(
         }
       }
 
-      if (results.length === 0) {
-        // Pass 2b: broader query — drop card number, variant, serial (keep negatives)
-        const broaderKeywords = buildKeywords({ includeCardNumber: false, includeVariant: false, includeSerial: false });
-        if (broaderKeywords && broaderKeywords !== keywords) {
-          results = await callSearchWithFallback(broaderKeywords);
-          console.log(`Search (broader query) returned ${results.length} results`);
-        }
+      if (results.length === 0 && canFireBroader) {
+        // Pass 2b (pre-fired): broader query — drop card number, variant, serial (keep negatives).
+        // Already executed in parallel with pass1, so no extra latency here.
+        results = broaderResults;
+        console.log(`Search (broader query, parallel) returned ${results.length} results`);
       }
 
       if (results.length === 0) {

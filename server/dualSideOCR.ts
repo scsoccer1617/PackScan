@@ -243,7 +243,9 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
       if (frontImage) batchImages.push({ base64: frontImage.buffer.toString('base64'), label: 'front' });
       if (backImage)  batchImages.push({ base64: backImage.buffer.toString('base64'),  label: 'back'  });
       if (batchImages.length > 0) {
+        console.time('vision-batch');
         await batchExtractTextFromImages(batchImages);
+        console.timeEnd('vision-batch');
       }
     } catch (batchErr: any) {
       // Non-fatal: downstream calls will fall back to individual Vision requests
@@ -326,7 +328,9 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
       console.log('About to call combineCardResults...');
       console.log('Front result before combine:', JSON.stringify(frontResult, null, 2));
       console.log('Back result before combine:', JSON.stringify(backResult, null, 2));
+      console.time('combine-card-results');
       combinedResult = await combineCardResults(frontResult, backResult, frontOCRText, backOCRText, frontImage?.buffer, backImage?.buffer);
+      console.timeEnd('combine-card-results');
       console.log('combineCardResults completed. Result:', JSON.stringify(combinedResult, null, 2));
     } catch (error) {
       console.error('Error in combineCardResults:', error);
