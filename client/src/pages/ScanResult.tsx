@@ -195,12 +195,22 @@ export default function ScanResult() {
   // wants to open the confirm card becomes a no-op after the user has
   // already answered Yes/No. Critical because fetchParallels is async
   // and may resolve after the user has tapped.
-  const requestShowParallelConfirm = (value: boolean) => {
+  //
+  // Returns true when the caller should STOP (confirm was shown) and
+  // false when the caller should fall through (confirm was suppressed
+  // because the user already decided). Without a return value, every
+  // branch that calls this and returns early leaves the flow stuck —
+  // showPriceResults never flips to true, and the UI sits on
+  // "Looking up pricing…" forever. See Alex Vesia Rainbow→Diamante Foil
+  // repro where the second pass of runPostScanFlow hit STEP 2's ">=2"
+  // branch, tried to re-prompt, got suppressed, and never priced.
+  const requestShowParallelConfirm = (value: boolean): boolean => {
     if (value && parallelDecidedRef.current) {
       console.log("[ScanResult] skip re-prompt, user already decided");
-      return;
+      return false;
     }
     setShowParallelConfirm(value);
+    return value;
   };
 
   const runPostScanFlow = async (data: Partial<CardFormValues>) => {
@@ -278,18 +288,22 @@ export default function ScanResult() {
           if (narrowed.length >= 2) {
             setParallelOptions(mergePreferringPrimary(narrowed, bySerial));
             setDetectedKeyword(extractKeyword(detected));
-            requestShowParallelConfirm(true);
+            if (requestShowParallelConfirm(true)) return;
+            // User already decided — price with what we have.
+            setShowPriceResults(true);
             return;
           }
           setParallelOptions(bySerial);
           setDetectedKeyword(extractKeyword(detected));
-          requestShowParallelConfirm(true);
+          if (requestShowParallelConfirm(true)) return;
+          setShowPriceResults(true);
           return;
         }
         if (bySerial.length >= 2) {
           setParallelOptions(bySerial);
           setDetectedKeyword("");
-          requestShowParallelConfirm(true);
+          if (requestShowParallelConfirm(true)) return;
+          setShowPriceResults(true);
           return;
         }
       }
@@ -312,14 +326,16 @@ export default function ScanResult() {
         }
         setParallelOptions(mergePreferringPrimary(filtered, allForStatus));
         setDetectedKeyword(extractKeyword(detected));
-        requestShowParallelConfirm(true);
+        if (requestShowParallelConfirm(true)) return;
+        setShowPriceResults(true);
         return;
       }
       if (filtered.length >= 2) {
         const allForStatus = filterBySerialStatus(allOptions, !!detectedSerial && !!data.isNumbered);
         setParallelOptions(mergePreferringPrimary(filtered, allForStatus));
         setDetectedKeyword(extractKeyword(detected));
-        requestShowParallelConfirm(true);
+        if (requestShowParallelConfirm(true)) return;
+        setShowPriceResults(true);
         return;
       }
 
@@ -329,7 +345,8 @@ export default function ScanResult() {
         if (allForStatus.length >= 2) {
           setParallelOptions(allForStatus);
           setDetectedKeyword(extractKeyword(detected));
-          requestShowParallelConfirm(true);
+          if (requestShowParallelConfirm(true)) return;
+          setShowPriceResults(true);
           return;
         }
       }
@@ -340,7 +357,8 @@ export default function ScanResult() {
         if (allForStatus.length >= 1) {
           setParallelOptions(allForStatus);
           setDetectedKeyword("");
-          requestShowParallelConfirm(true);
+          if (requestShowParallelConfirm(true)) return;
+          setShowPriceResults(true);
           return;
         }
       }
