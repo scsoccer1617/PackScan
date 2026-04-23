@@ -146,9 +146,14 @@ function loadImage(src: string): Promise<HTMLImageElement> {
 export async function detectCardQuadWithCV(
   sourceImage: string,
 ): Promise<NormalizedQuad | null> {
+  const t0 = performance.now();
   let cv: any;
   try {
+    console.log("[openCVDetect] ensuring OpenCV.js ready…");
     cv = await ensureOpenCVReady();
+    console.log("[openCVDetect] OpenCV.js ready", {
+      latencyMs: Math.round(performance.now() - t0),
+    });
   } catch (err) {
     console.warn("[openCVDetect] OpenCV.js unavailable:", err);
     return null;
@@ -189,11 +194,15 @@ export async function detectCardQuadWithCV(
   const hierarchy = new cv.Mat();
 
   try {
+    const pipeStart = performance.now();
     cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
     // 5x5 Gaussian to kill polka-dot / glitter / rainbow-foil high-frequency
     // pattern noise that would otherwise dominate the edge map.
     cv.GaussianBlur(gray, blurred, new cv.Size(5, 5), 0, 0, cv.BORDER_DEFAULT);
     cv.Canny(blurred, edges, 50, 150, 3, false);
+    console.log("[openCVDetect] Canny done", {
+      latencyMs: Math.round(performance.now() - pipeStart),
+    });
     // Single 3x3 dilation closes small gaps in the card border without
     // merging nearby unrelated edges.
     const kernel = cv.Mat.ones(3, 3, cv.CV_8U);
@@ -207,6 +216,9 @@ export async function detectCardQuadWithCV(
       cv.RETR_EXTERNAL,
       cv.CHAIN_APPROX_SIMPLE,
     );
+    console.log("[openCVDetect] findContours done", {
+      contourCount: contours.size(),
+    });
 
     const imageArea = w * h;
     let bestQuad: {
