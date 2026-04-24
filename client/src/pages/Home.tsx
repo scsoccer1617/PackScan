@@ -1,7 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
-import { Camera, Search, ArrowRight, TrendingUp, Sparkles } from "lucide-react";
+import { Camera, Mic, PenLine, ArrowRight, TrendingUp } from "lucide-react";
 import { cn } from "@/lib/utils";
+import ModeTile from "@/components/ModeTile";
 
 /**
  * Redesigned Home — the collector's dashboard.
@@ -135,43 +136,31 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Primary CTAs — scan is the hero action (2:1 split) */}
-      <section className="mx-4 grid grid-cols-3 gap-3">
-        <Link
+      {/* Primary CTAs — three equal tiles: Scan (photos), Voice (speak it),
+          Manual (type it). Scan is the hero and uses the foil treatment. */}
+      <section className="mx-4 grid grid-cols-3 gap-2.5">
+        <ModeTile
           href="/scan"
-          className="col-span-2 rounded-2xl bg-foil text-white p-4 relative overflow-hidden foil-shimmer grade-halo"
-          data-testid="button-scan"
-        >
-          <div className="relative z-10 flex flex-col gap-3 h-full">
-            <div className="flex items-center gap-2">
-              <span className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center">
-                <Camera className="w-5 h-5" strokeWidth={2.25} />
-              </span>
-              <Sparkles className="w-4 h-4 text-white/80" />
-            </div>
-            <div>
-              <p className="font-display text-lg font-semibold leading-tight">
-                Scan a card
-              </p>
-              <p className="text-white/80 text-xs mt-0.5">
-                Identify · Grade · Price in one shot
-              </p>
-            </div>
-          </div>
-        </Link>
-        <Link
-          href="/search"
-          className="rounded-2xl bg-white border border-card-border p-4 hover:bg-muted flex flex-col gap-3 justify-between transition-colors"
-          data-testid="button-manual"
-        >
-          <span className="w-10 h-10 rounded-full bg-muted flex items-center justify-center text-ink">
-            <Search className="w-5 h-5" strokeWidth={2} />
-          </span>
-          <div>
-            <p className="font-semibold text-sm leading-tight text-ink">Manual lookup</p>
-            <p className="text-slate-500 text-xs mt-0.5">Type it in</p>
-          </div>
-        </Link>
+          icon={<Camera className="w-5 h-5" strokeWidth={2.25} />}
+          label="Scan"
+          hint="Front & back"
+          primary
+          testId="tile-scan"
+        />
+        <ModeTile
+          href="/scan?mode=voice"
+          icon={<Mic className="w-5 h-5" strokeWidth={2} />}
+          label="Voice"
+          hint="Speak it"
+          testId="tile-voice"
+        />
+        <ModeTile
+          href="/add-card"
+          icon={<PenLine className="w-5 h-5" strokeWidth={2} />}
+          label="Manual"
+          hint="Type it"
+          testId="tile-manual"
+        />
       </section>
 
       {/* Recent scans — horizontal carousel of real Holo grade runs */}
