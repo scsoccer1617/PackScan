@@ -9,9 +9,10 @@ import type { CardWithRelations } from "@shared/schema";
  *
  * Visual direction from packscan-redesign/client/src/pages/Stats.tsx:
  *   - Dark "pack" gradient hero with the collection's current value, a
- *     small "since W1" delta line, and an SVG sparkline of weekly value.
+ *     small growth-since-first-scan line, and an SVG sparkline of
+ *     weekly value over the most recent (up to 7) weeks.
  *   - 4 KPI tiles in a 2×2 grid with foil-tone accent swatches.
- *   - A single "Most valuable set" row at the bottom.
+ *   - A single "Most valuable card" row at the bottom.
  *
  * Data comes entirely from existing endpoints — no backend work:
  *   /api/collection/summary   → { cardCount, totalValue }
@@ -31,9 +32,10 @@ import type { CardWithRelations } from "@shared/schema";
  *                       cards with createdAt in the current calendar month)
  *
  * Sparkline strategy: bucket every card by the ISO week of its createdAt,
- * cumulatively sum estimatedValue over the most recent 7 weeks (W1 … W7
- * with W7 = this week). That gives a real "collection value over time"
- * line instead of the prototype's mock graphPoints[].
+ * cumulatively sum estimatedValue over the most recent 7 weeks. Leading
+ * zero weeks are trimmed so the chart starts at the first activity
+ * (prevents the "flat $0 until W5" look). Ticks are labeled as short
+ * dates instead of W1…W7 so the timeline is self-explanatory.
  */
 
 type CollectionSummary = { cardCount: number; totalValue: number };
@@ -44,6 +46,13 @@ type ScanGrade = {
   overall: number;
   label: string;
   createdAt: string | Date;
+  /** Identification captured during grading — used to dedupe scans by card
+      so the "Cards graded" KPI counts unique cards, not raw scan events. */
+  identification?: {
+    player?: string | null;
+    year?: number | string | null;
+    brand?: string | null;
+  } | null;
 };
 
 type ScanGradesResponse = {
@@ -82,19 +91,28 @@ function weekStart(d: Date): Date {
 }
 
 /**
- * Build a 7-week cumulative-value sparkline.
+ * Build a cumulative-value sparkline over the most recent weeks.
  *
- * Buckets every card by the week it was createdAt, then returns the
- * running total of estimatedValue at the end of each of the last 7
- * weeks (oldest first). The hero shows W1 … W7 ticks under the line.
+ * Windowing:
+ * - At most 7 weeks are shown.
+ * - Weeks older than the oldest card are trimmed so a brand-new
+ *   collector's chart doesn't look like a flat $0 until week 5. When
+ *   trimming happens we always keep at least 2 points (the week before
+ *   the first add, at $0, plus the first non-zero week) so the growth
+ *   is still legible.
+ * - Cards created before the 7-week window fold into the earliest
+ *   kept bucket as a baseline so their value doesn't disappear.
+ *
+ * Ticks are labeled as short dates (e.g. "Mar 4", "Now") instead of
+ * abstract W1…W7, which matches how dealers think about inventory.
  */
 function buildSparkline(cards: CardWithRelations[] | undefined) {
-  if (!cards || cards.length === 0) return [] as Array<{ week: string; value: number }>;
+  type Point = { week: string; value: number };
+  if (!cards || cards.length === 0) return [] as Point[];
 
   const now = new Date();
   const currentWeek = weekStart(now);
-  // 7 buckets, index 0 = oldest (6 weeks ago), index 6 = this week
-  const buckets: number[] = Array(7).fill(0);
+  // 7 weekly offsets, oldest → newest. Index 6 is this week.
   const weekOffsets: Date[] = [];
   for (let i = 6; i >= 0; i--) {
     const w = new Date(currentWeek);
@@ -102,31 +120,54 @@ function buildSparkline(cards: CardWithRelations[] | undefined) {
     weekOffsets.push(w);
   }
 
-  // Running total of cards added <= end of bucket i.
-  // Simpler: compute per-week delta, then cumulatively sum.
+  // Per-week deltas plus a "before the window" baseline so older cards
+  // still contribute their value at the start of the line instead of
+  // being dropped or stuffed into bucket 0 (which used to make W1 equal
+  // the entire lifetime total).
   const deltas = Array(7).fill(0);
+  let baseline = 0;
   for (const c of cards) {
     const created = c.createdAt ? new Date(c.createdAt as any) : null;
     if (!created || isNaN(created.getTime())) continue;
     const cw = weekStart(created);
-    // Find which bucket this falls into. Anything before the 7-week
-    // window folds into bucket 0 so older cards still contribute to
-    // the baseline total.
+    const v = c.estimatedValue ? Number(c.estimatedValue) : 0;
+    if (cw < weekOffsets[0]) {
+      baseline += v;
+      continue;
+    }
     let idx = 0;
     for (let i = 0; i < 7; i++) {
       if (cw >= weekOffsets[i]) idx = i;
     }
-    // But if the card's week is strictly before weekOffsets[0], still
-    // bucket 0 (baseline). Above loop already handles that.
-    const v = c.estimatedValue ? Number(c.estimatedValue) : 0;
     deltas[idx] += v;
   }
-  let run = 0;
+  const buckets: number[] = Array(7).fill(0);
+  let run = baseline;
   for (let i = 0; i < 7; i++) {
     run += deltas[i];
     buckets[i] = run;
   }
-  return weekOffsets.map((_, i) => ({ week: `W${i + 1}`, value: buckets[i] }));
+
+  // Trim leading buckets that are still at the baseline — i.e. no
+  // activity yet. Keep the last trimmed bucket as the $0 (or baseline)
+  // starting point so the line has somewhere to start from.
+  let firstActivityIdx = 0;
+  for (let i = 0; i < 7; i++) {
+    if (deltas[i] > 0) { firstActivityIdx = i; break; }
+    firstActivityIdx = i + 1;
+  }
+  // If there's no activity at all, show the whole window so the empty
+  // state still reads correctly.
+  let startIdx = 0;
+  if (firstActivityIdx < 7 && firstActivityIdx > 0) {
+    startIdx = Math.max(firstActivityIdx - 1, 0);
+  }
+
+  const fmt = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" });
+  return weekOffsets.slice(startIdx).map((d, i, arr) => ({
+    week: i === arr.length - 1 ? "Now" : fmt.format(d),
+    value: buckets[startIdx + i],
+  }));
 }
 
 export default function Stats() {
@@ -160,7 +201,36 @@ export default function Stats() {
     return sum / scanGrades.grades.length;
   }, [scanGrades]);
 
-  const gradedCount = scanGrades?.grades?.length ?? 0;
+  // "Cards graded" — unique cards graded, not raw scan events. A dealer
+  // flipping a card back-and-forth can easily rack up 10+ grade rows for
+  // a single card; counting raw rows made the KPI balloon far past the
+  // number of cards actually in the sheet (e.g. 83 scans against 7 rows).
+  // We dedupe by (playerLastName + year + brand) — the same identification
+  // signature the server uses to backfill Collection images.
+  const gradedCount = useMemo(() => {
+    const grades = scanGrades?.grades ?? [];
+    if (grades.length === 0) return 0;
+    const seen = new Set<string>();
+    for (const g of grades) {
+      const ident = g.identification;
+      if (!ident) {
+        // Pre-identification rows still represent a unique scan event; key
+        // on the grade row id so they don't collapse into one bucket.
+        seen.add(`id:${g.id}`);
+        continue;
+      }
+      const last =
+        (typeof ident.player === "string" ? ident.player.trim().split(/\s+/).pop() : "") || "";
+      const yearStr =
+        ident.year == null ? "" : String(ident.year).trim();
+      const brand = (ident.brand ?? "").trim();
+      const sig = `${last.toLowerCase()}|${yearStr}|${brand.toLowerCase()}`;
+      // If every identification field is blank, fall back to the row id so
+      // empty-ident rows don't all collapse into one bucket either.
+      seen.add(sig === "||" ? `id:${g.id}` : sig);
+    }
+    return seen.size;
+  }, [scanGrades]);
 
   const addedThisMonth = useMemo(() => {
     if (!cards) return 0;
@@ -203,7 +273,14 @@ export default function Stats() {
   const area = pts.length > 0 ? `${line} L${W},${H} L0,${H} Z` : "";
 
   const totalValue = summary?.totalValue ?? 0;
-  const sinceW1 = hasPoints ? Math.max(values[values.length - 1] - values[0], 0) : 0;
+  // Growth shown next to the hero is from the first tick of the trimmed
+  // window to "Now". When the window starts before any activity, the
+  // first tick is $0 (or the pre-window baseline) so this reads as pure
+  // growth rather than "value compared to 7 weeks ago".
+  const growthSinceStart = hasPoints
+    ? Math.max(values[values.length - 1] - values[0], 0)
+    : 0;
+  const startLabel = points[0]?.week ?? "start";
 
   return (
     <div className="pt-4 pb-6 space-y-5">
@@ -229,7 +306,7 @@ export default function Stats() {
         />
         <div className="relative">
           <p className="text-[11px] uppercase tracking-[0.14em] text-white/60">
-            Collection value · 7 weeks
+            Collection value{points.length > 0 ? ` · ${points.length} weeks` : ""}
           </p>
           <p
             className="font-display text-[34px] font-semibold leading-none mt-2 tracking-tight"
@@ -237,9 +314,9 @@ export default function Stats() {
           >
             {money(totalValue)}
           </p>
-          {hasPoints && sinceW1 > 0 ? (
+          {hasPoints && growthSinceStart > 0 ? (
             <p className="text-xs text-foil-green mt-1.5">
-              ↑ {money(sinceW1)} since W1
+              ↑ {money(growthSinceStart)} since {startLabel}
             </p>
           ) : (
             <p className="text-xs text-white/50 mt-1.5">
@@ -284,9 +361,9 @@ export default function Stats() {
           </svg>
           <div className="flex justify-between text-[10px] text-white/50 mt-1">
             {points.length > 0
-              ? points.map((p) => <span key={p.week}>{p.week}</span>)
+              ? points.map((p, i) => <span key={`${p.week}-${i}`}>{p.week}</span>)
               : Array.from({ length: 7 }).map((_, i) => (
-                  <span key={i}>W{i + 1}</span>
+                  <span key={i}>—</span>
                 ))}
           </div>
         </div>

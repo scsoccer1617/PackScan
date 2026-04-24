@@ -209,6 +209,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // local `cards` table is no longer maintained. For unauthenticated or
   // Google-unconnected users this returns [] so the Collection page
   // renders the empty state instead of 500'ing.
+  //
+  // Sheet-rows written before durable image persistence (or when a data-URI
+  // exceeded the 50k-char-per-cell ceiling) have an empty Front link. We
+  // backfill those from the user's scan_grades rows by matching on
+  // (playerLastName + year + brand) — the same identification signature the
+  // Holo grader already captured when the card was scanned. This is strictly
+  // read-side; the sheet itself is not rewritten.
   app.get(`${apiPrefix}/cards`, async (req, res) => {
     try {
       const userId = (req.user as any)?.id as number | undefined;
@@ -221,6 +228,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const at = a.createdAt ? Date.parse(a.createdAt) : 0;
         return bt - at;
       });
+
+      // Backfill frontImage/backImage for rows that are missing one or both.
+      const needsBackfill = rows.some((r) => !r.frontImage || !r.backImage);
+      if (needsBackfill) {
+        const grades = (await listGradesForUser(userId, 100)).map(hydrateGrade);
+        // Index grade images by a normalized identification signature so we
+        // can splice them into matching sheet rows. Newer grades win — we
+        // seed the map newest-first and skip collisions after.
+        const sigToImages = new Map<string, { front: string | null; back: string | null }>();
+        for (const g of grades) {
+          const ident = g.identification;
+          if (!ident) continue;
+          const last = (ident.player || '').trim().split(/\s+/).pop() || '';
+          const year = ident.year != null ? String(ident.year) : '';
+          const brand = (ident.brand || '').trim();
+          if (!last && !year && !brand) continue;
+          const sig = `${last.toLowerCase()}|${year}|${brand.toLowerCase()}`;
+          if (sigToImages.has(sig)) continue;
+          sigToImages.set(sig, {
+            front: (g as any).frontImage ?? null,
+            back: (g as any).backImage ?? null,
+          });
+        }
+        if (sigToImages.size > 0) {
+          for (const r of rows) {
+            if (r.frontImage && r.backImage) continue;
+            const last = (r.playerLastName || '').trim();
+            const year = r.year != null ? String(r.year) : '';
+            const brand = (r.brand?.name || '').trim();
+            const sig = `${last.toLowerCase()}|${year}|${brand.toLowerCase()}`;
+            const hit = sigToImages.get(sig);
+            if (!hit) continue;
+            if (!r.frontImage && hit.front) r.frontImage = hit.front;
+            if (!r.backImage && hit.back) r.backImage = hit.back;
+          }
+        }
+      }
+
       return res.json(rows);
     } catch (error) {
       console.error('Error fetching cards:', error);
