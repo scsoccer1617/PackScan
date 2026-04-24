@@ -1886,6 +1886,7 @@ async function combineCardResults(
             playerLastName: combined.playerLastName,
             playerFirstName: combined.playerFirstName || undefined,
             collection: combined.collection || undefined,
+            cardNumberHint: combined.cardNumber || undefined,
           });
           if (pResult.found) {
             found = applyDbResult(pResult, 'player-anchored fallback');
