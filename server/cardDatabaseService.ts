@@ -877,6 +877,14 @@ export interface PlayerAnchoredLookupInput {
   playerFirstName?: string;
   /** Optional: narrow to a specific collection/set (e.g. "Series One") — case-insensitive. */
   collection?: string;
+  /** Optional: the "wrong" card number the caller originally tried (OCR mis-read
+   *  or user mis-spoke). When provided and it has a non-numeric prefix like
+   *  "T88-", "US", "RC-", or "H", rows whose cardNumberRaw shares the same
+   *  prefix get a strong score boost — breaking ties when the player appears
+   *  on multiple cards in the same set. Without this, "Griffey T88-80" (where
+   *  the real card is T88-82) would tie T88-82 against base-set #1 and
+   *  refuse to auto-correct. */
+  cardNumberHint?: string;
 }
 
 /**
@@ -901,7 +909,7 @@ export interface PlayerAnchoredLookupInput {
 export async function lookupCardByPlayer(
   input: PlayerAnchoredLookupInput
 ): Promise<CardLookupResult> {
-  const { brand, year, playerLastName, playerFirstName, collection } = input;
+  const { brand, year, playerLastName, playerFirstName, collection, cardNumberHint } = input;
 
   if (!brand || !year || !playerLastName || playerLastName.trim().length < 2) {
     return { found: false, source: 'ocr_fallback' };
@@ -952,11 +960,46 @@ export async function lookupCardByPlayer(
     const firstNameWord = firstNameNorm
       ? new RegExp(`\\b${firstNameNorm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i')
       : null;
+    // Card-number prefix hint: when the caller provided the "wrong" number
+    // they originally tried (e.g. "T88-80" for the real card "T88-82"),
+    // extract its non-numeric prefix and strongly prefer rows whose
+    // cardNumberRaw shares that prefix. A shared prefix like "T88-" is a
+    // nearly unambiguous set-identity signal — the user wanted the T88
+    // insert and just got the number wrong by a digit. Without this hint,
+    // players with multiple cards in the same set (base + insert + highlights)
+    // tie on name score and we refuse to auto-pick.
+    //
+    // Prefix extraction: leading non-digit chars up to and including any
+    // trailing dash or dot. "T88-80" → "T88-", "US239" → "US", "1" → ""
+    // (purely numeric numbers have no distinguishing prefix). We only apply
+    // the boost when the extracted prefix is at least 1 character AND at
+    // least one character is alphabetic (so "99" doesn't become a prefix
+    // boost for any row starting with "99").
+    const extractPrefix = (raw: string): string => {
+      const m = raw.trim().match(/^[^0-9]+[-.]?/);
+      if (!m) return '';
+      const pref = m[0];
+      return /[a-zA-Z]/.test(pref) ? pref.toLowerCase() : '';
+    };
+    const hintPrefix = cardNumberHint ? extractPrefix(cardNumberHint) : '';
+    if (hintPrefix) {
+      console.log(`[CardDB] Player-anchored: card-number hint="${cardNumberHint}" → prefix="${hintPrefix}" (will boost matching rows by +50)`);
+    }
+
     const scoreRow = (row: typeof cardDatabase.$inferSelect): number => {
       const name = (row.playerName || '').toLowerCase();
       let s = 0;
       if (lastNameWord.test(name)) s += 10;
       if (firstNameWord && firstNameWord.test(name)) s += 20;
+      // +50 when the row's card number shares the hint's alphanumeric prefix.
+      // Dominates name score so a T88-series insert wins over a base-set row
+      // with the same player, but only when the hint provided a usable prefix.
+      if (hintPrefix) {
+        const rowPrefix = extractPrefix(row.cardNumberRaw || '');
+        if (rowPrefix && rowPrefix === hintPrefix) {
+          s += 50;
+        }
+      }
       return s;
     };
     // Keep only rows that actually have the last name as a whole word —
@@ -1152,6 +1195,7 @@ export async function enrichVoiceFields(
         playerLastName,
         playerFirstName: playerFirstName || undefined,
         collection: collection || undefined,
+        cardNumberHint: cardNumber || undefined,
       });
       if (anchored.found) {
         console.log(`[VoiceCardDB] player-anchored fallback hit — corrected cardNumber="${anchored.cardNumber}"`);
