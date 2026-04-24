@@ -291,7 +291,7 @@ export default function MySheets() {
                         </div>
                         <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
                           {isActive
-                            ? `${activeCardCount} ${activeCardCount === 1 ? "card" : "cards"} · Syncing now`
+                            ? `${activeCardCount} ${activeCardCount === 1 ? "card" : "cards"} · Auto-syncs on save`
                             : "Linked to Google Sheets"}
                         </p>
                       </div>
