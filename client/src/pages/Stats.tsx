@@ -27,7 +27,11 @@ import type { CardWithRelations } from "@shared/schema";
  * don't have a real backend counterpart):
  *   - "Pull rate"     → "Scans · 30d"       (count of scans in last 30d)
  *   - "Avg grade"     → unchanged (mean of overall grade across scans)
- *   - "Graded cards"  → unchanged (total scans with a Holo grade on file)
+ *   - "Unique card scans" → count of distinct cards that have a Holo
+ *                           grade on file (deduped per cardId, falling
+ *                           back to grade.id for untracked scans). Label
+ *                           renamed from "Graded cards" so it's clear it
+ *                           counts unique cards, not total scan events.
  *   - "This month"    → "Added this month" (sum of estimatedValue for
  *                       cards with createdAt in the current calendar month)
  *
@@ -388,7 +392,7 @@ export default function Stats() {
         />
         <KpiCard
           icon={<TrendingUp className="w-4 h-4" />}
-          label="Graded cards"
+          label="Unique card scans"
           value={String(gradedCount)}
           tone="green"
           testId="kpi-graded-count"

@@ -521,7 +521,10 @@ function FieldRow({ label, value, onChange, placeholder, inputMode, testId }: Fi
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         inputMode={inputMode}
-        className="mt-1"
+        // Lighter + italic placeholder so example text ("e.g. Nolan
+        // Arenado", "Topps", "2025") reads as a hint, not as real data
+        // already filled in by the voice extractor.
+        className="mt-1 placeholder:text-slate-400 placeholder:font-normal placeholder:italic"
         data-testid={testId}
       />
     </div>

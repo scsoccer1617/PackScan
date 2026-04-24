@@ -968,8 +968,10 @@ function DetailsTab({
     ["Player", playerName(cardData) || "—"],
     ["Year", cardData.year ? String(cardData.year) : "—"],
     ["Brand", cardData.brand || "—"],
-    ["Collection", cardData.collection || "—"],
+    // Set appears above Collection so the ordering matches the edit form
+    // and reads top-down from "where in the product line" → "which box".
     ["Set", cardData.set || "—"],
+    ["Collection", cardData.collection || "—"],
     ["Card #", cardData.cardNumber || "—"],
     ["Parallel", cardData.foilType || "Base"],
     ["Serial", cardData.serialNumber || "—"],
@@ -1091,17 +1093,19 @@ function DetailsTab({
                 testId="edit-brand"
               />
             </div>
-            <EditField
-              label="Collection"
-              value={draft.collection || ""}
-              onChange={(v) => setDraft((d) => ({ ...d, collection: v }))}
-              testId="edit-collection"
-            />
+            {/* Set above Collection — matches the display-row ordering and
+                the EditCardModal form so the UI is consistent everywhere. */}
             <EditField
               label="Set"
               value={(draft as any).set || ""}
               onChange={(v) => setDraft((d) => ({ ...d, set: v } as any))}
               testId="edit-set"
+            />
+            <EditField
+              label="Collection"
+              value={draft.collection || ""}
+              onChange={(v) => setDraft((d) => ({ ...d, collection: v }))}
+              testId="edit-collection"
             />
             <div className="grid grid-cols-2 gap-3">
               <EditField

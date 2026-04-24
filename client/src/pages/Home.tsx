@@ -1,17 +1,19 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
-import { Camera, Mic, PenLine, ArrowRight, TrendingUp } from "lucide-react";
+import { Camera, Mic, PenLine, ArrowRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import ModeTile from "@/components/ModeTile";
 
 /**
  * Redesigned Home — the collector's dashboard.
  *
- * Data comes from three existing endpoints (no new backend work):
+ * Data comes from two existing endpoints (no new backend work):
  *   /api/collection/summary   → { cardCount, totalValue } for the hero
  *   /api/scan-grades?limit=8  → recent Holo grade runs for the carousel
- *   /api/stats/top-cards      → top-5-by-estimated-value, #1 used for the
- *                               "Most valuable card" strip
+ *
+ * The "Most valuable card" strip used to live here but now lives on the
+ * Stats page only — it was duplicated between Home and Stats and Home
+ * already leads with the collection total value.
  *
  * Weekly delta is intentionally omitted for now — we don't store price
  * snapshots over time, so there's no honest number to show. Can be added
@@ -38,16 +40,6 @@ type ScanGradesResponse = {
     frontImage?: string | null;
     backImage?: string | null;
   }>;
-};
-
-type TopCard = {
-  id: number;
-  playerFirstName: string;
-  playerLastName: string;
-  year: number;
-  estimatedValue: string | null;
-  frontImage: string | null;
-  brand?: { name?: string } | null;
 };
 
 function money(n: number, fractionDigits = 0) {
@@ -93,12 +85,7 @@ export default function Home() {
     },
   });
 
-  const { data: topCards } = useQuery<TopCard[]>({
-    queryKey: ["/api/stats/top-cards"],
-  });
-
   const recent = scanGrades?.grades ?? [];
-  const topCard = topCards?.[0];
   const totalValue = summary?.totalValue ?? 0;
   const cardCount = summary?.cardCount ?? 0;
 
@@ -230,25 +217,8 @@ export default function Home() {
         </section>
       )}
 
-      {/* Most valuable card strip */}
-      {topCard && (
-        <section className="mx-4 rounded-2xl bg-white border border-card-border p-4 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center text-ink">
-            <TrendingUp className="w-5 h-5" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-xs text-slate-500">Most valuable card</p>
-            <p className="text-sm font-medium truncate text-ink" data-testid="text-top-card">
-              {topCard.playerFirstName} {topCard.playerLastName}
-              {topCard.year ? ` · ${topCard.year}` : ""}
-              {topCard.brand?.name ? ` ${topCard.brand.name}` : ""}
-            </p>
-          </div>
-          <p className="font-display text-lg font-semibold text-ink">
-            {money(Number(topCard.estimatedValue ?? 0), 0)}
-          </p>
-        </section>
-      )}
+      {/* "Most valuable card" moved to the Stats page — previously shown
+          both here and there, Stats is the single source of truth now. */}
     </div>
   );
 }
