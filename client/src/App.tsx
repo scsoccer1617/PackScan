@@ -5,6 +5,7 @@ import NotFound from "@/pages/not-found";
 import Home from "@/pages/Home";
 import Scan from "@/pages/Scan";
 import ScanResult from "@/pages/ScanResult";
+import AddCard from "@/pages/AddCard";
 import CardSearch from "@/pages/CardSearch";
 import CardDatabaseAdmin from "@/pages/CardDatabaseAdmin";
 import Login from "@/pages/Login";
@@ -119,6 +120,7 @@ function Router() {
           <Route path="/" component={Home} />
           <Route path="/scan" component={Scan} />
           <Route path="/result" component={ScanResult} />
+          <Route path="/add-card" component={AddCard} />
           <Route path="/search" component={CardSearch} />
           <Route path="/collection" component={Collection} />
           <Route path="/sheets" component={MySheets} />
