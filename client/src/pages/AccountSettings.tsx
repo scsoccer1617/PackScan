@@ -3,6 +3,7 @@ import { Link, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import {
   FileSpreadsheet,
+  Layers,
   Shield,
   HelpCircle,
   LogOut,
@@ -227,6 +228,13 @@ export default function AccountSettings() {
           sub={sheetsCount > 0 ? `${sheetsCount} sheet${sheetsCount === 1 ? "" : "s"} linked` : "No sheets yet"}
           href="/sheets"
           testId="row-sheets"
+        />
+        <SettingRow
+          icon={<Layers className="w-4 h-4" />}
+          label="Bulk scan"
+          sub="Pair duplex scans from Drive and auto-price them"
+          href="/bulk-scan"
+          testId="row-bulk-scan"
         />
         {user.email && (
           <SettingRow

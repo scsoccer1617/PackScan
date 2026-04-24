@@ -527,8 +527,10 @@ export const googleDriveFolders = pgTable("google_drive_folders", {
   // dealer could add a second row; for now we treat it as 1:1.
   id: serial("id").primaryKey(),
   userId: integer("user_id").references(() => users.id, { onDelete: 'cascade' }).notNull().unique(),
-  // Drive folder IDs. inbox is where Brother drops scans; processed is where
-  // the pipeline moves successful pairs after appending to the sheet.
+  // Drive folder IDs. inbox is where the dealer's duplex scanner drops
+  // multi-page scans (scanner-agnostic — any device that saves to Drive
+  // works); processed is where the pipeline moves successful pairs after
+  // appending to the sheet.
   inboxFolderId: text("inbox_folder_id"),
   processedFolderId: text("processed_folder_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),

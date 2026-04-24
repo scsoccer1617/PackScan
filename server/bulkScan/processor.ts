@@ -319,7 +319,10 @@ async function processItem(batch: ScanBatch, item: ScanBatchItem): Promise<'auto
   const exifFront = await normalizeImageOrientation(rawFront, `batch${batch.id}#${item.position}/front`);
 
   // Probe back-side orientation (front is assumed right-side-up from the
-  // Brother scanner; a future PR can probe it too at 1× cost).
+  // duplex scanner; a future PR can probe the front too at 1× cost).
+  //
+  // Scanner-agnostic: the pipeline only assumes multi-page JPEG/PDF output
+  // dropped into a Drive folder — any duplex ADF produces this shape.
   const orient = await detectOrientation(exifBack, `batch${batch.id}#${item.position}/back`);
   const correctedBack = await applyRotation(exifBack, orient.rotationNeeded);
 
