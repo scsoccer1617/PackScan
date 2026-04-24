@@ -15,6 +15,8 @@ import { useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { useScanFlow } from "@/hooks/use-scan-flow";
 import { useToast } from "@/hooks/use-toast";
+import { usePreferences } from "@/hooks/use-preferences";
+import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import EbayPriceResults from "@/components/EbayPriceResults";
 import { HoloGradeCard } from "@/components/HoloGradeCard";
@@ -28,7 +30,7 @@ import ParallelPickerSheet, {
 import CollectionPickerSheet, {
   type CollectionCandidate,
 } from "@/components/CollectionPickerSheet";
-import { Camera, Check, Pencil, ScanLine, ScanSearch, X } from "lucide-react";
+import { Camera, Check, Pencil, ScanLine, ScanSearch, Sparkles, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { CardFormValues } from "@shared/schema";
 import {
@@ -886,9 +888,7 @@ export default function ScanResult() {
           {holoGrade ? (
             <HoloGradeCard grade={holoGrade} />
           ) : (
-            <div className="rounded-2xl border border-card-border bg-card p-4 text-sm text-slate-500">
-              No Holo grade returned for this scan.
-            </div>
+            <GradeTabEmptyState />
           )}
         </TabsContent>
 
@@ -1224,6 +1224,90 @@ function EditField({
         className="mt-1 w-full h-10 rounded-xl bg-background border border-card-border px-3 text-sm outline-none focus:ring-2 focus:ring-foil-violet/30"
         data-testid={testId}
       />
+    </div>
+  );
+}
+
+/**
+ * Empty state shown on the Grade tab when the scan didn't produce a Holo
+ * grade. There are two ways to land here:
+ *
+ *   1. Auto-grading is disabled in Account settings (users.preferences.autoGrade
+ *      is false — the default). The server intentionally skipped the Claude
+ *      call. We show a friendly explanation with an inline toggle so the user
+ *      doesn't have to navigate away to turn it on.
+ *
+ *   2. Auto-grading IS enabled but Holo failed for some other reason — missing
+ *      ANTHROPIC_API_KEY on the server, a Claude error, or no front image was
+ *      provided. We keep the neutral "no grade returned" message here.
+ *
+ * Flipping the toggle applies on the next scan; we don't retroactively grade
+ * the card we're already on (no front-image buffer on the client after /result,
+ * and it would need a new server endpoint).
+ */
+function GradeTabEmptyState() {
+  const { preferences, update, isUpdating, isLoading } = usePreferences();
+  const autoGradeOff = !preferences.autoGrade;
+
+  if (isLoading) {
+    // Lightweight skeleton so we don't flash the "enable" CTA for signed-in
+    // users whose preferences are still fetching on first tab entry.
+    return (
+      <div
+        className="rounded-2xl border border-card-border bg-card p-4 text-sm text-slate-500"
+        data-testid="grade-empty-loading"
+      >
+        Loading grade…
+      </div>
+    );
+  }
+
+  if (autoGradeOff) {
+    return (
+      <div
+        className="rounded-2xl border border-card-border bg-card p-5"
+        data-testid="grade-empty-disabled"
+      >
+        <div className="flex items-start gap-3">
+          <div className="w-10 h-10 rounded-xl bg-foil-violet/10 flex items-center justify-center text-foil-violet shrink-0">
+            <Sparkles className="w-5 h-5" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold">Automatic grading is off</p>
+            <p className="text-[12px] text-slate-500 mt-1 leading-relaxed">
+              Turn it on to get an AI condition grade (centering, corners,
+              edges, surface) on every scan. Each scan will take a little
+              longer.
+            </p>
+            <div className="mt-4 flex items-center justify-between rounded-xl border border-card-border bg-background px-3 py-2">
+              <span className="text-[13px] font-medium">
+                Grade cards automatically
+              </span>
+              <Switch
+                checked={preferences.autoGrade}
+                onCheckedChange={(checked) => update({ autoGrade: checked })}
+                disabled={isUpdating}
+                aria-label="Grade cards automatically"
+                data-testid="switch-auto-grade-empty"
+              />
+            </div>
+            <p className="text-[11px] text-slate-500 mt-2">
+              Applies to future scans. Your current card won't be re-graded.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Auto-grading is on but no grade came back — Holo misfire / missing front image.
+  return (
+    <div
+      className="rounded-2xl border border-card-border bg-card p-4 text-sm text-slate-500"
+      data-testid="grade-empty-unavailable"
+    >
+      No grade returned for this scan. Try re-scanning with a clear front
+      image.
     </div>
   );
 }
