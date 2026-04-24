@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import sharp from 'sharp';
 import { CardFormValues } from '@shared/schema';
 import { analyzeSportsCardImage, extractAllYearCandidates } from './dynamicCardAnalyzer';
-import { lookupCard } from './cardDatabaseService';
+import { lookupCard, lookupCardByPlayer } from './cardDatabaseService';
 import { extractProductLine } from './productLineExtractor';
 import { batchExtractTextFromImages, clearOcrCache } from './googleVisionFetch';
 import type { FoilDetectionResult } from './visualFoilDetector';
@@ -1083,6 +1083,22 @@ async function combineCardResults(
     }
   }
 
+  // ─── H-4: Set/collection dedupe ─────────────────────────────────────────
+  // When the product-line extractor wrote the set (e.g. "Series One") AND the
+  // earlier OCR/wordmark pass wrote the same string as the collection, the
+  // two fields duplicate and both show up in the UI. The set is the
+  // authoritative product line; collection should come from the catalog
+  // ("Rookie Debut", "1989 All-Stars", etc.) — not repeat the set name. Clear
+  // it here and let the upcoming CardDB lookup fill it authoritatively.
+  if (
+    combined.set &&
+    combined.collection &&
+    combined.set.trim().toLowerCase() === combined.collection.trim().toLowerCase()
+  ) {
+    console.log(`[ProductLine] Clearing duplicate collection "${combined.collection}" — same as set "${combined.set}". CardDB will fill collection if applicable.`);
+    combined.collection = '';
+  }
+
   // Handle other fields with no specific priority
   const otherFields: (keyof CardFormValues)[] = [
     'condition', 'estimatedValue', 'isAutographed', 'isNumbered', 'notes'
@@ -1852,6 +1868,30 @@ async function combineCardResults(
           console.log(`[CardDB] Retrying with year=${yr + delta} cardNumber="${backNum}"`);
           found = await tryLookup(combined.brand, yr + delta, backNum, combined.collection, { requireNameMatch: true });
           if (found) break;
+        }
+      }
+
+      // ─── H-3: Player-anchored fallback ──────────────────────────────────
+      // If the (brand, year, cardNumber) lookup and all ±year windows rejected
+      // the card number, the card number is almost certainly what OCR got
+      // wrong (stat-row digit, jersey number, sticker number, etc.). Drop the
+      // card number entirely and search by (brand, year, playerLastName). If
+      // exactly one row matches in this set, auto-correct the card number.
+      if (!found && combined.brand && combined.year && combined.playerLastName) {
+        console.log(`[CardDB] Player-anchored fallback — searching by (brand="${combined.brand}", year=${combined.year}, lastName="${combined.playerLastName}")`);
+        try {
+          const pResult = await lookupCardByPlayer({
+            brand: combined.brand,
+            year: combined.year as number,
+            playerLastName: combined.playerLastName,
+            playerFirstName: combined.playerFirstName || undefined,
+            collection: combined.collection || undefined,
+          });
+          if (pResult.found) {
+            found = applyDbResult(pResult, 'player-anchored fallback');
+          }
+        } catch (err: any) {
+          console.error('[CardDB] Player-anchored fallback failed (non-fatal):', err.message);
         }
       }
 
