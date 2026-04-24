@@ -13,11 +13,14 @@ import {
   X,
   Loader2,
   Database,
+  Sparkles,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
+import { usePreferences } from "@/hooks/use-preferences";
 import { apiRequest } from "@/lib/queryClient";
 import { cn } from "@/lib/utils";
+import { Switch } from "@/components/ui/switch";
 
 /**
  * Redesigned Account page (`/account`).
@@ -64,6 +67,25 @@ export default function AccountSettings() {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
+  // Per-user app preferences (autoGrade, future keys). Loaded via React Query
+  // and updated via PATCH; server is the source of truth so the scan route
+  // can't be tricked by a stale client.
+  const { preferences, update: updatePreferences, isUpdating: prefsUpdating } = usePreferences();
+  const toggleAutoGrade = () => {
+    updatePreferences(
+      { autoGrade: !preferences.autoGrade },
+      {
+        onError: () => {
+          toast({
+            title: "Couldn't save setting",
+            description: "Please try again.",
+            variant: "destructive",
+          });
+        },
+      },
+    );
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -181,6 +203,24 @@ export default function AccountSettings() {
 
       {/* Settings rows */}
       <section className="px-4 space-y-2">
+        <SettingRow
+          icon={<Sparkles className="w-4 h-4" />}
+          label="Grade cards automatically"
+          sub="Each scan will take a little longer"
+          onClick={toggleAutoGrade}
+          disabled={prefsUpdating}
+          trailing={
+            <Switch
+              checked={preferences.autoGrade}
+              onCheckedChange={toggleAutoGrade}
+              disabled={prefsUpdating}
+              onClick={(e) => e.stopPropagation()}
+              aria-label="Grade cards automatically"
+              data-testid="switch-auto-grade"
+            />
+          }
+          testId="row-auto-grade"
+        />
         <SettingRow
           icon={<FileSpreadsheet className="w-4 h-4" />}
           label="Google Sheets"

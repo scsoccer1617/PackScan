@@ -39,7 +39,7 @@ import {
   type HoloAnalysis,
 } from './holo/cardGrader';
 import { saveGrade, listGradesForUser, hydrateGrade, updateGradeIdentification } from './holo/storage';
-import { requireAuth } from './auth';
+import { requireAuth, getUserPreferences } from './auth';
 import { lookupCard as scpLookupCard, SOURCE_SLUG as SCP_SOURCE_SLUG } from './sportscardspro';
 import type { ScanQueryInput as ScpScanQueryInput } from './sportscardspro';
 import { discoverParallels } from './sportscardspro/parallels';
@@ -1812,7 +1812,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Topps flagship, which has no refractors). Holo runs in parallel
       // with the OCR pipeline so the scan still returns even if Claude is
       // unavailable; `identification` is always persisted as null.
+      //
+      // Auto-grading is opt-in per user (users.preferences.autoGrade,
+      // default false). Dealers inventorying hundreds of raw cards don't
+      // want to pay the ~several-second Claude round-trip on every scan,
+      // so when the flag is off we short-circuit to null — the rest of
+      // the pipeline already handles a missing holo result gracefully
+      // (HoloGradeCard + the grade tone pill conditionally render).
       const userId = (req.user as any)?.id as number | undefined;
+      const prefs = await getUserPreferences(userId);
+      const autoGradeEnabled = prefs.autoGrade === true;
       const frontFileForHolo = files.frontImage?.[0];
       const backFileForHolo = files.backImage?.[0];
       type HoloResponse = (HoloGrade & {
@@ -1822,6 +1831,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }) | null;
       const holoPromise: Promise<HoloResponse> = (async () => {
         try {
+          if (!autoGradeEnabled) {
+            console.log('Holo: auto-grade disabled for user, skipping analysis');
+            return null;
+          }
           if (!frontFileForHolo) {
             console.log('Holo: no front image provided, skipping analysis');
             return null;

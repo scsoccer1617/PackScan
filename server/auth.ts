@@ -9,7 +9,14 @@ import crypto from 'crypto';
 import { z } from 'zod';
 import { eq, and, isNull, gt } from 'drizzle-orm';
 import { db, pool } from '../db';
-import { users, authTokens, type User } from '../shared/schema';
+import {
+  users,
+  authTokens,
+  userPreferencesSchema,
+  DEFAULT_USER_PREFERENCES,
+  type User,
+  type UserPreferences,
+} from '../shared/schema';
 import { sendEmail, verificationEmail, passwordResetEmail } from './email';
 import { ensureDefaultSheetForUser, appendCardRow, NotConnectedError, type CardRowInput } from './googleSheets';
 
@@ -418,4 +425,53 @@ export function setupAuth(app: Express) {
   app.get(`${apiPrefix}/config`, (_req, res) => {
     res.json({ googleEnabled: isGoogleConfigured() });
   });
+
+  // ── Per-user preferences ────────────────────────────────────────────────
+  // Stored in users.preferences (JSONB). We merge with DEFAULT_USER_PREFERENCES
+  // on every read so adding new keys later is a no-op for existing rows.
+  app.get('/api/user/preferences', requireAuth, async (req, res) => {
+    const [u] = await db.select().from(users).where(eq(users.id, (req.user as any).id)).limit(1);
+    if (!u) return res.status(404).json({ error: 'User not found' });
+    res.json({ preferences: readPreferences(u.preferences) });
+  });
+
+  app.patch('/api/user/preferences', requireAuth, async (req, res) => {
+    const [u] = await db.select().from(users).where(eq(users.id, (req.user as any).id)).limit(1);
+    if (!u) return res.status(404).json({ error: 'User not found' });
+    const current = readPreferences(u.preferences);
+    // Merge partial patch into current prefs, then validate the full shape.
+    const patch = req.body && typeof req.body === 'object' ? req.body : {};
+    const next = userPreferencesSchema.safeParse({ ...current, ...patch });
+    if (!next.success) {
+      return res.status(400).json({ error: 'Invalid preferences', issues: next.error.issues });
+    }
+    await db.update(users).set({ preferences: next.data }).where(eq(users.id, u.id));
+    res.json({ preferences: next.data });
+  });
+}
+
+/**
+ * Normalize the `users.preferences` JSONB value into a fully-populated
+ * UserPreferences object. Rows that pre-date the column (or rows that
+ * were written before a new key was added) may have `null` or a partial
+ * shape — we always merge against defaults so callers see every key.
+ *
+ * Exported so server-side code (e.g. scan routes) can ask "is autoGrade on
+ * for this user?" in one place instead of duplicating the merge logic.
+ */
+export function readPreferences(raw: unknown): UserPreferences {
+  if (!raw || typeof raw !== 'object') return { ...DEFAULT_USER_PREFERENCES };
+  const parsed = userPreferencesSchema.safeParse({ ...DEFAULT_USER_PREFERENCES, ...raw });
+  return parsed.success ? parsed.data : { ...DEFAULT_USER_PREFERENCES };
+}
+
+/**
+ * Fetch a user's effective preferences. Anonymous callers (no user id)
+ * get the defaults — e.g. auto-grading stays OFF for unauthenticated
+ * requests, matching signed-in new-user behavior.
+ */
+export async function getUserPreferences(userId: number | undefined | null): Promise<UserPreferences> {
+  if (!userId) return { ...DEFAULT_USER_PREFERENCES };
+  const [u] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+  return readPreferences(u?.preferences);
 }
