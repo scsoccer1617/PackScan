@@ -242,7 +242,10 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
         // preliminary buffer so any downstream consumer (visual foil detector,
         // crop routines, etc.) operates on the exact same bytes that produced
         // the cached OCR text and analyzer result.
-        if (frontImage) {
+        // Voice speculative entries don't carry a front image buffer, so
+        // only substitute when the cached entry actually has one (i.e. the
+        // preliminary fired from the image scan path).
+        if (frontImage && preliminaryEntry.frontImageBuffer) {
           frontImage.buffer = preliminaryEntry.frontImageBuffer;
           frontImage.size = preliminaryEntry.frontImageBuffer.length;
         }

@@ -44,6 +44,28 @@ import { lookupCard as scpLookupCard, SOURCE_SLUG as SCP_SOURCE_SLUG } from './s
 import type { ScanQueryInput as ScpScanQueryInput } from './sportscardspro';
 import { discoverParallels } from './sportscardspro/parallels';
 
+// Mirrors splitPlayerName in client/src/pages/Scan.tsx so the voice
+// speculative-SCP sanity check compares identities the same way the
+// client does when it navigates to /result. Hoisted to module scope to
+// satisfy ES5 strict-mode's no-function-in-blocks rule.
+function splitVoicePlayerName(
+  name: string | null | undefined,
+): { first: string; last: string } {
+  if (!name) return { first: '', last: '' };
+  const tokens = name.trim().split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return { first: '', last: '' };
+  if (tokens.length === 1) return { first: tokens[0], last: '' };
+  const suffixRe = /^(jr|sr|ii|iii|iv|v)\.?$/i;
+  const lastToken = tokens[tokens.length - 1];
+  if (suffixRe.test(lastToken) && tokens.length >= 3) {
+    return {
+      first: tokens[0],
+      last: `${tokens[tokens.length - 2]} ${lastToken}`,
+    };
+  }
+  return { first: tokens[0], last: tokens.slice(1).join(' ') };
+}
+
 // Configure multer for handling file uploads
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -1276,6 +1298,199 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
     },
   );
+
+  // ── Voice speculative SCP (F-3b mirror for voice) ────────────────────────
+  // Client fires this immediately after /voice-lookup/extract returns, in
+  // parallel with rendering the confirm sheet. We kick off an SCP lookup in
+  // the background keyed by a client-generated voiceScanId and stash the
+  // result in the same scanSession cache used by image-flow F-3b. On confirm,
+  // the client hits /voice-lookup/speculative-scp to collect the (usually
+  // already-resolved) result and seeds it onto cardData.speculativeCatalog,
+  // so CatalogPriceStrip on /result renders immediately without a second
+  // /api/catalog/match round trip.
+  //
+  // Identity gate mirrors F-3b: playerName + one of (brand | year |
+  // cardNumber). Voice-extracted fields frequently have all three when the
+  // speaker reads the card fully, so the gate is usually satisfied.
+  // PSA grade is NOT used here — SCP is price-tier agnostic; PSA only
+  // influences the downstream eBay tier selection on /result.
+  //
+  // All error paths return 200 — a hiccup here must never block the main
+  // voice flow.
+  app.post(`${apiPrefix}/voice-lookup/preliminary`, async (req, res) => {
+    try {
+      const voiceScanId = typeof (req.body as any)?.voiceScanId === 'string'
+        ? (req.body as any).voiceScanId
+        : '';
+      const fields = (req.body as any)?.fields as
+        | {
+            sport?: string | null;
+            year?: number | null;
+            brand?: string | null;
+            collection?: string | null;
+            setName?: string | null;
+            playerName?: string | null;
+            cardNumber?: string | null;
+            parallel?: string | null;
+            serialNumber?: string | null;
+          }
+        | undefined;
+      if (!voiceScanId || !fields) {
+        return res.status(200).json({ success: false, reason: 'missing_fields' });
+      }
+
+      // Split playerName into first/last on the server too, so the sanity
+      // check in /voice-lookup/speculative-scp can compare against whatever
+      // the client ultimately lands on (the client also splits before
+      // navigating to /result — see fieldsToCardData in pages/Scan.tsx).
+      const { first, last } = splitVoicePlayerName(fields.playerName ?? null);
+
+      const hasSpecGate =
+        !!first &&
+        !!last &&
+        (!!fields.brand || !!fields.year || !!fields.cardNumber);
+      if (!hasSpecGate) {
+        console.log(`[voice-preliminary-${voiceScanId}] skipped — insufficient fields`);
+        return res.status(200).json({ success: false, reason: 'insufficient_fields' });
+      }
+
+      // Stash a sparse entry so /voice-lookup/speculative-scp has something
+      // to find even before the SCP lookup resolves. frontImageBuffer /
+      // frontOCRText stay empty — they're not used on the voice path.
+      const { putPendingScan, updatePendingScan } = await import('./scanSession');
+      putPendingScan(voiceScanId, {
+        frontResult: {
+          playerFirstName: first,
+          playerLastName: last,
+          brand: fields.brand || '',
+          year: fields.year ?? 0,
+          cardNumber: fields.cardNumber || '',
+          collection: fields.collection || '',
+          variant: fields.parallel || '',
+          serialNumber: fields.serialNumber || '',
+        },
+        frontOCRText: '',
+      });
+
+      const userId = (req.user as any)?.id as number | undefined;
+      const specInput: ScpScanQueryInput = {
+        playerName: `${first} ${last}`.trim(),
+        year: fields.year ?? null,
+        brand: fields.brand || null,
+        collection: fields.collection || null,
+        setName: fields.setName || null,
+        cardNumber: fields.cardNumber || null,
+        parallel: fields.parallel || null,
+      };
+
+      // Fire-and-forget — respond immediately so the client can move on.
+      (async () => {
+        const specStart = Date.now();
+        try {
+          const specResult = await scpLookupCard(specInput, { userId: userId ?? null });
+          updatePendingScan(voiceScanId, { scpResult: specResult });
+          console.log(
+            `[voice-preliminary-scp-${voiceScanId}] ${specResult.status}` +
+              (specResult.status === 'miss'
+                ? ` (${specResult.reason})`
+                : ` score=${specResult.match.matchScore}`) +
+              ` took ${Date.now() - specStart}ms`,
+          );
+        } catch (err: any) {
+          console.warn(
+            `[voice-preliminary-scp-${voiceScanId}] threw unexpectedly:`,
+            err?.message || err,
+          );
+        }
+      })();
+
+      return res.status(200).json({ success: true });
+    } catch (err: any) {
+      console.error('[voice-preliminary] unhandled error:', err?.message || err);
+      return res.status(200).json({ success: false, reason: 'internal_error' });
+    }
+  });
+
+  // Consume the speculative SCP result for a voice scan. The client calls
+  // this on confirm; the server briefly waits (up to 2s) for the lookup to
+  // resolve so slow-resolving SCP calls still benefit. On hit, we sanity-check
+  // that the player identity the client is about to navigate with still
+  // matches what was fired — if the user edited the player in the confirm
+  // sheet, drop the speculative and let the client's fresh /api/catalog/match
+  // run (mirrors the image-flow player-identity guard in the dual handler).
+  app.get(`${apiPrefix}/voice-lookup/speculative-scp`, async (req, res) => {
+    try {
+      const voiceScanId = typeof req.query.voiceScanId === 'string' ? req.query.voiceScanId : '';
+      const finalFirst = (
+        typeof req.query.playerFirstName === 'string' ? req.query.playerFirstName : ''
+      ).toLowerCase().trim();
+      const finalLast = (
+        typeof req.query.playerLastName === 'string' ? req.query.playerLastName : ''
+      ).toLowerCase().trim();
+      if (!voiceScanId) {
+        return res.status(200).json({ success: false, reason: 'missing_voice_scan_id' });
+      }
+
+      const { peekPendingScan, waitForPendingScan } = await import('./scanSession');
+      // First peek — if the entry is present but scpResult is still null,
+      // waitForPendingScan will immediately return the entry (it doesn't
+      // wait for scpResult specifically). We poll briefly for the field.
+      let entry = peekPendingScan(voiceScanId);
+      if (!entry) {
+        entry = await waitForPendingScan(voiceScanId, 500);
+      }
+      if (!entry) {
+        return res.status(200).json({ success: true, scpResult: null });
+      }
+
+      // Poll for scpResult up to 2s — the SCP lookup is usually <1s but
+      // we leave headroom for cold cache misses.
+      if (!entry.scpResult) {
+        const deadline = Date.now() + 2000;
+        while (Date.now() < deadline) {
+          await new Promise((r) => setTimeout(r, 50));
+          const fresh = peekPendingScan(voiceScanId);
+          if (fresh?.scpResult) {
+            entry = fresh;
+            break;
+          }
+          if (!fresh) break; // evicted
+        }
+      }
+      if (!entry || !entry.scpResult) {
+        return res.status(200).json({ success: true, scpResult: null });
+      }
+
+      // Player-identity sanity check — only enforce on hit. Misses are safe
+      // to forward regardless (saves a redundant round trip for a query we
+      // already know can't match).
+      if (entry.scpResult.status === 'hit') {
+        const specPlayerFirst = (entry.frontResult.playerFirstName || '').toLowerCase();
+        const specPlayerLast = (entry.frontResult.playerLastName || '').toLowerCase();
+        const playerMatches =
+          specPlayerFirst === finalFirst && specPlayerLast === finalLast;
+        if (!playerMatches) {
+          console.log(
+            `[voice-speculative-scp] discarding hit for voiceScanId=${voiceScanId}` +
+              ` — player identity changed (${specPlayerFirst} ${specPlayerLast} → ${finalFirst} ${finalLast})`,
+          );
+          return res.status(200).json({ success: true, scpResult: null });
+        }
+        console.log(
+          `[voice-speculative-scp] forwarding hit for voiceScanId=${voiceScanId}` +
+            ` (score ${entry.scpResult.match.matchScore})`,
+        );
+      } else {
+        console.log(
+          `[voice-speculative-scp] forwarding miss (${entry.scpResult.reason}) for voiceScanId=${voiceScanId}`,
+        );
+      }
+      return res.status(200).json({ success: true, scpResult: entry.scpResult });
+    } catch (err: any) {
+      console.error('[voice-speculative-scp] unhandled error:', err?.message || err);
+      return res.status(200).json({ success: true, scpResult: null });
+    }
+  });
 
   // ── F-3a: Preliminary front-side scan ─────────────────────────────────────
   // Fires from the client on front shutter (before the user flips the card).

@@ -63,10 +63,40 @@ interface ExtractResponse {
 }
 
 interface VoiceLookupProps {
-  /** Called when the user confirms the extracted fields in the sheet. */
-  onConfirm: (fields: ExtractedCardFields) => void;
+  /** Called when the user confirms the extracted fields in the sheet.
+   *  `voiceScanId` (when present) identifies a server-side speculative SCP
+   *  lookup fired during extract — the parent uses it to retrieve the
+   *  cached result and seed cardData.speculativeCatalog before navigating
+   *  to /result, mirroring F-3b for image scans. */
+  onConfirm: (fields: ExtractedCardFields, voiceScanId: string | null) => void;
   /** Optional — disable the button while a sibling action is running. */
   disabled?: boolean;
+}
+
+/** Mint a short opaque id for the voice speculative SCP lookup. Mirrors
+ *  mintScanId in pages/Scan.tsx so both flows use the same id shape. */
+function mintVoiceScanId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `voice-${crypto.randomUUID()}`;
+  }
+  return `voice-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/** Fire-and-forget speculative SCP kickoff. Never awaited by the caller —
+ *  a network hiccup here must not block the confirm sheet opening. */
+async function fireVoicePreliminary(
+  voiceScanId: string,
+  fields: ExtractedCardFields,
+): Promise<void> {
+  try {
+    await fetch('/api/voice-lookup/preliminary', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ voiceScanId, fields }),
+    });
+  } catch (err) {
+    console.warn('[VoiceLookup] preliminary kickoff failed (non-blocking):', err);
+  }
 }
 
 // Pick a MediaRecorder mimeType that both iOS Safari and desktop Chrome can
@@ -109,6 +139,10 @@ export default function VoiceLookup({ onConfirm, disabled }: VoiceLookupProps) {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [transcript, setTranscript] = useState<string>("");
   const [draft, setDraft] = useState<ExtractedCardFields | null>(null);
+  // Voice speculative SCP id — minted + fired once per successful extract;
+  // handed to the parent on confirm so /result can seed speculativeCatalog.
+  // Reset to null whenever the sheet closes or a new recording starts.
+  const [voiceScanId, setVoiceScanId] = useState<string | null>(null);
 
   // ── Cleanup on unmount (component removed mid-recording) ──────────────
   useEffect(() => {
@@ -272,6 +306,14 @@ export default function VoiceLookup({ onConfirm, disabled }: VoiceLookupProps) {
       setTranscript(body.transcript || "");
       setDraft(body.fields);
       setSheetOpen(true);
+
+      // Fire speculative SCP in parallel with the confirm sheet rendering.
+      // By the time the user reviews + taps Confirm (typically 3–6s), the
+      // background lookup on the server has usually resolved, so /result
+      // can render SCP pricing immediately without a second round trip.
+      const newId = mintVoiceScanId();
+      setVoiceScanId(newId);
+      void fireVoicePreliminary(newId, body.fields);
     } catch (err) {
       console.error("[VoiceLookup] upload failed:", err);
       toast({
@@ -304,7 +346,11 @@ export default function VoiceLookup({ onConfirm, disabled }: VoiceLookupProps) {
       });
     }
     setSheetOpen(false);
-    onConfirm(draft);
+    onConfirm(draft, voiceScanId);
+    // Drop the id so if the user records another card in the same session
+    // we don't accidentally forward a stale speculative from the previous
+    // scan. A new recording mints a fresh id inside the extract handler.
+    setVoiceScanId(null);
   }
 
   // ── Render ──────────────────────────────────────────────────────────────
