@@ -19,8 +19,9 @@
 // is obviously wrong before sending.
 
 import { useEffect, useState } from "react";
+import { useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { FolderOpen, Check, AlertTriangle, ExternalLink, Loader2 } from "lucide-react";
+import { FolderOpen, Check, AlertTriangle, ExternalLink, Loader2, XCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/use-auth";
@@ -50,6 +51,7 @@ function extractFolderId(raw: string): string {
 export default function BulkScanSettings() {
   const { user } = useAuth();
   const { toast } = useToast();
+  const [, setLocation] = useLocation();
 
   const { data, isLoading } = useQuery<FoldersResponse>({
     queryKey: ["/api/bulk-scan/folders"],
@@ -58,6 +60,10 @@ export default function BulkScanSettings() {
 
   const [inbox, setInbox] = useState("");
   const [processed, setProcessed] = useState("");
+  // Persist the most recent error so a slow network or server 500 stays
+  // visible on the page instead of flashing through a toast that's easy
+  // to miss. Cleared on the next save attempt.
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // Hydrate the inputs once data arrives. Only seed empty inputs so edits in
   // flight aren't clobbered by a background refetch.
@@ -69,6 +75,7 @@ export default function BulkScanSettings() {
 
   const saveMutation = useMutation({
     mutationFn: async () => {
+      setSaveError(null);
       const payload = {
         inboxFolderId: inbox ? extractFolderId(inbox) : null,
         processedFolderId: processed ? extractFolderId(processed) : null,
@@ -82,9 +89,21 @@ export default function BulkScanSettings() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/bulk-scan/folders"] });
       toast({ title: "Folders saved" });
+      // Bounce back to /bulk-scan once the save succeeds — dealers want
+      // to hit Sync next, not stay on the config screen.
+      setLocation("/bulk-scan");
     },
     onError: (err: any) => {
-      const msg = String(err?.message || "").replace(/^\d+:\s*/, "");
+      const raw = String(err?.message || "").replace(/^\d+:\s*/, "");
+      // Server routes return JSON like `{ error: "..." }` — unwrap so the
+      // inline banner shows the real reason (missing table, missing inbox,
+      // Drive auth expired, etc.) instead of a raw JSON string.
+      let msg = raw;
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed.error === "string") msg = parsed.error;
+      } catch {}
+      setSaveError(msg || "Unknown error");
       toast({ title: "Couldn't save folders", description: msg, variant: "destructive" });
     },
   });
@@ -185,6 +204,28 @@ export default function BulkScanSettings() {
           optional
         />
       </section>
+
+      {/* Error banner — stays visible so the user isn't relying on a
+          ~3s toast to notice that save failed. Covers the common causes:
+          DB tables not migrated yet, Drive auth expired, missing inbox. */}
+      {saveError && (
+        <section className="mx-4 rounded-2xl bg-foil-red/5 border border-foil-red/25 p-4 flex items-start gap-3" data-testid="banner-save-error">
+          <div className="w-9 h-9 rounded-xl bg-foil-red/15 text-foil-red flex items-center justify-center shrink-0">
+            <XCircle className="w-5 h-5" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-foil-red">Couldn't save folders</p>
+            <p className="text-[12px] text-slate-700 mt-0.5 break-words">{saveError}</p>
+            {/relation.*does not exist|scan_batches|google_drive_folders/i.test(saveError) && (
+              <p className="text-[11px] text-slate-600 mt-2">
+                The bulk-scan tables haven't been created yet. Run{" "}
+                <span className="font-mono bg-muted px-1 rounded">npm run db:push</span>{" "}
+                on the server once, then try again.
+              </p>
+            )}
+          </div>
+        </section>
+      )}
 
       {/* Save */}
       <section className="px-4 pt-1">
