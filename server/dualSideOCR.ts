@@ -743,6 +743,15 @@ async function combineCardResults(
     'CLASSIC', 'CLASSICS', 'ESSENTIAL', 'ULTIMATE', 'MASTER', 'MASTERS',
     'ALL-TIME', 'ALLTIME', 'HEROES', 'HALL', 'FAME',
     'PITCHERS', 'CATCHERS', 'SLUGGERS', 'HITTERS',
+    // iOS / browser / keyboard chrome occasionally creeps into the frame
+    // when a user scans a card held near a phone keyboard or browser tab
+    // bar. These are NOT real name tokens and must never be promoted into
+    // surname-search candidates — a whole-word hit on "HOME" will happily
+    // match unrelated catalog copy ("Stealing Second, Third and Home").
+    'FN', 'HOME', 'DELETE', 'TAB', 'SHIFT', 'CTRL', 'ALT', 'ESC',
+    'ENTER', 'RETURN', 'SPACE', 'BACKSPACE', 'CAPS', 'LOCK',
+    'COMMAND', 'OPTION', 'F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8',
+    'F9', 'F10', 'F11', 'F12', 'PAGE', 'UP', 'DOWN', 'END', 'INSERT',
   ]);
 
   // Strip trademark suffixes AND possessive 's so words like
@@ -1598,6 +1607,17 @@ async function combineCardResults(
     }
   }
 
+  // Snapshot the pre-surname-probe cardNumber/year. The front-surname-driven
+  // catalog search below may override these values in-place based on a
+  // catalog row that later gets rejected by the main (brand, year, cardNumber)
+  // lookup. When that happens we roll back to these original OCR-derived
+  // values rather than leaving the probe-set (and rejected) values in place.
+  const presurnameProbeSnapshot = {
+    year: combined.year,
+    cardNumber: combined.cardNumber,
+    collection: combined.collection,
+  };
+
   // ─── Front-surname-driven catalog search ──────────────────────────────────
   // The back-side card-number extractor sometimes latches onto prose
   // numbers (e.g. "A FORMER NO. 1 DRAFT CHOICE OF THE OAKLAND A'S"
@@ -1963,6 +1983,28 @@ async function combineCardResults(
 
       if (!found) {
         console.log('[CardDB] No DB match after all fallbacks — proceeding with OCR-only results');
+        // Roll back any surname-probe-driven cardNumber/year overrides when
+        // the main lookup + all fallbacks rejected the row. Leaving the
+        // probe-set values in place would cause the final scan result to
+        // carry a cardNumber/year taken from a catalog row we just refused
+        // to trust (e.g. the "home"-whole-token false-positive that pointed
+        // at MROD-5 from "Stealing Second, Third and Home").
+        const flagged = combined as CardFormWithFlags;
+        if (flagged._yearFromSurnameProbe) {
+          if (combined.cardNumber !== presurnameProbeSnapshot.cardNumber) {
+            console.log(`[CardDB] Rolling back surname-probe cardNumber override "${combined.cardNumber}" → "${presurnameProbeSnapshot.cardNumber || '(none)'}" — lookup rejected.`);
+            combined.cardNumber = presurnameProbeSnapshot.cardNumber;
+          }
+          if (combined.year !== presurnameProbeSnapshot.year) {
+            console.log(`[CardDB] Rolling back surname-probe year override ${combined.year} → ${presurnameProbeSnapshot.year || '(none)'} — lookup rejected.`);
+            combined.year = presurnameProbeSnapshot.year;
+          }
+          if (combined.collection !== presurnameProbeSnapshot.collection) {
+            console.log(`[CardDB] Rolling back surname-probe collection override "${combined.collection}" → "${presurnameProbeSnapshot.collection || '(none)'}" — lookup rejected.`);
+            combined.collection = presurnameProbeSnapshot.collection;
+          }
+          flagged._yearFromSurnameProbe = false;
+        }
       }
     } catch (err: any) {
       console.error('[CardDB] Lookup failed (non-fatal):', err.message);
