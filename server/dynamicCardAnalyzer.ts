@@ -108,6 +108,14 @@ const PLAYER_NAME_BLOCKLIST: ReadonlySet<string> = new Set([
   'AUTOGRAPH', 'ISSUE', 'ISSUES',
   'VALUED', 'PRIVATE', 'EXCLUSIVE', 'PREMIER', 'PRIME',
   'NATIONAL', 'DIGITAL', 'VINTAGE', 'RETRO', 'REVIVAL', 'REPRINT',
+  // Upper Deck hockey insert wordmarks. The 2024-25 UD Series One "UD Canvas"
+  // insert prints "UID CANVAS" across the top of the card (the slab font makes
+  // the "D" read as "ID" under OCR) and "UPPER DECK" below it. With UPPER/DECK
+  // already blocked but UID/CANVAS missing, the line-priority pass was picking
+  // "Uid Canvas" as a priority-1 player candidate and out-voting the real
+  // "JORDAN BINNINGTON" name line lower on the card. Blocking the insert-set
+  // wordmark tokens themselves makes every detection branch reject that line.
+  'UD', 'UID', 'CANVAS',
   // Stat/bio terms that appear on card backs and can look like 2-word names
   'AVERAGE', 'OPPONENT', 'BATTERS', 'FACED',
   'INNINGS', 'PITCHED', 'STRIKEOUT', 'STRIKEOUTS', 'COMPLETE', 'SHUTOUT',
