@@ -143,6 +143,32 @@ export function extractParallel(productName: string): string | null {
 }
 
 /**
+ * Pull the player name from an SCP product-name. The SCP convention is
+ * that the player name sits at the front of the product-name, before any
+ * `[parallel]` bracket or `#cardNumber` marker. Some trailing variant
+ * tokens (e.g. "Rookie", "Autograph") are printed as words between the
+ * name and the bracket/hash; we conservatively keep them out by cutting
+ * at the first `[` or `#` and trimming whitespace.
+ *
+ *   "Shohei Ohtani #17"                   -> "Shohei Ohtani"
+ *   "Shohei Ohtani [Gold] #AA-11"          -> "Shohei Ohtani"
+ *   "Michael Jordan #57 [Autograph]"       -> "Michael Jordan"
+ *   "Ken Griffey Jr. #350"                 -> "Ken Griffey Jr."
+ *
+ * Returns null for empty / unparseable names.
+ */
+export function extractPlayerName(productName: string): string | null {
+  if (!productName) return null;
+  // Cut at the first `#` (card number marker) or `[` (parallel bracket).
+  const cutIdx = productName.search(/[#\[]/);
+  const head = cutIdx >= 0 ? productName.slice(0, cutIdx) : productName;
+  const cleaned = head.replace(/\s+/g, " ").trim();
+  // Strip a trailing hyphen/en-dash/em-dash if SCP used one as a separator.
+  const trimmed = cleaned.replace(/[-–—]+$/g, "").trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+/**
  * Pull the year from an SCP console-name.
  *   "Baseball Cards 2023 Topps All Aces" -> 2023
  *   "Basketball Cards 1986 Fleer"        -> 1986

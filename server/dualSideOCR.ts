@@ -3,6 +3,14 @@ import sharp from 'sharp';
 import { CardFormValues } from '@shared/schema';
 import { analyzeSportsCardImage, extractAllYearCandidates } from './dynamicCardAnalyzer';
 import { lookupCard, lookupCardByPlayer } from './cardDatabaseService';
+import { lookupCard as scpLookupCard } from './sportscardspro';
+import {
+  extractCardNumber as scpExtractCardNumber,
+  extractParallel as scpExtractParallel,
+  extractYear as scpExtractYear,
+  extractBrand as scpExtractBrand,
+  extractPlayerName as scpExtractPlayerName,
+} from './sportscardspro/match';
 import { extractProductLine } from './productLineExtractor';
 import { batchExtractTextFromImages, clearOcrCache } from './googleVisionFetch';
 import type { FoilDetectionResult } from './visualFoilDetector';
@@ -1157,11 +1165,105 @@ async function combineCardResults(
     console.log(`Set isNumbered=true based on serial number: ${combined.serialNumber}`);
   }
 
+  // ─── SCP-First Authority ────────────────────────────────────────────────────
+  // SCP is the authoritative catalog for brand/year/cardNumber/playerName/parallel.
+  // It covers the major sports (baseball, football, basketball, hockey) far more
+  // comprehensively than our local card_database, so we ask SCP first using the
+  // OCR-derived query fields. If SCP returns a confident match (score ≥ 65),
+  // we overwrite the OCR-owned scan fields with SCP's values and skip the
+  // entire CardDB path below — year-probe disambiguation, surname-catalog
+  // search, and the main tryLookup block. CardDB still runs on SCP miss as a
+  // silent fallback, and set/collection enrichment from CardDB only fires when
+  // SCP has already been skipped.
+  //
+  // OCR-owned fields (CMP code, rookie flag, autograph flag, serial number,
+  // variant, team) are NEVER overwritten by SCP or CardDB — those are signals
+  // only the card image itself carries authoritatively.
+  let scpHit = false;
+  try {
+    const scpPlayerName = `${combined.playerFirstName || ''} ${combined.playerLastName || ''}`.trim();
+    const scpInput = {
+      playerName: scpPlayerName || null,
+      year: (combined.year as number | null | undefined) ?? null,
+      brand: combined.brand || null,
+      collection: combined.collection || null,
+      setName: (combined as any).set || null,
+      cardNumber: combined.cardNumber || null,
+      parallel: combined.foilType || null,
+    };
+    console.log(
+      `[SCP-first] Probing SCP: player="${scpInput.playerName || '(none)'}" year=${scpInput.year || '(none)'}` +
+        ` brand="${scpInput.brand || '(none)'}" cardNumber="${scpInput.cardNumber || '(none)'}" parallel="${scpInput.parallel || '(none)'}"`,
+    );
+    const scpResult = await scpLookupCard(scpInput, { userId: null });
+    if (scpResult.status === 'hit') {
+      scpHit = true;
+      const { productName, consoleName, matchScore } = scpResult.match;
+      const scpYear = scpExtractYear(consoleName);
+      const scpBrand = scpExtractBrand(consoleName);
+      const scpNumber = scpExtractCardNumber(productName);
+      const scpParallel = scpExtractParallel(productName);
+      const scpName = scpExtractPlayerName(productName);
+      console.log(
+        `[SCP-first] HIT score=${matchScore} "${productName}" :: "${consoleName}" — ` +
+          `year=${scpYear ?? '?'} brand=${scpBrand ?? '?'} cardNumber=${scpNumber ?? '?'} ` +
+          `parallel=${scpParallel ?? 'base'} player="${scpName ?? '?'}"`,
+      );
+      // Overwrite SCP-owned fields. We only overwrite when SCP produced a
+      // non-null parsed value — missing pieces (e.g. SCP console-name without
+      // a recognizable year token) leave the OCR value intact.
+      if (scpYear) {
+        combined.year = scpYear;
+        // SCP is a stronger year signal than any OCR/catalog probe below.
+        const flagged = combined as CardFormWithFlags;
+        flagged._yearFromCatalogProbe = true;
+        flagged._yearFromBackOnly = false;
+        flagged._yearFromCopyright = false;
+        flagged._yearFromBareFallback = false;
+        flagged._yearFromSurnameProbe = false;
+      }
+      if (scpBrand) combined.brand = scpBrand;
+      if (scpNumber) combined.cardNumber = scpNumber;
+      if (scpParallel) combined.foilType = scpParallel;
+      if (scpName) {
+        // Split "First Middle Last" into first / last. Preserve Jr./Sr./II/III/IV
+        // suffixes as part of the last name so card dealers still see them.
+        const suffixes = new Set(['Jr', 'Jr.', 'Sr', 'Sr.', 'II', 'III', 'IV', 'V']);
+        const parts = scpName.split(/\s+/).filter(p => p.length > 0);
+        if (parts.length === 1) {
+          combined.playerFirstName = '';
+          combined.playerLastName = parts[0];
+        } else if (parts.length >= 2) {
+          // Pull off any trailing suffix(es) so they stay glued to the last name.
+          const tail: string[] = [];
+          while (parts.length > 1 && suffixes.has(parts[parts.length - 1])) {
+            tail.unshift(parts.pop() as string);
+          }
+          const last = parts.pop() as string;
+          combined.playerFirstName = parts.join(' ');
+          combined.playerLastName = tail.length > 0 ? `${last} ${tail.join(' ')}` : last;
+        }
+      }
+      console.log(
+        `[SCP-first] Populated from SCP: brand="${combined.brand}" year=${combined.year} ` +
+          `cardNumber="${combined.cardNumber}" player="${combined.playerFirstName} ${combined.playerLastName}" ` +
+          `foilType="${combined.foilType || 'base'}" — skipping CardDB path.`,
+      );
+    } else {
+      console.log(`[SCP-first] MISS (${scpResult.reason}) — falling through to CardDB.`);
+    }
+  } catch (err: any) {
+    // Never let SCP-first failures block the scan. Fall through to CardDB.
+    console.warn('[SCP-first] threw unexpectedly (non-fatal, falling through to CardDB):', err?.message || err);
+  }
+
   // ─── Card Database Lookup ───────────────────────────────────────────────────
   // Use authoritative DB data when OCR successfully detected brand + year + card number.
   // DB provides: player name, team, rookie flag, collection, variation.
   // OCR foil/serial/condition data is preserved and not overwritten.
   // dbVariation is stashed here and applied AFTER visual/text foil detection as a fallback.
+  // SCP-first gate: on SCP hit we skip the year-probe, surname-catalog search,
+  // and main tryLookup block entirely. set/collection stay as OCR populated them.
   let dbVariation: string | null = null;
   // Set to true when the catalog confirmed a card hit but no parallel
   // variation row matched the serial-number rule (no detected serial → no
@@ -1376,7 +1478,7 @@ async function combineCardResults(
   // if the back-side surname looked usable.
   let yearProbeFoundCatalogHit = false;
 
-  if (combined.brand && combined.cardNumber) {
+  if (!scpHit && combined.brand && combined.cardNumber) {
     try {
       const allOcrText = `${frontOCRText}\n${backOCRText}`;
       const ocrCandidates = extractAllYearCandidates(allOcrText);
@@ -1890,7 +1992,7 @@ async function combineCardResults(
     }
   }
 
-  if (combined.brand && combined.year && combined.cardNumber) {
+  if (!scpHit && combined.brand && combined.year && combined.cardNumber) {
     // If the OCR text contains the literal "<year>-<cardNumber>"
     // compound (vintage convention printed in the © legal block,
     // e.g. "© TCMA LTD. 1982-17"), then BOTH year and cardNumber
@@ -2009,6 +2111,8 @@ async function combineCardResults(
     } catch (err: any) {
       console.error('[CardDB] Lookup failed (non-fatal):', err.message);
     }
+  } else if (scpHit) {
+    console.log('[CardDB] Skipping lookup — SCP-first already supplied authoritative brand/year/cardNumber/player/parallel.');
   } else {
     console.log(`[CardDB] Skipping lookup — insufficient OCR fields: brand="${combined.brand}" year=${combined.year} cardNumber="${combined.cardNumber}"`);
   }
