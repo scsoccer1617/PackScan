@@ -19,6 +19,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import EbayPriceResults from "@/components/EbayPriceResults";
 import { HoloGradeCard } from "@/components/HoloGradeCard";
 import GradedPriceBreakdown from "@/components/GradedPriceBreakdown";
+import PsaGradeSelect from "@/components/PsaGradeSelect";
 import AddToSheetButton from "@/components/AddToSheetButton";
 import ParallelPickerSheet, {
   type ParallelOption,
@@ -905,10 +906,11 @@ export default function ScanResult() {
           forceMount
           className="mt-4 space-y-4 px-4 data-[state=inactive]:hidden"
         >
-          {holoGrade && (
+          {(holoGrade || cardData.psaGrade != null) && (
             <GradedPriceBreakdown
               cardData={cardData}
-              holoOverall={holoGrade.overall}
+              holoOverall={holoGrade?.overall ?? null}
+              userPsaGrade={cardData.psaGrade ?? null}
             />
           )}
           {showPriceResults ? (
@@ -971,6 +973,7 @@ function DetailsTab({
     ["Card #", cardData.cardNumber || "—"],
     ["Parallel", cardData.foilType || "Base"],
     ["Serial", cardData.serialNumber || "—"],
+    ["PSA grade", cardData.psaGrade != null ? `PSA ${cardData.psaGrade}` : "—"],
     ["Rookie", cardData.isRookieCard ? "Yes" : "No"],
   ];
 
@@ -1121,6 +1124,10 @@ function DetailsTab({
               onChange={(v) => setDraft((d) => ({ ...d, foilType: v, variant: v }))}
               placeholder="e.g. Silver Prizm, Rainbow Foil"
               testId="edit-parallel"
+            />
+            <PsaGradeSelect
+              value={draft.psaGrade ?? null}
+              onChange={(psa) => setDraft((d) => ({ ...d, psaGrade: psa }))}
             />
             <label className="flex items-center gap-2 pt-1 text-sm text-ink">
               <input

@@ -171,6 +171,13 @@ export const cardSchema = z.object({
   variant: z.string().optional(),
   serialNumber: z.string().optional(),
   condition: z.string().optional(),
+  /**
+   * User-supplied PSA grade (1–10, half-steps allowed). When set, it overrides
+   * the Holo-predicted grade for the eBay at-grade tier. Use this when the
+   * user knows the card is already slabbed — a PSA-10 Arenado's comps look
+   * nothing like a raw or PSA-8 Arenado, so this field steers the comp pool.
+   */
+  psaGrade: z.number().min(1).max(10).optional().nullable(),
   estimatedValue: z.number().optional(),
   isRookieCard: z.boolean().optional().default(false),
   isAutographed: z.boolean().optional().default(false),
