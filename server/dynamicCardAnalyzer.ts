@@ -479,7 +479,18 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
             if (/^[a-z]+$/.test(w)) return 'lower';
             return 'other';
           };
-          const caseStyles = new Set(nameWords.map(caseStyleOf));
+          // Middle-initial tokens ("C.", "A", "J.") are NOT a casing signal — they
+          // are a single letter that, by definition, has no lowercase letters to
+          // match against the surrounding all-caps or title-case style. So
+          // "JUAN C. URIBE" correctly splits to upper/other/upper and the naive
+          // caseStyles.size===1 check rejects it even though it IS a real name
+          // line. For 3-word name candidates, skip the middle token from the
+          // casing-consistency check when it looks like a middle initial.
+          const isMiddleInitialToken = (w: string) => /^[A-Z]\.?$/.test(w);
+          const tokensForCasing = (nameWords.length === 3 && isMiddleInitialToken(nameWords[1]))
+            ? [nameWords[0], nameWords[2]]
+            : nameWords;
+          const caseStyles = new Set(tokensForCasing.map(caseStyleOf));
           const consistentCasing = caseStyles.size === 1 && !caseStyles.has('other');
 
           if (noNonNameWords && noNumbers && eachWordLen && consistentCasing) {

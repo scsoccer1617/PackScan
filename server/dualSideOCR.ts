@@ -20,7 +20,15 @@ interface YearConfidenceFlags {
   _yearFromCopyright?: boolean;
   _yearFromBareFallback?: boolean;
   _yearFromBackOnly?: boolean;
+  // Strong signal: brand+year+cardNumber triple matched a catalog row
+  // (year-validation block) — this is the only flag that justifies trusting
+  // a DB row's player name over an OCR'd player name in applyDbResult.
   _yearFromCatalogProbe?: boolean;
+  // Weaker signal: the surname-catalog search (brand + surname substring)
+  // decided to override the year / cardNumber. MUST NOT be used to justify
+  // trusting DB-over-OCR for player name — the surname search is itself
+  // what introduced the candidate row, so using it as validation is circular.
+  _yearFromSurnameProbe?: boolean;
   _cardNumberLowConfidence?: boolean;
   _variationAmbiguous?: boolean;
   _variationOptions?: string[];
@@ -586,6 +594,24 @@ async function combineCardResults(
   const frontHasYear = hasValue(frontResult.year);
   const backHasYear  = hasValue(backResult.year);
 
+  // Retro / throwback product lines reuse a deliberately-vintage copyright
+  // imprint on the back (e.g. 2008 Topps Heritage prints “© 2000 THE TOPPS
+  // COMPANY” to evoke the 1959-era design). When the FRONT collection is one
+  // of these retro lines and the back year came from a copyright marker, we
+  // must NOT let the back year influence the combined year — the back
+  // copyright is a stylistic choice, not the production year.
+  const RETRO_COLLECTION_MARKERS = [
+    'heritage', 'archives', 'flashback', 'flashbacks', 'legends',
+    'gypsy queen', 'allen & ginter', 'allen and ginter', 'stadium club',
+    'big league', 'turkey red', 'original six',
+  ];
+  const frontCollectionLower = String(frontResult.collection || '').toLowerCase();
+  const frontIsRetroProduct = !!frontCollectionLower && RETRO_COLLECTION_MARKERS.some(m => frontCollectionLower.includes(m));
+  const backYearIsRetroCopyright = frontIsRetroProduct && backYearFromCopyright;
+  if (backYearIsRetroCopyright) {
+    console.log(`[Year] Back year ${backResult.year} is a retro-product copyright imprint (front collection "${frontResult.collection}"). Will NOT use it to override front year.`);
+  }
+
   // When the front year came from the bare-year fallback (i.e. just a 4-digit
   // year buried in prose like "TRIPLE CROWN-1967") AND it disagrees with the
   // back year by more than 2 years, the back year is more reliable. This
@@ -593,6 +619,7 @@ async function combineCardResults(
   // event year but the actual production year only appears on the back.
   if (frontHasYear && backHasYear &&
       frontYearFromBareFallback &&
+      !backYearIsRetroCopyright &&
       Math.abs(Number(frontResult.year) - Number(backResult.year)) > 2) {
     combined.year = backResult.year;
     (combined as any)._yearFromCopyright = backYearFromCopyright;
@@ -603,7 +630,7 @@ async function combineCardResults(
     if (backHasYear && backResult.year !== frontResult.year) {
       console.log(`[Year] Front year ${frontResult.year} preferred over back year ${backResult.year} (front is the authoritative source; back stats and copyright lines are unreliable for year).`);
     }
-  } else if (backHasYear) {
+  } else if (backHasYear && !backYearIsRetroCopyright) {
     combined.year = backResult.year;
     // Mark as low-confidence — front had no year, so this came entirely from
     // the back (stats / copyright / publisher imprint). DB lookup should
@@ -611,6 +638,8 @@ async function combineCardResults(
     (combined as any)._yearFromBackOnly = true;
     (combined as any)._yearFromCopyright = backYearFromCopyright;
     console.log(`[Year] Using back year ${backResult.year} as fallback (front had no year). Marked low-confidence — DB lookup will widen the year search window.`);
+  } else if (backHasYear && backYearIsRetroCopyright) {
+    console.log(`[Year] Discarded back year ${backResult.year} (retro-product copyright imprint, front collection "${frontResult.collection}"). No year assigned from back.`);
   }
 
   // Log when back has no card number
@@ -1147,10 +1176,20 @@ async function combineCardResults(
       const ocrLast = (combined.playerLastName || '').trim().toLowerCase();
       const ocrFirst = (combined.playerFirstName || '').trim().toLowerCase();
       const dbLast  = (dbResult.playerLastName || '').trim().toLowerCase();
+      // Surname overlap must be a whole-token match (or a compound-surname
+      // where one side's surname is a distinct token in the other side's
+      // multi-word surname, e.g. OCR "de la rosa" vs DB "Rosa"). Substring
+      // matching — the old behaviour — let "uribe" spuriously match
+      // "Euribel", which in turn allowed a Juan Uribe OCR to be "validated"
+      // against an Euribel Durazo catalog row.
+      const tokenize = (s: string) => s.split(/[^a-z]+/).filter(Boolean);
+      const ocrLastTokens = tokenize(ocrLast);
+      const dbLastTokens  = tokenize(dbLast);
       const lastNamesOverlap = !!ocrLast && !!dbLast && (
         ocrLast === dbLast ||
-        ocrLast.includes(dbLast) ||
-        dbLast.includes(ocrLast)
+        // OR any whole-token appears in both surnames (handles
+        // "Perez" vs "Perez Jr", "de la rosa" vs "rosa", etc.)
+        ocrLastTokens.some(t => dbLastTokens.includes(t))
       );
       const ocrHasNoName = !ocrLast;
       // Treat OCR names made entirely of common English stopwords as bogus
@@ -1602,6 +1641,18 @@ async function combineCardResults(
       //       that tuple — the OCR-derived tuple is wrong (Catfish Hunter
       //       case: brand=TCMA, year=2012, #25 is unknown, but searching
       //       by surname=catfish/hunter would salvage the correct row)
+      //
+      // Post-SQL word-boundary filter for surname matches.
+      // The SQL `LIKE '%fs%'` is a substring match, so a surname like
+      // "Uribe" spuriously matches "Eur ibel", "Uribe stitas", "b Uribe ndez",
+      // etc. That's how a Juan Uribe card got promoted into an “Euribel
+      // Durazo” row. Require the surname to appear as a whole token (split
+      // on non-letters) in the DB playerName before we trust the row.
+      const surnameIsWholeToken = (playerName: string | null | undefined, fs: string): boolean => {
+        if (!playerName) return false;
+        const tokens = String(playerName).toLowerCase().split(/[^a-z]+/).filter(Boolean);
+        return tokens.includes(fs.toLowerCase());
+      };
       const cardNumberMissing = !combined.cardNumber || String(combined.cardNumber).trim().length === 0;
       const tupleMissedCatalog = !!combined.brand && !!combined.cardNumber && !yearProbeFoundCatalogHit;
       const shouldRun = surnameCandidates.length > 0 && (cardNumberMissing || !backSurnameUsable || tupleMissedCatalog);
@@ -1621,7 +1672,7 @@ async function combineCardResults(
         if (tupleMissedCatalog && combined.cardNumber) {
           const cardNumLower = String(combined.cardNumber).toLowerCase();
           for (const fs of surnameCandidates) {
-            const rows = await db
+            const rawRows = await db
               .select({
                 year: cardDatabase.year,
                 cardNumber: cardDatabase.cardNumberRaw,
@@ -1633,6 +1684,13 @@ async function combineCardResults(
                 sql`lower(${cardDatabase.playerName}) LIKE ${'%' + fs + '%'}`,
               ))
               .limit(50);
+            // Word-boundary filter: reject rows where the surname only matches
+            // as a substring (e.g. "uribe" inside "Euribel"). See the
+            // surnameIsWholeToken helper above for the rationale.
+            const rows = rawRows.filter(r => surnameIsWholeToken(r.playerName, fs));
+            if (rawRows.length !== rows.length) {
+              console.log(`[CardDB] Surname salvage (year-agnostic): discarded ${rawRows.length - rows.length}/${rawRows.length} substring-only rows for "${fs}" (e.g. ${rawRows.filter(r => !surnameIsWholeToken(r.playerName, fs)).slice(0, 3).map(r => r.playerName).join(', ')}).`);
+            }
             if (rows.length === 0) continue;
             // Prefer rows whose cardNumber matches the OCR-derived one.
             const cardNumMatches = rows.filter(r => String(r.cardNumber).toLowerCase() === cardNumLower);
@@ -1643,7 +1701,7 @@ async function combineCardResults(
               const row = cardNumMatches[0];
               combined.year = row.year;
               combined.cardNumber = String(row.cardNumber);
-              flagged._yearFromCatalogProbe = true;
+              flagged._yearFromSurnameProbe = true;
               flagged._yearFromBackOnly = false;
               flagged._yearFromCopyright = false;
               flagged._yearFromBareFallback = false;
@@ -1663,7 +1721,7 @@ async function combineCardResults(
               const pool = ocrGrounded.length > 0 ? ocrGrounded : cardNumMatches;
               const chosen = pool.reduce((a, b) => (b.year < a.year ? b : a));
               combined.year = chosen.year;
-              flagged._yearFromCatalogProbe = true;
+              flagged._yearFromSurnameProbe = true;
               flagged._yearFromBackOnly = false;
               flagged._yearFromCopyright = false;
               flagged._yearFromBareFallback = false;
@@ -1676,7 +1734,7 @@ async function combineCardResults(
               const row = rows[0];
               combined.year = row.year;
               combined.cardNumber = String(row.cardNumber);
-              flagged._yearFromCatalogProbe = true;
+              flagged._yearFromSurnameProbe = true;
               flagged._yearFromBackOnly = false;
               flagged._yearFromCopyright = false;
               flagged._yearFromBareFallback = false;
@@ -1708,7 +1766,7 @@ async function combineCardResults(
                 const newYr = yearsAvail[0];
                 if (newYr !== ocrYr) {
                   combined.year = newYr;
-                  flagged._yearFromCatalogProbe = true;
+                  flagged._yearFromSurnameProbe = true;
                   flagged._yearFromBackOnly = false;
                   flagged._yearFromCopyright = false;
                   flagged._yearFromBareFallback = false;
@@ -1721,14 +1779,14 @@ async function combineCardResults(
             console.log(`[CardDB] Surname salvage (year-agnostic): "${fs}" matched ${rows.length} catalog rows but none matched OCR cardNumber #${cardNumLower} — leaving in place.`);
           }
           // If salvage succeeded, skip the year-restricted loop below.
-          if ((combined as CardFormWithFlags)._yearFromCatalogProbe && combined.year !== Number(combined.year)) {
+          if ((combined as CardFormWithFlags)._yearFromSurnameProbe && combined.year !== Number(combined.year)) {
             // marker only; structured break via the loop above already exited
           }
         }
 
         if (uniqueYears.length > 0) {
           for (const fs of surnameCandidates) {
-            const rows = await db
+            const rawRows = await db
               .select({
                 year: cardDatabase.year,
                 cardNumber: cardDatabase.cardNumberRaw,
@@ -1742,6 +1800,13 @@ async function combineCardResults(
                 sql`lower(${cardDatabase.playerName}) LIKE ${'%' + fs + '%'}`,
               ))
               .limit(10);
+            // Word-boundary filter: reject rows where the surname only matches
+            // as a substring (e.g. "uribe" inside "Euribel"). See the
+            // surnameIsWholeToken helper above for the rationale.
+            const rows = rawRows.filter(r => surnameIsWholeToken(r.playerName, fs));
+            if (rawRows.length !== rows.length) {
+              console.log(`[CardDB] Surname catalog search: discarded ${rawRows.length - rows.length}/${rawRows.length} substring-only rows for "${fs}" (e.g. ${rawRows.filter(r => !surnameIsWholeToken(r.playerName, fs)).slice(0, 3).map(r => r.playerName).join(', ')}).`);
+            }
 
               const flagged = combined as CardFormWithFlags;
               const oldYear = combined.year;
@@ -1752,7 +1817,7 @@ async function combineCardResults(
               const row = rows[0];
               combined.year = row.year;
               combined.cardNumber = String(row.cardNumber);
-              flagged._yearFromCatalogProbe = true;
+              flagged._yearFromSurnameProbe = true;
               flagged._yearFromBackOnly = false;
               flagged._yearFromCopyright = false;
               flagged._yearFromBareFallback = false;
@@ -1771,7 +1836,7 @@ async function combineCardResults(
                 // If all matches also share the same year, lock that in too.
                 if (years.length === 1) {
                   combined.year = years[0];
-                  flagged._yearFromCatalogProbe = true;
+                  flagged._yearFromSurnameProbe = true;
                   flagged._yearFromBackOnly = false;
                   flagged._yearFromCopyright = false;
                   flagged._yearFromBareFallback = false;
@@ -1786,7 +1851,7 @@ async function combineCardResults(
                   const chosenYear = (ocrGroundedYears.length > 0 ? ocrGroundedYears : years)
                     .reduce((a, b) => (b < a ? b : a));
                   combined.year = chosenYear;
-                  flagged._yearFromCatalogProbe = true;
+                  flagged._yearFromSurnameProbe = true;
                   flagged._yearFromBackOnly = false;
                   flagged._yearFromCopyright = false;
                   flagged._yearFromBareFallback = false;
