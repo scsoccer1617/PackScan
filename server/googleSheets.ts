@@ -239,6 +239,194 @@ export function buildRow(input: CardRowInput): (string | number)[] {
   ];
 }
 
+// ── Read helpers ─────────────────────────────────────────────────────────────
+// PackScan treats the active Google Sheet as the source of truth for saved
+// cards. The local `cards` table is still written for legacy reasons but it
+// no longer receives new data, so any endpoint that powers Collection value,
+// Collection tab, or Stats has to read from the sheet.
+
+/**
+ * Parsed shape of one data row in a PackScan-shaped Google Sheet. Field
+ * names mirror SHEET_HEADERS / buildRow and the client `CardWithRelations`
+ * contract so the UI can consume rows without a second translation layer.
+ */
+export interface SheetCardRow {
+  /** Stable id — "<sheetId>-<rowIndex>" — for React keys. Rows have no DB id. */
+  id: string;
+  rowIndex: number;
+  createdAt: string | null;
+  sport: { name: string } | null;
+  brand: { name: string } | null;
+  playerFirstName: string;
+  playerLastName: string;
+  year: number | null;
+  collection: string | null;
+  set: string | null;
+  cardNumber: string | null;
+  cmpNumber: string | null;
+  variant: string | null;
+  serialNumber: string | null;
+  foilType: string | null;
+  isRookieCard: boolean;
+  isAutographed: boolean;
+  isNumbered: boolean;
+  estimatedValue: string | null;
+  frontImage: string | null;
+  backImage: string | null;
+  ebaySearchUrl: string | null;
+}
+
+function parseBool(v: string | undefined): boolean {
+  if (!v) return false;
+  const s = v.trim().toLowerCase();
+  return s === 'yes' || s === 'true' || s === '1' || s === 'y';
+}
+
+function parseInt10(v: string | undefined): number | null {
+  if (!v) return null;
+  const n = parseInt(String(v).trim(), 10);
+  return isNaN(n) ? null : n;
+}
+
+function parsePlayerName(raw: string): { first: string; last: string } {
+  const s = (raw || '').trim();
+  if (!s) return { first: '', last: '' };
+  const parts = s.split(/\s+/);
+  if (parts.length === 1) return { first: '', last: parts[0] };
+  const first = parts[0];
+  const last = parts.slice(1).join(' ');
+  return { first, last };
+}
+
+/**
+ * Parse one sheet row (the shape Google returns — a string[] aligned to
+ * SHEET_HEADERS) into the card shape the UI expects. Returns null for
+ * rows that are entirely empty so the caller can filter them out.
+ */
+function parseSheetRow(
+  values: string[],
+  rowIndex: number,
+  sheetId: string,
+): SheetCardRow | null {
+  // Column order mirrors SHEET_HEADERS exactly:
+  //   0 Date scanned, 1 Sport, 2 Player, 3 Year, 4 Brand, 5 Card #, 6 CMP,
+  //   7 Set, 8 Collection, 9 Parallel, 10 Serial #, 11 Variant,
+  //   12 Rookie, 13 Auto, 14 Numbered,
+  //   15 Avg eBay price, 16 Front link, 17 Back link, 18 eBay search URL.
+  const get = (i: number) => (values[i] ?? '').toString().trim();
+  const player = get(2);
+  const sport = get(1);
+  const brand = get(4);
+  // Treat the row as empty only when every meaningful identity column is
+  // blank — protects against header-only rows and stray whitespace.
+  if (!player && !sport && !brand && !get(5)) return null;
+  const { first, last } = parsePlayerName(player);
+  // "Date scanned" is ISO yyyy-mm-dd; hydrate to a full ISO string so the
+  // client's `new Date(createdAt)` parse behaves.
+  const dateStr = get(0);
+  let createdAt: string | null = null;
+  if (dateStr) {
+    const dt = new Date(`${dateStr}T00:00:00`);
+    createdAt = isNaN(dt.getTime()) ? null : dt.toISOString();
+  }
+  const priceRaw = get(15);
+  const estimatedValue = priceRaw && !isNaN(Number(priceRaw)) ? Number(priceRaw).toFixed(2) : null;
+  return {
+    id: `${sheetId}-${rowIndex}`,
+    rowIndex,
+    createdAt,
+    sport: sport ? { name: sport } : null,
+    brand: brand ? { name: brand } : null,
+    playerFirstName: first,
+    playerLastName: last,
+    year: parseInt10(get(3)),
+    collection: get(8) || null,
+    set: get(7) || null,
+    cardNumber: get(5) || null,
+    cmpNumber: get(6) || null,
+    variant: get(11) || null,
+    serialNumber: get(10) || null,
+    foilType: get(9) || null,
+    isRookieCard: parseBool(get(12)),
+    isAutographed: parseBool(get(13)),
+    isNumbered: parseBool(get(14)),
+    estimatedValue,
+    frontImage: get(16) || null,
+    backImage: get(17) || null,
+    ebaySearchUrl: get(18) || null,
+  };
+}
+
+// Tiny in-memory TTL cache keyed by (userId, sheetId). The aggregate
+// endpoints (/api/cards, /api/collection/summary, /api/stats/*) all fire
+// back-to-back on page load — without a cache that's 4–5 Google round
+// trips per navigation. 15s TTL is short enough that a just-appended row
+// shows up quickly but long enough to absorb a page load.
+type RowsCacheEntry = { rows: SheetCardRow[]; fetchedAt: number };
+const rowsCache = new Map<string, RowsCacheEntry>();
+const ROWS_TTL_MS = 15_000;
+
+function rowsCacheKey(userId: number, sheetId: string) {
+  return `${userId}:${sheetId}`;
+}
+
+/**
+ * Invalidate the read cache for a user's active sheet. Call after any
+ * mutation that would change row contents (append, delete, import) so the
+ * next read sees the fresh state instead of serving a stale snapshot.
+ */
+export function invalidateSheetRowsCache(userId: number, sheetId?: string) {
+  if (sheetId) {
+    rowsCache.delete(rowsCacheKey(userId, sheetId));
+    return;
+  }
+  // No sheetId — drop every entry for this user.
+  const prefix = `${userId}:`;
+  rowsCache.forEach((_v, key) => {
+    if (key.startsWith(prefix)) rowsCache.delete(key);
+  });
+}
+
+/**
+ * Read every data row from the user's active sheet and return them as
+ * SheetCardRow[]. Returns [] if the user has no active sheet, no Google
+ * connection, or the sheet is empty. Never throws NotConnectedError —
+ * swallows it so the Home/Collection/Stats pages render gracefully for
+ * users who haven't finished OAuth.
+ */
+export async function getActiveSheetRows(userId: number): Promise<SheetCardRow[]> {
+  try {
+    const active = await getActiveSheet(userId);
+    if (!active) return [];
+    const cacheKey = rowsCacheKey(userId, active.googleSheetId);
+    const cached = rowsCache.get(cacheKey);
+    if (cached && Date.now() - cached.fetchedAt < ROWS_TTL_MS) {
+      return cached.rows;
+    }
+    const { oauth } = await getOAuthClient(userId);
+    const sheets = sheetsFor(oauth);
+    const got = await sheets.spreadsheets.values.get({
+      spreadsheetId: active.googleSheetId,
+      range: `A:${String.fromCharCode(65 + SHEET_HEADERS.length - 1)}`,
+      majorDimension: 'ROWS',
+    });
+    const values = got.data.values || [];
+    // Skip row 0 (header). Row index in the sheet is 1-based; we pass the
+    // 1-based sheet row (i + 1 from values.slice(1)) so ids are stable.
+    const rows: SheetCardRow[] = [];
+    for (let i = 1; i < values.length; i++) {
+      const parsed = parseSheetRow(values[i] as string[], i + 1, active.googleSheetId);
+      if (parsed) rows.push(parsed);
+    }
+    rowsCache.set(cacheKey, { rows, fetchedAt: Date.now() });
+    return rows;
+  } catch (err: any) {
+    if (err instanceof NotConnectedError) return [];
+    console.error('[googleSheets] getActiveSheetRows failed:', err?.message || err);
+    return [];
+  }
+}
+
 /**
  * Count the number of data rows (excluding the header row) in a user's
  * spreadsheet. Used by the MySheets page so the "N cards" label reflects
@@ -308,5 +496,10 @@ export async function appendCardRow(
     requestBody: { values: [row] },
   });
   const sheetUrl = `https://docs.google.com/spreadsheets/d/${sheet.googleSheetId}`;
+  // Any new row means the TTL cache for this sheet is stale — clear it so
+  // the next aggregate read (e.g. Home reloading /api/collection/summary
+  // right after a save) sees the row immediately instead of waiting out
+  // the 15s TTL.
+  invalidateSheetRowsCache(userId, sheet.googleSheetId);
   return { sheet, sheetUrl };
 }
