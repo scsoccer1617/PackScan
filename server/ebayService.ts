@@ -581,44 +581,19 @@ export async function searchCardValues(
     // We treat the user's card as relic-ish only when the variant/foilType
     // literally says so (rare — most Holo users don't scan relics). Otherwise
     // relic listings are excluded at query time AND hard-filtered from results.
-    const RELIC_KEYWORDS_RE = /\b(relic|memorabilia|game[-\s]?used|game[-\s]?worn|patch|jersey|bat\s+piece|bat\s+relic|dual\s+relic|triple\s+relic|swatch|button|laundry\s+tag)\b/i;
     const ownVariantBlob = `${variant || ''} ${foilType || ''} ${collection || ''} ${set || ''}`;
-    const isRelicCard = RELIC_KEYWORDS_RE.test(ownVariantBlob);
+    const isRelicCard = RELIC_DETECT_RE.test(ownVariantBlob);
 
-    // Build eBay negative-keyword exclusions.
-    // These are prefixed with "-" and appended to the query so eBay filters them
-    // at the API level, well before our scoring step.
-    const buildNegativeKeywords = (): string => {
-      const excludes: string[] = [];
-
-      // Always exclude autograph/signed listings for non-auto cards
-      if (!isAuto) {
-        excludes.push('-autograph', '-signed');
-      }
-
-      // Exclude parallel-indicator terms for base cards — but only when we
-      // are NOT explicitly searching for a graded slab. A Holo user grading
-      // their PSA-10 refractor still wants to see the slab's comps.
-      if (isBaseCard && !gradeKeyword) {
-        excludes.push('-parallel', '-refractor', '-xfractor', '-rainbow', '-mojo', '-holo');
-      }
-
-      // Exclude relic/memorabilia listings when our card isn't one. These
-      // regularly masquerade as normal base-card listings because the seller
-      // includes the year + product + player name in the title; only the
-      // "Relic" / "Game-Used" / "Patch" words give them away.
-      if (!isRelicCard) {
-        excludes.push('-relic', '-memorabilia', '-"game-used"', '-"game used"', '-patch', '-jersey');
-      }
-
-      // When the caller asked for the RAW price tier, strip slabbed sales
-      // so the average reflects ungraded card prices only.
-      if (excludeGraded) {
-        excludes.push('-PSA', '-BGS', '-SGC', '-CGC', '-graded', '-slab', '-slabbed');
-      }
-
-      return excludes.join(' ');
-    };
+    // Build eBay negative-keyword exclusions via the shared helper —
+    // `getEbaySearchUrl` uses the same one so the outbound "View on eBay"
+    // link returns the same slice of listings as this API query.
+    const buildNegativeKeywords = (): string => buildCardSearchNegatives({
+      isBase: isBaseCard,
+      isAuto,
+      isRelic: isRelicCard,
+      excludeGraded,
+      hasGrade: !!gradeKeyword,
+    });
 
     // Color keyword extracted from the foilType for use in intermediate fallback searches.
     // e.g. "Holiday Green Leaf" → "Green", "Blue Crackle Foil" → "Blue"
@@ -672,7 +647,7 @@ export async function searchCardValues(
     // MSI access is granted we'll gate a 'sold' path behind EBAY_MSI_ENABLED
     // and flip the label automatically.
     const dataType: 'sold' | 'current' = 'current';
-    const fallbackSearchUrl = getEbaySearchUrl(safePlayerName, cardNumber, brand, year, collection, '', isNumbered, foilType, serialNumber, variant, set, gradeKeyword || undefined);
+    const fallbackSearchUrl = getEbaySearchUrl(safePlayerName, cardNumber, brand, year, collection, '', isNumbered, foilType, serialNumber, variant, set, gradeKeyword || undefined, isAuto, excludeGraded);
 
     // Use eBay Finding API (findCompletedItems) to get sold listings.
     // This API is accessible from Replit servers (unlike the web UI which hits Akamai bot protection).
@@ -994,7 +969,7 @@ export async function searchCardValues(
       // fuzzy matcher sometimes returns titles that still contain these
       // terms (e.g. when the listing uses "Game Used" as a hyphenated
       // phrase the token exclusion missed). This is the backstop.
-      if (!isRelicCard && RELIC_KEYWORDS_RE.test(t)) {
+      if (!isRelicCard && RELIC_DETECT_RE.test(t)) {
         console.log(`  ↳ Hard-filtered (relic/memorabilia listing but scanned card isn't a relic): "${r.title}"`);
         return false;
       }
@@ -1217,7 +1192,7 @@ export async function searchCardValues(
     return {
       averageValue: 0,
       results: [],
-      searchUrl: getEbaySearchUrl(playerName || '', cardNumber, brand, year, collection, '', isNumbered, foilType, serialNumber, variant, set, options?.gradeKeyword || undefined),
+      searchUrl: getEbaySearchUrl(playerName || '', cardNumber, brand, year, collection, '', isNumbered, foilType, serialNumber, variant, set, options?.gradeKeyword || undefined, !!isAutographed, !!options?.excludeGraded),
       errorMessage: 'eBay search failed',
       dataType: 'sold' as const
     };
@@ -1225,7 +1200,59 @@ export async function searchCardValues(
 }
 
 /**
- * Build a URL to eBay search for a specific card
+ * Relic-detection regex shared with searchCardValues — factor out so the
+ * outbound-link builder (`getEbaySearchUrl`) and the API query keep the
+ * same "is our scanned card a relic?" answer.
+ */
+const RELIC_DETECT_RE = /\b(relic|memorabilia|game[-\s]?used|game[-\s]?worn|patch|jersey|bat\s+piece|bat\s+relic|dual\s+relic|triple\s+relic|swatch|button|laundry\s+tag)\b/i;
+
+/**
+ * Negative keywords that keep a card's eBay results clean of the many
+ * things that share the player + year + brand tokens but aren't the
+ * same card (autos, parallels, relics, slabs). Mirrors the in-API
+ * `buildNegativeKeywords` closure used by searchCardValues — any change
+ * here must land in both, which is why this lives at module scope.
+ *
+ * - `isBase` — no foilType/variant on our card, so exclude parallel words
+ * - `isAuto` — when false, exclude `-autograph -signed`
+ * - `isRelic` — when false, exclude `-relic -memorabilia -patch -jersey` etc.
+ * - `excludeGraded` — true on the Raw tier, strips `-PSA -BGS -SGC -CGC ...`
+ * - `hasGrade` — when a gradeKeyword is in play (At-grade / Top-grade tiers),
+ *   we deliberately don't apply parallel exclusions; a PSA-10 refractor slab
+ *   is a legitimate comp for that tier.
+ */
+export function buildCardSearchNegatives(opts: {
+  isBase: boolean;
+  isAuto: boolean;
+  isRelic: boolean;
+  excludeGraded: boolean;
+  hasGrade: boolean;
+}): string {
+  const excludes: string[] = [];
+  if (!opts.isAuto) excludes.push('-autograph', '-signed');
+  if (opts.isBase && !opts.hasGrade) {
+    excludes.push('-parallel', '-refractor', '-xfractor', '-rainbow', '-mojo', '-holo');
+  }
+  if (!opts.isRelic) {
+    excludes.push('-relic', '-memorabilia', '-"game-used"', '-"game used"', '-patch', '-jersey');
+  }
+  if (opts.excludeGraded) {
+    excludes.push('-PSA', '-BGS', '-SGC', '-CGC', '-graded', '-slab', '-slabbed');
+  }
+  return excludes.join(' ');
+}
+
+/**
+ * Build a URL to eBay search for a specific card.
+ *
+ * Mirrors the negative-keyword filters that searchCardValues applies to
+ * the Browse API query so the outbound "View on eBay" link returns the
+ * same slice of listings the tile's asking median was computed from.
+ * Pass `isAutographed` + `excludeGraded` explicitly — both default to
+ * false for backward compatibility, but callers on the 3-tier price
+ * breakdown should forward them (the Raw tile sets excludeGraded=true,
+ * and auto cards set isAutographed=true to avoid accidentally excluding
+ * legitimate auto comps).
  */
 export function getEbaySearchUrl(
   playerName: string,
@@ -1239,7 +1266,9 @@ export function getEbaySearchUrl(
   serialNumber?: string,
   variant?: string,
   set?: string,
-  gradeKeyword?: string
+  gradeKeyword?: string,
+  isAutographed?: boolean,
+  excludeGraded?: boolean,
 ): string {
   // Prefer the product Set name (e.g. "Holiday", "Series 1") over the generic
   // Collection name (e.g. "Base Set") that eBay sellers never write in titles.
@@ -1313,6 +1342,25 @@ export function getEbaySearchUrl(
     keywords += ` "${gradeKeyword!.trim()}"`;
   }
 
+  // Append the same negative-keyword exclusions searchCardValues uses so
+  // the link surfaces the same slice of listings the tile's asking median
+  // was built from. Without these, tapping "eBay" on a base-card tile
+  // pulls in every parallel (Gold, Rainbow Foil, Refractor, …) because
+  // those listings all contain the player + year + brand tokens too.
+  const isBase = (!foilType || !foilType.trim()) && (!variant || !variant.trim());
+  const ownVariantBlob = `${variant || ''} ${foilType || ''} ${collection || ''} ${set || ''}`;
+  const isRelic = RELIC_DETECT_RE.test(ownVariantBlob);
+  const negatives = buildCardSearchNegatives({
+    isBase,
+    isAuto: !!isAutographed,
+    isRelic,
+    excludeGraded: !!excludeGraded,
+    hasGrade: isGradedTier,
+  });
+  if (negatives) {
+    keywords += ` ${negatives}`;
+  }
+
   // Active listings only (PackScan sources pricing from the Browse API —
   // sold access blocked behind Marketplace Insights approval). Sorted by
   // newest listings so the outbound "View on eBay" link matches the asks
@@ -1326,6 +1374,10 @@ export function getEbaySearchUrl(
     set: set || null,
     collection: collection || null,
     gradeKeyword: gradeKeyword || null,
+    isAutographed: !!isAutographed,
+    excludeGraded: !!excludeGraded,
+    isBase,
+    isRelic,
   });
   return finalUrl;
 }

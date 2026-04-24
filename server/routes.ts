@@ -977,7 +977,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           parseInt(req.query.year as string, 10),
           req.query.collection as string || '',
           '',
-          req.query.isNumbered === 'true'
+          req.query.isNumbered === 'true',
+          (req.query.foilType as string) || '',
+          (req.query.serialNumber as string) || '',
+          (req.query.variant as string) || '',
+          (req.query.set as string) || undefined,
+          undefined, // gradeKeyword — not applicable on this endpoint
+          req.query.isAutographed === 'true',
+          false, // excludeGraded — single-tier endpoint; no raw/graded split here
         ) 
       });
     }

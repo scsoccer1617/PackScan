@@ -160,6 +160,9 @@ export function registerSheetRoutes(app: Express) {
         player, c.cardNumber || '', c.brand || '', yr, c.collection || '', '',
         !!c.isNumbered, c.foilType || '', c.serialNumber || '',
         (c as any).variant || '', c.set || '',
+        undefined, // gradeKeyword — sheet link is always raw asking
+        !!(c as any).isAutographed,
+        false, // excludeGraded — keep sheet links broad; tile links are tier-specific
       ) : '');
       const frontStored = await persistDataUriIfNeeded(c.frontImageUrl, 'front');
       const backStored = await persistDataUriIfNeeded(c.backImageUrl, 'back');
