@@ -864,6 +864,187 @@ export async function lookupCard(input: CardLookupInput): Promise<CardLookupResu
   }
 }
 
+// ───────────────────────────────────────────────
+// Player-anchored fallback lookup (H-3)
+// ───────────────────────────────────────────────
+
+export interface PlayerAnchoredLookupInput {
+  brand: string;
+  year: number;
+  /** Last name, case-insensitive substring match against card_database.player_name. */
+  playerLastName: string;
+  /** Optional: if provided and non-empty, require first-name match too. */
+  playerFirstName?: string;
+  /** Optional: narrow to a specific collection/set (e.g. "Series One") — case-insensitive. */
+  collection?: string;
+}
+
+/**
+ * Player-anchored fallback lookup (H-3).
+ *
+ * Precondition: the standard (brand, year, cardNumber) lookup and all of its
+ * ±year fallbacks returned no matching row whose player name agrees with the
+ * OCR. That is overwhelming evidence that the *card number* — not the player,
+ * brand, or year — is what OCR got wrong.
+ *
+ * Strategy: drop the card number from the query entirely and search by
+ * (brand, year, playerLastName). If exactly one row matches, auto-correct
+ * the card number to that row's value. If multiple rows match (the player
+ * appears on multiple cards in the same set — base + subset + insert), we
+ * refuse to auto-pick rather than guess wrong; the caller keeps the OCR
+ * number and the UI surfaces the ambiguity.
+ *
+ * Scoped tightly to (brand, year) to avoid cross-set leakage, and uses
+ * last-name substring matching so middle initials / suffixes ("Jr.")
+ * don't force a miss.
+ */
+export async function lookupCardByPlayer(
+  input: PlayerAnchoredLookupInput
+): Promise<CardLookupResult> {
+  const { brand, year, playerLastName, playerFirstName, collection } = input;
+
+  if (!brand || !year || !playerLastName || playerLastName.trim().length < 2) {
+    return { found: false, source: 'ocr_fallback' };
+  }
+
+  try {
+    const brandNorm = normalizeBrand(brand);
+    const lastNameNorm = playerLastName.trim().toLowerCase();
+    const firstNameNorm = playerFirstName?.trim().toLowerCase() || '';
+
+    // Build a list of candidate rows across the exact year plus ±1 (the
+    // surrounding retry window that the main lookupCard loop already
+    // probed). The caller tells us those all rejected on player-name
+    // mismatch, so we expect the real match to come from the exact year
+    // in the vast majority of cases — but we include ±1 for the same
+    // copyright-lag reasons the main lookup does.
+    const yearCandidates = [year, year + 1, year - 1];
+    let allRows: Array<typeof cardDatabase.$inferSelect> = [];
+    for (const yr of yearCandidates) {
+      if (yr < 1900 || yr > new Date().getFullYear() + 1) continue;
+      const rows = await db
+        .select()
+        .from(cardDatabase)
+        .where(
+          and(
+            sql`lower(${cardDatabase.brand}) = lower(${brandNorm})`,
+            eq(cardDatabase.year, yr),
+            sql`lower(${cardDatabase.playerName}) LIKE ${'%' + lastNameNorm + '%'}`
+          )
+        )
+        .limit(50);
+      if (rows.length > 0) {
+        console.log(`[CardDB] Player-anchored probe year=${yr} lastName="${lastNameNorm}" → ${rows.length} candidate row(s)`);
+        allRows.push(...rows);
+      }
+    }
+
+    if (allRows.length === 0) {
+      console.log(`[CardDB] Player-anchored fallback: no rows for brand="${brandNorm}" year≈${year} lastName="${lastNameNorm}"`);
+      return { found: false, source: 'ocr_fallback' };
+    }
+
+    // If first name was provided, use it as a tiebreaker but don't filter
+    // hard — some DB rows store nicknames or alternate spellings. Instead
+    // score rows: +10 if last name matches as a standalone word at end,
+    // +20 if first name also matches, and prefer higher score.
+    const lastNameWord = new RegExp(`\\b${lastNameNorm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+    const firstNameWord = firstNameNorm
+      ? new RegExp(`\\b${firstNameNorm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i')
+      : null;
+    const scoreRow = (row: typeof cardDatabase.$inferSelect): number => {
+      const name = (row.playerName || '').toLowerCase();
+      let s = 0;
+      if (lastNameWord.test(name)) s += 10;
+      if (firstNameWord && firstNameWord.test(name)) s += 20;
+      return s;
+    };
+    // Keep only rows that actually have the last name as a whole word —
+    // LIKE '%ritter%' also matches "Ritterbach", which would poison the
+    // uniqueness check below. Whole-word match eliminates that class of
+    // false positive.
+    const strictRows = allRows.filter(r => lastNameWord.test(r.playerName || ''));
+    if (strictRows.length === 0) {
+      console.log(`[CardDB] Player-anchored fallback: no whole-word last-name matches (substring-only — too weak to auto-correct)`);
+      return { found: false, source: 'ocr_fallback' };
+    }
+
+    // Optional collection narrow: if caller provided a collection, prefer
+    // rows where collection OR set contains that token (case-insensitive).
+    // Only narrows the candidate pool when it leaves ≥1 row standing; if
+    // the collection filter would zero out the pool, fall back to the
+    // un-narrowed set so the extractor still has a shot at uniqueness.
+    let candidates = strictRows;
+    if (collection && collection.trim().length > 0) {
+      const collNorm = collection.trim().toLowerCase();
+      const narrowed = strictRows.filter(r =>
+        (r.collection || '').toLowerCase().includes(collNorm) ||
+        (r.set || '').toLowerCase().includes(collNorm)
+      );
+      if (narrowed.length > 0) {
+        console.log(`[CardDB] Player-anchored: collection="${collection}" narrowed ${strictRows.length} → ${narrowed.length} candidate(s)`);
+        candidates = narrowed;
+      } else {
+        console.log(`[CardDB] Player-anchored: collection="${collection}" would zero out ${strictRows.length} candidates — ignoring filter`);
+      }
+    }
+
+    // Score and sort.
+    const scored = candidates
+      .map(r => ({ row: r, score: scoreRow(r) }))
+      .sort((a, b) => b.score - a.score);
+
+    // Unique-row rule: auto-correct only when a SINGLE row stands alone at
+    // the top. If the best score is tied across multiple rows, we refuse —
+    // the player has multiple cards in this set and we don't know which
+    // one was scanned from the image alone.
+    const bestScore = scored[0].score;
+    const tied = scored.filter(s => s.score === bestScore);
+    if (tied.length > 1) {
+      console.log(`[CardDB] Player-anchored fallback: ${tied.length} rows tied at score=${bestScore} — refusing to auto-pick to avoid guessing wrong card. Tied card #s: [${tied.map(t => t.row.cardNumberRaw).join(', ')}]`);
+      return { found: false, source: 'ocr_fallback' };
+    }
+
+    const cardRow = tied[0].row;
+    console.log(`[CardDB] Player-anchored fallback HIT: ${cardRow.playerName} — ${cardRow.brand} ${cardRow.year} #${cardRow.cardNumberRaw} (collection="${cardRow.collection}", set="${cardRow.set || ''}"). Auto-correcting card number from OCR read.`);
+
+    const { firstName, lastName } = splitPlayerName(cardRow.playerName);
+    const isRookieCard = !!(cardRow.rookieFlag && cardRow.rookieFlag.toLowerCase().includes('rookie'));
+
+    // Look up variation the same way the main lookup does so the caller
+    // still gets the parallel/serial context when available.
+    const variationResult = await lookupVariation({
+      brandId: cardRow.brandId,
+      year: cardRow.year,
+      collection: cardRow.collection,
+      set: cardRow.set || undefined,
+      serialNumber: undefined,
+    });
+
+    return {
+      found: true,
+      playerFirstName: firstName,
+      playerLastName: lastName,
+      team: cardRow.team || undefined,
+      collection: cardRow.collection,
+      set: cardRow.set || variationResult.picked?.set || undefined,
+      cardNumber: cardRow.cardNumberRaw,
+      variation: variationResult.picked?.variationOrParallel,
+      variationOptions: variationResult.options,
+      variationAmbiguous: variationResult.ambiguous,
+      serialNumber: variationResult.picked?.serialNumber || undefined,
+      isRookieCard,
+      brand: cardRow.brand,
+      year: cardRow.year,
+      cmpNumber: cardRow.cmpNumber || undefined,
+      source: 'card_database',
+    };
+  } catch (err: any) {
+    console.error('[CardDB] Player-anchored lookup error:', err.message);
+    return { found: false, source: 'ocr_fallback' };
+  }
+}
+
 /**
  * Find variation record(s) matching the given context.
  *

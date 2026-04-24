@@ -1593,18 +1593,83 @@ function extractCardNumberPass(
       }
     }
 
+    // ISOLATED-NUMBER AT TOP OF BACK (H-2): when the OCR's very first line
+    // consists of a single bare integer by itself, that is the card number
+    // with near-certainty on modern Topps/Bowman issues. The purple
+    // "NAME / NUMBER" strip at the top of Series One/Two backs OCRs as
+    // line 1 = "18" (just the number, alone), followed by the player's
+    // name on the next line. Historically this check ran AFTER the
+    // plain-number pattern, which meant a stat-row false positive like
+    // "23 FRESNO 65 246 53 75..." could grab "65" before we ever looked
+    // at the top-of-card number. Running it here — before plain-number —
+    // preserves the position hierarchy: when a standalone digit sits at
+    // the very top of the back, it always wins. Scoped to side='back'
+    // because front-side OCR can legitimately start with a jersey number
+    // or a commemorative year that isn't the card number.
+    if (side === 'back' && lines.length > 0) {
+      const firstLineForH2 = lines[0].trim();
+      if (/^\d+$/.test(firstLineForH2)) {
+        const numVal = parseInt(firstLineForH2, 10);
+        if (numVal > 0 && numVal < 10000) {
+          if (acceptCandidate(firstLineForH2, 'first-line-digit-back')) {
+            cardDetails.cardNumber = firstLineForH2;
+            console.log(`[CardNum] Accepting "${firstLineForH2}" via first-line-digit-back (isolated number at very top of back OCR — beats plain-number stat-row false positives)`);
+            return;
+          }
+        }
+      }
+    }
+
     // Plain number format: #123 or No. 123 (also tolerates common OCR glitches:
     // "N0." with a zero, "NO " without the dot, the superscript "Nº", and the
     // old-style "No 123" with no period — all variations seen on vintage card
     // backs where the marker is printed in small condensed type.)
     // Guard: must NOT be a CODE# token from the legal text (e.g. CODE#065939 → skip).
     // Use global iteration so a CODE# hit doesn't block a later valid #123 match.
-    const plainNumberPatternGlobal = /(?:#|N[o0]\.?\s*|N[º°]\s*)(\d+)/gi;
+    //
+    // IMPORTANT: the "N[o0]" alternation can false-positive on any uppercase
+    // word that ends in "NO" followed by a number — e.g. a stat-table row
+    // like "23 FRESNO 65 246 53 75..." used to match as if it said "No. 65"
+    // because the OCR's case-insensitive flag let "NO " inside FRESNO align
+    // with the marker. Require a word-boundary before the marker letter: the
+    // character immediately before the match must be either start-of-string,
+    // whitespace, or a typographic separator (punctuation / symbol). This
+    // preserves legitimate matches ("No. 56", "#123", line-start "NO. 42")
+    // while rejecting intra-word suffix collisions.
+    //
+    // We use a capturing group for the boundary char (instead of a lookbehind)
+    // because Safari still ships older JS engines that only partially support
+    // variable-width lookbehind. The digit capture is now group 2.
+    const plainNumberPatternGlobal = /(?:^|[^A-Za-z0-9])(#|N[o0]\.?\s*|N[º°]\s*)(\d+)/gi;
     let plainNumberMatch;
     while ((plainNumberMatch = plainNumberPatternGlobal.exec(text)) !== null) {
-      const candidate = plainNumberMatch[1];
+      const candidate = plainNumberMatch[2];
+      const markerToken = plainNumberMatch[1];
+      // The full consumed slice includes the boundary char; use it for line
+      // lookup so the findLine still anchors correctly.
       const matchedToken = plainNumberMatch[0];
-      const lineWithMatch = lines.find(line => line.includes(matchedToken));
+      const lineWithMatch = lines.find(line => line.includes(markerToken + candidate));
+
+      // Hash marker is unambiguous — "#65" only ever means "card number 65".
+      // Letter markers ("No.", "N0.", "Nº", "NO ") need stricter adjacency:
+      // the non-dot variants ("NO " / "No ") with no period are exactly the
+      // form that collides with English prose and OCR'd stat rows, so we
+      // require that the marker token include a dot, degree/ordinal sign,
+      // or be immediately followed by whitespace + digits on the same line
+      // where no other stat-like numerics precede it. The simplest safe rule:
+      // when marker is a bare "NO " (no dot, no ordinal sign), the line must
+      // not look like a stat row (4+ numeric tokens). This kills the FRESNO
+      // false positive without rejecting legitimate "NO 42" markers printed
+      // alone on vintage card backs.
+      const isHashMarker = markerToken === '#';
+      const isDotlessNoMarker = !isHashMarker && !/\./.test(markerToken) && !/[º°]/.test(markerToken);
+      if (isDotlessNoMarker && lineWithMatch) {
+        const numericCount = (lineWithMatch.match(/\b\d+(?:\.\d+)?\b/g) || []).length;
+        if (numericCount >= 4) {
+          console.log(`Skipping plain number "${candidate}" — dotless "${markerToken.trim()}" marker appears in a stat-like line (${numericCount} numerics): "${lineWithMatch.substring(0, 60)}"`);
+          continue;
+        }
+      }
 
       if (lineWithMatch && isDOBFormat(lineWithMatch)) {
         console.log(`Skipping plain number "${candidate}" that appears in a date/stat line`);
@@ -1620,7 +1685,7 @@ function extractCardNumberPass(
       // a legitimate marker like "No. 56" printed at the bottom of the back
       // is never rejected just because "56" also occurs as a stat cell.
       if (!acceptRaw(candidate, 'plain-number')) continue;
-      console.log(`[CardNum] Accepting "${candidate}" via plain-number (explicit "${matchedToken}" marker bypasses stat-block guard)`);
+      console.log(`[CardNum] Accepting "${candidate}" via plain-number (explicit "${markerToken.trim()}" marker bypasses stat-block guard; match slice="${matchedToken.trim()}")`);
       if (candidate.length === 1) {
         cardDetails.cardNumber = candidate;
         break;
