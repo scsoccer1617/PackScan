@@ -50,6 +50,12 @@ interface YearConfidenceFlags {
     playerName: string;
     isRookieCard: boolean;
   }>;
+  // SCP-first outcome. Used by the bulk-scan confidence gate to decide
+  // between auto-save and review queue without re-running SCP on the
+  // server. `_scpHit` is true when SCP returned a hit above its internal
+  // threshold; `_scpMatchScore` is the 0–100 score of that hit.
+  _scpHit?: boolean;
+  _scpMatchScore?: number;
 }
 type CardFormWithFlags = CardFormValues & YearConfidenceFlags;
 
@@ -1209,6 +1215,11 @@ async function combineCardResults(
     if (scpResult.status === 'hit') {
       scpHit = true;
       const { productName, consoleName, matchScore } = scpResult.match;
+      // Stamp the SCP outcome onto the combined result so downstream
+      // consumers (notably the bulk-scan confidence gate) can reason about
+      // how confident the identification is without re-running SCP.
+      (combined as CardFormWithFlags)._scpHit = true;
+      (combined as CardFormWithFlags)._scpMatchScore = matchScore;
       const scpYear = scpExtractYear(consoleName);
       const scpBrand = scpExtractBrand(consoleName);
       const scpNumber = scpExtractCardNumber(productName);

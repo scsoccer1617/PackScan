@@ -431,3 +431,109 @@ export const scpProductCache = pgTable("scp_product_cache", {
 
 export type ScpProductCacheEntry = typeof scpProductCache.$inferSelect;
 export type ScpProductCacheInsert = typeof scpProductCache.$inferInsert;
+
+// =============================================
+// Bulk Scan — Brother duplex scanner pipeline
+// =============================================
+// The dealer workflow: a Brother duplex scanner emits JPEG pairs (back / front
+// alternating) to a Google Drive inbox folder. PackScan's bulk-scan pipeline
+// pulls the inbox, pairs images, classifies + orients them, runs the dual-side
+// OCR analyzer, and either auto-saves high-confidence hits to the user's
+// active Google Sheet or queues ambiguous pairs for manual review.
+//
+// Three tables:
+//   • scan_batches — one row per dealer-triggered "sync" run.
+//   • scan_batch_items — one row per (back, front) pair within a batch.
+//   • google_drive_folders — per-user Drive folder config (inbox + processed).
+//
+// OAuth tokens live on the existing `users` table (googleAccessToken,
+// googleRefreshToken, googleTokenExpiresAt) — no duplication here.
+
+export const scanBatches = pgTable("scan_batches", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").references(() => users.id, { onDelete: 'cascade' }).notNull(),
+  // Status machine: 'queued' → 'running' → ('completed' | 'failed')
+  // Resumable: on process restart any row in 'running' is re-queued.
+  status: text("status", { enum: ['queued', 'running', 'completed', 'failed'] }).notNull().default('queued'),
+  // Drive folder IDs captured at sync time so a later rename doesn't confuse
+  // the resume logic. Both come from `google_drive_folders` at trigger time.
+  sourceFolderId: text("source_folder_id"),
+  processedFolderId: text("processed_folder_id"),
+  // Running counters — updated as items complete.
+  fileCount: integer("file_count").notNull().default(0),
+  processedCount: integer("processed_count").notNull().default(0),
+  reviewQueueCount: integer("review_queue_count").notNull().default(0),
+  // If the entire batch fails (auth, Drive unreachable, etc.) — kept short.
+  errorMessage: text("error_message"),
+  // Dry-run mode: process the batch but do NOT append rows to the user's
+  // Google Sheet or move files out of the inbox. Lets the dealer verify the
+  // pipeline on real scans before committing.
+  dryRun: boolean("dry_run").notNull().default(false),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  completedAt: timestamp("completed_at"),
+}, (table) => [
+  index("scan_batches_user_idx").on(table.userId),
+  index("scan_batches_status_idx").on(table.status),
+]);
+
+export type ScanBatch = typeof scanBatches.$inferSelect;
+export type ScanBatchInsert = typeof scanBatches.$inferInsert;
+
+export const scanBatchItems = pgTable("scan_batch_items", {
+  id: serial("id").primaryKey(),
+  batchId: integer("batch_id").references(() => scanBatches.id, { onDelete: 'cascade' }).notNull(),
+  // Position within the batch (1-based). Used for deterministic pairing
+  // order even after retries.
+  position: integer("position").notNull(),
+  // Drive file IDs for the pair. Either side can be null when the batch has
+  // an odd number of pages or the classifier marked a page as unpaired.
+  backFileId: text("back_file_id"),
+  backFileName: text("back_file_name"),
+  frontFileId: text("front_file_id"),
+  frontFileName: text("front_file_name"),
+  // Status machine:
+  //   'pending'     — created, waiting for worker
+  //   'processing'  — worker claimed it
+  //   'auto_saved'  — passed confidence gate, appended to sheet
+  //   'review'      — failed confidence gate, in the review queue
+  //   'skipped'     — user marked skip from review queue
+  //   'failed'      — fatal error analyzing this pair
+  status: text("status", {
+    enum: ['pending', 'processing', 'auto_saved', 'review', 'skipped', 'failed'],
+  }).notNull().default('pending'),
+  // Confidence gate inputs / outputs. Kept for diagnostics + review UI.
+  confidenceScore: numeric("confidence_score", { precision: 5, scale: 2 }),
+  // Snapshot of the analyzer result (CardFormValues + internal flags). The
+  // review UI re-displays this so the dealer can confirm / edit without
+  // re-running OCR.
+  analysisResult: jsonb("analysis_result"),
+  // Human-readable list of gate flags that caused review, e.g.
+  // ['collection_ambiguous', 'card_number_low_confidence'].
+  reviewReasons: jsonb("review_reasons"),
+  errorMessage: text("error_message"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  processedAt: timestamp("processed_at"),
+}, (table) => [
+  index("scan_batch_items_batch_idx").on(table.batchId),
+  index("scan_batch_items_status_idx").on(table.status),
+  index("scan_batch_items_batch_position_idx").on(table.batchId, table.position),
+]);
+
+export type ScanBatchItem = typeof scanBatchItems.$inferSelect;
+export type ScanBatchItemInsert = typeof scanBatchItems.$inferInsert;
+
+export const googleDriveFolders = pgTable("google_drive_folders", {
+  // One row per user (enforced by unique userId). A future multi-scanner
+  // dealer could add a second row; for now we treat it as 1:1.
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").references(() => users.id, { onDelete: 'cascade' }).notNull().unique(),
+  // Drive folder IDs. inbox is where Brother drops scans; processed is where
+  // the pipeline moves successful pairs after appending to the sheet.
+  inboxFolderId: text("inbox_folder_id"),
+  processedFolderId: text("processed_folder_id"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export type GoogleDriveFolders = typeof googleDriveFolders.$inferSelect;
+export type GoogleDriveFoldersInsert = typeof googleDriveFolders.$inferInsert;
