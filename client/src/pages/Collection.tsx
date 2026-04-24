@@ -5,7 +5,6 @@ import {
   Filter as FilterIcon,
   LayoutGrid,
   List as ListIcon,
-  MoreVertical,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { CardWithRelations } from "@shared/schema";
@@ -354,12 +353,6 @@ function CollectionGridTile({
             {grade!.toFixed(1)}
           </span>
         ) : null}
-        <span
-          className="absolute top-2 left-2 w-7 h-7 rounded-full bg-white/80 text-slate-700 flex items-center justify-center"
-          aria-hidden
-        >
-          <MoreVertical className="w-4 h-4" />
-        </span>
       </div>
       <div className="p-2.5">
         <p className="text-[13px] font-medium leading-tight truncate">

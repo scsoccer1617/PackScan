@@ -140,7 +140,7 @@ export default function Home() {
           Manual (type it). Scan is the hero and uses the foil treatment. */}
       <section className="mx-4 grid grid-cols-3 gap-2.5">
         <ModeTile
-          href="/scan"
+          href="/scan/camera"
           icon={<Camera className="w-5 h-5" strokeWidth={2.25} />}
           label="Scan"
           hint="Front & back"
@@ -148,10 +148,11 @@ export default function Home() {
           testId="tile-scan"
         />
         <ModeTile
-          href="/scan?mode=voice"
+          href="/scan/camera?mode=voice"
           icon={<Mic className="w-5 h-5" strokeWidth={2} />}
           label="Voice"
           hint="Speak it"
+          tone="voice"
           testId="tile-voice"
         />
         <ModeTile
@@ -159,6 +160,7 @@ export default function Home() {
           icon={<PenLine className="w-5 h-5" strokeWidth={2} />}
           label="Manual"
           hint="Type it"
+          tone="manual"
           testId="tile-manual"
         />
       </section>
@@ -173,7 +175,7 @@ export default function Home() {
               className="text-xs text-slate-500 flex items-center gap-0.5 hover:text-ink"
               data-testid="link-view-all"
             >
-              View all <ArrowRight className="w-3 h-3" />
+              View Collection <ArrowRight className="w-3 h-3" />
             </Link>
           </div>
           <div className="flex gap-3 overflow-x-auto px-4 pb-2 no-scrollbar">
