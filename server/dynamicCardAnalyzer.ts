@@ -34,6 +34,61 @@ interface OCRResult {
  * team name, team-city tokens, positions, stat/bio abbreviations, biographical
  * prose, and English stopwords likely to surface on card backs.
  */
+/**
+ * Multi-sport team + position regex used by the player-name detector to
+ * classify a line as "team/position" context. A line matching this regex
+ * is never a player name itself — its role is to anchor a NEARBY line as
+ * the real player name. Reused from the sport-detection pass further down
+ * in this file; consolidated here so the detector can use it without
+ * cross-function coupling.
+ *
+ * Covers MLB, NFL, NBA, NHL, MLS team nicknames + every major position
+ * abbreviation across the four sports. Deliberately omits generic English
+ * words like CITY/UNITED (MLS) and CENTER (ambiguous across NHL/NBA/NFL
+ * positions, plus English "center" in bio prose) — those raise false
+ * positives without improving true-positive rate on modern card fronts.
+ */
+const TEAM_OR_POSITION_LINE = new RegExp(
+  [
+    // MLB teams
+    'YANKEES','RED\\s+SOX','DODGERS','CUBS','GIANTS','CARDINALS','BRAVES','ASTROS',
+    'PHILLIES','NATIONALS','METS','BLUE\\s+JAYS','ANGELS','RANGERS','MARINERS','ROYALS',
+    'MARLINS','ATHLETICS','TWINS','BREWERS','GUARDIANS','INDIANS','PIRATES','PADRES',
+    'RAYS','ORIOLES','ROCKIES','DIAMONDBACKS','WHITE\\s+SOX','REDS','TIGERS',
+    // NFL teams
+    'PATRIOTS','COWBOYS','PACKERS','49ERS','STEELERS','BRONCOS','SEAHAWKS','RAVENS',
+    'CHIEFS','EAGLES','VIKINGS','RAIDERS','COLTS','BEARS','PANTHERS','CHARGERS',
+    'SAINTS','TITANS','BENGALS','JETS','BILLS','BUCCANEERS','BROWNS','COMMANDERS',
+    'LIONS','JAGUARS','TEXANS','DOLPHINS','FALCONS','RAMS',
+    // NBA teams
+    'LAKERS','CELTICS','BULLS','WARRIORS','SPURS','HEAT','KNICKS','NETS','MAVERICKS',
+    '76ERS','SIXERS','CLIPPERS','ROCKETS','BUCKS','THUNDER','CAVALIERS','CAVS',
+    'NUGGETS','GRIZZLIES','TRAIL\\s+BLAZERS','BLAZERS','JAZZ','SUNS','HAWKS',
+    'HORNETS','PACERS','KINGS','TIMBERWOLVES','WOLVES','PELICANS','RAPTORS','MAGIC',
+    'WIZARDS','PISTONS',
+    // NHL teams
+    'BLACKHAWKS','BRUINS','CANADIENS','MAPLE\\s+LEAFS','RED\\s+WINGS','LIGHTNING',
+    'AVALANCHE','PENGUINS','FLYERS','CAPITALS','STARS','SHARKS','BLUES','ISLANDERS',
+    'GOLDEN\\s+KNIGHTS','DUCKS','WILD','HURRICANES','PREDATORS','FLAMES','SABRES',
+    'OILERS','BLUE\\s+JACKETS','CANUCKS','DEVILS','SENATORS','KRAKEN','COYOTES',
+    'UTAH\\s+HOCKEY',
+    // Positions — full words
+    'OUTFIELDER','INFIELDER','PITCHER','CATCHER','SHORTSTOP','BASEMAN','STARTING',
+    'CLOSER','RELIEVER','QUARTERBACK','RUNNING\\s+BACK','WIDE\\s+RECEIVER',
+    'TIGHT\\s+END','LINEBACKER','CORNERBACK','DEFENSIVE\\s+END','DEFENSIVE\\s+TACKLE',
+    'POINT\\s+GUARD','SHOOTING\\s+GUARD','SMALL\\s+FORWARD','POWER\\s+FORWARD',
+    'DEFENSEMAN','GOALIE','GOALTENDER','WINGER','LEFT\\s+WING','RIGHT\\s+WING',
+    'MIDFIELDER','STRIKER','DEFENDER','GOALKEEPER',
+    // Positions — abbreviations. Word-boundary-safe so "SS" on a team-position
+    // line ("SS PHILLIES") anchors but a stray "SS" inside a body word doesn't.
+    '\\bQB\\b','\\bRB\\b','\\bWR\\b','\\bTE\\b','\\bLB\\b','\\bCB\\b',
+    '\\bDE\\b','\\bDT\\b','\\bOL\\b','\\b1B\\b','\\b2B\\b','\\b3B\\b',
+    '\\bSS\\b','\\bLF\\b','\\bCF\\b','\\bRF\\b','\\bDH\\b','\\bPG\\b',
+    '\\bSG\\b','\\bSF\\b','\\bPF\\b',
+  ].join('|'),
+  'i',
+);
+
 const PLAYER_NAME_BLOCKLIST: ReadonlySet<string> = new Set([
   'TOPPS', 'LOPPS', 'OPPS', 'TOPPE', 'CHROME', 'BOWMAN', 'FLEER', 'DONRUSS', 'PANINI', 'SCORE', 'LEAF',
   'UPPER', 'DECK', 'SERIES', 'ONE', 'TWO', 'THREE', 'OPENING', 'DAY', 'STADIUM', 'CLUB',
@@ -432,9 +487,35 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
     // Used so names like "JOSÉ BUTTÓ", "HERNÁNDEZ", "PEÑA" are not filtered out
     const isValidNameChar = /^[A-ZÀ-ÖØ-Ý][A-Za-zÀ-ÖØ-öø-ÿ'\-\.]+$|^[A-ZÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖØÙÚÛÜÝÞ]{2,}$/;
 
-    const potentialNames: Array<{firstName: string, lastName: string, source: string, priority: number}> = [];
+    /**
+     * Candidate shape for the player-name picker. `priority` preserves the
+     * legacy 0/1/2/3 line-position scoring; `teamAdjacent` is an independent
+     * structural signal (the candidate line sits next to a team nickname or
+     * position keyword). The sort comparator below applies team-adjacency as
+     * the PRIMARY key whenever any candidate in the pool carries it — which
+     * means a priority-2 team-adjacent name (e.g. "JORDAN BINNINGTON" on line
+     * 7 next to "BLUES®" on line 8) beats a priority-1 non-adjacent insert
+     * wordmark ("UID CANVAS" on line 3). Without the team anchor present the
+     * sort falls back to legacy priority, so cards that don't print a team on
+     * the front are unaffected.
+     */
+    const potentialNames: Array<{firstName: string, lastName: string, source: string, priority: number, teamAdjacent: boolean}> = [];
     
     const rawLines = (originalText || text).split('\n');
+
+    /**
+     * A candidate is "team-adjacent" when the PREVIOUS or NEXT OCR line
+     * matches a team nickname or position keyword. Checked symmetrically
+     * because card layouts vary — some print "CITY TEAM\nPLAYER NAME" (team
+     * above) and others print "PLAYER NAME\nTEAM ®" (team below). The
+     * regex (TEAM_OR_POSITION_LINE) covers MLB/NFL/NBA/NHL nicknames and
+     * position words.
+     */
+    const isTeamAdjacentLine = (lineIdx: number): boolean => {
+      const prev = lineIdx > 0 ? rawLines[lineIdx - 1] : '';
+      const next = lineIdx + 1 < rawLines.length ? rawLines[lineIdx + 1] : '';
+      return TEAM_OR_POSITION_LINE.test(prev) || TEAM_OR_POSITION_LINE.test(next);
+    };
     
     // Bio-info line prefixes — these lines contain biographical data, never player names
     const bioPrefixPattern = /^(BORN|HOME|ACQ|SIGNED|DRAFTED|HT|WT|HEIGHT|WEIGHT|BATS|THROWS)[\s:]/i;
@@ -565,13 +646,19 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
             const firstName = renderToken(nameWords[0]);
             const lastName = nameWords.slice(1).map(renderToken).join(' ');
             
+            // Legacy priority boost: when the NEXT line matches the narrow
+            // MLB-only team/position regex, collapse priority to 0. Kept as-is
+            // so pre-existing behavior is unchanged when a candidate fires it.
+            // The broader multi-sport signal lives on `teamAdjacent` below and
+            // is applied by the sort comparator.
             const isFollowedByTeamPosition = (i + 1 < rawLines.length) && 
               /PHILLIES|YANKEES|DODGERS|METS|CUBS|BRAVES|ASTROS|RANGERS|PADRES|GIANTS|CARDINALS|NATIONALS|ORIOLES|GUARDIANS|TWINS|RAYS|MARLINS|PIRATES|REDS|BREWERS|TIGERS|ROYALS|ATHLETICS|MARINERS|ANGELS|ROCKIES|DIAMONDBACKS|OUTFIELDER|INFIELDER|PITCHER|CATCHER|SHORTSTOP|BASEMAN|STARTING|CLOSER|RELIEVER/i.test(rawLines[i + 1]);
             
             const priority = isFollowedByTeamPosition ? 0 : (i < 5 ? 1 : 2);
+            const teamAdjacent = isTeamAdjacentLine(i);
             
-            console.log(`Line-based player name candidate: "${firstName} ${lastName}" (priority: ${priority}, line: ${i})`);
-            potentialNames.push({ firstName, lastName, source: 'line', priority });
+            console.log(`Line-based player name candidate: "${firstName} ${lastName}" (priority: ${priority}, line: ${i}, teamAdjacent: ${teamAdjacent})`);
+            potentialNames.push({ firstName, lastName, source: 'line', priority, teamAdjacent });
           } else if (noNonNameWords && noNumbers && eachWordLen && !consistentCasing) {
             console.log(`[Name] Rejected mixed-case line candidate: "${nameWords.join(' ')}" (line ${i}) — inconsistent token casing suggests OCR split a single logo word`);
           }
@@ -595,9 +682,10 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
               /PHILLIES|YANKEES|DODGERS|METS|CUBS|BRAVES|ASTROS|RANGERS|PADRES|GIANTS|CARDINALS|NATIONALS|ORIOLES|GUARDIANS|TWINS|RAYS|MARLINS|PIRATES|REDS|BREWERS|TIGERS|ROYALS|ATHLETICS|MARINERS|ANGELS|ROCKIES|DIAMONDBACKS|OUTFIELDER|INFIELDER|PITCHER|CATCHER|SHORTSTOP|BASEMAN|STARTING|CLOSER|RELIEVER/i.test(rawLines[i + 1]);
             
             const priority = isFollowedByTeamPosition ? 0 : (i < 5 ? 1 : 2);
+            const teamAdjacent = isTeamAdjacentLine(i);
             
-            console.log(`Card-number-prefixed name candidate: "${firstName} ${lastName}" (priority: ${priority}, line: ${i})`);
-            potentialNames.push({ firstName, lastName, source: 'card-number-prefix', priority });
+            console.log(`Card-number-prefixed name candidate: "${firstName} ${lastName}" (priority: ${priority}, line: ${i}, teamAdjacent: ${teamAdjacent})`);
+            potentialNames.push({ firstName, lastName, source: 'card-number-prefix', priority, teamAdjacent });
           }
         }
       }
@@ -678,8 +766,13 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
       const surnameTitle = bShape.surname.charAt(0).toUpperCase() + bShape.surname.slice(1).toLowerCase();
       const lastName = bShape.suffix ? `${surnameTitle} ${bShape.suffix}` : surnameTitle;
       const priority = i < 5 ? 1 : 2;
-      console.log(`Multi-line player name candidate: "${firstName} ${lastName}" (priority: ${priority}, lines: ${i}+${i + 1}${bShape.suffix ? ', suffix ' + bShape.suffix : ''})`);
-      potentialNames.push({ firstName, lastName, source: 'multiline' as any, priority });
+      // For multi-line names the candidate occupies lines i and i+1. Check
+      // both neighbours (i-1 above the first-name line, i+2 below the surname
+      // line) so a team sash printed above OR below the two-line name sash
+      // anchors the candidate as team-adjacent.
+      const teamAdjacent = isTeamAdjacentLine(i) || isTeamAdjacentLine(i + 1);
+      console.log(`Multi-line player name candidate: "${firstName} ${lastName}" (priority: ${priority}, lines: ${i}+${i + 1}${bShape.suffix ? ', suffix ' + bShape.suffix : ''}, teamAdjacent: ${teamAdjacent})`);
+      potentialNames.push({ firstName, lastName, source: 'multiline' as any, priority, teamAdjacent });
     }
 
     if (potentialNames.length === 0) {
@@ -697,14 +790,42 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
         if (noNonNameWords && eachWordLen) {
           const firstName = words[0].charAt(0).toUpperCase() + words[0].slice(1).toLowerCase();
           const lastName = words.slice(1).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
-          potentialNames.push({ firstName, lastName, source: 'regex', priority: 3 });
+          // Regex fallback works against joined text and has no OCR-line
+          // context, so it never qualifies as team-adjacent. The sort
+          // comparator already keeps priority-3 regex candidates behind
+          // everything else when real line-based candidates exist.
+          potentialNames.push({ firstName, lastName, source: 'regex', priority: 3, teamAdjacent: false });
           console.log(`Regex-based player name candidate: "${firstName} ${lastName}"`);
         }
       }
     }
     
     if (potentialNames.length > 0) {
+      // Team-adjacency is a structural signal: when ANY candidate in the
+      // pool sits next to a team or position line, it almost certainly IS
+      // the real player name, and candidates without that anchor are almost
+      // certainly logo/wordmark/set text printed elsewhere on the card. This
+      // supersedes the line-position priority the individual branches assign.
+      //
+      // Without this, a priority-1 insert wordmark on line 3 beats a
+      // priority-2 real name on line 7 even when the real name sits directly
+      // next to the team sash. Jordan Binnington's 2024-25 UD Canvas card
+      // (OCR: "UID CANVAS" @ line 3 priority 1, "JORDAN BINNINGTON" @ line 7
+      // priority 2 next to "BLUES®") is the canonical example, but the same
+      // shape recurs for any insert-set wordmark (YOUNG GUNS, SP AUTHENTIC,
+      // STADIUM CLUB, GYPSY QUEEN, GOLD LABEL, OPENING DAY, etc.).
+      //
+      // When NO candidate is team-adjacent (older cards, bare-sash fronts,
+      // some inserts that omit the team logo) we fall through to the
+      // pre-existing priority comparison so unrelated behavior is unchanged.
+      const hasTeamAnchor = potentialNames.some(c => c.teamAdjacent);
+      if (hasTeamAnchor) {
+        console.log(`[Name] Team anchor present — promoting team-adjacent candidates.`);
+      }
       potentialNames.sort((a, b) => {
+        if (hasTeamAnchor && a.teamAdjacent !== b.teamAdjacent) {
+          return a.teamAdjacent ? -1 : 1;
+        }
         if (a.priority !== b.priority) return a.priority - b.priority;
         // Tie-break 1: prefer 2-word names (firstName + lastName) over 3-word names.
         // 3-word names are more likely to be partial OCR artifacts (e.g. "Apps Aats Ew").
@@ -736,7 +857,7 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
       const selected = potentialNames[0];
       cardDetails.playerFirstName = selected.firstName;
       cardDetails.playerLastName = selected.lastName;
-      console.log(`Selected player name: ${selected.firstName} ${selected.lastName} (source: ${selected.source}, priority: ${selected.priority})`);
+      console.log(`Selected player name: ${selected.firstName} ${selected.lastName} (source: ${selected.source}, priority: ${selected.priority}, teamAdjacent: ${selected.teamAdjacent})`);
       return;
     }
     
