@@ -48,10 +48,20 @@ const PLAYER_NAME_BLOCKLIST: ReadonlySet<string> = new Set([
   'KC', 'TB', 'LA', 'NY', 'SF', 'SD', 'STL', 'CLE', 'DET', 'MIN', 'CHC', 'CHW', 'CWS',
   'MIL', 'PIT', 'CIN', 'ATL', 'MIA', 'PHI', 'NYM', 'NYY', 'BOS', 'BAL', 'TOR',
   'HOU', 'TEX', 'SEA', 'OAK', 'LAA', 'LAD', 'ARI', 'COL',
-  'PHILLIES', 'PHILLIE', 'YANKEES', 'DODGERS', 'METS', 'CUBS', 'RED', 'SOX', 'BRAVES',
-  'ASTROS', 'RANGERS', 'PADRES', 'GIANTS', 'CARDINALS', 'NATIONALS', 'ORIOLES', 'GUARDIANS',
-  'TWINS', 'RAYS', 'MARLINS', 'PIRATES', 'REDS', 'BREWERS', 'TIGERS', 'ROYALS', 'ATHLETICS',
-  'MARINERS', 'ANGELS', 'ROCKIES', 'DIAMONDBACKS', 'INDIANS',
+  'PHILLIES', 'PHILLIE', 'YANKEES', 'YANKEE', 'DODGERS', 'DODGER', 'METS', 'CUBS', 'CUB',
+  'RED', 'SOX', 'BRAVES', 'BRAVE',
+  'ASTROS', 'ASTRO', 'RANGERS', 'RANGER', 'PADRES', 'PADRE', 'GIANTS', 'GIANT',
+  'CARDINALS', 'CARDINAL', 'NATIONALS', 'NATIONAL', 'ORIOLES', 'ORIOLE',
+  'GUARDIANS', 'GUARDIAN', 'TWINS', 'TWIN', 'RAYS', 'MARLINS', 'MARLIN',
+  'PIRATES', 'PIRATE', 'REDS', 'BREWERS', 'BREWER', 'TIGERS', 'TIGER',
+  'ROYALS', 'ROYAL', 'ATHLETICS', 'ATHLETIC',
+  // Singular team nicknames appear when the trailing S is clipped by OCR
+  // (e.g. the 2023 Topps Ken Griffey Jr. insert reads "MARINER" across the
+  // diagonal sash because the "S" falls off the crop). Without these, the
+  // multi-line name detector pairs "MARINER\nKEN" as "Mariner Ken" and it
+  // wins the tie-break against the real "Ken Griffey Jr." candidate.
+  'MARINERS', 'MARINER', 'ANGELS', 'ANGEL', 'ROCKIES', 'DIAMONDBACKS', 'DIAMONDBACK',
+  'INDIANS', 'INDIAN',
   'PHILADELPHIA', 'CHICAGO', 'BOSTON', 'ANGELES', 'YORK',
   'NEW', 'SAN', 'LOS', 'SAINT', 'LOUIS', 'KANSAS', 'CITY',
   'SLG', 'OPS', 'AVG', 'WHIP', 'IP', 'AB',
@@ -696,7 +706,7 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
     if (potentialNames.length > 0) {
       potentialNames.sort((a, b) => {
         if (a.priority !== b.priority) return a.priority - b.priority;
-        // Tie-break: prefer 2-word names (firstName + lastName) over 3-word names.
+        // Tie-break 1: prefer 2-word names (firstName + lastName) over 3-word names.
         // 3-word names are more likely to be partial OCR artifacts (e.g. "Apps Aats Ew").
         // Generational suffixes (Jr., Sr., II/III/IV) do NOT count as an extra
         // "real" word — they modify the surname. Without this exclusion a valid
@@ -707,7 +717,21 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
           [first, ...last.split(/\s+/)].filter(w => w && !suffixCountRe.test(w)).length;
         const aWordCount = countNameWords(a.firstName, a.lastName);
         const bWordCount = countNameWords(b.firstName, b.lastName);
-        return aWordCount - bWordCount;
+        if (aWordCount !== bWordCount) return aWordCount - bWordCount;
+        // Tie-break 2: prefer candidates that carry a generational suffix.
+        // Real-world cards print "KEN GRIFFEY JR." on a sash; OCR-manufactured
+        // 2-word pairs like "Mariner Ken" never carry a suffix. When the
+        // effective word counts tie, the suffix-bearing candidate is almost
+        // always the real name. This is defense-in-depth on top of the
+        // singular-team-name blocklist — if some future team nickname slips
+        // through as a bogus surname candidate, this still prefers the real
+        // Jr./Sr./III/IV-suffixed name.
+        const hasSuffix = (first: string, last: string): boolean =>
+          [first, ...last.split(/\s+/)].some(w => suffixCountRe.test(w || ''));
+        const aSuffix = hasSuffix(a.firstName, a.lastName) ? 1 : 0;
+        const bSuffix = hasSuffix(b.firstName, b.lastName) ? 1 : 0;
+        if (aSuffix !== bSuffix) return bSuffix - aSuffix; // suffix-bearing wins
+        return 0;
       });
       const selected = potentialNames[0];
       cardDetails.playerFirstName = selected.firstName;
@@ -777,6 +801,11 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
                           'ASTROS', 'RANGERS', 'PADRES', 'GIANTS', 'CARDINALS', 'NATIONALS',
                           'ORIOLES', 'GUARDIANS', 'TWINS', 'RAYS', 'MARLINS', 'PIRATES',
                           'REDS', 'BREWERS', 'TIGERS', 'ATHLETICS', 'MARINERS', 'ANGELS',
+                          // Singular team nicknames OCR can read when the trailing S is clipped.
+                          'MARINER', 'YANKEE', 'DODGER', 'CUB', 'PHILLIE', 'BRAVE', 'ASTRO',
+                          'RANGER', 'PADRE', 'GIANT', 'CARDINAL', 'NATIONAL', 'ORIOLE',
+                          'GUARDIAN', 'TWIN', 'MARLIN', 'PIRATE', 'BREWER', 'TIGER',
+                          'ATHLETIC', 'ANGEL', 'ROYAL', 'DIAMONDBACK', 'INDIAN',
                           'TOTALS', 'MAJ', 'LEA', 'RECORD', 'PITCHING', 'BATTING', 'FIELDING'];
         const cleaned = text.replace(/\.+$/g, '').toUpperCase();
         return nonNames.includes(cleaned) || cleaned.length < 2 || /^\d+$/.test(cleaned);

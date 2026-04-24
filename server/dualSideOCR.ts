@@ -698,10 +698,20 @@ async function combineCardResults(
   
   const bogusNameWords = new Set([
     'TOPPS', 'LOPPS', 'OPPS', 'CHROME', 'BOWMAN', 'FLEER', 'DONRUSS', 'PANINI', 'SCORE', 'LEAF',
-    'SERIES', 'PHILLIE', 'PHILLIES', 'YANKEES', 'DODGERS', 'METS', 'CUBS', 'BRAVES',
-    'ASTROS', 'RANGERS', 'PADRES', 'GIANTS', 'CARDINALS', 'NATIONALS', 'ORIOLES', 'GUARDIANS',
-    'TWINS', 'RAYS', 'MARLINS', 'PIRATES', 'REDS', 'BREWERS', 'TIGERS', 'ROYALS', 'ATHLETICS',
-    'MARINERS', 'ANGELS', 'ROCKIES', 'DIAMONDBACKS', 'SOX',
+    'SERIES', 'PHILLIE', 'PHILLIES', 'YANKEES', 'YANKEE', 'DODGERS', 'DODGER',
+    'METS', 'CUBS', 'CUB', 'BRAVES', 'BRAVE',
+    'ASTROS', 'ASTRO', 'RANGERS', 'RANGER', 'PADRES', 'PADRE', 'GIANTS', 'GIANT',
+    'CARDINALS', 'CARDINAL', 'NATIONALS', 'NATIONAL', 'ORIOLES', 'ORIOLE',
+    'GUARDIANS', 'GUARDIAN', 'TWINS', 'TWIN', 'RAYS', 'MARLINS', 'MARLIN',
+    'PIRATES', 'PIRATE', 'REDS', 'BREWERS', 'BREWER', 'TIGERS', 'TIGER',
+    'ROYALS', 'ROYAL', 'ATHLETICS', 'ATHLETIC',
+    // Singular team nicknames — OCR often clips the trailing S off
+    // diagonal sashes/banners (e.g. 2023 Topps Ken Griffey Jr. reads
+    // "MARINER" instead of "MARINERS"). Without blocking the singular
+    // form, the multi-line detector pairs "MARINER\nKEN" into the
+    // bogus "Mariner Ken" name.
+    'MARINERS', 'MARINER', 'ANGELS', 'ANGEL', 'ROCKIES', 'DIAMONDBACKS', 'DIAMONDBACK',
+    'INDIAN', 'INDIANS', 'SOX',
     'OUTFIELDER', 'INFIELDER', 'PITCHER', 'CATCHER', 'LEFT', 'RIGHT', 'THROWS', 'BATS',
     'MAJOR', 'LEAGUE', 'BATTING', 'RECORD', 'STADIUM', 'CLUB', 'COLLECTION',
     'OPENING', 'DAY', 'HERITAGE', 'PRIZM', 'SELECT', 'MOSAIC',
