@@ -206,6 +206,7 @@ export function registerBulkScanRoutes(app: Express): void {
     const userId = (req.user as any)?.id as number | undefined;
     if (!userId) return res.status(401).json({ error: 'Not authenticated' });
     const row = await getOrInitFolders(userId);
+    console.log(`[bulkScan] GET /folders user=${userId} row=${row ? JSON.stringify({ id: row.id, inbox: row.inboxFolderId, processed: row.processedFolderId }) : 'null'}`);
     if (!row) {
       return res.json({
         folders: { userId, inboxFolderId: null, processedFolderId: null },
@@ -223,6 +224,7 @@ export function registerBulkScanRoutes(app: Express): void {
     const userId = (req.user as any)?.id as number | undefined;
     if (!userId) return res.status(401).json({ error: 'Not authenticated' });
     const body = (req.body || {}) as { inboxFolderId?: string | null; processedFolderId?: string | null };
+    console.log(`[bulkScan] PUT /folders user=${userId} body=${JSON.stringify(body)}`);
     try {
       const updated = await setUserFolders(userId, {
         inboxFolderId: typeof body.inboxFolderId === 'string' ? body.inboxFolderId : body.inboxFolderId ?? null,
