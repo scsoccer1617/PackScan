@@ -429,6 +429,36 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
     // Bio-info line prefixes — these lines contain biographical data, never player names
     const bioPrefixPattern = /^(BORN|HOME|ACQ|SIGNED|DRAFTED|HT|WT|HEIGHT|WEIGHT|BATS|THROWS)[\s:]/i;
 
+    // Stats-header detector — lines like "SB SLG BB" / "AVG HR RBI" / "G AB R H"
+    // are never player names. The player-name picker previously rejected mixed
+    // bogus words via PLAYER_NAME_BLOCKLIST, but short stat abbreviations like
+    // "SB", "BB", "SO", "HR" are intentionally NOT on the blocklist (too many
+    // real surnames start with those letters). A line where the MAJORITY of
+    // tokens are recognised stat columns is a header row, not a name.
+    const STAT_HEADER_TOKENS = new Set([
+      // baseball batting
+      'G','AB','R','H','2B','3B','HR','RBI','BB','SO','SB','CS','AVG','OBP','SLG','OPS','TB','HBP','SF','SH',
+      // baseball pitching
+      'W','L','ERA','GS','CG','SHO','SV','IP','ER','WHIP','BAA','SVO',
+      // football
+      'CMP','ATT','PCT','YDS','TD','INT','RTG','QBR','SACK','SACKS','SCK','REC','RUSH','LNG','FUM',
+      // basketball
+      'PPG','RPG','APG','SPG','BPG','FG','FGM','FGA','FT','FTA','FTM','3P','3PA','3PM','MPG','MIN','PTS','REB','AST','STL','BLK','TO','TOV',
+      // hockey
+      'GP','GA','PIM','SOG','TOI','GWG','SHG','SAV','PP','PK',
+      // generic
+      'YEAR','SEASON','SSN','TEAM','LEAGUE','LG','TOT','TOTAL','TOTALS','POS','CL','CLASS','OPP','CLUB',
+    ]);
+    const looksLikeStatsHeader = (line: string): boolean => {
+      const toks = line.toUpperCase().replace(/[.,]/g, '').split(/[\s|/]+/).filter(t => t.length > 0);
+      if (toks.length < 2) return false;
+      const hits = toks.filter(t => STAT_HEADER_TOKENS.has(t)).length;
+      // A line is a stats header when at least 2 stat-column tokens are present
+      // AND stat tokens make up >= 60% of all tokens. Real 2-word names
+      // virtually never contain multiple stat-column abbreviations.
+      return hits >= 2 && hits / toks.length >= 0.6;
+    };
+
     for (let i = 0; i < rawLines.length; i++) {
       const line = rawLines[i].trim();
       if (!line) continue;
@@ -437,13 +467,28 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
       // look like player names (e.g. "HOME: CUMANA, VENEZ." → "Cumana Venez.")
       if (bioPrefixPattern.test(line)) continue;
 
+      // Skip stat-column header lines ("SB SLG BB", "AVG HR RBI", "G AB R H").
+      // These routinely survive earlier filters because individual short stat
+      // tokens (SB, BB, SO) double as legitimate surname prefixes.
+      if (looksLikeStatsHeader(line)) {
+        console.log(`[Name] Skipping stats-header line "${line}" (line ${i})`);
+        continue;
+      }
+
       const words = line.split(/\s+/).filter(w => w.length > 0);
       
       if (words.length >= 2 && words.length <= 5) {
+        // Normalize trailing punctuation. Commas and semicolons are always
+        // stripped; the trailing period on suffixes like "JR." / "SR." is
+        // normalized to a bare "JR" / "SR" token so downstream checks (casing
+        // comparison, lastName rendering) can handle suffixes consistently.
+        // We intentionally KEEP the suffix token in nameWords so a 2-word
+        // surname-only line like "GRIFFEY JR." still passes the >= 2 length
+        // gate and is picked as the player-name line candidate.
         let nameWords = words
           .map(w => w.replace(/[,;]+$/, ''))
-          .filter(w => isValidNameChar.test(w))
-          .filter(w => !/^(II|III|IV|JR|SR)$/i.test(w));
+          .map(w => /^(JR|SR|II|III|IV)\.?$/i.test(w) ? w.replace(/\.$/, '') : w)
+          .filter(w => isValidNameChar.test(w));
         
         while (nameWords.length > 0 && isNonNameWord(nameWords[nameWords.length - 1])) {
           nameWords.pop();
@@ -487,15 +532,28 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
           // line. For 3-word name candidates, skip the middle token from the
           // casing-consistency check when it looks like a middle initial.
           const isMiddleInitialToken = (w: string) => /^[A-Z]\.?$/.test(w);
+          // Suffix tokens like "JR", "SR", "II", "III", "IV" are already stripped
+          // upstream by the suffix filter, but defensive-check here too — a bare
+          // suffix that slips through (e.g. unusual OCR artifacts) should not
+          // contribute to the casing-consistency signal.
+          const isSuffixToken = (w: string) => /^(JR|SR|II|III|IV)\.?$/i.test(w);
           const tokensForCasing = (nameWords.length === 3 && isMiddleInitialToken(nameWords[1]))
             ? [nameWords[0], nameWords[2]]
-            : nameWords;
+            : nameWords.filter(w => !isSuffixToken(w));
           const caseStyles = new Set(tokensForCasing.map(caseStyleOf));
           const consistentCasing = caseStyles.size === 1 && !caseStyles.has('other');
 
           if (noNonNameWords && noNumbers && eachWordLen && consistentCasing) {
-            const firstName = nameWords[0].charAt(0).toUpperCase() + nameWords[0].slice(1).toLowerCase();
-            const lastName = nameWords.slice(1).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+            // Render each name word title-cased, but preserve the canonical form
+            // of suffix tokens ("JR" → "Jr.", "SR" → "Sr.", roman numerals kept
+            // as-is in upper case).
+            const renderToken = (w: string): string => {
+              if (/^(JR|SR)\.?$/i.test(w)) return w.toUpperCase().startsWith('JR') ? 'Jr.' : 'Sr.';
+              if (/^(II|III|IV)\.?$/i.test(w)) return w.replace(/\.$/, '').toUpperCase();
+              return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+            };
+            const firstName = renderToken(nameWords[0]);
+            const lastName = nameWords.slice(1).map(renderToken).join(' ');
             
             const isFollowedByTeamPosition = (i + 1 < rawLines.length) && 
               /PHILLIES|YANKEES|DODGERS|METS|CUBS|BRAVES|ASTROS|RANGERS|PADRES|GIANTS|CARDINALS|NATIONALS|ORIOLES|GUARDIANS|TWINS|RAYS|MARLINS|PIRATES|REDS|BREWERS|TIGERS|ROYALS|ATHLETICS|MARINERS|ANGELS|ROCKIES|DIAMONDBACKS|OUTFIELDER|INFIELDER|PITCHER|CATCHER|SHORTSTOP|BASEMAN|STARTING|CLOSER|RELIEVER/i.test(rawLines[i + 1]);
@@ -556,24 +614,61 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
       if (/^[a-z]+$/.test(w)) return 'lower';
       return 'other';
     };
+    // Classify a line for multi-line surname + first-name matching. A line may
+    // be either:
+    //   - a single name word (e.g. "Aaron" / "AARON" / "GRIFFEY"), or
+    //   - a surname token followed by a generational suffix
+    //     (e.g. "GRIFFEY JR.", "Smith Sr.", "JONES III").
+    // For the suffix form we return the surname token plus the normalized
+    // suffix ("Jr.", "Sr.", "II", "III", "IV") so the rendered lastName
+    // preserves "Griffey Jr." rather than dropping the suffix.
+    const suffixTokenRe = /^(JR|SR|II|III|IV)\.?$/i;
+    const normalizeSuffix = (w: string): string => {
+      const bare = w.replace(/\.$/, '').toUpperCase();
+      if (bare === 'JR') return 'Jr.';
+      if (bare === 'SR') return 'Sr.';
+      return bare; // II / III / IV preserved as-is
+    };
+    interface SurnameLineShape {
+      surname: string;
+      suffix: string | null;
+      style: 'upper' | 'title' | 'lower' | 'other';
+    }
+    const classifySurnameLine = (line: string): SurnameLineShape | null => {
+      const tokens = line.trim().split(/\s+/).filter(Boolean);
+      if (tokens.length === 1) {
+        if (!isSingleNameWord(tokens[0])) return null;
+        return { surname: tokens[0], suffix: null, style: wordCaseStyle(tokens[0]) };
+      }
+      if (tokens.length === 2) {
+        const [head, tail] = tokens;
+        const tailClean = tail.replace(/[.,;]+$/, '');
+        if (!suffixTokenRe.test(tailClean)) return null;
+        if (!isSingleNameWord(head)) return null;
+        return { surname: head, suffix: normalizeSuffix(tailClean), style: wordCaseStyle(head) };
+      }
+      return null;
+    };
+
     for (let i = 0; i < Math.min(rawLines.length - 1, 8); i++) {
       const a = rawLines[i].trim();
       const b = rawLines[i + 1].trim();
       if (!a || !b) continue;
       if (bioPrefixPattern.test(a) || bioPrefixPattern.test(b)) continue;
-      // Both lines must be a single name-shaped word with the same casing.
+      // Line A must be a single first-name word; line B may be a single
+      // surname word OR a "SURNAME SUFFIX" pair ("GRIFFEY JR.").
       const aWords = a.split(/\s+/);
-      const bWords = b.split(/\s+/);
-      if (aWords.length !== 1 || bWords.length !== 1) continue;
-      if (!isSingleNameWord(aWords[0]) || !isSingleNameWord(bWords[0])) continue;
+      if (aWords.length !== 1 || !isSingleNameWord(aWords[0])) continue;
+      const bShape = classifySurnameLine(b);
+      if (!bShape) continue;
       const aStyle = wordCaseStyle(aWords[0]);
-      const bStyle = wordCaseStyle(bWords[0]);
-      if (aStyle === 'other' || bStyle === 'other') continue;
-      if (aStyle !== bStyle) continue;
+      if (aStyle === 'other' || bShape.style === 'other') continue;
+      if (aStyle !== bShape.style) continue;
       const firstName = aWords[0].charAt(0).toUpperCase() + aWords[0].slice(1).toLowerCase();
-      const lastName = bWords[0].charAt(0).toUpperCase() + bWords[0].slice(1).toLowerCase();
+      const surnameTitle = bShape.surname.charAt(0).toUpperCase() + bShape.surname.slice(1).toLowerCase();
+      const lastName = bShape.suffix ? `${surnameTitle} ${bShape.suffix}` : surnameTitle;
       const priority = i < 5 ? 1 : 2;
-      console.log(`Multi-line player name candidate: "${firstName} ${lastName}" (priority: ${priority}, lines: ${i}+${i + 1})`);
+      console.log(`Multi-line player name candidate: "${firstName} ${lastName}" (priority: ${priority}, lines: ${i}+${i + 1}${bShape.suffix ? ', suffix ' + bShape.suffix : ''})`);
       potentialNames.push({ firstName, lastName, source: 'multiline' as any, priority });
     }
 
@@ -602,9 +697,16 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
       potentialNames.sort((a, b) => {
         if (a.priority !== b.priority) return a.priority - b.priority;
         // Tie-break: prefer 2-word names (firstName + lastName) over 3-word names.
-        // 3-word names are more likely to be partial OCR artifacts (e.g. "Apps Aats Ew")
-        const aWordCount = [a.firstName, ...a.lastName.split(/\s+/)].length;
-        const bWordCount = [b.firstName, ...b.lastName.split(/\s+/)].length;
+        // 3-word names are more likely to be partial OCR artifacts (e.g. "Apps Aats Ew").
+        // Generational suffixes (Jr., Sr., II/III/IV) do NOT count as an extra
+        // "real" word — they modify the surname. Without this exclusion a valid
+        // "Ken Griffey Jr." candidate would lose the tie-break to a 2-word OCR
+        // artifact like "Mariner Ken".
+        const suffixCountRe = /^(JR|SR|II|III|IV)\.?$/i;
+        const countNameWords = (first: string, last: string) =>
+          [first, ...last.split(/\s+/)].filter(w => w && !suffixCountRe.test(w)).length;
+        const aWordCount = countNameWords(a.firstName, a.lastName);
+        const bWordCount = countNameWords(b.firstName, b.lastName);
         return aWordCount - bWordCount;
       });
       const selected = potentialNames[0];
@@ -1394,19 +1496,30 @@ function extractCardNumberPass(
         }
       }
       const lineWithMatch = lineWithMatchEarly;
-      if (lineWithMatch && isDOBFormat(lineWithMatch)) {
+      // Topps anniversary/insert card numbers like "T88-82" (T-prefix + 2 digits +
+      // dash + digits) and "89B-2" (year-letter-dash-digits) are legitimate card
+      // numbers that routinely appear on the same back-of-card line as BORN /
+      // DRAFT / ACQ biographical copy. Bypass the DOB + biographical filters when
+      // the match already looks like a real Topps insert-series card number.
+      const isToppsInsertCardNumber =
+        /^T\d{2,3}-\d{1,3}$/.test(matchedText) ||
+        /^\d+[A-Z]\d*-\d+$/.test(matchedText);
+      if (lineWithMatch && isDOBFormat(lineWithMatch) && !isToppsInsertCardNumber) {
         console.log(`Skipping date-like pattern "${matchedText}" that appears to be a birthdate/date`);
         continue;
       }
-      if (lineWithMatch && /\b(DRAFTED|DRAFT|BORN|SIGNED|OVERALL|ROUND|PICK|AGENT|FREE)\b/i.test(lineWithMatch)) {
+      if (lineWithMatch && /\b(DRAFTED|DRAFT|BORN|SIGNED|OVERALL|ROUND|PICK|AGENT|FREE)\b/i.test(lineWithMatch) && !isToppsInsertCardNumber) {
         console.log(`Skipping pattern "${matchedText}" in biographical context`);
         continue;
+      }
+      if (isToppsInsertCardNumber && lineWithMatch && (isDOBFormat(lineWithMatch) || /\b(DRAFTED|DRAFT|BORN|SIGNED|OVERALL|ROUND|PICK|AGENT|FREE)\b/i.test(lineWithMatch))) {
+        console.log(`[CardNum] Accepting "${matchedText}" as Topps insert card number despite biographical line context`);
       }
       if (!acceptCandidate(matchedText, 'dash-number')) continue;
       cardDetails.cardNumber = matchedText;
       console.log(`Detected card number with dash: ${cardDetails.cardNumber}`);
-      // 35th Anniversary cards have format like 89B-2
-      if (matchedText.match(/^\d+[A-Z]\d*-\d+$/)) {
+      // 35th Anniversary cards have format like 89B-2 or T88-82
+      if (matchedText.match(/^\d+[A-Z]\d*-\d+$/) || /^T\d{2,3}-\d{1,3}$/.test(matchedText)) {
         cardDetails.collection = "35th Anniversary";
         console.log(`Setting collection from card number pattern: 35th Anniversary`);
       }
@@ -2100,9 +2213,23 @@ function extractCardNumberPass(
       // it explicitly. Other multi-letter prefixes that happen to be
       // common abbreviations (HT, WT, etc.) stay blocked.
       const allowDespiteStop = prefix.toUpperCase() === 'US';
+      // FRONT-SIDE GUARD: front-of-card OCR routinely surfaces bogus
+      // alphanumeric tokens (player jersey numbers like "C359" from a
+      // collection badge, subset codes, or marketing graphics) that are
+      // NOT real card numbers. Real card numbers almost always live on
+      // the back. When running on the front side, require a much stricter
+      // pattern: either a hyphenated code ("BD-7", "T88-82", "US-123") or
+      // a multi-letter prefix paired with digits ("US323", "BDC15"). Reject
+      // single-letter-prefix tokens like "C359" — those are overwhelmingly
+      // badge/subset codes, not card numbers.
+      const isStrictFrontCardNumberShape =
+        prefix.length >= 2 || // multi-letter prefixes ok (US, BD, HRC …)
+        /-/.test(fullToken);  // hyphenated codes (handled elsewhere but safe)
+      const frontRejectsSingleLetterPrefix = side === 'front' && !isStrictFrontCardNumberShape;
       if (
         !codePrefixSkip.has(prefix.toUpperCase()) &&
         (allowDespiteStop || !stopPrefixRe.test(prefix)) &&
+        !frontRejectsSingleLetterPrefix &&
         digitsVal > 0 && digitsVal < 10000
       ) {
         if (acceptCandidate(fullToken, 'standalone-line-alphanum')) {
@@ -2110,6 +2237,8 @@ function extractCardNumberPass(
           console.log(`Detected standalone alphanumeric card number: ${cardDetails.cardNumber}`);
           return;
         }
+      } else if (frontRejectsSingleLetterPrefix) {
+        console.log(`[CardNum] Rejecting standalone alphanum "${fullToken}" on front side — single-letter prefix + digits is not a valid front-of-card card number shape.`);
       }
     }
 
