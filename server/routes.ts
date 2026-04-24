@@ -38,7 +38,7 @@ import {
   type HoloGrade,
   type HoloAnalysis,
 } from './holo/cardGrader';
-import { saveGrade, listGradesForUser, hydrateGrade } from './holo/storage';
+import { saveGrade, listGradesForUser, hydrateGrade, updateGradeIdentification } from './holo/storage';
 import { requireAuth } from './auth';
 import { lookupCard as scpLookupCard, SOURCE_SLUG as SCP_SOURCE_SLUG } from './sportscardspro';
 import type { ScanQueryInput as ScpScanQueryInput } from './sportscardspro';
@@ -1863,6 +1863,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // OCR output flows straight through as card identification. Holo
       // contributes only the grade (attached as `data.holo` below).
       const cardData = backOcrResponse.data;
+
+      // Patch the scan_grades row with the OCR-derived identification so
+      // Home's Recent Scans carousel renders the player's name instead of
+      // "Unknown card". saveGrade() persisted the row with identification=null
+      // because it ran in parallel with the back OCR; now that cardData is
+      // in hand we can backfill the identification column.
+      try {
+        const gradeRowId = holoResolved?.id;
+        if (gradeRowId) {
+          const playerName = [cardData.playerFirstName, cardData.playerLastName]
+            .filter(Boolean)
+            .join(' ')
+            .trim();
+          if (playerName) {
+            await updateGradeIdentification(gradeRowId, {
+              player: playerName,
+              brand: cardData.brand ?? null,
+              setName: cardData.set ?? cardData.collection ?? '',
+              collection: cardData.collection ?? null,
+              year: cardData.year != null ? String(cardData.year) : '',
+              cardNumber: cardData.cardNumber ?? null,
+              serialNumber: cardData.serialNumber ?? null,
+              parallel: cardData.foilType ?? null,
+              variant: cardData.variant ?? null,
+              cmpCode: cardData.cmpNumber ?? null,
+              sport: cardData.sport ?? '',
+              confidence: typeof cardData.confidence === 'number' ? cardData.confidence : 0,
+            });
+            // Keep the in-memory grade in sync so any downstream consumer
+            // (currently none, but future-proofing) sees the enriched id.
+            (holoResolved as any).identification = {
+              player: playerName,
+              year: cardData.year != null ? String(cardData.year) : null,
+              brand: cardData.brand ?? null,
+              setName: cardData.set ?? cardData.collection ?? null,
+            };
+          }
+        }
+      } catch (identErr) {
+        console.warn('Failed to backfill scan grade identification:', identErr);
+      }
 
       // ── F-3b: Surface any speculative SportsCardsPro result ───────────────
       // The preliminary handler fires an SCP lookup in the background when

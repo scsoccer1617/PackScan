@@ -75,6 +75,32 @@ export async function getGradeById(id: number): Promise<ScanGrade | undefined> {
 }
 
 /**
+ * Patch the identification payload on an existing scan_grades row. The scan
+ * flow persists the Holo grade immediately (in parallel with the back-OCR
+ * identification step) so `saveGrade` is called with `identification: null`.
+ * Once the OCR pipeline resolves, the dual-image handler calls this helper
+ * to attach the real identification — otherwise the Home screen's Recent
+ * Scans carousel renders "Unknown card" forever, even when we know exactly
+ * who's on the card.
+ */
+export async function updateGradeIdentification(
+  id: number,
+  identification: HoloIdentification | null,
+): Promise<void> {
+  if (!id) return;
+  await db
+    .update(scanGrades)
+    .set({
+      identification: identification ?? null,
+      identificationConfidence:
+        identification?.confidence != null
+          ? identification.confidence.toFixed(3)
+          : null,
+    })
+    .where(eq(scanGrades.id, id));
+}
+
+/**
  * Legacy rows stored just the original client filename (e.g. "IMG_1234.jpg")
  * in frontImagePath because the scan route didn't persist the image buffer.
  * Old rows (pre-Object-Storage) stored a local `/uploads/scan_front_<uuid>.jpg`
