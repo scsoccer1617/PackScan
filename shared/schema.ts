@@ -358,8 +358,14 @@ export const scpMissLog = pgTable("scp_miss_log", {
   // reproduction. Shape: [{ id, productName, consoleName, score }]
   candidates: jsonb("candidates"),
   // Score of the best candidate that still fell below the threshold. Null
-  // for no_results / api_error.
-  bestScore: numeric("best_score", { precision: 4, scale: 3 }),
+  // for no_results / api_error. Scores are 0..100 (see
+  // server/sportscardspro/match.ts — rankCandidates clamps to that range),
+  // so we need at least three integer digits. Previous schema used
+  // NUMERIC(4,3) = max 9.999 which overflowed on any real miss and threw
+  // "numeric field overflow" from the log-insert. NUMERIC(6,3) gives
+  // headroom up to 999.999 while preserving 3-decimal precision for the
+  // breakdown analytics.
+  bestScore: numeric("best_score", { precision: 6, scale: 3 }),
   errorMessage: text("error_message"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => [
