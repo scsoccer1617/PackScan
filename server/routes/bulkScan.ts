@@ -223,10 +223,22 @@ export function registerBulkScanRoutes(app: Express): void {
     const userId = (req.user as any)?.id as number | undefined;
     if (!userId) return res.status(401).json({ error: 'Not authenticated' });
     const body = (req.body || {}) as { inboxFolderId?: string | null; processedFolderId?: string | null };
-    const updated = await setUserFolders(userId, {
-      inboxFolderId: typeof body.inboxFolderId === 'string' ? body.inboxFolderId : body.inboxFolderId ?? null,
-      processedFolderId: typeof body.processedFolderId === 'string' ? body.processedFolderId : body.processedFolderId ?? null,
-    });
-    return res.json({ folders: updated });
+    try {
+      const updated = await setUserFolders(userId, {
+        inboxFolderId: typeof body.inboxFolderId === 'string' ? body.inboxFolderId : body.inboxFolderId ?? null,
+        processedFolderId: typeof body.processedFolderId === 'string' ? body.processedFolderId : body.processedFolderId ?? null,
+      });
+      // Resolve folder names so the /bulk-scan page can display them without
+      // a second roundtrip. getFolderName swallows its own errors and returns
+      // null on failure (folder deleted / no access), so this can't throw.
+      const [inboxName, processedName] = await Promise.all([
+        updated.inboxFolderId ? getFolderName(userId, updated.inboxFolderId) : Promise.resolve(null),
+        updated.processedFolderId ? getFolderName(userId, updated.processedFolderId) : Promise.resolve(null),
+      ]);
+      return res.json({ folders: updated, names: { inbox: inboxName, processed: processedName } });
+    } catch (err: any) {
+      console.error('[bulkScan/route] PUT /folders failed:', err);
+      return res.status(500).json({ error: err?.message || 'save_failed' });
+    }
   });
 }

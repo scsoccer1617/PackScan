@@ -24,6 +24,8 @@ import {
   ListChecks,
   Settings as SettingsIcon,
   Beaker,
+  FileSpreadsheet,
+  ExternalLink,
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
@@ -54,6 +56,16 @@ interface FoldersResponse {
   };
   names: { inbox: string | null; processed: string | null };
 }
+interface UserSheet {
+  id: number;
+  googleSheetId: string;
+  title: string;
+  isDefault: boolean;
+}
+interface SheetsResponse {
+  sheets: UserSheet[];
+  activeSheetId: number | null;
+}
 
 export default function BulkScan() {
   const { user } = useAuth();
@@ -65,6 +77,18 @@ export default function BulkScan() {
     queryKey: ["/api/bulk-scan/folders"],
     enabled: !!user,
   });
+
+  // Active sheet — the destination for both auto-saved rows and review
+  // saves. Dealers asked to see which sheet they're writing to before
+  // kicking off a batch so there's no "wait, where did my cards go?"
+  // moment.
+  const { data: sheetsData } = useQuery<SheetsResponse>({
+    queryKey: ["/api/sheets"],
+    enabled: !!user,
+  });
+  const activeSheet = sheetsData?.sheets.find(
+    (s) => s.id === sheetsData.activeSheetId,
+  ) ?? null;
 
   // Recent batches. Poll while any batch is active so the dealer sees
   // live progress without mashing refresh.
@@ -175,14 +199,59 @@ export default function BulkScan() {
           <FolderRow
             label="Inbox"
             name={foldersData?.names.inbox || "Loading…"}
+            folderId={foldersData?.folders.inboxFolderId ?? null}
             testId="row-inbox"
           />
           {foldersData?.folders.processedFolderId && (
             <FolderRow
               label="Processed"
               name={foldersData?.names.processed || "—"}
+              folderId={foldersData?.folders.processedFolderId ?? null}
               testId="row-processed"
             />
+          )}
+        </section>
+      )}
+
+      {/* Destination sheet — where identified cards land. Tapping opens the
+          /sheets tab so the dealer can pick a different sheet if needed. */}
+      {googleConnected && (
+        <section className="mx-4 rounded-2xl bg-card border border-card-border p-4">
+          {activeSheet ? (
+            <Link
+              href="/sheets"
+              className="flex items-center gap-3 hover-elevate -mx-4 -my-4 px-4 py-4 rounded-2xl"
+              data-testid="link-active-sheet"
+            >
+              <div className="w-8 h-8 rounded-xl bg-foil-green/15 flex items-center justify-center text-foil-green shrink-0">
+                <FileSpreadsheet className="w-4 h-4" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                  Saving to sheet
+                </p>
+                <p className="text-sm font-medium truncate">{activeSheet.title}</p>
+              </div>
+              <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
+            </Link>
+          ) : (
+            <div className="flex items-center gap-3" data-testid="row-no-sheet">
+              <div className="w-8 h-8 rounded-xl bg-foil-amber/15 flex items-center justify-center text-foil-amber shrink-0">
+                <AlertTriangle className="w-4 h-4" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium">No active sheet</p>
+                <p className="text-[11px] text-muted-foreground">
+                  Pick a sheet so Holo knows where to save cards.
+                </p>
+              </div>
+              <Link
+                href="/sheets"
+                className="shrink-0 h-9 px-3 rounded-xl bg-foil-violet text-white text-xs font-medium flex items-center hover-elevate"
+              >
+                Open
+              </Link>
+            </div>
           )}
         </section>
       )}
@@ -292,15 +361,17 @@ export default function BulkScan() {
 function FolderRow({
   label,
   name,
+  folderId,
   testId,
 }: {
   label: string;
   name: string;
+  folderId: string | null;
   testId?: string;
 }) {
-  return (
-    <div className="flex items-center gap-3" data-testid={testId}>
-      <div className="w-8 h-8 rounded-xl bg-muted flex items-center justify-center text-slate-600">
+  const content = (
+    <>
+      <div className="w-8 h-8 rounded-xl bg-muted flex items-center justify-center text-slate-600 shrink-0">
         <Folder className="w-4 h-4" />
       </div>
       <div className="flex-1 min-w-0">
@@ -309,6 +380,27 @@ function FolderRow({
         </p>
         <p className="text-sm font-medium truncate">{name}</p>
       </div>
+      {folderId && (
+        <ExternalLink className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+      )}
+    </>
+  );
+  if (folderId) {
+    return (
+      <a
+        href={`https://drive.google.com/drive/folders/${folderId}`}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="flex items-center gap-3 hover-elevate -mx-2 -my-1 px-2 py-1 rounded-lg"
+        data-testid={testId}
+      >
+        {content}
+      </a>
+    );
+  }
+  return (
+    <div className="flex items-center gap-3" data-testid={testId}>
+      {content}
     </div>
   );
 }

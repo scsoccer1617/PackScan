@@ -66,12 +66,13 @@ export default function BulkScanSettings() {
   const [saveError, setSaveError] = useState<string | null>(null);
 
   // Hydrate the inputs once data arrives. Only seed empty inputs so edits in
-  // flight aren't clobbered by a background refetch.
+  // flight aren't clobbered by a background refetch. Re-open the page and we
+  // want the saved ID visible, so we seed whenever the input is empty.
   useEffect(() => {
     if (!data) return;
-    if (!inbox && data.folders.inboxFolderId) setInbox(data.folders.inboxFolderId);
-    if (!processed && data.folders.processedFolderId) setProcessed(data.folders.processedFolderId);
-  }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
+    setInbox((prev) => (prev ? prev : data.folders.inboxFolderId ?? ""));
+    setProcessed((prev) => (prev ? prev : data.folders.processedFolderId ?? ""));
+  }, [data]);
 
   const saveMutation = useMutation({
     mutationFn: async () => {
@@ -80,13 +81,25 @@ export default function BulkScanSettings() {
         inboxFolderId: inbox ? extractFolderId(inbox) : null,
         processedFolderId: processed ? extractFolderId(processed) : null,
       };
-      return apiRequest({
+      return apiRequest<FoldersResponse>({
         url: "/api/bulk-scan/folders",
         method: "PUT",
         body: payload,
       });
     },
-    onSuccess: () => {
+    onSuccess: (resp) => {
+      // Prime the cache with the server response so /bulk-scan sees the
+      // saved folders instantly (including the human-readable names) — no
+      // refetch race on the landing page.
+      if (resp && resp.folders) {
+        queryClient.setQueryData(["/api/bulk-scan/folders"], {
+          folders: {
+            inboxFolderId: resp.folders.inboxFolderId ?? null,
+            processedFolderId: resp.folders.processedFolderId ?? null,
+          },
+          names: resp.names ?? { inbox: null, processed: null },
+        });
+      }
       queryClient.invalidateQueries({ queryKey: ["/api/bulk-scan/folders"] });
       toast({ title: "Folders saved" });
       // Bounce back to /bulk-scan once the save succeeds — dealers want
