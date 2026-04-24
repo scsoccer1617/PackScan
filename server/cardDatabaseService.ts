@@ -1045,6 +1045,127 @@ export async function lookupCardByPlayer(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Voice-lookup enrichment (H-5)
+// ---------------------------------------------------------------------------
+
+export interface VoiceEnrichInput {
+  brand: string | null;
+  year: number | null;
+  collection: string | null;
+  cardNumber: string | null;
+  playerFirstName: string | null;
+  playerLastName: string | null;
+  serialNumber: string | null;
+  /** Free-form parallel/variant description the speaker provided, used as a
+   *  hint when resolving the variation row. Optional. */
+  parallelHint?: string | null;
+}
+
+export interface VoiceEnrichResult {
+  /** The CardLookupResult that matched. `found` is always true when returned. */
+  hit: CardLookupResult;
+  /** Which fallback chain produced the hit. Informational for logs/UI. */
+  source: 'direct' | 'year-widen' | 'player-anchored';
+}
+
+/**
+ * Voice-flow CardDB enrichment (H-5).
+ *
+ * Mirrors the image-scan CardDB lookup ladder used inside dualSideOCR.ts:
+ *   1. Direct lookup on (brand, year, cardNumber)
+ *   2. ±1-year fallback with requireNameMatch against the spoken surname
+ *   3. Player-anchored fallback on (brand, year, lastName) when the spoken
+ *      card number turns out to be wrong (e.g. user said a jersey number or
+ *      misspoke). Only auto-picks when a single row uniquely matches.
+ *
+ * Returns null when all three paths miss; the caller keeps the voice-provided
+ * fields as-is. Never throws — this is purely enrichment.
+ */
+export async function enrichVoiceFields(
+  input: VoiceEnrichInput,
+): Promise<VoiceEnrichResult | null> {
+  const { brand, year, collection, cardNumber, playerLastName, playerFirstName, serialNumber, parallelHint } = input;
+
+  // Gate: need at least brand + year + (cardNumber OR last name) to make any
+  // lookup meaningful. Below that the search would be unbounded.
+  if (!brand || !year || (!cardNumber && !playerLastName)) {
+    return null;
+  }
+
+  try {
+    // ─── 1. Direct lookup ─────────────────────────────────────────────
+    if (cardNumber) {
+      const direct = await lookupCard({
+        brand,
+        year,
+        cardNumber,
+        collection: collection || undefined,
+        playerLastName: playerLastName || undefined,
+        serialNumber: serialNumber || undefined,
+        ocrText: parallelHint || undefined,
+      });
+      if (direct.found) {
+        return { hit: direct, source: 'direct' };
+      }
+    }
+
+    // ─── 2. ±1-year widening (name-match guarded) ───────────────────────────
+    // Speakers occasionally fumble the year ("twenty twenty five" vs
+    // "twenty twenty six"). Widen by ±1 and require the surname to agree
+    // — otherwise a base-set card number hits a different player in the
+    // adjacent year and corrupts everything.
+    if (cardNumber && playerLastName) {
+      for (const delta of [1, -1]) {
+        const yr = year + delta;
+        const widened = await lookupCard({
+          brand,
+          year: yr,
+          cardNumber,
+          collection: collection || undefined,
+          playerLastName,
+          serialNumber: serialNumber || undefined,
+          ocrText: parallelHint || undefined,
+        });
+        if (widened.found) {
+          const dbLast = (widened.playerLastName || '').trim().toLowerCase();
+          const spokenLast = playerLastName.trim().toLowerCase();
+          const lastMatch =
+            !!dbLast && !!spokenLast &&
+            (dbLast === spokenLast || dbLast.startsWith(spokenLast) || spokenLast.startsWith(dbLast));
+          if (lastMatch) {
+            console.log(`[VoiceCardDB] ±1 year widen hit at year=${yr}`);
+            return { hit: widened, source: 'year-widen' };
+          }
+        }
+      }
+    }
+
+    // ─── 3. Player-anchored fallback (H-3 for voice) ────────────────────────
+    // Speaker gave a wrong card number (read a jersey number, misheard, etc.)
+    // Search by (brand, year, lastName) and auto-correct the card number
+    // when a single row uniquely matches.
+    if (playerLastName) {
+      const anchored = await lookupCardByPlayer({
+        brand,
+        year,
+        playerLastName,
+        playerFirstName: playerFirstName || undefined,
+        collection: collection || undefined,
+      });
+      if (anchored.found) {
+        console.log(`[VoiceCardDB] player-anchored fallback hit — corrected cardNumber="${anchored.cardNumber}"`);
+        return { hit: anchored, source: 'player-anchored' };
+      }
+    }
+
+    return null;
+  } catch (err: any) {
+    console.warn('[VoiceCardDB] enrichment error (non-fatal):', err.message);
+    return null;
+  }
+}
+
 /**
  * Find variation record(s) matching the given context.
  *
