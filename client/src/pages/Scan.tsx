@@ -22,6 +22,7 @@ import VoiceLookup, { type ExtractedCardFields } from "@/components/VoiceLookup"
 import { useToast } from "@/hooks/use-toast";
 import { useScanFlow } from "@/hooks/use-scan-flow";
 import { compressImage } from "@/lib/scanFlow";
+import { queryClient } from "@/lib/queryClient";
 import type { CardFormValues } from "@shared/schema";
 import type { HoloGrade } from "@/components/HoloGradeCard";
 import { ScanLine, RotateCw } from "lucide-react";
@@ -255,6 +256,15 @@ export default function Scan() {
         cardData: result.data,
         holoGrade: (result.data.holo as HoloGrade) ?? null,
       });
+      // Recent Scans (Home), Collection, and Stats all read from
+      // /api/scan-grades. The shared queryClient uses staleTime: Infinity,
+      // so without an explicit invalidation the carousel never refetches
+      // after a scan and stays stuck on whatever was cached at first load.
+      // Invalidate both keyed variants (Home uses { limit: 8 }, Collection
+      // uses { limit: 100 }, Stats uses a fixed URL) — passing just the
+      // prefix matches all three.
+      queryClient.invalidateQueries({ queryKey: ["/api/scan-grades"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/scan-grades?limit=100"] });
       console.log("[Scan] navigating to /result");
       navigate("/result");
     } catch (error) {

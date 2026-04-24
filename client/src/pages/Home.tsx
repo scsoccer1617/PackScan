@@ -28,6 +28,10 @@ type ScanGradesResponse = {
     id: number;
     overall: number;
     label: string;
+    /** Sentinel `"none"` marks rows inserted when auto-grade was off.
+        We still want these in Recent Scans (same thumbnail + identification)
+        but the grade pill is hidden because there is no real grade. */
+    model: string;
     createdAt: string | Date;
     identification: null | {
       player?: string | null;
@@ -167,6 +171,11 @@ export default function Home() {
           </div>
           <div className="flex gap-3 overflow-x-auto px-4 pb-2 no-scrollbar">
             {recent.map((g) => {
+              // Rows with model='none' or label='UNGRADED' are scan-activity
+              // placeholders inserted when auto-grade was off. Render the
+              // thumbnail + identification but hide the grade pill — a "0.0"
+              // badge would be visually misleading and uglier than nothing.
+              const isGraded = g.model !== "none" && g.label !== "UNGRADED";
               const tone = gradeTone(g.overall);
               const id = g.identification;
               const player = id?.player ?? "Unknown card";
@@ -189,15 +198,17 @@ export default function Home() {
                     ) : (
                       <Camera className="w-8 h-8 text-slate-300" strokeWidth={1.5} />
                     )}
-                    <span
-                      className={cn(
-                        "absolute top-2 right-2 px-2 py-0.5 rounded-full text-[11px] font-semibold ring-1 backdrop-blur bg-white/90",
-                        tone.text,
-                        tone.ring,
-                      )}
-                    >
-                      {g.overall.toFixed(1)}
-                    </span>
+                    {isGraded && (
+                      <span
+                        className={cn(
+                          "absolute top-2 right-2 px-2 py-0.5 rounded-full text-[11px] font-semibold ring-1 backdrop-blur bg-white/90",
+                          tone.text,
+                          tone.ring,
+                        )}
+                      >
+                        {g.overall.toFixed(1)}
+                      </span>
+                    )}
                   </div>
                   <div className="p-2.5">
                     <p className="text-[13px] font-medium leading-tight truncate text-ink">
