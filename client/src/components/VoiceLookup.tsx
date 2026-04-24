@@ -242,10 +242,26 @@ export default function VoiceLookup({ onConfirm, disabled }: VoiceLookupProps) {
       const body: ExtractResponse = await response.json().catch(() => ({ success: false }));
 
       if (!body.success || !body.fields) {
+        // Map server reason → a more informative toast title so a missing
+        // API key / empty recording / rate-limit all read differently
+        // instead of all showing "Voice lookup failed".
+        const titleByReason: Record<string, string> = {
+          not_configured: "Voice lookup not set up",
+          audio_too_short: "Recording too short",
+          no_speech: "No speech detected",
+          audio_invalid: "Audio format not supported",
+          file_too_large: "Recording too long",
+          missing_audio: "No audio captured",
+          api_error: "Voice lookup failed",
+          internal_error: "Voice lookup failed",
+        };
+        const title = titleByReason[body.reason || ""] || "Voice lookup failed";
+        console.warn("[VoiceLookup] server error", { reason: body.reason, message: body.message });
         toast({
-          title: "Voice lookup failed",
+          title,
           description: body.message || "Try again and speak clearly.",
           variant: "destructive",
+          duration: 8000,
         });
         return;
       }

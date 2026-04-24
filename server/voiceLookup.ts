@@ -305,12 +305,40 @@ export async function extractCardFromAudio(
 
     return { status: "ok", transcript, fields };
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.warn("[voiceLookup] Gemini call failed:", message);
+    const rawMessage = err instanceof Error ? err.message : String(err);
+    console.warn("[voiceLookup] Gemini call failed:", rawMessage);
+    // Surface a more specific reason so the client toast tells the user what
+    // actually happened instead of a generic "try again". The three common
+    // failure classes we've seen so far:
+    //   - 401/403 → bad or missing API key  ("API key not valid", "permission")
+    //   - 429    → quota exceeded
+    //   - 4xx on  content → unsupported mimetype or bad audio
+    const lower = rawMessage.toLowerCase();
+    if (lower.includes("api key") || lower.includes("permission") || lower.includes("unauthorized") || lower.includes("401") || lower.includes("403")) {
+      return {
+        status: "error",
+        reason: "not_configured",
+        message: "Voice lookup can't reach Gemini. Check that GEMINI_API_KEY is set correctly.",
+      };
+    }
+    if (lower.includes("quota") || lower.includes("rate limit") || lower.includes("429")) {
+      return {
+        status: "error",
+        reason: "api_error",
+        message: "Gemini rate limit hit. Try again in a moment.",
+      };
+    }
+    if (lower.includes("unsupported") || lower.includes("invalid audio")) {
+      return {
+        status: "error",
+        reason: "audio_invalid",
+        message: "Gemini rejected the audio format. Try recording again.",
+      };
+    }
     return {
       status: "error",
       reason: "api_error",
-      message: "Voice lookup failed. Please try again.",
+      message: `Gemini request failed: ${rawMessage.slice(0, 160)}`,
     };
   }
 }
