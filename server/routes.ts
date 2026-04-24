@@ -1441,11 +1441,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         parallel: fields.parallel || null,
       };
 
-      // Fire-and-forget — respond immediately so the client can move on.
+      // SCP-first gate (voice path): fire SCP first, then ONLY fall back to
+      // CardDB enrichment when SCP misses. Previously SCP and CardDB fired in
+      // parallel; that let CardDB contradict SCP-owned fields on SCP hits.
+      // CardDB remains the silent fallback for sports/sets SCP doesn't cover.
+      //
+      // Still fire-and-forget at the outer level — the client response doesn't
+      // wait on either lookup; the speculative-scp endpoint polls for both
+      // results when the confirm sheet is submitted.
       (async () => {
         const specStart = Date.now();
+        let specResult: Awaited<ReturnType<typeof scpLookupCard>> | null = null;
         try {
-          const specResult = await scpLookupCard(specInput, { userId: userId ?? null });
+          specResult = await scpLookupCard(specInput, { userId: userId ?? null });
           updatePendingScan(voiceScanId, { scpResult: specResult });
           console.log(
             `[voice-preliminary-scp-${voiceScanId}] ${specResult.status}` +
@@ -1460,15 +1468,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
             err?.message || err,
           );
         }
-      })();
 
-      // H-5: Fire CardDB enrichment in parallel with SCP. Produces authoritative
-      // fields (rookie flag, collection, set, corrected card number via
-      // player-anchored fallback, variation) the same way the image scan path
-      // does inside dualSideOCR.ts. Also fire-and-forget; the response to the
-      // client doesn't wait on this. The speculative-scp endpoint then returns
-      // both scpResult and voiceCardDbResult when the confirm sheet is submitted.
-      (async () => {
+        // CardDB enrichment only on SCP miss (silent fallback). On SCP hit,
+        // set/collection stay as OCR/voice populated them; SCP already owns
+        // brand/year/cardNumber/playerName/parallel.
+        if (specResult && specResult.status === 'hit') {
+          updatePendingScan(voiceScanId, { voiceCardDbResult: null });
+          console.log(
+            `[voice-preliminary-carddb-${voiceScanId}] skipped — SCP-first hit is authoritative.`,
+          );
+          return;
+        }
+
         const cardDbStart = Date.now();
         try {
           const enrichment = await enrichVoiceFields({
@@ -1484,7 +1495,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           updatePendingScan(voiceScanId, { voiceCardDbResult: enrichment ?? null });
           console.log(
             `[voice-preliminary-carddb-${voiceScanId}] ${enrichment ? `hit (${enrichment.source})` : 'miss'}` +
-              ` took ${Date.now() - cardDbStart}ms`,
+              ` took ${Date.now() - cardDbStart}ms (SCP missed, fell through to CardDB)`,
           );
         } catch (err: any) {
           console.warn(
