@@ -203,6 +203,7 @@ export default function BulkScanSettings() {
           value={inbox}
           onChange={setInbox}
           currentName={data?.names.inbox ?? null}
+          savedId={data?.folders.inboxFolderId ?? null}
           loading={isLoading}
           testId="input-inbox-folder"
         />
@@ -212,6 +213,7 @@ export default function BulkScanSettings() {
           value={processed}
           onChange={setProcessed}
           currentName={data?.names.processed ?? null}
+          savedId={data?.folders.processedFolderId ?? null}
           loading={isLoading}
           testId="input-processed-folder"
           optional
@@ -276,6 +278,7 @@ function FolderInput({
   value,
   onChange,
   currentName,
+  savedId,
   loading,
   testId,
   optional,
@@ -285,6 +288,7 @@ function FolderInput({
   value: string;
   onChange: (v: string) => void;
   currentName: string | null;
+  savedId: string | null;
   loading?: boolean;
   testId?: string;
   optional?: boolean;
@@ -314,7 +318,16 @@ function FolderInput({
         spellCheck={false}
       />
       <p className="text-[11px] text-slate-500 mt-1">{sub}</p>
-      {showPreview && (
+      {/* Show the saved id on the server regardless of the current input
+          value — this makes "is this folder actually persisted?" obvious at
+          a glance, and prevents the "I saved it but it didn't stick" panic
+          when a dealer reopens the page. */}
+      {savedId && (
+        <p className="text-[11px] text-foil-green mt-1 flex items-center gap-1 font-mono" data-testid={`${testId}-saved`}>
+          <Check className="w-3 h-3" /> Saved: <span className="truncate">{savedId}</span>
+        </p>
+      )}
+      {showPreview && extracted !== savedId && (
         <p className="text-[11px] text-slate-600 mt-1 flex items-center gap-1 font-mono">
           <ExternalLink className="w-3 h-3" /> Folder ID: <span className="truncate">{extracted}</span>
         </p>
