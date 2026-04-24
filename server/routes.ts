@@ -1469,34 +1469,68 @@ export async function registerRoutes(app: Express): Promise<Server> {
           );
         }
 
-        // CardDB enrichment only on SCP miss (silent fallback). On SCP hit,
-        // set/collection stay as OCR/voice populated them; SCP already owns
-        // brand/year/cardNumber/playerName/parallel.
-        if (specResult && specResult.status === 'hit') {
-          updatePendingScan(voiceScanId, { voiceCardDbResult: null });
-          console.log(
-            `[voice-preliminary-carddb-${voiceScanId}] skipped — SCP-first hit is authoritative.`,
-          );
-          return;
+        // CardDB enrichment strategy based on SCP outcome:
+        //  - SCP hit  → still call CardDB, but only forward set/collection to
+        //    the client. SCP already owns brand/year/cardNumber/playerName/
+        //    parallel, and CardDB doesn't have structured set/collection
+        //    anywhere else, so we run enrichment with the SCP-corrected
+        //    fields and strip everything except set/collection from the hit.
+        //  - SCP miss → run CardDB as the full silent fallback (same as before).
+        const scpHit = !!specResult && specResult.status === 'hit';
+        // When SCP hit, use the SCP-corrected brand/year/cardNumber for the
+        // enrichment query so CardDB is matched against the authoritative
+        // identifiers — not the raw voice input that SCP may have corrected.
+        const scpMatch = scpHit && specResult!.status === 'hit' ? specResult!.match : null;
+        let enrichBrand = fields.brand || null;
+        let enrichYear: number | null = fields.year ?? null;
+        let enrichCardNumber = fields.cardNumber || null;
+        if (scpMatch) {
+          const { extractYear, extractBrand, extractCardNumber } = await import('./sportscardspro/match');
+          enrichYear = extractYear(scpMatch.consoleName) ?? enrichYear;
+          enrichBrand = extractBrand(scpMatch.consoleName) ?? enrichBrand;
+          enrichCardNumber = extractCardNumber(scpMatch.productName) ?? enrichCardNumber;
         }
 
         const cardDbStart = Date.now();
         try {
           const enrichment = await enrichVoiceFields({
-            brand: fields.brand || null,
-            year: fields.year ?? null,
+            brand: enrichBrand,
+            year: enrichYear,
             collection: fields.collection || null,
-            cardNumber: fields.cardNumber || null,
+            cardNumber: enrichCardNumber,
             playerFirstName: first || null,
             playerLastName: last || null,
             serialNumber: fields.serialNumber || null,
             parallelHint: fields.parallel || null,
           });
-          updatePendingScan(voiceScanId, { voiceCardDbResult: enrichment ?? null });
-          console.log(
-            `[voice-preliminary-carddb-${voiceScanId}] ${enrichment ? `hit (${enrichment.source})` : 'miss'}` +
-              ` took ${Date.now() - cardDbStart}ms (SCP missed, fell through to CardDB)`,
-          );
+
+          if (scpHit && enrichment) {
+            // Filter the hit down to set/collection only. The client's merge
+            // logic reads every populated field on dbHit, so leaving the other
+            // fields populated would let CardDB stomp SCP-owned values on the
+            // client side. Keep `found: true` so the merge block still runs,
+            // and keep `source` so the log line remains meaningful.
+            const filteredHit: any = {
+              found: true,
+              set: enrichment.hit.set ?? null,
+              collection: enrichment.hit.collection ?? null,
+            };
+            updatePendingScan(voiceScanId, {
+              voiceCardDbResult: { hit: filteredHit, source: enrichment.source } as any,
+            });
+            console.log(
+              `[voice-preliminary-carddb-${voiceScanId}] hit (${enrichment.source}) — ` +
+                `SCP authoritative, forwarding set="${filteredHit.set || ''}" collection="${filteredHit.collection || ''}" only. ` +
+                `Took ${Date.now() - cardDbStart}ms.`,
+            );
+          } else {
+            updatePendingScan(voiceScanId, { voiceCardDbResult: enrichment ?? null });
+            console.log(
+              `[voice-preliminary-carddb-${voiceScanId}] ${enrichment ? `hit (${enrichment.source})` : 'miss'}` +
+                ` took ${Date.now() - cardDbStart}ms` +
+                (scpHit ? ' (SCP hit but CardDB miss — set/collection unchanged)' : ' (SCP missed, fell through to CardDB)'),
+            );
+          }
         } catch (err: any) {
           console.warn(
             `[voice-preliminary-carddb-${voiceScanId}] threw unexpectedly:`,

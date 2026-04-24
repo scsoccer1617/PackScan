@@ -1257,8 +1257,54 @@ async function combineCardResults(
       console.log(
         `[SCP-first] Populated from SCP: brand="${combined.brand}" year=${combined.year} ` +
           `cardNumber="${combined.cardNumber}" player="${combined.playerFirstName} ${combined.playerLastName}" ` +
-          `foilType="${combined.foilType || 'base'}" — skipping CardDB path.`,
+          `foilType="${combined.foilType || 'base'}"`,
       );
+
+      // CardDB set/collection enrichment on SCP hit. SCP doesn't carry
+      // structured set/collection data, so we still query CardDB — but only
+      // to fill those two fields. SCP-owned fields (brand/year/cardNumber/
+      // playerName/parallel) are NEVER touched by this enrichment path;
+      // only combined.set and combined.collection are updated, and only
+      // when they're currently empty so a CardDB miss / stale row can't
+      // clobber what SCP already gave us. Runs with the SCP-corrected
+      // (brand, year, cardNumber) so the DB lookup uses the authoritative
+      // identifiers rather than the raw OCR values.
+      try {
+        const enrichNum = String(combined.cardNumber || '').trim();
+        if (combined.brand && combined.year && enrichNum) {
+          const enrichResult = await lookupCard({
+            brand: combined.brand,
+            year: combined.year as number,
+            collection: combined.collection || undefined,
+            cardNumber: enrichNum,
+            serialNumber: combined.serialNumber || undefined,
+            playerLastName: combined.playerLastName || undefined,
+            ocrText: `${frontOCRText}\n${backOCRText}`,
+          });
+          if (enrichResult.found) {
+            let filled: string[] = [];
+            if (!combined.set && enrichResult.set) {
+              combined.set = enrichResult.set;
+              filled.push(`set="${enrichResult.set}"`);
+            }
+            if (!combined.collection && enrichResult.collection) {
+              combined.collection = enrichResult.collection;
+              filled.push(`collection="${enrichResult.collection}"`);
+            }
+            if (filled.length > 0) {
+              console.log(`[SCP-first] CardDB set/collection enrichment: ${filled.join(', ')}.`);
+            } else {
+              console.log('[SCP-first] CardDB row found but set/collection already populated — leaving OCR values in place.');
+            }
+          } else {
+            console.log('[SCP-first] CardDB set/collection enrichment: no matching row — set/collection stay as OCR populated them.');
+          }
+        }
+      } catch (enrichErr: any) {
+        console.warn('[SCP-first] CardDB set/collection enrichment threw (non-fatal):', enrichErr?.message || enrichErr);
+      }
+
+      console.log('[SCP-first] Skipping main CardDB lookup — SCP owns brand/year/cardNumber/player/parallel.');
     } else {
       console.log(`[SCP-first] MISS (${scpResult.reason}) — falling through to CardDB.`);
     }
