@@ -19,6 +19,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import EbayPriceResults from "@/components/EbayPriceResults";
 import { HoloGradeCard } from "@/components/HoloGradeCard";
 import GradedPriceBreakdown from "@/components/GradedPriceBreakdown";
+import CatalogPriceStrip from "@/components/CatalogPriceStrip";
 import PsaGradeSelect from "@/components/PsaGradeSelect";
 import AddToSheetButton from "@/components/AddToSheetButton";
 import ParallelPickerSheet, {
@@ -906,6 +907,27 @@ export default function ScanResult() {
           forceMount
           className="mt-4 space-y-4 px-4 data-[state=inactive]:hidden"
         >
+          {/* SCP / SportsCardsPro catalog strip renders UNCONDITIONALLY.
+              Previously this lived inside <GradedPriceBreakdown>, which
+              meant SCP was hidden whenever the eBay graded search failed
+              or returned null — the user reported seeing "nothing above
+              Active Listings" for exactly that reason. CatalogPriceStrip
+              has its own internal miss/skeleton handling (returns null on
+              SCP miss, so dealers with no SCP coverage see nothing but
+              no errors), so it's safe to render without a gate. */}
+          <CatalogPriceStrip
+            cardData={cardData}
+            predictedPsaGrade={
+              // Priority: user-entered PSA grade > Holo overall rounded
+              // to the nearest integer (8.5 → 9). Highlight only; SCP
+              // still renders all catalog tiers when null.
+              cardData.psaGrade ??
+              (holoGrade?.overall != null && Number.isFinite(holoGrade.overall)
+                ? Math.round(holoGrade.overall)
+                : null)
+            }
+            speculativeCatalog={(cardData as any).speculativeCatalog ?? null}
+          />
           {(holoGrade || cardData.psaGrade != null) && (
             <GradedPriceBreakdown
               cardData={cardData}

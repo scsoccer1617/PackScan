@@ -9,7 +9,13 @@ import {
   ShoppingBag,
 } from "lucide-react";
 import type { CardFormValues } from "@shared/schema";
-import CatalogPriceStrip from "@/components/CatalogPriceStrip";
+
+// NOTE: CatalogPriceStrip (SportsCardsPro) used to render inside this
+// component, which gated SCP on a successful eBay graded-search response.
+// That coupling caused the price tab to show "nothing above Active
+// Listings" whenever the graded search failed or returned `null` — even
+// though SCP data was available. SCP is now rendered by the parent
+// (ScanResult.tsx) so the two sections fail independently.
 
 /**
  * Shape of one tier returned by GET /api/ebay-graded-search. Mirrors
@@ -246,9 +252,9 @@ function TierColumn({
  *   At grade  \u2014  PSA {predictedGrade} comps
  *   Top grade \u2014  PSA 10 comps (ceiling)
  *
- * Only renders when we have a Holo grade to anchor the at-grade tier.
- * The parent (PriceLookup) hides this component entirely when holoGrade
- * is null to avoid running an extra eBay call when Holo didn\u2019t run.
+ * Renders only the eBay "Recent sales" section. The SCP/CatalogPriceStrip
+ * hero lives above this in ScanResult.tsx so it's not coupled to the
+ * eBay response lifecycle.
  */
 export default function GradedPriceBreakdown({
   cardData,
@@ -383,32 +389,11 @@ export default function GradedPriceBreakdown({
   const atGradeSublabel = psa ? `predicted PSA ${psa}` : "predicted grade";
   const topGradeSublabel = psa === 10 ? "same as at-grade" : "ceiling";
 
-  // PR #38b: SCP is now the pricing hero; eBay comps are demoted to a
-  // "Recent sales" context section below. The old layout put eBay first
-  // with SCP as an inline benchmark strip — but dealers told us the
-  // cross-grade catalog prices (raw/8/9/10/etc.) are what they actually
-  // reference when pricing inventory, and the eBay asking-price grid is
-  // useful mainly as a sanity check. So: SCP rendered as its own full-
-  // width hero card, eBay rendered below it as a smaller supporting card.
-  //
-  // CatalogPriceStrip renders null on miss, so dealers without SCP
-  // coverage still see the eBay section as before (just without the
-  // hero promo above it). The eBay section title stays neutral
-  // ("Recent sales") so the page doesn't feel empty when SCP is absent.
+  // eBay "Recent sales" tier breakdown. The SCP/CatalogPriceStrip hero
+  // renders separately above this in ScanResult.tsx so that SCP data
+  // still shows when eBay comps fail or are unavailable.
   return (
     <div className="flex flex-col gap-3" data-testid="card-graded-price-breakdown">
-      {/* Hero: SportsCardsPro catalog benchmark */}
-      {/* F-3b: forward the server's speculative SCP result (fetched during
-          the front-shutter preliminary call) so the strip can short-circuit
-          its own /api/catalog/match round trip when present. Falls back to
-          the client-side fetch path when the field is absent/null. */}
-      <CatalogPriceStrip
-        cardData={cardData}
-        predictedPsaGrade={psa}
-        speculativeCatalog={(cardData as any).speculativeCatalog ?? null}
-      />
-
-      {/* Secondary: eBay comps, demoted */}
       <Card data-testid="card-ebay-recent-sales">
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-sm text-slate-700">
