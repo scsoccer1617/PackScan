@@ -32,6 +32,7 @@ import {
 } from '@shared/schema';
 
 import { listInboxImages, downloadFile, moveFile, type DriveImageFile } from './driveClient';
+import { or, isNotNull } from 'drizzle-orm';
 import { classifyCardSide } from './sideClassifier';
 import { detectOrientation, applyRotation } from './orientation';
 import { pairPages, type ScanPage, type PairedScan } from './pairing';
@@ -78,31 +79,51 @@ export async function getOrInitFolders(userId: number) {
   return row || null;
 }
 
+/**
+ * Normalize a folder input: trim, pull the id out of a Drive URL if one was
+ * pasted (defense-in-depth — the client already extracts, but we can't
+ * assume that for direct API callers), empty string → null.
+ */
+function normalizeFolderInput(v: string | null | undefined): string | null {
+  if (v == null) return null;
+  const trimmed = String(v).trim();
+  if (!trimmed) return null;
+  const match = trimmed.match(/\/folders\/([a-zA-Z0-9_-]+)/);
+  if (match) return match[1];
+  return trimmed;
+}
+
 export async function setUserFolders(
   userId: number,
   input: { inboxFolderId?: string | null; processedFolderId?: string | null },
 ) {
+  // Treat undefined as "don't touch" but null / empty-string as "clear".
+  const inbox = 'inboxFolderId' in input ? normalizeFolderInput(input.inboxFolderId) : undefined;
+  const processed = 'processedFolderId' in input ? normalizeFolderInput(input.processedFolderId) : undefined;
+
   const existing = await getOrInitFolders(userId);
   if (existing) {
     const [updated] = await db
       .update(googleDriveFolders)
       .set({
-        inboxFolderId: input.inboxFolderId ?? existing.inboxFolderId,
-        processedFolderId: input.processedFolderId ?? existing.processedFolderId,
+        inboxFolderId: inbox === undefined ? existing.inboxFolderId : inbox,
+        processedFolderId: processed === undefined ? existing.processedFolderId : processed,
         updatedAt: new Date(),
       })
       .where(eq(googleDriveFolders.userId, userId))
       .returning();
+    console.log(`[bulkScan] setUserFolders(user=${userId}): updated → inbox=${updated.inboxFolderId}, processed=${updated.processedFolderId}`);
     return updated;
   }
   const [created] = await db
     .insert(googleDriveFolders)
     .values({
       userId,
-      inboxFolderId: input.inboxFolderId ?? null,
-      processedFolderId: input.processedFolderId ?? null,
+      inboxFolderId: inbox ?? null,
+      processedFolderId: processed ?? null,
     })
     .returning();
+  console.log(`[bulkScan] setUserFolders(user=${userId}): inserted → inbox=${created.inboxFolderId}, processed=${created.processedFolderId}`);
   return created;
 }
 
@@ -236,7 +257,33 @@ export async function runBatch(batchId: number): Promise<void> {
  */
 async function discoverAndPlanItems(batch: ScanBatch): Promise<ScanBatchItem[]> {
   if (!batch.sourceFolderId) throw new Error('Batch has no source folder');
-  const files = await listInboxImages(batch.userId, batch.sourceFolderId);
+  const rawFiles = await listInboxImages(batch.userId, batch.sourceFolderId);
+
+  // Dedup against any Drive file this user has already seen in a prior
+  // batch. The processor moves successful pairs to the processed folder,
+  // so those drop out of the inbox listing on their own — but review /
+  // skipped / failed items stay in the inbox by design (so the dealer can
+  // view them during review). Without this guard, every Sync would
+  // re-enqueue those same files and write duplicate rows on re-run.
+  const seenRows = await db
+    .select({ back: scanBatchItems.backFileId, front: scanBatchItems.frontFileId })
+    .from(scanBatchItems)
+    .innerJoin(scanBatches, eq(scanBatchItems.batchId, scanBatches.id))
+    .where(and(
+      eq(scanBatches.userId, batch.userId),
+      or(isNotNull(scanBatchItems.backFileId), isNotNull(scanBatchItems.frontFileId)),
+    ));
+  const seenFileIds = new Set<string>();
+  for (const row of seenRows) {
+    if (row.back) seenFileIds.add(row.back);
+    if (row.front) seenFileIds.add(row.front);
+  }
+  const files = rawFiles.filter(f => !seenFileIds.has(f.id));
+  const skipped = rawFiles.length - files.length;
+  if (skipped > 0) {
+    console.log(`[bulkScan] Batch ${batch.id}: skipping ${skipped} previously-seen file(s) in inbox.`);
+  }
+
   if (files.length === 0) {
     await db.update(scanBatches).set({ fileCount: 0 }).where(eq(scanBatches.id, batch.id));
     return [];
