@@ -144,13 +144,16 @@ export default function Scan() {
     scanIdRef.current = null;
     const cardData = fieldsToCardData(fields);
 
-    // Voice speculative SCP (F-3b mirror): while the confirm sheet was open,
-    // the server fired an SCP lookup keyed by voiceScanId. Fetch it now so
-    // /result can render SCP pricing immediately — no second /catalog/match
-    // round trip. The server briefly waits (up to ~2s) for the lookup to
-    // resolve before returning null, so this won't stall navigation for
-    // slow-resolving queries. On any error / null, we fall through to the
-    // existing client-side fetch path on /result with zero regression.
+    // Voice speculative lookups (F-3b mirror for SCP + H-5 for CardDB): while
+    // the confirm sheet was open, the server fired two background lookups
+    // keyed by voiceScanId — one to SportsCardsPro and one to the local
+    // card_database. Fetch both now in a single call so /result can render
+    // SCP pricing immediately (no second /catalog/match round trip) AND so
+    // CardDB-authoritative fields (rookie flag, corrected card number via
+    // player-anchored fallback, authoritative collection/set/variation) are
+    // applied before the /result page reads cardData. The server briefly
+    // waits (~2s) for both to resolve. On any error / null, we fall through
+    // to the existing client-side fetch path on /result with zero regression.
     if (voiceScanId) {
       try {
         const params = new URLSearchParams({
@@ -159,12 +162,39 @@ export default function Scan() {
           playerLastName: cardData.playerLastName || "",
         });
         const res = await fetch(`/api/voice-lookup/speculative-scp?${params.toString()}`);
-        const body = await res.json().catch(() => ({ scpResult: null }));
+        const body = await res.json().catch(() => ({ scpResult: null, cardDbResult: null }));
         if (body?.scpResult) {
           (cardData as any).speculativeCatalog = body.scpResult;
         }
+        // H-5: Merge CardDB enrichment into cardData. Only overwrite fields
+        // that CardDB populated, preserving any edits the user made in the
+        // confirm sheet. Serial number is explicitly preserved — the user
+        // may have spoken "12/99" that the catalog doesn't list as a parallel.
+        const dbHit = body?.cardDbResult?.hit;
+        if (dbHit && dbHit.found) {
+          if (dbHit.playerFirstName) cardData.playerFirstName = dbHit.playerFirstName;
+          if (dbHit.playerLastName) cardData.playerLastName = dbHit.playerLastName;
+          if (dbHit.brand) cardData.brand = dbHit.brand;
+          if (dbHit.year) cardData.year = dbHit.year;
+          if (dbHit.collection) cardData.collection = dbHit.collection;
+          if (dbHit.set) cardData.set = dbHit.set;
+          if (dbHit.cardNumber) cardData.cardNumber = dbHit.cardNumber;
+          if (dbHit.isRookieCard) cardData.isRookieCard = true;
+          // Variant: DB variation is an authoritative catalog parallel name;
+          // prefer it over the spoken free-form parallel when the speaker
+          // didn't give one, or when the catalog resolved it unambiguously.
+          if (dbHit.variation && !cardData.variant) {
+            cardData.variant = dbHit.variation;
+          }
+          if ((dbHit as any).cmpNumber) {
+            (cardData as any).cmpNumber = (dbHit as any).cmpNumber;
+          }
+          console.debug(
+            `[Scan] voice CardDB enrichment applied (${body.cardDbResult.source}): cardNumber="${dbHit.cardNumber}" rookie=${!!dbHit.isRookieCard} collection="${dbHit.collection}"`,
+          );
+        }
       } catch (err) {
-        console.warn("[Scan] voice speculative SCP fetch failed (non-blocking):", err);
+        console.warn("[Scan] voice speculative lookups fetch failed (non-blocking):", err);
       }
     }
 

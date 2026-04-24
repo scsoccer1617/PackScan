@@ -24,7 +24,7 @@ import { holoOverallToPsaInt, psaKeyword } from './holo/psaGrade';
 import { z } from 'zod';
 import { handleDualSideCardAnalysis } from './dualSideOCR';
 import { extractTextFromImage, analyzeSportsCardImage } from './googleVisionFetch';
-import { importCardsCSV, importVariationsCSV, lookupCard } from './cardDatabaseService';
+import { importCardsCSV, importVariationsCSV, lookupCard, enrichVoiceFields } from './cardDatabaseService';
 import { cardDatabase, cardVariations } from '../shared/schema';
 import { join } from 'path';
 import fs from 'fs';
@@ -1462,6 +1462,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       })();
 
+      // H-5: Fire CardDB enrichment in parallel with SCP. Produces authoritative
+      // fields (rookie flag, collection, set, corrected card number via
+      // player-anchored fallback, variation) the same way the image scan path
+      // does inside dualSideOCR.ts. Also fire-and-forget; the response to the
+      // client doesn't wait on this. The speculative-scp endpoint then returns
+      // both scpResult and voiceCardDbResult when the confirm sheet is submitted.
+      (async () => {
+        const cardDbStart = Date.now();
+        try {
+          const enrichment = await enrichVoiceFields({
+            brand: fields.brand || null,
+            year: fields.year ?? null,
+            collection: fields.collection || null,
+            cardNumber: fields.cardNumber || null,
+            playerFirstName: first || null,
+            playerLastName: last || null,
+            serialNumber: fields.serialNumber || null,
+            parallelHint: fields.parallel || null,
+          });
+          updatePendingScan(voiceScanId, { voiceCardDbResult: enrichment ?? null });
+          console.log(
+            `[voice-preliminary-carddb-${voiceScanId}] ${enrichment ? `hit (${enrichment.source})` : 'miss'}` +
+              ` took ${Date.now() - cardDbStart}ms`,
+          );
+        } catch (err: any) {
+          console.warn(
+            `[voice-preliminary-carddb-${voiceScanId}] threw unexpectedly:`,
+            err?.message || err,
+          );
+          updatePendingScan(voiceScanId, { voiceCardDbResult: null });
+        }
+      })();
+
       return res.status(200).json({ success: true });
     } catch (err: any) {
       console.error('[voice-preliminary] unhandled error:', err?.message || err);
@@ -1490,60 +1523,91 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const { peekPendingScan, waitForPendingScan } = await import('./scanSession');
-      // First peek — if the entry is present but scpResult is still null,
-      // waitForPendingScan will immediately return the entry (it doesn't
-      // wait for scpResult specifically). We poll briefly for the field.
+      // First peek — if the entry is present but scpResult/voiceCardDbResult
+      // is still undefined, waitForPendingScan returns the entry shell
+      // immediately. We then poll briefly for BOTH lookup results (SCP and
+      // CardDB) to resolve before responding.
       let entry = peekPendingScan(voiceScanId);
       if (!entry) {
         entry = await waitForPendingScan(voiceScanId, 500);
       }
       if (!entry) {
-        return res.status(200).json({ success: true, scpResult: null });
+        return res.status(200).json({ success: true, scpResult: null, cardDbResult: null });
       }
 
-      // Poll for scpResult up to 2s — the SCP lookup is usually <1s but
-      // we leave headroom for cold cache misses.
-      if (!entry.scpResult) {
+      // Poll for both scpResult and voiceCardDbResult up to 2s — SCP is
+      // typically <1s and CardDB is typically <50ms (local SQLite), so the
+      // bottleneck is SCP. `undefined` = still in flight, `null` = completed
+      // as a miss. We wait until neither is undefined, then forward both.
+      const lookupsPending = () =>
+        entry!.scpResult === undefined || entry!.voiceCardDbResult === undefined;
+      if (lookupsPending()) {
         const deadline = Date.now() + 2000;
         while (Date.now() < deadline) {
           await new Promise((r) => setTimeout(r, 50));
           const fresh = peekPendingScan(voiceScanId);
-          if (fresh?.scpResult) {
-            entry = fresh;
-            break;
-          }
           if (!fresh) break; // evicted
+          entry = fresh;
+          if (!lookupsPending()) break;
         }
       }
-      if (!entry || !entry.scpResult) {
-        return res.status(200).json({ success: true, scpResult: null });
+      if (!entry) {
+        return res.status(200).json({ success: true, scpResult: null, cardDbResult: null });
       }
 
       // Player-identity sanity check — only enforce on hit. Misses are safe
       // to forward regardless (saves a redundant round trip for a query we
       // already know can't match).
-      if (entry.scpResult.status === 'hit') {
-        const specPlayerFirst = (entry.frontResult.playerFirstName || '').toLowerCase();
-        const specPlayerLast = (entry.frontResult.playerLastName || '').toLowerCase();
-        const playerMatches =
-          specPlayerFirst === finalFirst && specPlayerLast === finalLast;
+      const specPlayerFirst = (entry.frontResult.playerFirstName || '').toLowerCase();
+      const specPlayerLast = (entry.frontResult.playerLastName || '').toLowerCase();
+      const playerMatches =
+        specPlayerFirst === finalFirst && specPlayerLast === finalLast;
+
+      let scpResultToReturn: typeof entry.scpResult | null = entry.scpResult ?? null;
+      if (scpResultToReturn && scpResultToReturn.status === 'hit') {
         if (!playerMatches) {
           console.log(
             `[voice-speculative-scp] discarding hit for voiceScanId=${voiceScanId}` +
               ` — player identity changed (${specPlayerFirst} ${specPlayerLast} → ${finalFirst} ${finalLast})`,
           );
-          return res.status(200).json({ success: true, scpResult: null });
+          scpResultToReturn = null;
+        } else {
+          console.log(
+            `[voice-speculative-scp] forwarding hit for voiceScanId=${voiceScanId}` +
+              ` (score ${scpResultToReturn.match.matchScore})`,
+          );
         }
+      } else if (scpResultToReturn) {
         console.log(
-          `[voice-speculative-scp] forwarding hit for voiceScanId=${voiceScanId}` +
-            ` (score ${entry.scpResult.match.matchScore})`,
-        );
-      } else {
-        console.log(
-          `[voice-speculative-scp] forwarding miss (${entry.scpResult.reason}) for voiceScanId=${voiceScanId}`,
+          `[voice-speculative-scp] forwarding miss (${scpResultToReturn.reason}) for voiceScanId=${voiceScanId}`,
         );
       }
-      return res.status(200).json({ success: true, scpResult: entry.scpResult });
+
+      // H-5: CardDB enrichment — same player-identity guard. If the user
+      // edited the player in the confirm sheet, discard the enrichment
+      // because it was computed against the original spoken player.
+      let cardDbResultToReturn: typeof entry.voiceCardDbResult | null =
+        entry.voiceCardDbResult ?? null;
+      if (cardDbResultToReturn) {
+        if (!playerMatches) {
+          console.log(
+            `[voice-speculative-carddb] discarding hit for voiceScanId=${voiceScanId}` +
+              ` — player identity changed`,
+          );
+          cardDbResultToReturn = null;
+        } else {
+          console.log(
+            `[voice-speculative-carddb] forwarding ${cardDbResultToReturn.source} hit for voiceScanId=${voiceScanId}` +
+              ` — cardNumber="${cardDbResultToReturn.hit.cardNumber}" rookie=${!!cardDbResultToReturn.hit.isRookieCard}`,
+          );
+        }
+      }
+
+      return res.status(200).json({
+        success: true,
+        scpResult: scpResultToReturn,
+        cardDbResult: cardDbResultToReturn,
+      });
     } catch (err: any) {
       console.error('[voice-speculative-scp] unhandled error:', err?.message || err);
       return res.status(200).json({ success: true, scpResult: null });

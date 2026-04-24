@@ -16,6 +16,7 @@
 import type { CardFormValues } from '@shared/schema';
 import type { CatalogLookupResult } from './sportscardspro';
 import type { FoilDetectionResult } from './visualFoilDetector';
+import type { VoiceEnrichResult } from './cardDatabaseService';
 
 export interface PendingScanEntry {
   /** Partial front-side analyzer output (CardFormValues subset).
@@ -37,6 +38,15 @@ export interface PendingScanEntry {
    *  has already returned to the client — consumers must tolerate this
    *  being `undefined` (lookup still in flight) or a miss result. */
   scpResult?: CatalogLookupResult | null;
+  /** H-5: Voice-flow CardDB enrichment result. Populated asynchronously by
+   *  /voice-lookup/preliminary in parallel with the speculative SCP lookup.
+   *  When set to a non-null VoiceEnrichResult, the authoritative DB fields
+   *  (rookie flag, collection, set, corrected card number, variation) are
+   *  applied to the client cardData on confirm. Null when the lookup
+   *  completed but missed; undefined while still in flight. Image scans
+   *  leave this unset — the image path does its CardDB lookup inline in
+   *  dualSideOCR.ts. */
+  voiceCardDbResult?: VoiceEnrichResult | null;
   /** F-3c: Preliminary visual-foil hint. Computed during the preliminary
    *  endpoint by running `detectFoilFromImage` on the front image buffer
    *  with `isNumbered: false` (we don't have the back-side serial yet).
