@@ -15,6 +15,10 @@ export const users = pgTable("users", {
   googleAccessToken: text("google_access_token"),
   googleRefreshToken: text("google_refresh_token"),
   googleTokenExpiresAt: timestamp("google_token_expires_at"),
+  // Per-user app preferences. Kept as JSONB so we can add more keys later
+  // (notification opts, default sheet, etc.) without another migration.
+  // Shape is enforced via `userPreferencesSchema` below.
+  preferences: jsonb("preferences"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -25,6 +29,22 @@ export const insertUserSchema = createInsertSchema(users).pick({
 
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
+
+/**
+ * User preferences stored in `users.preferences` (JSONB).
+ *
+ * `autoGrade` controls whether the Holo (Claude vision) grading call runs
+ * during /api/analyze-card-dual-images. Default is `false` — grading adds
+ * several seconds to every scan, and dealers inventorying hundreds of raw
+ * cards usually don't need it. Users opt in from Account settings.
+ */
+export const userPreferencesSchema = z.object({
+  autoGrade: z.boolean().default(false),
+});
+export type UserPreferences = z.infer<typeof userPreferencesSchema>;
+export const DEFAULT_USER_PREFERENCES: UserPreferences = {
+  autoGrade: false,
+};
 
 export const authTokens = pgTable("auth_tokens", {
   id: serial("id").primaryKey(),
