@@ -17,6 +17,9 @@ import MySheets from "@/pages/MySheets";
 import AccountSettings from "@/pages/AccountSettings";
 import Collection from "@/pages/Collection";
 import Stats from "@/pages/Stats";
+import BulkScan from "@/pages/BulkScan";
+import BulkScanSettings from "@/pages/BulkScanSettings";
+import BulkScanBatch from "@/pages/BulkScanBatch";
 import AppShell from "@/components/AppShell";
 import { AuthProvider, useAuth } from "@/hooks/use-auth";
 import { ScanFlowProvider } from "@/hooks/use-scan-flow";
@@ -131,6 +134,11 @@ function Router() {
           <Route path="/sheets" component={MySheets} />
           <Route path="/stats" component={Stats} />
           <Route path="/account" component={AccountSettings} />
+          {/* Holo bulk-scan: /bulk-scan (home), /bulk-scan/settings
+              (folder pickers), /bulk-scan/batches/:id (detail + review). */}
+          <Route path="/bulk-scan" component={BulkScan} />
+          <Route path="/bulk-scan/settings" component={BulkScanSettings} />
+          <Route path="/bulk-scan/batches/:id" component={BulkScanBatch} />
           {/* Admin route is mounted for everyone but redirects non-admin
               users home. The server enforces email + password on every
               admin API route — this is just UX polish to keep the page
