@@ -1,24 +1,22 @@
 // Scan entry page — /scan
 //
-// Three-tile entry point to the pricing pipeline:
-//   • Scan   — capture front + back photos, full dual-image analyze
-//   • Voice  — speak a card description; Gemini extracts fields, user
-//               confirms, lands on /result with same SCP+eBay pipeline
-//   • Manual — jump to the long-form /add-card page (SimpleCardForm)
+// Capture half of the pricing pipeline. The Home page owns the three
+// entry tiles (Scan / Voice / Manual); this page renders just the capture
+// surface the user picked:
 //
-// The Scan tile is the primary action and is pre-selected — tapping it
-// reveals the front/back capture grid and the "Analyze & price" button
-// below the tiles. Tapping Voice toggles into voice mode (mic tile).
-// Tapping Manual navigates away. Switching back and forth doesn't lose
-// already-captured images (scan state stays local).
+//   /scan             → front + back photo capture (default)
+//   /scan?mode=voice  → mic + confirm sheet for voice lookup
 //
-// On successful analyze (image or voice), we seed the ScanFlow context
-// and navigate to /result where runPostScanFlow drives parallel
-// disambiguation + eBay comps. This is the capture half of the split
-// that replaced the old monolithic PriceLookup.tsx.
+// Manual lookup lives at /add-card and is reached directly from Home — it
+// is not rendered here.
+//
+// On successful analyze (image or voice), we seed the ScanFlow context and
+// navigate to /result where runPostScanFlow drives parallel disambiguation
+// + eBay comps. This is the capture half of the split that replaced the
+// old monolithic PriceLookup.tsx.
 
 import { useRef, useState } from "react";
-import { useLocation } from "wouter";
+import { useLocation, useSearch } from "wouter";
 import SimpleImageUploader from "@/components/SimpleImageUploader";
 import VoiceLookup, { type ExtractedCardFields } from "@/components/VoiceLookup";
 import { useToast } from "@/hooks/use-toast";
@@ -26,7 +24,7 @@ import { useScanFlow } from "@/hooks/use-scan-flow";
 import { compressImage } from "@/lib/scanFlow";
 import type { CardFormValues } from "@shared/schema";
 import type { HoloGrade } from "@/components/HoloGradeCard";
-import { Camera, Mic, PenLine, ScanLine, RotateCw } from "lucide-react";
+import { ScanLine, RotateCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // ── Voice → CardFormValues mapping ────────────────────────────────────────
@@ -112,12 +110,18 @@ async function firePreliminaryScan(scanId: string, frontImageDataUrl: string): P
 // ── Page ─────────────────────────────────────────────────────────────────
 type Mode = "image" | "voice";
 
+function modeFromSearch(search: string): Mode {
+  const params = new URLSearchParams(search);
+  return params.get("mode") === "voice" ? "voice" : "image";
+}
+
 export default function Scan() {
   const [, navigate] = useLocation();
+  const search = useSearch();
   const { setAll, reset } = useScanFlow();
   const { toast } = useToast();
 
-  const [mode, setMode] = useState<Mode>("image");
+  const mode: Mode = modeFromSearch(search);
 
   // Image capture state — kept local so switching to voice and back doesn't
   // drop captured photos.
@@ -209,39 +213,13 @@ export default function Scan() {
     <div className="pt-4 pb-6 space-y-4">
       <div className="px-4">
         <h1 className="font-display text-[22px] font-semibold tracking-tight text-ink">
-          Look up a card
+          {mode === "voice" ? "Describe a card" : "Scan a card"}
         </h1>
         <p className="text-sm text-slate-500 mt-0.5">
-          Choose how you want to find your card.
+          {mode === "voice"
+            ? "Speak the card details — we'll transcribe and price it."
+            : "Capture the front and back to identify, grade, and price."}
         </p>
-      </div>
-
-      {/* ── Entry tiles ─────────────────────────────────────────────────── */}
-      <div className="px-4 grid grid-cols-3 gap-2.5">
-        <ModeTile
-          icon={<Camera className="w-5 h-5" />}
-          label="Scan"
-          hint="Front & back"
-          active={mode === "image"}
-          onClick={() => setMode("image")}
-          testId="tile-scan"
-        />
-        <ModeTile
-          icon={<Mic className="w-5 h-5" />}
-          label="Voice"
-          hint="Speak it"
-          active={mode === "voice"}
-          onClick={() => setMode("voice")}
-          testId="tile-voice"
-        />
-        <ModeTile
-          icon={<PenLine className="w-5 h-5" />}
-          label="Manual"
-          hint="Type it"
-          active={false}
-          onClick={() => navigate("/add-card")}
-          testId="tile-manual"
-        />
       </div>
 
       {/* ── Image capture ───────────────────────────────────────────────── */}
@@ -332,51 +310,5 @@ export default function Scan() {
         </div>
       )}
     </div>
-  );
-}
-
-// ── Tile ──────────────────────────────────────────────────────────────────
-interface ModeTileProps {
-  icon: React.ReactNode;
-  label: string;
-  hint: string;
-  active: boolean;
-  onClick: () => void;
-  testId: string;
-}
-
-function ModeTile({ icon, label, hint, active, onClick, testId }: ModeTileProps) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      data-testid={testId}
-      className={cn(
-        "group flex flex-col items-center justify-center gap-1 rounded-2xl h-[88px] px-2 border transition",
-        active
-          ? "bg-foil text-white border-foil shadow-sm"
-          : "bg-white text-ink border-slate-200 hover:border-slate-300 active:bg-slate-50",
-      )}
-    >
-      <div
-        className={cn(
-          "w-9 h-9 rounded-full flex items-center justify-center",
-          active ? "bg-white/15" : "bg-slate-100 text-slate-600 group-hover:bg-slate-200",
-        )}
-      >
-        {icon}
-      </div>
-      <div className="flex flex-col items-center leading-tight">
-        <span className="font-display text-[13px] font-semibold">{label}</span>
-        <span
-          className={cn(
-            "text-[10px] uppercase tracking-wider font-semibold",
-            active ? "text-white/70" : "text-slate-400",
-          )}
-        >
-          {hint}
-        </span>
-      </div>
-    </button>
   );
 }
