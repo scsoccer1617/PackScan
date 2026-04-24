@@ -136,13 +136,42 @@ export default function Scan() {
 
   const ready = !!backImage;
 
-  const handleVoiceConfirm = (fields: ExtractedCardFields) => {
+  const handleVoiceConfirm = async (
+    fields: ExtractedCardFields,
+    voiceScanId: string | null,
+  ) => {
     reset();
     scanIdRef.current = null;
+    const cardData = fieldsToCardData(fields);
+
+    // Voice speculative SCP (F-3b mirror): while the confirm sheet was open,
+    // the server fired an SCP lookup keyed by voiceScanId. Fetch it now so
+    // /result can render SCP pricing immediately — no second /catalog/match
+    // round trip. The server briefly waits (up to ~2s) for the lookup to
+    // resolve before returning null, so this won't stall navigation for
+    // slow-resolving queries. On any error / null, we fall through to the
+    // existing client-side fetch path on /result with zero regression.
+    if (voiceScanId) {
+      try {
+        const params = new URLSearchParams({
+          voiceScanId,
+          playerFirstName: cardData.playerFirstName || "",
+          playerLastName: cardData.playerLastName || "",
+        });
+        const res = await fetch(`/api/voice-lookup/speculative-scp?${params.toString()}`);
+        const body = await res.json().catch(() => ({ scpResult: null }));
+        if (body?.scpResult) {
+          (cardData as any).speculativeCatalog = body.scpResult;
+        }
+      } catch (err) {
+        console.warn("[Scan] voice speculative SCP fetch failed (non-blocking):", err);
+      }
+    }
+
     setAll({
       frontImage: "",
       backImage: "",
-      cardData: fieldsToCardData(fields),
+      cardData,
       holoGrade: null,
     });
     navigate("/result");

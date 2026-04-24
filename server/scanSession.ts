@@ -18,13 +18,19 @@ import type { CatalogLookupResult } from './sportscardspro';
 import type { FoilDetectionResult } from './visualFoilDetector';
 
 export interface PendingScanEntry {
-  /** Partial front-side analyzer output (CardFormValues subset). */
+  /** Partial front-side analyzer output (CardFormValues subset).
+   *  For image scans this is the analyzer output; for voice scans this is
+   *  the Gemini-extracted fields mapped into CardFormValues shape. Used by
+   *  the speculative SCP sanity check to compare player identity before/after
+   *  the user may have edited fields. */
   frontResult: Partial<CardFormValues>;
-  /** Raw Google Vision OCR text for the front image. */
+  /** Raw Google Vision OCR text for the front image. Image scans only.
+   *  Voice scans leave this empty. */
   frontOCRText: string;
   /** Rotation-normalized front image buffer — reused as-is by the main
-   *  handler so it doesn't re-run `sharp.rotate()` on the same bytes. */
-  frontImageBuffer: Buffer;
+   *  dual-image handler so it doesn't re-run `sharp.rotate()` on the same
+   *  bytes. Absent for voice scans, which have no image. */
+  frontImageBuffer?: Buffer;
   /** F-3b: Speculative SportsCardsPro lookup, fired in background during
    *  preliminary if the front OCR had enough identifying fields. Populated
    *  asynchronously via `updatePendingScan` after the preliminary response
