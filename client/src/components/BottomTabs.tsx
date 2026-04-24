@@ -32,9 +32,13 @@ export default function BottomTabs() {
     >
       <div className="mx-auto max-w-lg grid grid-cols-5 h-[68px] pb-[env(safe-area-inset-bottom)]">
         {TABS.map((t) => {
+          // The Scan tab covers the picker at /scan plus its capture
+          // children (/scan/camera, /scan/camera?...), and Home treats
+          // Scan as the active tab since its hero CTA is the scan flow.
           const active =
             location === t.href ||
-            (t.href === "/scan" && location === "/");
+            (t.href === "/scan" &&
+              (location === "/" || location.startsWith("/scan")));
           const Icon = t.icon;
           return (
             <Link

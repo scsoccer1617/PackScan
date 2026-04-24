@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { TrendingUp, Award, Layers, DollarSign, Sparkles } from "lucide-react";
+import { TrendingUp, Award, DollarSign, Sparkles, Star } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { CardWithRelations } from "@shared/schema";
 
@@ -19,6 +19,8 @@ import type { CardWithRelations } from "@shared/schema";
  *                               monthly-added KPI, and set rollup).
  *   /api/scan-grades?limit=100→ recent Holo grades (for avg-grade and
  *                               scan-count KPIs).
+ *   /api/stats/top-cards      → top-5-by-estimatedValue; #1 drives the
+ *                               "Most valuable card" row at the bottom.
  *
  * KPI mapping vs. prototype (the prototype had mock-only metrics that
  * don't have a real backend counterpart):
@@ -47,6 +49,18 @@ type ScanGrade = {
 type ScanGradesResponse = {
   success: boolean;
   grades: ScanGrade[];
+};
+
+// Mirrors the shape /api/stats/top-cards returns — kept narrow on purpose
+// so Stats only depends on the fields it actually renders.
+type TopCard = {
+  id: number;
+  playerFirstName: string;
+  playerLastName: string;
+  year: number;
+  estimatedValue: string | null;
+  frontImage: string | null;
+  brand?: { name?: string } | null;
 };
 
 function money(n: number, fractionDigits = 0) {
@@ -161,28 +175,13 @@ export default function Stats() {
       .reduce((acc, c) => acc + (c.estimatedValue ? Number(c.estimatedValue) : 0), 0);
   }, [cards]);
 
-  // Most-valuable set — group by "collection" (falls back to brand name
-  // when collection is blank so we still show something meaningful for
-  // cards that only have a brand tagged).
-  const mostValuableSet = useMemo(() => {
-    if (!cards || cards.length === 0) return null;
-    const totals = new Map<string, number>();
-    for (const c of cards) {
-      const brandName =
-        (c as any).brand && typeof (c as any).brand === "object" && "name" in (c as any).brand
-          ? ((c as any).brand.name as string)
-          : "";
-      const key = c.collection?.trim() || brandName || "Untagged";
-      const v = c.estimatedValue ? Number(c.estimatedValue) : 0;
-      totals.set(key, (totals.get(key) ?? 0) + v);
-    }
-    let best: { name: string; value: number } | null = null;
-    for (const [name, value] of totals.entries()) {
-      if (value <= 0) continue;
-      if (!best || value > best.value) best = { name, value };
-    }
-    return best;
-  }, [cards]);
+  // Most-valuable card — pulls from the same /api/stats/top-cards feed
+  // Home already uses. We show the #1 card so collectors see their
+  // crown-jewel card (not just its set) without a second hop.
+  const { data: topCards } = useQuery<TopCard[]>({
+    queryKey: ["/api/stats/top-cards"],
+  });
+  const topCard = topCards?.[0];
 
   // Sparkline geometry. Guards against degenerate cases where every
   // bucket is equal (e.g. single card, or no data yet).
@@ -327,26 +326,39 @@ export default function Stats() {
         />
       </section>
 
-      {/* Most valuable set — single row, gold-tinted swatch matches
-          the prototype's treatment. */}
+      {/* Most valuable card — single row, gold-tinted swatch. Uses the
+          top-cards feed so the label, year, and brand line up with what
+          Home's "Most valuable card" strip already shows. */}
       <section
         className="mx-4 rounded-2xl bg-card border border-card-border p-4 flex items-center gap-3"
-        data-testid="row-most-valuable-set"
+        data-testid="row-most-valuable-card"
       >
         <div className="w-10 h-10 rounded-full bg-foil-gold/15 flex items-center justify-center text-foil-gold">
-          <Layers className="w-5 h-5" />
+          <Star className="w-5 h-5" />
         </div>
         <div className="flex-1 min-w-0">
           <p className="text-[11px] uppercase tracking-[0.14em] text-slate-500">
-            Most valuable set
+            Most valuable card
           </p>
-          <p className="text-sm font-medium text-ink truncate">
-            {mostValuableSet?.name ?? "—"}
+          <p
+            className="text-sm font-medium text-ink truncate"
+            data-testid="text-most-valuable-card"
+          >
+            {topCard
+              ? [
+                  `${topCard.playerFirstName ?? ""} ${topCard.playerLastName ?? ""}`.trim() ||
+                    "Untitled card",
+                  topCard.year ? String(topCard.year) : null,
+                  topCard.brand?.name ?? null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")
+              : "—"}
           </p>
         </div>
-        {mostValuableSet && (
+        {topCard && (
           <p className="text-sm font-semibold text-ink tabular-nums">
-            {money(mostValuableSet.value)}
+            {money(Number(topCard.estimatedValue ?? 0))}
           </p>
         )}
       </section>

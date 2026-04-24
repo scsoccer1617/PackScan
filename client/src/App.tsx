@@ -4,6 +4,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import NotFound from "@/pages/not-found";
 import Home from "@/pages/Home";
 import Scan from "@/pages/Scan";
+import ScanPicker from "@/pages/ScanPicker";
 import ScanResult from "@/pages/ScanResult";
 import AddCard from "@/pages/AddCard";
 import CardSearch from "@/pages/CardSearch";
@@ -118,7 +119,11 @@ function Router() {
         <VerificationBanner />
         <Switch>
           <Route path="/" component={Home} />
-          <Route path="/scan" component={Scan} />
+          {/* /scan now lands on a picker (Scan / Voice / Manual); the
+              live camera moved to /scan/camera so the tab press can't
+              surprise-launch the capture flow. */}
+          <Route path="/scan" component={ScanPicker} />
+          <Route path="/scan/camera" component={Scan} />
           <Route path="/result" component={ScanResult} />
           <Route path="/add-card" component={AddCard} />
           <Route path="/search" component={CardSearch} />
