@@ -49,6 +49,10 @@ type ScanGrade = {
   cardId?: number | null;
   overall: number;
   label: string;
+  /** Sentinel `"none"` marks rows inserted when auto-grade was off. These
+      still count as scan events (scans · 30d) but must be filtered out of
+      any grade-driven KPI (avg grade, gradedCount) to avoid 0-skew. */
+  model: string;
   createdAt: string | Date;
   /** Identification captured during grading — used to dedupe scans by card
       so the "Cards graded" KPI counts unique cards, not raw scan events. */
@@ -200,9 +204,14 @@ export default function Stats() {
   }, [scanGrades]);
 
   const avgGrade = useMemo(() => {
-    if (!scanGrades?.grades || scanGrades.grades.length === 0) return 0;
-    const sum = scanGrades.grades.reduce((acc, g) => acc + (Number(g.overall) || 0), 0);
-    return sum / scanGrades.grades.length;
+    // Skip ungraded placeholder rows (auto-grade off). They have overall=0
+    // and would drag the mean down, misrepresenting actual grade quality.
+    const gradedOnly = (scanGrades?.grades ?? []).filter(
+      (g) => g.model !== "none" && g.label !== "UNGRADED",
+    );
+    if (gradedOnly.length === 0) return 0;
+    const sum = gradedOnly.reduce((acc, g) => acc + (Number(g.overall) || 0), 0);
+    return sum / gradedOnly.length;
   }, [scanGrades]);
 
   // "Cards graded" — unique cards graded, not raw scan events. A dealer
@@ -212,7 +221,12 @@ export default function Stats() {
   // We dedupe by (playerLastName + year + brand) — the same identification
   // signature the server uses to backfill Collection images.
   const gradedCount = useMemo(() => {
-    const grades = scanGrades?.grades ?? [];
+    // "Cards graded" explicitly excludes ungraded placeholder rows — the
+    // label is about graded cards, not total scan events (which already
+    // have their own `scans · 30d` KPI).
+    const grades = (scanGrades?.grades ?? []).filter(
+      (g) => g.model !== "none" && g.label !== "UNGRADED",
+    );
     if (grades.length === 0) return 0;
     const seen = new Set<string>();
     for (const g of grades) {

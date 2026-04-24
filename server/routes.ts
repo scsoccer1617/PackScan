@@ -1869,16 +1869,115 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const autoGradeEnabled = prefs.autoGrade === true;
       const frontFileForHolo = files.frontImage?.[0];
       const backFileForHolo = files.backImage?.[0];
+
+      // Persist the scanned images to Replit Object Storage (GCS-backed)
+      // so the Home screen's Recent Scans carousel can render a real
+      // thumbnail instead of a camera-icon placeholder. We used to write
+      // these to a local `./uploads/` dir under the container, but Replit
+      // Autoscale wipes the filesystem on every deploy and every new
+      // instance spawn — the DB row outlives the container, so old URLs
+      // 404ed immediately. Object Storage is persistent across deploys.
+      //
+      // `storage.saveImage` stores the blob under `/objects/uploads/<uuid>`,
+      // which is served by the GET /objects/:path handler registered in
+      // server/replit_integrations/object_storage/routes.ts. Failures
+      // are non-fatal: we fall back to the original filename-only
+      // behavior so a scan never breaks if Object Storage is unreachable.
+      //
+      // Hoisted out of the Holo IIFE so image persistence + the scan_grades
+      // row creation run even when auto-grade is OFF. Otherwise every scan
+      // a user made while auto-grade was disabled (the default) was invisible
+      // to Recent Scans — we would never insert a row, and the Home carousel
+      // stayed empty no matter how many cards the user scanned.
+      const persistScanImage = async (
+        file: Express.Multer.File,
+        side: 'front' | 'back',
+      ): Promise<string | null> => {
+        try {
+          const contentType = file.mimetype || 'image/jpeg';
+          const dataUrl = `data:${contentType};base64,${file.buffer.toString('base64')}`;
+          const filename = `scan_${side}_${file.originalname || 'scan.jpg'}`;
+          return await storage.saveImage(dataUrl, filename);
+        } catch (writeErr) {
+          console.warn(`Scan: failed to persist ${side} scan image to Object Storage:`, writeErr);
+          return null;
+        }
+      };
+      // Kick off image persistence immediately, in parallel with Holo + OCR.
+      // Both the graded and ungraded scan_grades insert branches below await
+      // this promise before writing the row so frontImagePath is populated.
+      const imagePersistPromise: Promise<{ frontUrl: string | null; backUrl: string | null }> =
+        (async () => {
+          if (!frontFileForHolo) return { frontUrl: null, backUrl: null };
+          const [frontUrl, backUrl] = await Promise.all([
+            persistScanImage(frontFileForHolo, 'front'),
+            backFileForHolo ? persistScanImage(backFileForHolo, 'back') : Promise.resolve(null),
+          ]);
+          return { frontUrl, backUrl };
+        })();
+
       type HoloResponse = (HoloGrade & {
         id: number;
         createdAt: Date;
         identification: null;
+        /** True when the row is a placeholder inserted without a real grade
+         *  (auto-grade off). The UI uses this to hide the grade pill. */
+        ungraded?: boolean;
       }) | null;
+
+      // When auto-grade is OFF (or Holo fails for any reason) we still want
+      // Recent Scans to reflect the scan event — otherwise dealers turning off
+      // auto-grade (the default) see an empty Home carousel forever. Insert a
+      // sentinel scan_grades row with zeroed sub-grades and model='none' so the
+      // row satisfies the NOT NULL constraints without schema churn. The UI
+      // treats gradeLabel='UNGRADED' / model='none' as "no grade" and renders
+      // the card thumbnail + identification only (no grade pill).
+      //
+      // Defined as a lazy factory (not an IIFE) because we only want to insert
+      // this row when the real grade didn't materialize. Running it eagerly
+      // would duplicate every successful graded scan with a paired ungraded row.
+      const insertUngradedScanRow = async (): Promise<HoloResponse> => {
+        if (!frontFileForHolo) return null;
+        try {
+          const { frontUrl, backUrl } = await imagePersistPromise;
+          const placeholderGrade: HoloGrade = {
+            centering: { score: 0, notes: '' },
+            centeringBack: null,
+            corners: { score: 0, notes: '' },
+            edges: { score: 0, notes: '' },
+            surface: { score: 0, notes: '' },
+            overall: 0,
+            label: 'UNGRADED',
+            notes: [],
+            confidence: 0,
+            model: 'none',
+            frontOnly: !backFileForHolo,
+          } as unknown as HoloGrade;
+          const row = await saveGrade({
+            userId: userId ?? null,
+            frontImagePath: frontUrl || frontFileForHolo.originalname || null,
+            backImagePath: backUrl || backFileForHolo?.originalname || null,
+            grade: placeholderGrade,
+            identification: null,
+          });
+          return {
+            ...placeholderGrade,
+            id: row.id,
+            createdAt: row.createdAt,
+            identification: null,
+            ungraded: true,
+          };
+        } catch (err) {
+          console.warn('Scan: failed to persist ungraded scan_grades row:', err);
+          return null;
+        }
+      };
+
       const holoPromise: Promise<HoloResponse> = (async () => {
         try {
           if (!autoGradeEnabled) {
-            console.log('Holo: auto-grade disabled for user, skipping analysis');
-            return null;
+            console.log('Holo: auto-grade disabled for user, inserting ungraded scan row');
+            return await insertUngradedScanRow();
           }
           if (!frontFileForHolo) {
             console.log('Holo: no front image provided, skipping analysis');
@@ -1904,37 +2003,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             grade.label,
             `(${grade.overall}, grade conf ${grade.confidence.toFixed(2)})`,
           );
-          // Persist the scanned images to Replit Object Storage (GCS-backed)
-          // so the Home screen's Recent Scans carousel can render a real
-          // thumbnail instead of a camera-icon placeholder. We used to write
-          // these to a local `./uploads/` dir under the container, but Replit
-          // Autoscale wipes the filesystem on every deploy and every new
-          // instance spawn — the DB row outlives the container, so old URLs
-          // 404ed immediately. Object Storage is persistent across deploys.
-          //
-          // `storage.saveImage` stores the blob under `/objects/uploads/<uuid>`,
-          // which is served by the GET /objects/:path handler registered in
-          // server/replit_integrations/object_storage/routes.ts. Failures
-          // are non-fatal: we fall back to the original filename-only
-          // behavior so a scan never breaks if Object Storage is unreachable.
-          const persistScanImage = async (
-            file: Express.Multer.File,
-            side: 'front' | 'back',
-          ): Promise<string | null> => {
-            try {
-              const contentType = file.mimetype || 'image/jpeg';
-              const dataUrl = `data:${contentType};base64,${file.buffer.toString('base64')}`;
-              const filename = `scan_${side}_${file.originalname || 'scan.jpg'}`;
-              return await storage.saveImage(dataUrl, filename);
-            } catch (writeErr) {
-              console.warn(`Holo: failed to persist ${side} scan image to Object Storage:`, writeErr);
-              return null;
-            }
-          };
-          const [frontUrl, backUrl] = await Promise.all([
-            persistScanImage(frontFileForHolo, 'front'),
-            backFileForHolo ? persistScanImage(backFileForHolo, 'back') : Promise.resolve(null),
-          ]);
+          const { frontUrl, backUrl } = await imagePersistPromise;
           try {
             const row = await saveGrade({
               userId: userId ?? null,
@@ -1960,11 +2029,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         } catch (err) {
           if (err instanceof HoloNotConfiguredError) {
-            console.log('Holo: ANTHROPIC_API_KEY not set, skipping analysis');
-          } else {
-            console.error('Holo: analysis failed, continuing scan without it:', err);
+            console.log('Holo: ANTHROPIC_API_KEY not set, inserting ungraded scan row');
+            return await insertUngradedScanRow();
           }
-          return null;
+          console.error('Holo: analysis failed, falling back to ungraded scan row:', err);
+          return await insertUngradedScanRow();
         }
       })();
 
@@ -2012,6 +2081,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const holoResolved = await holoPromise;
       console.timeEnd('holo-claude');
 
+      // The ungraded sentinel row is only useful for Recent Scans bookkeeping —
+      // the ScanResult page expects `data.holo` to be null when there is no
+      // real grade, otherwise it would render a giant "0 UNGRADED" pill in the
+      // hero. Strip the placeholder here so the client payload keeps its
+      // pre-existing "no grade" shape while the DB row still exists for the
+      // Home carousel + identification backfill below.
+      const holoForClient = holoResolved && (holoResolved as any).ungraded
+        ? null
+        : holoResolved;
+
       // Holo is grade-only now — identification comes exclusively from the
       // OCR pipeline (Google Vision → local card DB → SCP catalog). If OCR
       // fails we still return whatever partial data it produced so the
@@ -2028,7 +2107,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               errorMessage: 'Could not analyze card for pricing',
               dataType: 'sold'
             },
-            holo: holoResolved,
+            holo: holoForClient,
           }
         });
       }
@@ -2188,7 +2267,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             data: {
               ...updatedCardData,
               ebayResults: ebayResults,
-              holo: holoResolved,
+              holo: holoForClient,
               speculativeCatalog,
             }
           });
@@ -2207,7 +2286,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 errorMessage: 'Insufficient card information for price lookup',
                 dataType: 'sold'
               },
-              holo: holoResolved,
+              holo: holoForClient,
               speculativeCatalog,
             }
           });
@@ -2227,7 +2306,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               errorMessage: 'eBay search failed',
               dataType: 'sold'
             },
-            holo: holoResolved,
+            holo: holoForClient,
             speculativeCatalog,
           }
         });

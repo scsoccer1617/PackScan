@@ -38,6 +38,8 @@ type ScanGrade = {
   cardId?: number | null;
   overall: number;
   label: string;
+  /** Sentinel `"none"` marks rows inserted when auto-grade was off. */
+  model: string;
   createdAt: string | Date;
 };
 
@@ -151,11 +153,15 @@ export default function Collection() {
   });
 
   // Map of cardId → latest overall grade, taking the most recent per card.
+  // Skip ungraded placeholder rows (model='none' / label='UNGRADED') — those
+  // exist so Recent Scans can show scan activity when auto-grade is off, but
+  // they carry no real grade and would stamp a bogus "0.0" pill on tiles.
   const gradesByCardId = useMemo(() => {
     const out = new Map<number, number>();
     const list = scanGrades?.grades ?? [];
     for (const g of list) {
       if (!g.cardId) continue;
+      if (g.model === "none" || g.label === "UNGRADED") continue;
       // First occurrence wins because /api/scan-grades returns newest-first.
       if (!out.has(g.cardId)) out.set(g.cardId, g.overall);
     }
