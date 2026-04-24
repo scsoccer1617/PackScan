@@ -7,6 +7,8 @@ import { autoSeedCardDatabaseIfEmpty } from "./cardDatabaseService";
 import { setupAuth } from "./auth";
 import { registerSheetRoutes } from "./sheetsRoutes";
 import { registerObjectStorageRoutes } from "./replit_integrations/object_storage";
+import { registerBulkScanRoutes } from "./routes/bulkScan";
+import { resumeRunningBatches } from "./bulkScan/processor";
 
 const app = express();
 app.use(express.json({ limit: '20mb' }));
@@ -109,7 +111,16 @@ app.use((req, res, next) => {
   setupAuth(app);
   registerSheetRoutes(app);
   registerObjectStorageRoutes(app);
+  registerBulkScanRoutes(app);
   const server = await registerRoutes(app);
+
+  // Re-queue any bulk-scan batch that was mid-flight when the previous
+  // process died. Runs in background — failure here never blocks startup,
+  // and a stuck batch that can't resume will eventually surface in the UI
+  // via its 'failed' status.
+  resumeRunningBatches().catch(err =>
+    console.error('[bulkScan] resumeRunningBatches failed on startup:', err),
+  );
 
   // Seed the card database from bundled CSVs if it's empty (runs in background)
   autoSeedCardDatabaseIfEmpty().catch(err =>
