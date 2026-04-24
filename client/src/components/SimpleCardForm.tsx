@@ -7,6 +7,7 @@ import { Form, FormField, FormItem, FormLabel, FormControl, FormMessage } from "
 import { Input } from "@/components/ui/input";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
+import PsaGradeSelect from "@/components/PsaGradeSelect";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { CardFormValues, cardSchema } from "@shared/schema";
@@ -39,6 +40,7 @@ export default function SimpleCardForm() {
       year: new Date().getFullYear(),
       variant: "",
       serialNumber: "",
+      psaGrade: null,
       condition: "PSA 8", // Changed from PSA 9 to PSA 8 as requested
       estimatedValue: 0,
       isRookieCard: false,
@@ -510,6 +512,23 @@ export default function SimpleCardForm() {
                             ))}
                           </SelectContent>
                         </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="psaGrade"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>PSA Grade</FormLabel>
+                        <FormControl>
+                          <PsaGradeSelect
+                            value={field.value ?? null}
+                            onChange={(v) => field.onChange(v)}
+                          />
+                        </FormControl>
                         <FormMessage />
                       </FormItem>
                     )}

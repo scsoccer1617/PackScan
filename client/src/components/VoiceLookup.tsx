@@ -24,6 +24,7 @@ import { Mic, Square, Loader2, X, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import PsaGradeSelect from "@/components/PsaGradeSelect";
 import {
   Sheet,
   SheetContent,
@@ -48,6 +49,8 @@ export interface ExtractedCardFields {
   cardNumber: string | null;
   parallel: string | null;
   serialNumber: string | null;
+  /** Integer 1–10 when the user explicitly said "PSA N", else null. */
+  psaGrade: number | null;
   notes: string | null;
 }
 
@@ -416,6 +419,10 @@ export default function VoiceLookup({ onConfirm, disabled }: VoiceLookupProps) {
                 onChange={(v) => updateDraft("parallel", v)}
                 placeholder="Pink Green Polka Dots"
                 testId="voice-field-parallel"
+              />
+              <PsaGradeSelect
+                value={draft.psaGrade}
+                onChange={(psa) => updateDraft("psaGrade", psa)}
               />
             </div>
           )}

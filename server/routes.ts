@@ -1028,16 +1028,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const {
         playerName, cardNumber, brand, year, collection, set, condition,
         isNumbered, foilType, serialNumber, variant, isAutographed, overall,
+        psaGrade,
       } = req.query;
 
       if (!brand || !year) {
         return res.status(400).json({ error: 'Missing required parameters: brand and year are required' });
       }
 
-      const overallNum = overall !== undefined && overall !== ''
-        ? Number(overall)
-        : NaN;
-      const psaInt = Number.isFinite(overallNum) ? holoOverallToPsaInt(overallNum) : null;
+      // User-supplied PSA grade (when the user knows the card is already
+      // slabbed) takes precedence over the Holo-predicted grade. PSA only
+      // issues integer grades on raw cards (1..10), so we floor any
+      // half-step input and clamp to the valid range before building the
+      // query keyword.
+      const userPsaNum = psaGrade !== undefined && psaGrade !== ''
+        ? Number(psaGrade) : NaN;
+      let psaInt: number | null = null;
+      if (Number.isFinite(userPsaNum) && userPsaNum >= 1 && userPsaNum <= 10) {
+        psaInt = Math.round(userPsaNum);
+      } else {
+        const overallNum = overall !== undefined && overall !== ''
+          ? Number(overall) : NaN;
+        psaInt = Number.isFinite(overallNum) ? holoOverallToPsaInt(overallNum) : null;
+      }
       const atGradeKeyword = psaKeyword(psaInt);
       const topGradeKeyword = 'PSA 10';
       const skipTopGrade = psaInt === 10; // at-grade IS top-grade — don't duplicate

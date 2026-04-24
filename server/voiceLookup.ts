@@ -42,6 +42,12 @@ export interface ExtractedCardFields {
   parallel: string | null;
   /** Serial number if the user said one, e.g. "12/99". */
   serialNumber: string | null;
+  /**
+   * PSA grade if the user said the card is slabbed, e.g. 10 for "PSA ten"
+   * or "a PSA 10". Half-grades are rare in speech and we round down; we
+   * only accept whole integers 1–10. Null if the user didn't mention PSA.
+   */
+  psaGrade: number | null;
   /** Anything else the user described that didn't fit the above fields. */
   notes: string | null;
 }
@@ -125,7 +131,7 @@ const EXTRACTION_SCHEMA = {
     cardNumber: {
       type: Type.STRING,
       description:
-        "Card number as a string. May be purely numeric ('193') or prefixed ('RC-3', 'AA-11', 'H1'). Empty string if not mentioned.",
+        "Card number as a string. Preserve EXACTLY what the speaker said. Include a dash ONLY if the speaker literally says 'dash' or 'hyphen'. Do NOT auto-insert separators between letters and digits. Examples: 'US two thirty-nine' \u2192 'US239' (no dash). 'RC dash twenty' \u2192 'RC-20'. 'H one' \u2192 'H1'. 'AA eleven' \u2192 'AA11'. Empty string if not mentioned.",
     },
     parallel: {
       type: Type.STRING,
@@ -136,6 +142,11 @@ const EXTRACTION_SCHEMA = {
       type: Type.STRING,
       description:
         "Numbered serial like '12/99' or '/25'. Empty string if not mentioned.",
+    },
+    psaGrade: {
+      type: Type.INTEGER,
+      description:
+        "PSA grade as an integer 1–10 if the user said the card is PSA graded (e.g. 'PSA 10', 'a PSA nine', 'graded a ten by PSA'). 0 if PSA grade was not mentioned. Only set this when the user explicitly references PSA \u2014 do NOT infer a grade from words like 'mint' or 'near mint' alone.",
     },
     notes: {
       type: Type.STRING,
@@ -154,6 +165,7 @@ const EXTRACTION_SCHEMA = {
     "cardNumber",
     "parallel",
     "serialNumber",
+    "psaGrade",
     "notes",
   ],
   propertyOrdering: [
@@ -167,6 +179,7 @@ const EXTRACTION_SCHEMA = {
     "cardNumber",
     "parallel",
     "serialNumber",
+    "psaGrade",
     "notes",
   ],
 } as const;
@@ -181,8 +194,14 @@ Examples of typical descriptions:
 
 Rules:
 - Preserve any spoken color/pattern words for the parallel field — if the user says "pink green polka dots" that IS the parallel description, even if it doesn't match a catalog name.
-- For card numbers, spell out the prefix: "RC dash 20" → "RC-20", "H 1" → "H1".
-- If the user says "rookie" or "RC", note it in the notes field; don't invent a card number from it.
+- CARD NUMBER RULE: Transcribe exactly what was said. Include a dash ONLY when the speaker literally says "dash" or "hyphen". Do NOT invent separators between letters and digits. Examples:
+    - "US 239" → "US239" (no dash — speaker did not say 'dash')
+    - "US two thirty-nine" → "US239" (no dash)
+    - "RC dash twenty" → "RC-20" (speaker said 'dash')
+    - "H one" → "H1"
+    - "AA eleven" → "AA11"
+    - "card number 193" → "193"
+- If the user says "rookie" or "RC" without a following number, note it in the notes field; don't invent a card number from it.
 - If the user mumbles through a year (e.g. "twenty twenty five"), convert to 4-digit integer 2025.
 - Use empty string "" for string fields you can't identify. Use 0 for year if not mentioned.
 - DO NOT hallucinate fields the user didn't say. An empty string is always better than a guess.`;
@@ -290,6 +309,13 @@ export async function extractCardFromAudio(
       };
     }
 
+    // Clamp PSA grade to the valid 1..10 range and coerce 0 → null (our
+    // "not mentioned" sentinel on the JSON wire is 0; on the TS side we
+    // prefer null so downstream consumers don't accidentally treat it as a
+    // real grade).
+    const rawPsa = typeof parsed.psaGrade === "number" ? parsed.psaGrade : 0;
+    const psaGrade = rawPsa >= 1 && rawPsa <= 10 ? Math.round(rawPsa) : null;
+
     const fields: ExtractedCardFields = {
       sport: nonEmpty(parsed.sport),
       year: typeof parsed.year === "number" && parsed.year >= 1900 ? parsed.year : null,
@@ -300,6 +326,7 @@ export async function extractCardFromAudio(
       cardNumber: nonEmpty(parsed.cardNumber),
       parallel: nonEmpty(parsed.parallel),
       serialNumber: nonEmpty(parsed.serialNumber),
+      psaGrade,
       notes: nonEmpty(parsed.notes),
     };
 

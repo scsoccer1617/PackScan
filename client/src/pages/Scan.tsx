@@ -59,6 +59,7 @@ function fieldsToCardData(fields: ExtractedCardFields): Partial<CardFormValues> 
     year: fields.year ?? 0,
     variant: fields.parallel || "",
     serialNumber: fields.serialNumber || "",
+    psaGrade: fields.psaGrade ?? null,
     notes: fields.notes || "",
     isNumbered: !!fields.serialNumber,
     isFoil: false,

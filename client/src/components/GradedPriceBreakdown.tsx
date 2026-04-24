@@ -45,6 +45,13 @@ type GradedResponse = {
 interface GradedPriceBreakdownProps {
   cardData: Partial<CardFormValues>;
   holoOverall: number | null | undefined;
+  /**
+   * Optional user-supplied PSA grade (1–10). When set, takes precedence
+   * over the Holo-predicted grade for the at-grade comp tier. Passed
+   * through to /api/ebay-graded-search?psaGrade=... which applies the
+   * override server-side.
+   */
+  userPsaGrade?: number | null;
 }
 
 function formatPrice(price: number, currency: string = "USD"): string {
@@ -246,6 +253,7 @@ function TierColumn({
 export default function GradedPriceBreakdown({
   cardData,
   holoOverall,
+  userPsaGrade,
 }: GradedPriceBreakdownProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -290,6 +298,9 @@ export default function GradedPriceBreakdown({
         if (holoOverall != null && Number.isFinite(holoOverall)) {
           params.set("overall", String(holoOverall));
         }
+        if (userPsaGrade != null && Number.isFinite(userPsaGrade)) {
+          params.set("psaGrade", String(userPsaGrade));
+        }
 
         const res = await fetch(`/api/ebay-graded-search?${params.toString()}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -324,6 +335,7 @@ export default function GradedPriceBreakdown({
     cardData.isAutographed,
     cardData.condition,
     holoOverall,
+    userPsaGrade,
   ]);
 
   if (loading) {
