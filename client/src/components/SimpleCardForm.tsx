@@ -23,7 +23,10 @@ export default function SimpleCardForm() {
   const [frontImage, setFrontImage] = useState<string>("");
   const [backImage, setBackImage] = useState<string>("");
   const [showOCRResults, setShowOCRResults] = useState<boolean>(false);
-  const [showFormFields, setShowFormFields] = useState<boolean>(false);
+  // Manual entry route: form fields must be visible immediately. Image
+  // capture + OCR lives on the dedicated scan flow, so we don't re-render
+  // the image uploader UI here. See ScanPicker `Manual` tile → /add-card.
+  const [showFormFields, setShowFormFields] = useState<boolean>(true);
   const [savedCardId, setSavedCardId] = useState<number | null>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -212,7 +215,10 @@ export default function SimpleCardForm() {
         </CardHeader>
         
         <CardContent className="space-y-4">
-          <div className="mb-6">
+          {/* Manual entry skips the image uploader / OCR pipeline — that
+              lives on the dedicated scan flow. Hidden here so tapping the
+              Manual tile drops the user straight into the form fields. */}
+          <div className="mb-6 hidden">
             <h3 className="text-lg font-medium text-slate-700 mb-2">Card Images</h3>
             
             <div className="grid grid-cols-2 gap-4">
