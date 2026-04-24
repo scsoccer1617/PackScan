@@ -275,7 +275,8 @@ export default function Collection() {
               key={card.id}
               card={card}
               grade={gradesByCardId.get(card.id)}
-              onOpen={() => setEditing(card)}
+              // Sheet-backed rows have string ids (e.g. "sheetId-4"); edit-by-tap is a follow-up.
+              onOpen={() => { if (typeof card.id === "number") setEditing(card); }}
             />
           ))}
         </div>
@@ -286,7 +287,8 @@ export default function Collection() {
               key={card.id}
               card={card}
               grade={gradesByCardId.get(card.id)}
-              onOpen={() => setEditing(card)}
+              // Sheet-backed rows have string ids (e.g. "sheetId-4"); edit-by-tap is a follow-up.
+              onOpen={() => { if (typeof card.id === "number") setEditing(card); }}
             />
           ))}
         </div>

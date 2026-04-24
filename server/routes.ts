@@ -204,17 +204,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Get all cards with related sport and brand
-  app.get(`${apiPrefix}/cards`, async (_req, res) => {
+  // Get all cards for the authenticated user. Source of truth is now the
+  // user's active Google Sheet — every add writes there, and the legacy
+  // local `cards` table is no longer maintained. For unauthenticated or
+  // Google-unconnected users this returns [] so the Collection page
+  // renders the empty state instead of 500'ing.
+  app.get(`${apiPrefix}/cards`, async (req, res) => {
     try {
-      const allCards = await db.query.cards.findMany({
-        with: {
-          sport: true,
-          brand: true
-        },
-        orderBy: [desc(cards.createdAt)]
+      const userId = (req.user as any)?.id as number | undefined;
+      if (!userId) return res.json([]);
+      const { getActiveSheetRows } = await import('./googleSheets');
+      const rows = await getActiveSheetRows(userId);
+      // Newest first so the Collection grid shows recent scans at the top.
+      rows.sort((a, b) => {
+        const bt = b.createdAt ? Date.parse(b.createdAt) : 0;
+        const at = a.createdAt ? Date.parse(a.createdAt) : 0;
+        return bt - at;
       });
-      return res.json(allCards);
+      return res.json(rows);
     } catch (error) {
       console.error('Error fetching cards:', error);
       return res.status(500).json({ error: 'Failed to fetch cards' });
@@ -776,21 +783,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  // Get collection summary for header display
-  app.get(`${apiPrefix}/collection/summary`, async (_req, res) => {
+  // Get collection summary for header display. Reads from the active
+  // Google Sheet — see the GET /api/cards comment above for the "Sheets
+  // is the source of truth" rationale.
+  app.get(`${apiPrefix}/collection/summary`, async (req, res) => {
     try {
-      const allCards = await storage.getCards();
-      const totalValue = allCards.reduce((sum, card) => sum + (card.estimatedValue ? Number(card.estimatedValue) : 0), 0);
-      
-      console.log("Collection summary data:", {
-        cardCount: allCards.length,
-        totalValue: totalValue
-      });
-      
-      return res.json({
-        cardCount: allCards.length,
-        totalValue: totalValue
-      });
+      const userId = (req.user as any)?.id as number | undefined;
+      if (!userId) return res.json({ cardCount: 0, totalValue: 0 });
+      const { getActiveSheetRows } = await import('./googleSheets');
+      const rows = await getActiveSheetRows(userId);
+      const totalValue = rows.reduce(
+        (sum, r) => sum + (r.estimatedValue ? Number(r.estimatedValue) : 0),
+        0,
+      );
+      return res.json({ cardCount: rows.length, totalValue });
     } catch (error) {
       console.error('Error fetching collection summary:', error);
       return res.status(500).json({ error: 'Failed to fetch collection summary' });
@@ -820,82 +826,82 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  // Stats endpoints for the stats page
-  // Get summary stats for the stats page
-  app.get(`${apiPrefix}/stats/summary`, async (_req, res) => {
+  // Stats endpoints for the Stats page. All three read from the active
+  // Google Sheet — same rationale as /api/cards and /api/collection/summary.
+  // Unauthenticated users get empty data so the page renders its “add cards
+  // to grow the curve” state instead of erroring.
+
+  app.get(`${apiPrefix}/stats/summary`, async (req, res) => {
     try {
-      const allCards = await storage.getCards();
-      const totalValue = allCards.reduce((sum, card) => 
-        sum + (card.estimatedValue ? Number(card.estimatedValue) : 0), 0);
-      
-      // Calculate change statistics (mock data for now)
-      // In a real app, this would compare to previous month or period
-      const changeValue = 0;
-      const changePercent = 0;
-      
-      return res.json({
-        totalValue,
-        changeValue,
-        changePercent
-      });
+      const userId = (req.user as any)?.id as number | undefined;
+      if (!userId) return res.json({ totalValue: 0, changeValue: 0, changePercent: 0 });
+      const { getActiveSheetRows } = await import('./googleSheets');
+      const rows = await getActiveSheetRows(userId);
+      const totalValue = rows.reduce(
+        (sum, r) => sum + (r.estimatedValue ? Number(r.estimatedValue) : 0),
+        0,
+      );
+      // Period-over-period deltas aren't stored yet — value snapshots
+      // would need a separate rollup table. Keep 0/0 here so the UI
+      // doesn't make up numbers.
+      return res.json({ totalValue, changeValue: 0, changePercent: 0 });
     } catch (error) {
       console.error('Error fetching stats summary:', error);
       return res.status(500).json({ error: 'Failed to fetch stats summary' });
     }
   });
-  
-  // Get top valuable cards
-  app.get(`${apiPrefix}/stats/top-cards`, async (_req, res) => {
+
+  // Top 5 cards by estimated value. Returns sheet rows with the same
+  // field names Home.tsx's TopCard type reads (playerFirstName,
+  // playerLastName, year, estimatedValue, frontImage, brand.name).
+  app.get(`${apiPrefix}/stats/top-cards`, async (req, res) => {
     try {
-      const topCards = await db.query.cards.findMany({
-        orderBy: desc(schema.cards.estimatedValue),
-        limit: 5,
-        with: {
-          sport: true,
-          brand: true,
-        },
-      });
-      
-      return res.json(topCards);
+      const userId = (req.user as any)?.id as number | undefined;
+      if (!userId) return res.json([]);
+      const { getActiveSheetRows } = await import('./googleSheets');
+      const rows = await getActiveSheetRows(userId);
+      const top = rows
+        .filter((r) => r.estimatedValue && Number(r.estimatedValue) > 0)
+        .sort((a, b) => Number(b.estimatedValue || 0) - Number(a.estimatedValue || 0))
+        .slice(0, 5);
+      return res.json(top);
     } catch (error) {
       console.error('Error fetching top cards:', error);
       return res.status(500).json({ error: 'Failed to fetch top cards' });
     }
   });
-  
-  // Get charts data
-  app.get(`${apiPrefix}/stats/charts`, async (_req, res) => {
+
+  // Charts data (value by year + cards by sport). Grouped client-side
+  // on the parsed sheet rows since we're already paying to read the full
+  // sheet for the other stats endpoints anyway — the TTL cache means
+  // this and /stats/summary share a single Google round trip.
+  app.get(`${apiPrefix}/stats/charts`, async (req, res) => {
     try {
-      const allCards = await storage.getCards();
-      
-      // Value by year
-      const valueByYear = await db.select({
-        year: schema.cards.year,
-        value: sql<string>`sum(CAST(${schema.cards.estimatedValue} AS numeric))`,
-      })
-      .from(schema.cards)
-      .groupBy(schema.cards.year)
-      .orderBy(schema.cards.year);
-      
-      // Cards by sport
-      const sportDistribution = await db.select({
-        name: schema.sports.name,
-        count: sql<number>`count(${schema.cards.id})`,
-      })
-      .from(schema.cards)
-      .innerJoin(schema.sports, eq(schema.cards.sportId, schema.sports.id))
-      .groupBy(schema.sports.name);
-      
-      return res.json({
-        valueByYear: valueByYear.map(y => ({
-          year: String(y.year),
-          value: Number(y.value) || 0,
-        })),
-        sportDistribution: sportDistribution.map(s => ({
-          name: s.name,
-          value: Number(s.count),
-        }))
-      });
+      const userId = (req.user as any)?.id as number | undefined;
+      if (!userId) return res.json({ valueByYear: [], sportDistribution: [] });
+      const { getActiveSheetRows } = await import('./googleSheets');
+      const rows = await getActiveSheetRows(userId);
+
+      const yearTotals = new Map<string, number>();
+      const sportCounts = new Map<string, number>();
+      for (const r of rows) {
+        if (r.year != null) {
+          const key = String(r.year);
+          const v = r.estimatedValue ? Number(r.estimatedValue) : 0;
+          yearTotals.set(key, (yearTotals.get(key) ?? 0) + v);
+        }
+        const sportName = r.sport?.name?.trim();
+        if (sportName) {
+          sportCounts.set(sportName, (sportCounts.get(sportName) ?? 0) + 1);
+        }
+      }
+      const valueByYear = Array.from(yearTotals.entries())
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([year, value]) => ({ year, value }));
+      const sportDistribution = Array.from(sportCounts.entries()).map(
+        ([name, count]) => ({ name, value: count }),
+      );
+      return res.json({ valueByYear, sportDistribution });
     } catch (error) {
       console.error('Error fetching charts data:', error);
       return res.status(500).json({ error: 'Failed to fetch charts data' });
