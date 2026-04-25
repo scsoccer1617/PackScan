@@ -2663,6 +2663,26 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>,
         }
       }
     }
+
+    // Special-case publisher imprint: "© T.C.G." / "T.C.G., PRTD. IN U.S.A."
+    // T.C.G. = Topps Chewing Gum, the legal entity that printed every Topps
+    // baseball card from 1956 through ~1981. Vintage Topps backs (1973 Larry
+    // Gura, etc.) often carry ONLY this imprint — the front "Topps" wordmark
+    // is tiny (~6pt) and frequently lost by OCR, and the back legal line
+    // never spells out the full "TOPPS" name. Without this fallback every
+    // such card resolves to brand = Unknown.
+    //
+    // Match common OCR variants of T.C.G. punctuation. The dots are routinely
+    // dropped or read as commas/spaces, and the leading "©" can be missing
+    // entirely. Require enough context ("PRTD"/"PRINTED"/"U.S.A"/© marker)
+    // that we don't false-match a stray "TCG" trigram in body prose.
+    if (!cardDetails.brand) {
+      const tcgImprintPattern = /(?:©|\(C\)|COPYRIGHT|\bBY\b)?\s*\bT[.,\s]*C[.,\s]*G\b[.,\s]*(?:PR[ITN]+D?|PRINTED|U\s*\.?\s*S\s*\.?\s*A)/i;
+      if (tcgImprintPattern.test(brandDetectionText)) {
+        cardDetails.brand = 'Topps';
+        console.log(`Detected brand: Topps (from T.C.G. publisher imprint — Topps Chewing Gum printed every vintage Topps baseball card 1956–1981)`);
+      }
+    }
     
     // COLLECTION DETECTION - Look for common collections/sets
     // Prefer to use regex for collections to avoid false positives
@@ -2922,38 +2942,16 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>,
       console.log(`Using copyright year as card date: ${cardDetails.year}${strictYears.length > 1 ? ` (latest of ${strictYears.length} © markers: ${strictYears.join(', ')})` : ''}`);
       return;
     }
-    // Relaxed garbled-© fallback — letter prefix immediately adjacent to digits.
-    const garbledCopyrightYearPattern = /(?:^|[^A-Za-z0-9])[LlIi]?[OoQ](\d{4})/g;
-    const garbledYears: number[] = [];
-    let gcm: RegExpExecArray | null;
-    while ((gcm = garbledCopyrightYearPattern.exec(text)) !== null) {
-      const y = parseInt(gcm[1], 10);
-      if (y >= 1900 && y <= new Date().getFullYear()) garbledYears.push(y);
-    }
-    if (garbledYears.length > 0) {
-      cardDetails.year = Math.max(...garbledYears);
-      console.log(`Using OCR-garbled copyright year as card date: ${cardDetails.year}`);
-      return;
-    }
-    
-    // Check for "YEAR Team" pattern often used in older cards
-    const yearTeamPattern = /\b(19\d{2}|20\d{2})\s+(REDS|YANKEES|CUBS|DODGERS|GIANTS|BRAVES|ATHLETICS|ANGELS|CARDINALS|BLUE JAYS|WHITE SOX|RED SOX|PIRATES|MARLINS|RANGERS|NATIONALS|MARINERS|TIGERS|TWINS|ROYALS|INDIANS|GUARDIANS|DIAMONDBACKS|ROCKIES|PADRES|RAYS|PHILLIES|METS|ASTROS|BREWERS|ORIOLES)\b/i;
-    const yearTeamMatch = text.match(yearTeamPattern);
-    
-    if (yearTeamMatch && yearTeamMatch[1]) {
-      const year = parseInt(yearTeamMatch[1], 10);
-      if (year >= 1900 && year <= new Date().getFullYear()) {
-        cardDetails.year = year;
-        // Year+team pattern is non-legal text — clear any low-confidence flag
-        // set earlier by the Leaf/Donruss copyright path.
-        (cardDetails as any)._yearFromCopyright = false;
-        console.log(`Using team-year pattern as card date: ${cardDetails.year}`);
-        return;
-      }
-    }
-    
-    // Fall back to looking for 4-digit years (but this is less reliable)
-    // This is more risky as it can pick up birth years or signing years
+
+    // Collect bare 4-digit year candidates once, up front. Several downstream
+    // fallbacks consult this list:
+    //   • the vintage stat-row convention (highest-confidence vintage signal)
+    //   • the team-year pattern
+    //   • the bare-year fallback at the very end
+    // Bio-context filter is light — we exclude only obvious signing/draft/birth
+    // text within 40 chars before the year. Stat-row years and trivia years
+    // both stay in the candidate set so the stat-row run detector below can
+    // see consecutive seasons.
     const yearPattern = /\b(19\d{2}|20\d{2})\b/g;
     const yearCandidates: number[] = [];
     let ym;
@@ -2967,7 +2965,7 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>,
       }
       yearCandidates.push(y);
     }
-    
+
     // Vintage stat-row convention: when the back contains a sequence of
     // consecutive year values (e.g. "1976 NEW YORK NL\n1977 NEW YORK NL\n
     // 1978 NEW YORK NL\n1979 NEW YORK NL\n1980 NEW YORK NL"), those are
@@ -2976,6 +2974,16 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>,
     // This convention only holds for vintage cards (pre-~1995); modern cards
     // typically print same-season stats. Trigger when we find ≥3 consecutive
     // ascending years all ≤ 1990.
+    //
+    // IMPORTANT: this check runs BEFORE the garbled-© and year-team fallbacks.
+    // On vintage cards (e.g. 1973 Topps Larry Gura) the legal line often reads
+    // "©T.C.G., PRTD. IN U.S.A." with no year next to the © glyph, so the
+    // strict copyright check fails. Without this ordering, the garbled-©
+    // pattern would latch onto a stat-row year like "o1970" (any token
+    // ending in `o` immediately followed by a year) and return the wrong
+    // value. The stat-row convention is a much stronger signal: ≥3
+    // consecutive seasons in ascending order is essentially diagnostic of a
+    // vintage stat table.
     {
       const sorted = Array.from(new Set(yearCandidates)).sort((a, b) => a - b);
       let bestRunStart = -1;
@@ -3001,6 +3009,53 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>,
         }
       }
     }
+
+    // Relaxed garbled-© fallback — copyright-glyph misread immediately
+    // adjacent to a 4-digit year.
+    //
+    // OCR commonly mangles "©" into "O", "Q", "(C)", "&copy;". The risky
+    // shape is a bare "O"/"o" — that letter appears at the end of countless
+    // English words ("Pro", "Co", "two", "info", "ago"). To prevent trivia
+    // text or stat-row column labels from triggering this fallback, the
+    // year must be at the START of a line / text segment, OR the "O"-like
+    // glyph must be flanked by other copyright-shaped characters
+    // (parenthesis, ampersand, lowercase "c"). This is roughly equivalent
+    // to requiring "©"-shape isolation rather than "any letter that ends
+    // a word."
+    //
+    // Examples that SHOULD match:  "\nO1979", " (O1979", " &O1979", " cO1979"
+    // Examples that should NOT:    "Pro 1970", "info 1989", "hello 1970"
+    const garbledCopyrightYearPattern = /(?:^|[\n\r])\s*[OoQ©](\d{4})|(?:^|[^A-Za-z0-9])[(&c][OoQ](\d{4})/g;
+    const garbledYears: number[] = [];
+    let gcm: RegExpExecArray | null;
+    while ((gcm = garbledCopyrightYearPattern.exec(text)) !== null) {
+      const yearStr = gcm[1] || gcm[2];
+      if (!yearStr) continue;
+      const y = parseInt(yearStr, 10);
+      if (y >= 1900 && y <= new Date().getFullYear()) garbledYears.push(y);
+    }
+    if (garbledYears.length > 0) {
+      cardDetails.year = Math.max(...garbledYears);
+      console.log(`Using OCR-garbled copyright year as card date: ${cardDetails.year}`);
+      return;
+    }
+    
+    // Check for "YEAR Team" pattern often used in older cards
+    const yearTeamPattern = /\b(19\d{2}|20\d{2})\s+(REDS|YANKEES|CUBS|DODGERS|GIANTS|BRAVES|ATHLETICS|ANGELS|CARDINALS|BLUE JAYS|WHITE SOX|RED SOX|PIRATES|MARLINS|RANGERS|NATIONALS|MARINERS|TIGERS|TWINS|ROYALS|INDIANS|GUARDIANS|DIAMONDBACKS|ROCKIES|PADRES|RAYS|PHILLIES|METS|ASTROS|BREWERS|ORIOLES)\b/i;
+    const yearTeamMatch = text.match(yearTeamPattern);
+    
+    if (yearTeamMatch && yearTeamMatch[1]) {
+      const year = parseInt(yearTeamMatch[1], 10);
+      if (year >= 1900 && year <= new Date().getFullYear()) {
+        cardDetails.year = year;
+        // Year+team pattern is non-legal text — clear any low-confidence flag
+        // set earlier by the Leaf/Donruss copyright path.
+        (cardDetails as any)._yearFromCopyright = false;
+        console.log(`Using team-year pattern as card date: ${cardDetails.year}`);
+        return;
+      }
+    }
+    
 
     if (yearCandidates.length > 0) {
       const modernYears = yearCandidates.filter(y => y >= 1980 && y <= 2026);
