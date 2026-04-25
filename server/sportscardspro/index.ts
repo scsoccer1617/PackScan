@@ -39,6 +39,15 @@ export interface CatalogMatchResult {
   matchScore: number;          // 0..100
   matchBreakdown: Record<string, number>;
   priceCurve: PriceCurve;
+  /**
+   * True when the hit was recovered by the no-player retry (where the
+   * player name was dropped from the search query and SCP returned a hit
+   * for the structural anchors alone). Callers should be wary of trusting
+   * such hits to override an OCR-confident player name — a retry hit at a
+   * different player at the same brand/year/cardNumber is a contradiction
+   * signal, not a correction.
+   */
+  recoveredByRetry: boolean;
 }
 
 /**
@@ -249,6 +258,7 @@ export async function lookupCard(
       matchScore: ranked.best.score,
       matchBreakdown: ranked.best.breakdown,
       priceCurve: buildPriceCurve(product),
+      recoveredByRetry,
     },
   };
 }

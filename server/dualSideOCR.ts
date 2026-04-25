@@ -87,6 +87,23 @@ interface YearConfidenceFlags {
   // identification was reconciled across two sources.
   _scpPlayerOverridden?: boolean;
   _scpPlayerOverrideReason?: 'carddb_disagreement' | string;
+  // Set true when the catalog player check confirmed the back-side OCR
+  // surname against card_database for this brand+year. SCP-first uses
+  // this signal to reject no-player-retry hits whose recovered player
+  // disagrees with our catalog-grounded OCR name (the retry hit is then
+  // a contradiction signal, not a correction).
+  _backPlayerCatalogValidated?: boolean;
+  // Set true when SCP returned a no-player-retry hit but we rejected it
+  // because the recovered player disagreed with confident OCR. Surfaced
+  // for the bulk-scan inbox diagnostic so dealers can see why we kept
+  // the OCR-derived identification instead of SCP's.
+  _scpRetryRejected?: boolean;
+  _scpRetryRejectedReason?: 'player_conflict_with_confident_ocr' | string;
+  _scpRetryRejectedHit?: {
+    productName: string;
+    consoleName: string;
+    score: number;
+  };
   // Raw OCR text from each side of the card. Truncated to 4 KB per side
   // before persistence so the analysisResult jsonb stays small. Used by
   // the inbox diagnostic UI so the dealer can see exactly what the
@@ -975,6 +992,19 @@ async function combineCardResults(
         const matchKind = backExact.length > 0 ? 'full-name' : `last-name "${backLast}"`;
         console.log(`Catalog player check: back name "${backResult.playerFirstName} ${backResult.playerLastName}" found in card_database for ${combined.brand} ${combined.year} via ${matchKind}; front name "${combined.playerFirstName} ${combined.playerLastName}" not found — preferring back`);
         frontNameBogus = true;
+        // Stash that the back-side OCR name was catalog-validated for this
+        // brand+year. SCP-first uses this as a confidence signal: when the
+        // SCP no-player retry returns a different player at the same
+        // brand/year/cardNumber, that retry hit is a contradiction
+        // (we have a catalog-grounded name already) — not a correction.
+        (combined as CardFormWithFlags)._backPlayerCatalogValidated = true;
+      } else if (backInCatalog && frontInCatalog) {
+        // Both names exist in the catalog at this brand+year. The front
+        // name is preferred per the existing rule, but the BACK name is
+        // still independently corroborated by the catalog — record that
+        // signal so the SCP retry-conflict guard treats this card as
+        // OCR-confident.
+        (combined as CardFormWithFlags)._backPlayerCatalogValidated = true;
       }
     } catch (err) {
       console.error('Catalog-based player name lookup failed:', err);
@@ -1268,6 +1298,74 @@ async function combineCardResults(
         ` brand="${scpInput.brand || '(none)'}" cardNumber="${scpInput.cardNumber || '(none)'}" parallel="${scpInput.parallel || '(none)'}"`,
     );
     const scpResult = await scpLookupCard(scpInput, { userId: null });
+    // ── No-player-retry conflict guard ────────────────────────────────
+    // SCP's no-player retry drops the player name from the search query
+    // and accepts the highest-scoring product at the same brand/year/
+    // cardNumber slot above a relaxed 55 floor. That's a useful safety
+    // net when OCR misread the player (e.g. modern silver-foil fronts),
+    // but it has a sharp failure mode: when OCR is actually CORRECT and
+    // the player simply isn't in SCP's index for that exact slot, the
+    // retry happily returns a same-numbered card from a *different
+    // sport's product line* (Adrian Peterson football for a Brent
+    // Abernathy baseball card, Santiago Espinal for Masyn Winn, etc.).
+    // Adopting that retry hit then overrides the OCR-correct player
+    // name with someone unrelated.
+    //
+    // Treat a retry-recovered hit as a CONTRADICTION SIGNAL when OCR
+    // already has a confident player identification. "Confident" =
+    // either (a) front and back surface the same surname (independent
+    // cross-validation) or (b) the back-side surname was confirmed
+    // against card_database for this brand+year by the catalog player
+    // check above. When confident OCR disagrees with the retry-
+    // recovered surname, we drop the SCP hit entirely and let the
+    // OCR-derived fields stand. CardDB-only enrichment still runs.
+    if (scpResult.status === 'hit' && scpResult.match.recoveredByRetry) {
+      const surnameNorm = (s: string | null | undefined) =>
+        String(s || '').toLowerCase().replace(/[^a-z]/g, '');
+      const ocrLast = surnameNorm(combined.playerLastName);
+      const frontLast = surnameNorm(frontResult.playerLastName);
+      const backLast = surnameNorm(backResult.playerLastName);
+      const dualSideAgreement =
+        frontLast.length >= 3 && backLast.length >= 3 && frontLast === backLast;
+      const catalogValidated =
+        (combined as CardFormWithFlags)._backPlayerCatalogValidated === true;
+      const ocrConfident = dualSideAgreement || catalogValidated;
+      const recoveredName = scpExtractPlayerName(scpResult.match.productName);
+      const recoveredLast = surnameNorm(
+        (recoveredName || '').split(/\s+/).filter(Boolean).pop() || '',
+      );
+      const surnameConflict =
+        ocrLast.length >= 3 && recoveredLast.length >= 3 && ocrLast !== recoveredLast;
+      if (ocrConfident && surnameConflict) {
+        const evidence = [
+          dualSideAgreement ? 'front+back surnames agree' : null,
+          catalogValidated ? 'back surname catalog-validated' : null,
+        ].filter(Boolean).join(', ');
+        console.log(
+          `[SCP-first] Rejecting no-player-retry hit (score=${scpResult.match.matchScore}) ` +
+            `"${scpResult.match.productName}" :: "${scpResult.match.consoleName}" — ` +
+            `recovered surname "${recoveredLast}" conflicts with confident OCR surname ` +
+            `"${ocrLast}" (${evidence}). Treating as miss; keeping OCR-derived fields.`,
+        );
+        const flagged = combined as CardFormWithFlags;
+        flagged._scpHit = false;
+        flagged._scpMatchScore = scpResult.match.matchScore;
+        flagged._scpStatus = 'miss';
+        flagged._scpReason = 'retry_player_conflict';
+        flagged._scpRetryRejected = true;
+        flagged._scpRetryRejectedReason = 'player_conflict_with_confident_ocr';
+        flagged._scpRetryRejectedHit = {
+          productName: scpResult.match.productName,
+          consoleName: scpResult.match.consoleName,
+          score: Number(scpResult.match.matchScore.toFixed(2)),
+        };
+        // Force the SCP hit branch to be skipped by mutating status.
+        // (Mutating a discriminated union is ugly, but the alternative is
+        // restructuring this whole block.)
+        (scpResult as { status: string }).status = 'miss';
+        (scpResult as { reason: string }).reason = 'retry_player_conflict';
+      }
+    }
     if (scpResult.status === 'hit') {
       scpHit = true;
       const { productName, consoleName, matchScore } = scpResult.match;
@@ -2043,7 +2141,7 @@ async function combineCardResults(
               flagged._yearFromBackOnly = false;
               flagged._yearFromCopyright = false;
               flagged._yearFromBareFallback = false;
-              console.log(`[CardDB] Surname salvage (year-agnostic): "${fs}" + cardNumber #${cardNumLower} matched ${cardNumMatches.length} rows across years [${cardNumMatches.map(r => r.year).join(', ')}]. Picked ${chosen.year} (closest to OCR year ${ocrYr}).`);
+              console.log(`[CardDB] Surname salvage (year-agnostic): "${fs}" + cardNumber #${cardNumLower} matched ${cardNumMatches.length} rows across years [${cardNumMatches.map(r => r.year).join(', ')}]. Picked ${chosen.year} (closest to OCR year ${combined.year}).`);
               break;
             }
             // No cardNumber match — but if all rows share a single
