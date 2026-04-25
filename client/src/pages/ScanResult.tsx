@@ -23,14 +23,18 @@ import { HoloGradeCard } from "@/components/HoloGradeCard";
 import GradedPriceBreakdown from "@/components/GradedPriceBreakdown";
 import CatalogPriceStrip from "@/components/CatalogPriceStrip";
 import PsaGradeSelect from "@/components/PsaGradeSelect";
-import AddToSheetButton from "@/components/AddToSheetButton";
+import AddToSheetButton, {
+  type ScanFieldSnapshot,
+  type ScanTracking,
+  type ScanUserAction,
+} from "@/components/AddToSheetButton";
 import ParallelPickerSheet, {
   type ParallelOption,
 } from "@/components/ParallelPickerSheet";
 import CollectionPickerSheet, {
   type CollectionCandidate,
 } from "@/components/CollectionPickerSheet";
-import { Camera, Check, Pencil, ScanLine, ScanSearch, Sparkles, X } from "lucide-react";
+import { Camera, Check, ScanLine, ScanSearch, Sparkles, ThumbsDown, ThumbsUp, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { CardFormValues } from "@shared/schema";
 import {
@@ -57,6 +61,35 @@ function gradeTone(grade: number): { bg: string; text: string; ring: string } {
 function playerName(c: Partial<CardFormValues> | null): string {
   if (!c) return "";
   return [c.playerFirstName, c.playerLastName].filter(Boolean).join(" ").trim();
+}
+
+/**
+ * Project a CardFormValues blob down to the ScanFieldSnapshot shape used
+ * by the user-scans logger. We only carry fields the scan-result screen
+ * has visibility into; CardFormValues fields not present here (e.g.
+ * speculativeCatalog) are intentionally dropped — they're scan-pipeline
+ * scratch state, not card identity.
+ */
+function snapshotFromCardData(c: Partial<CardFormValues>): ScanFieldSnapshot {
+  return {
+    sport: c.sport ?? null,
+    playerFirstName: c.playerFirstName ?? null,
+    playerLastName: c.playerLastName ?? null,
+    brand: c.brand ?? null,
+    collection: c.collection ?? null,
+    set: (c as { set?: string | null }).set ?? null,
+    cardNumber: c.cardNumber ?? null,
+    year: typeof c.year === 'number' ? c.year : (c.year ? Number.parseInt(String(c.year), 10) || null : null),
+    variant: c.variant ?? null,
+    team: (c as { team?: string | null }).team ?? null,
+    cmpNumber: (c as { cmpNumber?: string | null }).cmpNumber ?? null,
+    serialNumber: c.serialNumber ?? null,
+    foilType: c.foilType ?? null,
+    isRookie: c.isRookieCard ?? null,
+    isAuto: c.isAutographed ?? null,
+    isNumbered: c.isNumbered ?? null,
+    isFoil: null,
+  };
 }
 
 export default function ScanResult() {
@@ -107,6 +140,49 @@ export default function ScanResult() {
   const holoGrade = flow.holoGrade;
   const frontImage = flow.frontImage;
   const backImage = flow.backImage;
+
+  // ——— Scan-feedback (👍 / 👎) state ———
+  //
+  // `feedback` tracks what the user clicked on the Card-info section header.
+  //   - 'none'             → user hasn't expressed a preference. A subsequent
+  //                          Add-to-Sheet press logs as 'saved_no_feedback'.
+  //   - 'confirmed'        → 👍. Add-to-Sheet logs as 'confirmed' and the diff
+  //                          is forced to [].
+  //   - 'declined_edited'  → 👎. Opens the inline edit panel; subsequent
+  //                          Add-to-Sheet logs as 'declined_edited' with the
+  //                          per-field diff captured server-side.
+  //
+  // `initialDetected` is the snapshot of cardData *as the scanner returned
+  // it* before any user edits or picker selections. We freeze it on the
+  // first render where cardData is non-null and re-freeze whenever a brand
+  // new scan starts (signaled by a change in `frontImage`). Editing or
+  // picker changes mutate flow.cardData but must NOT update this snapshot —
+  // it's the "detected" baseline the diff measures against.
+  const [feedback, setFeedback] = useState<ScanUserAction | 'none'>('none');
+  const [initialDetected, setInitialDetected] = useState<ScanFieldSnapshot | null>(null);
+  const lastFrontImageRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!cardData) return;
+    // New scan session = new frontImage. Reset feedback + re-snapshot
+    // the detected fields. Also covers the very first mount (ref starts
+    // undefined, so any frontImage triggers the snapshot path).
+    if (lastFrontImageRef.current !== frontImage) {
+      lastFrontImageRef.current = frontImage;
+      setFeedback('none');
+      setInitialDetected(snapshotFromCardData(cardData));
+    } else if (initialDetected === null) {
+      // Same session but we never managed to snapshot (e.g. cardData was
+      // null on first mount). Capture now so the diff has a baseline.
+      setInitialDetected(snapshotFromCardData(cardData));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cardData, frontImage]);
+
+  const scanTracking: ScanTracking | undefined = cardData
+    ? {
+        userAction: feedback === 'none' ? 'saved_no_feedback' : feedback,
+      }
+    : undefined;
 
   // Reset the priceInfo cache whenever the underlying card data changes
   // so the hero doesn't briefly show a stale avg price for the previous
@@ -805,6 +881,8 @@ export default function ScanResult() {
               searchUrl={priceInfo?.searchUrl || undefined}
               frontImage={frontImage}
               backImage={backImage}
+              scanTracking={scanTracking}
+              initialDetected={initialDetected ?? undefined}
             />
           </div>
         </div>
@@ -881,6 +959,9 @@ export default function ScanResult() {
             frontImage={frontImage}
             backImage={backImage}
             onSaveCardInfo={handleSaveCardInfo}
+            feedback={feedback}
+            onConfirm={() => setFeedback('confirmed')}
+            onDecline={() => setFeedback('declined_edited')}
           />
         </TabsContent>
 
@@ -969,13 +1050,45 @@ function DetailsTab({
   frontImage,
   backImage,
   onSaveCardInfo,
+  feedback,
+  onConfirm,
+  onDecline,
 }: {
   cardData: Partial<CardFormValues>;
   frontImage: string;
   backImage: string;
   onSaveCardInfo: (patch: Partial<CardFormValues>) => void;
+  /**
+   * Current scan-feedback state, owned by the parent so it survives tab
+   * switches and travels with the AddToSheetButton's append payload.
+   */
+  feedback: ScanUserAction | 'none';
+  /** Mark the scan as confirmed (👍). Closes the edit panel if open. */
+  onConfirm: () => void;
+  /** Mark the scan as declined and open the edit panel (👎). */
+  onDecline: () => void;
 }) {
   const [editing, setEditing] = useState(false);
+
+  // Derived flags so the buttons can show a clear pressed/active state
+  // even though the state itself lives in the parent.
+  const isConfirmed = feedback === 'confirmed';
+  const isDeclined = feedback === 'declined_edited';
+
+  // 👍 handler: close the edit panel if it's open (treat as "nevermind, it's
+  // right after all") and tell the parent to flip feedback to confirmed.
+  const handleConfirmClick = () => {
+    if (editing) setEditing(false);
+    onConfirm();
+  };
+
+  // 👎 handler: open the edit panel and tell the parent the user wants to
+  // correct fields. Tapping 👎 again while already in edit mode is a no-op
+  // (the panel is already open and feedback is already 'declined_edited').
+  const handleDeclineClick = () => {
+    if (!editing) setEditing(true);
+    onDecline();
+  };
 
   // Local draft state mirrors the scan flow cardData while the panel is
   // open. Reset from cardData every time the panel opens so cancelling
@@ -1055,15 +1168,47 @@ function DetailsTab({
         <div className="flex items-center justify-between px-4 py-3 border-b border-card-border">
           <h2 className="text-sm font-semibold text-ink">Card info</h2>
           {!editing ? (
-            <button
-              type="button"
-              onClick={() => setEditing(true)}
-              className="inline-flex items-center gap-1 h-8 px-2.5 rounded-lg text-xs font-medium text-foil-violet hover:bg-foil-violet/10 transition-colors"
-              data-testid="button-edit-info"
-            >
-              <Pencil className="w-3.5 h-3.5" /> Edit info
-            </button>
+            // Default state: 👍 Confirm / 👎 Edit pair. The selected option
+            // gets a filled background so the user has a clear visual that
+            // their feedback is registered — this is feedback-only state;
+            // saving still happens via Add to Sheet in the sticky hero.
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={handleConfirmClick}
+                aria-pressed={isConfirmed}
+                title="Looks right—all fields verified"
+                className={cn(
+                  "inline-flex items-center gap-1 h-8 px-2.5 rounded-lg text-xs font-medium transition-colors",
+                  isConfirmed
+                    ? "bg-foil-violet text-white hover:brightness-110"
+                    : "text-foil-violet hover:bg-foil-violet/10",
+                )}
+                data-testid="button-confirm-info"
+              >
+                <ThumbsUp className="w-3.5 h-3.5" /> Confirm
+              </button>
+              <button
+                type="button"
+                onClick={handleDeclineClick}
+                aria-pressed={isDeclined}
+                title="Something's off—let me edit"
+                className={cn(
+                  "inline-flex items-center gap-1 h-8 px-2.5 rounded-lg text-xs font-medium transition-colors",
+                  isDeclined
+                    ? "bg-slate-700 text-white hover:brightness-110"
+                    : "text-slate-600 hover:bg-slate-100",
+                )}
+                data-testid="button-decline-info"
+              >
+                <ThumbsDown className="w-3.5 h-3.5" /> Edit
+              </button>
+            </div>
           ) : (
+            // Edit mode: same Cancel + Save pair as before. Clicking Save
+            // commits the draft via onSaveCardInfo; the parent's feedback
+            // state is already 'declined_edited' (set when 👎 opened the
+            // panel), so the next Add-to-Sheet call carries that tag.
             <div className="flex items-center gap-1">
               <button
                 type="button"
