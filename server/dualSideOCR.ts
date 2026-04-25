@@ -56,6 +56,36 @@ interface YearConfidenceFlags {
   // threshold; `_scpMatchScore` is the 0–100 score of that hit.
   _scpHit?: boolean;
   _scpMatchScore?: number;
+  // Diagnostic snapshot of the SCP-first probe so the bulk-scan inbox
+  // diagnostic UI can explain *why* a card landed in review without
+  // re-running SCP. _scpQuery is the input we sent; _scpStatus is
+  // 'hit' | 'miss' | 'threw' | 'skipped'; _scpReason is the SCP miss
+  // reason on miss (no_results / below_threshold / api_error /
+  // not_configured) or the throw message when _scpStatus='threw'.
+  // _scpTopCandidates carries the top 3 below-threshold hits with their
+  // 0–100 score so the dealer can see how close SCP got.
+  _scpQuery?: {
+    playerName: string | null;
+    year: number | null;
+    brand: string | null;
+    collection: string | null;
+    setName: string | null;
+    cardNumber: string | null;
+    parallel: string | null;
+  };
+  _scpStatus?: 'hit' | 'miss' | 'threw' | 'skipped';
+  _scpReason?: string | null;
+  _scpTopCandidates?: Array<{
+    productName: string;
+    consoleName: string;
+    score: number;
+  }>;
+  // Raw OCR text from each side of the card. Truncated to 4 KB per side
+  // before persistence so the analysisResult jsonb stays small. Used by
+  // the inbox diagnostic UI so the dealer can see exactly what the
+  // analyzer read off the card when SCP/CardDB couldn't find a match.
+  _frontOCRText?: string;
+  _backOCRText?: string;
 }
 type CardFormWithFlags = CardFormValues & YearConfidenceFlags;
 
@@ -1196,17 +1226,21 @@ async function combineCardResults(
   // variant, team) are NEVER overwritten by SCP or CardDB — those are signals
   // only the card image itself carries authoritatively.
   let scpHit = false;
+  // Always stamp the SCP query input on the combined result, even before
+  // we know the outcome. The bulk-scan inbox-diagnostic UI uses this to
+  // show "here's what we asked SCP" for every card, hit or miss.
+  const scpPlayerName = `${combined.playerFirstName || ''} ${combined.playerLastName || ''}`.trim();
+  const scpInput = {
+    playerName: scpPlayerName || null,
+    year: (combined.year as number | null | undefined) ?? null,
+    brand: combined.brand || null,
+    collection: combined.collection || null,
+    setName: (combined as any).set || null,
+    cardNumber: combined.cardNumber || null,
+    parallel: combined.foilType || null,
+  };
+  (combined as CardFormWithFlags)._scpQuery = { ...scpInput };
   try {
-    const scpPlayerName = `${combined.playerFirstName || ''} ${combined.playerLastName || ''}`.trim();
-    const scpInput = {
-      playerName: scpPlayerName || null,
-      year: (combined.year as number | null | undefined) ?? null,
-      brand: combined.brand || null,
-      collection: combined.collection || null,
-      setName: (combined as any).set || null,
-      cardNumber: combined.cardNumber || null,
-      parallel: combined.foilType || null,
-    };
     console.log(
       `[SCP-first] Probing SCP: player="${scpInput.playerName || '(none)'}" year=${scpInput.year || '(none)'}` +
         ` brand="${scpInput.brand || '(none)'}" cardNumber="${scpInput.cardNumber || '(none)'}" parallel="${scpInput.parallel || '(none)'}"`,
@@ -1220,6 +1254,8 @@ async function combineCardResults(
       // how confident the identification is without re-running SCP.
       (combined as CardFormWithFlags)._scpHit = true;
       (combined as CardFormWithFlags)._scpMatchScore = matchScore;
+      (combined as CardFormWithFlags)._scpStatus = 'hit';
+      (combined as CardFormWithFlags)._scpReason = null;
       const scpYear = scpExtractYear(consoleName);
       const scpBrand = scpExtractBrand(consoleName);
       const scpNumber = scpExtractCardNumber(productName);
@@ -1318,10 +1354,29 @@ async function combineCardResults(
       console.log('[SCP-first] Skipping main CardDB lookup — SCP owns brand/year/cardNumber/player/parallel.');
     } else {
       console.log(`[SCP-first] MISS (${scpResult.reason}) — falling through to CardDB.`);
+      const flagged = combined as CardFormWithFlags;
+      flagged._scpHit = false;
+      flagged._scpStatus = 'miss';
+      flagged._scpReason = scpResult.reason;
+      if (scpResult.topCandidates && scpResult.topCandidates.length > 0) {
+        flagged._scpTopCandidates = scpResult.topCandidates.map(c => ({
+          productName: c.productName,
+          consoleName: c.consoleName,
+          score: Number(c.score.toFixed(2)),
+        }));
+      }
+      // api_error miss carries an errorMessage we want to surface verbatim.
+      if (scpResult.reason === 'api_error' && scpResult.errorMessage) {
+        flagged._scpReason = `api_error: ${scpResult.errorMessage}`;
+      }
     }
   } catch (err: any) {
     // Never let SCP-first failures block the scan. Fall through to CardDB.
     console.warn('[SCP-first] threw unexpectedly (non-fatal, falling through to CardDB):', err?.message || err);
+    const flagged = combined as CardFormWithFlags;
+    flagged._scpHit = false;
+    flagged._scpStatus = 'threw';
+    flagged._scpReason = err?.message ? String(err.message) : 'unknown_error';
   }
 
   // ─── Card Database Lookup ───────────────────────────────────────────────────
@@ -2555,6 +2610,28 @@ async function combineCardResults(
     if (cn.length === 0) {
       flagged._cardNumberLowConfidence = true;
       console.log('[CardNum] No card number extracted — flagging low-confidence so UI prompts user.');
+    }
+  }
+
+  // Stamp truncated OCR text onto combined so downstream consumers (the
+  // bulk-scan inbox-diagnostic UI) can show the dealer exactly what the
+  // analyzer read off the card. Capped at 4 KB per side so the
+  // analysisResult jsonb stays small — OCR text is highly repetitive and
+  // 4 KB easily covers everything visible on a card front or back.
+  {
+    const flagged = combined as CardFormWithFlags;
+    const MAX_OCR_BYTES = 4096;
+    if (frontOCRText) {
+      flagged._frontOCRText =
+        frontOCRText.length > MAX_OCR_BYTES
+          ? frontOCRText.slice(0, MAX_OCR_BYTES) + '…'
+          : frontOCRText;
+    }
+    if (backOCRText) {
+      flagged._backOCRText =
+        backOCRText.length > MAX_OCR_BYTES
+          ? backOCRText.slice(0, MAX_OCR_BYTES) + '…'
+          : backOCRText;
     }
   }
 

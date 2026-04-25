@@ -41,9 +41,39 @@ export interface CatalogMatchResult {
   priceCurve: PriceCurve;
 }
 
+/**
+ * Top below-threshold candidate exposed on miss results so callers
+ * (notably the bulk-scan inbox diagnostic) can show "SCP got close to X
+ * with score Y" without re-running the search. Keep this small — a
+ * handful of fields per candidate, top 3 only — because it can end up
+ * persisted in the scanBatchItems.analysisResult jsonb column.
+ */
+export interface CatalogMissCandidate {
+  productName: string;
+  consoleName: string;
+  score: number; // 0..100
+}
+
+export type CatalogMissReason =
+  | "no_query"
+  | "no_results"
+  | "below_threshold"
+  | "api_error"
+  | "not_configured";
+
 export type CatalogLookupResult =
-  | { status: "hit"; match: CatalogMatchResult }
-  | { status: "miss"; reason: "no_query" | "no_results" | "below_threshold" | "api_error" | "not_configured" };
+  | { status: "hit"; match: CatalogMatchResult; query: string }
+  | {
+      status: "miss";
+      reason: CatalogMissReason;
+      query: string;
+      // Populated for below_threshold so callers can show how close SCP
+      // came; empty/undefined for the other miss reasons.
+      topCandidates?: CatalogMissCandidate[];
+      // Populated when reason='api_error' so callers can surface the
+      // underlying transport / SCP-side error message.
+      errorMessage?: string;
+    };
 
 interface LookupOptions {
   /** User ID for the miss log. Null for unauthenticated callers. */
@@ -93,7 +123,7 @@ export async function lookupCard(
   const query = buildSearchQuery(input);
   if (!query) {
     // No identifiable query — don't bother hitting SCP or logging.
-    return { status: "miss", reason: "no_query" };
+    return { status: "miss", reason: "no_query", query: "" };
   }
 
   let candidates;
@@ -102,13 +132,14 @@ export async function lookupCard(
   } catch (err) {
     if (err instanceof ScpNotConfiguredError) {
       // Quietly skip — local dev without a token shouldn't clutter logs.
-      return { status: "miss", reason: "not_configured" };
+      return { status: "miss", reason: "not_configured", query };
     }
+    const errorMessage = err instanceof Error ? err.message : String(err);
     await logMiss({
       input, query, reason: "api_error", userId: opts.userId ?? null,
-      errorMessage: err instanceof Error ? err.message : String(err),
+      errorMessage,
     });
-    return { status: "miss", reason: "api_error" };
+    return { status: "miss", reason: "api_error", query, errorMessage };
   }
 
   let ranked = candidates.length > 0 ? rankCandidates(input, candidates) : null;
@@ -175,14 +206,21 @@ export async function lookupCard(
   if (!ranked || !ranked.best || ranked.best.score < (recoveredByRetry ? RETRY_THRESHOLD : MATCH_THRESHOLD)) {
     if (candidates.length === 0) {
       await logMiss({ input, query, reason: "no_results", userId: opts.userId ?? null });
-      return { status: "miss", reason: "no_results" };
+      return { status: "miss", reason: "no_results", query };
     }
     await logMiss({
       input, query, reason: "below_threshold", userId: opts.userId ?? null,
       candidates: ranked?.top,
       bestScore: ranked?.best?.score ?? null,
     });
-    return { status: "miss", reason: "below_threshold" };
+    const topCandidates: CatalogMissCandidate[] = (ranked?.top ?? [])
+      .slice(0, 3)
+      .map((c) => ({
+        productName: c.candidate["product-name"],
+        consoleName: c.candidate["console-name"],
+        score: c.score,
+      }));
+    return { status: "miss", reason: "below_threshold", query, topCandidates };
   }
 
   // Confident match — now fetch the full product for price data.
@@ -192,15 +230,17 @@ export async function lookupCard(
   try {
     product = await getProduct(ranked.best.candidate.id);
   } catch (err) {
+    const errorMessage = err instanceof ScpApiError ? err.message : String(err);
     await logMiss({
       input, query, reason: "api_error", userId: opts.userId ?? null,
-      errorMessage: err instanceof ScpApiError ? err.message : String(err),
+      errorMessage,
     });
-    return { status: "miss", reason: "api_error" };
+    return { status: "miss", reason: "api_error", query, errorMessage };
   }
 
   return {
     status: "hit",
+    query,
     match: {
       source: SOURCE_SLUG,
       productId: product.id,

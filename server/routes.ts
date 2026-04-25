@@ -1245,7 +1245,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // but a bug in the persistence layer could leak. Return a miss so
       // the client renders normally.
       console.error('[catalog/match] unexpected throw:', err?.message || err);
-      return res.status(200).json({ status: 'miss', reason: 'api_error' });
+      return res.status(200).json({ status: 'miss', reason: 'api_error', query: '' });
     }
   });
 

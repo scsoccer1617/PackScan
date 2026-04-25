@@ -78,6 +78,26 @@ type InboxFileDisposition =
   | "pending_or_processing"
   | "wrong_mimetype"
   | "unknown";
+interface InboxDiagnosticDetail {
+  ocr: {
+    playerName: string | null;
+    year: number | null;
+    brand: string | null;
+    cardNumber: string | null;
+    collection: string | null;
+    set: string | null;
+    foilType: string | null;
+    ambiguityFlags: string[];
+  };
+  scp: {
+    status: "hit" | "miss" | "threw" | "skipped" | "unknown";
+    reason: string | null;
+    matchScore: number | null;
+    query: Record<string, string | number | null> | null;
+    topCandidates: Array<{ productName: string; consoleName: string; score: number }>;
+  };
+  ocrText: { front: string | null; back: string | null };
+}
 interface InboxDiagnosticFile {
   fileId: string;
   name: string;
@@ -88,6 +108,7 @@ interface InboxDiagnosticFile {
   reason: string | null;
   itemId: number | null;
   batchId: number | null;
+  detail: InboxDiagnosticDetail | null;
 }
 interface InboxDiagnosticResponse {
   inboxFolderId: string;
@@ -490,34 +511,331 @@ function InboxDiagnosticRow({ file }: { file: InboxDiagnosticFile }) {
     wrong_mimetype: "bg-destructive/15 text-destructive",
     unknown: "bg-muted text-muted-foreground",
   };
+  // Only items the analyzer actually processed have a detail payload —
+  // wrong_mimetype / unknown files were never read, so there's nothing to
+  // expand and we render the original compact row.
+  const hasDetail = !!file.detail;
+  const [expanded, setExpanded] = useState(false);
   return (
     <li
-      className="rounded-xl border border-card-border bg-background px-3 py-2 flex items-start gap-2"
+      className="rounded-xl border border-card-border bg-background"
       data-testid={`row-inbox-file-${file.fileId}`}
     >
-      <FileQuestion className="w-4 h-4 text-muted-foreground shrink-0 mt-0.5" />
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 flex-wrap">
-          <p className="text-xs font-medium truncate max-w-[220px]" title={file.name}>
-            {file.name}
+      <div className="px-3 py-2 flex items-start gap-2">
+        <FileQuestion className="w-4 h-4 text-muted-foreground shrink-0 mt-0.5" />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="text-xs font-medium truncate max-w-[220px]" title={file.name}>
+              {file.name}
+            </p>
+            <span
+              className={cn(
+                "inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-medium",
+                dispTone[file.disposition],
+              )}
+              data-testid={`badge-disposition-${file.fileId}`}
+            >
+              {dispLabel[file.disposition]}
+            </span>
+          </div>
+          {file.reason && (
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              {file.reason}
+            </p>
+          )}
+        </div>
+        {hasDetail && (
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            className="text-[10px] font-medium text-muted-foreground hover:text-foreground hover-elevate px-1.5 py-0.5 rounded-md flex items-center gap-1 shrink-0"
+            data-testid={`button-toggle-detail-${file.fileId}`}
+            aria-expanded={expanded}
+          >
+            {expanded ? "Hide" : "Why?"}
+            <ChevronDown
+              className={cn(
+                "w-3 h-3 transition-transform",
+                expanded ? "rotate-180" : "rotate-0",
+              )}
+            />
+          </button>
+        )}
+      </div>
+      {hasDetail && expanded && file.detail && (
+        <InboxDiagnosticDetailPanel
+          detail={file.detail}
+          fileId={file.fileId}
+        />
+      )}
+    </li>
+  );
+}
+
+// Human-readable label for each ambiguity flag the confidence gate
+// surfaces. Mirrors server/bulkScan/confidenceGate.ts — if a new flag
+// is added there, add it here so the dealer sees a friendly label
+// instead of the raw snake_case key.
+const AMBIGUITY_FLAG_LABELS: Record<string, string> = {
+  card_number_low_confidence:
+    "Card # was hard to read or missing — OCR couldn't lock onto a clear value.",
+  variation_ambiguous:
+    "Card DB had multiple parallel/variation rows for this brand+year+#; the gate can't pick one.",
+  collection_ambiguous:
+    "Card DB had multiple collections for this brand+year+#; the gate can't pick one.",
+  year_from_back_only:
+    "Year came from the back of the card only — weaker signal than a front-of-card year.",
+  year_from_copyright:
+    "Year was inferred from a copyright line, which can be a year off from the card year.",
+  year_from_bare_fallback:
+    "Year was a bare 4-digit fallback — lowest-confidence year extraction.",
+};
+
+// Human-readable label for each SCP miss reason. The reason strings are
+// the canonical CatalogMissReason union from server/sportscardspro.
+const SCP_REASON_LABELS: Record<string, string> = {
+  no_query:
+    "No query was built — the OCR-extracted fields were too sparse to even ask SCP.",
+  no_results:
+    "SCP returned zero candidates for this query — the player+year+brand combination isn't in their catalog.",
+  below_threshold:
+    "SCP returned candidates but none scored high enough to be a confident match.",
+  api_error:
+    "SCP's API errored or timed out — the lookup never produced a clean answer.",
+  not_configured:
+    "SCP integration isn't configured (missing API token) — SCP-first was skipped.",
+};
+
+function InboxDiagnosticDetailPanel({
+  detail,
+  fileId,
+}: {
+  detail: InboxDiagnosticDetail;
+  fileId: string;
+}) {
+  const ocrFields: Array<{ label: string; value: string | number | null }> = [
+    { label: "Player", value: detail.ocr.playerName },
+    { label: "Year", value: detail.ocr.year },
+    { label: "Brand", value: detail.ocr.brand },
+    { label: "Card #", value: detail.ocr.cardNumber },
+    { label: "Collection", value: detail.ocr.collection },
+    { label: "Set", value: detail.ocr.set },
+    { label: "Foil", value: detail.ocr.foilType },
+  ];
+  const scpStatusLabel: Record<InboxDiagnosticDetail["scp"]["status"], string> = {
+    hit: "Hit",
+    miss: "Miss",
+    threw: "Threw",
+    skipped: "Skipped",
+    unknown: "Unknown",
+  };
+  const scpStatusTone: Record<InboxDiagnosticDetail["scp"]["status"], string> = {
+    hit: "bg-foil-emerald/15 text-foil-emerald",
+    miss: "bg-foil-amber/15 text-foil-amber",
+    threw: "bg-destructive/15 text-destructive",
+    skipped: "bg-muted text-muted-foreground",
+    unknown: "bg-muted text-muted-foreground",
+  };
+  // Pretty-print the SCP miss reason. The server may have wrapped an
+  // api_error message into the reason like "api_error: <msg>"; in that
+  // case show the canonical label and append the message.
+  let scpReasonText: string | null = null;
+  if (detail.scp.reason) {
+    const [base, ...rest] = detail.scp.reason.split(":");
+    const label = SCP_REASON_LABELS[base.trim()] ?? null;
+    const tail = rest.join(":").trim();
+    scpReasonText = label ? (tail ? `${label} (${tail})` : label) : detail.scp.reason;
+  }
+  return (
+    <div
+      className="border-t border-card-border bg-muted/30 px-3 py-3 space-y-3"
+      data-testid={`detail-panel-${fileId}`}
+    >
+      {/* OCR-extracted fields */}
+      <div>
+        <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1.5">
+          What OCR extracted
+        </p>
+        <dl className="grid grid-cols-2 gap-x-3 gap-y-1">
+          {ocrFields.map((f) => (
+            <div key={f.label} className="flex items-baseline gap-1.5 min-w-0">
+              <dt className="text-[10px] text-muted-foreground shrink-0">{f.label}:</dt>
+              <dd
+                className={cn(
+                  "text-[11px] font-medium truncate",
+                  f.value == null || f.value === "" ? "text-muted-foreground italic" : "",
+                )}
+                title={f.value == null ? "none" : String(f.value)}
+              >
+                {f.value == null || f.value === "" ? "none" : String(f.value)}
+              </dd>
+            </div>
+          ))}
+        </dl>
+        {detail.ocr.ambiguityFlags.length > 0 && (
+          <ul className="mt-2 space-y-1">
+            {detail.ocr.ambiguityFlags.map((flag) => (
+              <li
+                key={flag}
+                className="text-[11px] text-foil-amber flex items-start gap-1.5"
+                data-testid={`flag-${fileId}-${flag}`}
+              >
+                <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" />
+                <span>{AMBIGUITY_FLAG_LABELS[flag] ?? flag}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {/* SCP probe outcome */}
+      <div>
+        <div className="flex items-center gap-2 mb-1.5">
+          <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+            SportsCardsPro lookup
           </p>
           <span
             className={cn(
               "inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-medium",
-              dispTone[file.disposition],
+              scpStatusTone[detail.scp.status],
             )}
-            data-testid={`badge-disposition-${file.fileId}`}
+            data-testid={`scp-status-${fileId}`}
           >
-            {dispLabel[file.disposition]}
+            {scpStatusLabel[detail.scp.status]}
+            {detail.scp.matchScore != null
+              ? ` · score ${detail.scp.matchScore.toFixed(0)}`
+              : ""}
           </span>
         </div>
-        {file.reason && (
-          <p className="text-[11px] text-muted-foreground mt-0.5">
-            {file.reason}
-          </p>
+        {detail.scp.query && (
+          <dl className="grid grid-cols-2 gap-x-3 gap-y-1 mb-1.5">
+            {([
+              ["Player", detail.scp.query.playerName],
+              ["Year", detail.scp.query.year],
+              ["Brand", detail.scp.query.brand],
+              ["Card #", detail.scp.query.cardNumber],
+              ["Parallel", detail.scp.query.parallel],
+              ["Set", detail.scp.query.setName],
+            ] as Array<[string, string | number | null | undefined]>).map(
+              ([label, value]) => (
+                <div key={label} className="flex items-baseline gap-1.5 min-w-0">
+                  <dt className="text-[10px] text-muted-foreground shrink-0">
+                    {label}:
+                  </dt>
+                  <dd
+                    className={cn(
+                      "text-[11px] font-medium truncate",
+                      value == null || value === "" ? "text-muted-foreground italic" : "",
+                    )}
+                    title={value == null ? "none" : String(value)}
+                  >
+                    {value == null || value === "" ? "none" : String(value)}
+                  </dd>
+                </div>
+              ),
+            )}
+          </dl>
+        )}
+        {scpReasonText && (
+          <p className="text-[11px] text-muted-foreground">{scpReasonText}</p>
+        )}
+        {detail.scp.topCandidates.length > 0 && (
+          <div className="mt-1.5">
+            <p className="text-[10px] text-muted-foreground mb-1">
+              Top below-threshold candidates:
+            </p>
+            <ul className="space-y-1">
+              {detail.scp.topCandidates.map((c, i) => (
+                <li
+                  key={`${c.productName}-${i}`}
+                  className="text-[11px] flex items-start gap-1.5 min-w-0"
+                  data-testid={`scp-candidate-${fileId}-${i}`}
+                >
+                  <span className="text-foil-amber font-mono shrink-0">
+                    {c.score.toFixed(0)}
+                  </span>
+                  <span className="truncate" title={`${c.productName} — ${c.consoleName}`}>
+                    {c.productName}
+                    <span className="text-muted-foreground">
+                      {" — "}
+                      {c.consoleName}
+                    </span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
       </div>
-    </li>
+
+      {/* Raw OCR text — collapsed by default within the panel since it's
+          long. We show first ~300 chars per side as a quick sanity check
+          and let the dealer expand for the full read. */}
+      {(detail.ocrText.front || detail.ocrText.back) && (
+        <RawOcrTextSection ocrText={detail.ocrText} fileId={fileId} />
+      )}
+    </div>
+  );
+}
+
+function RawOcrTextSection({
+  ocrText,
+  fileId,
+}: {
+  ocrText: { front: string | null; back: string | null };
+  fileId: string;
+}) {
+  const [showFull, setShowFull] = useState(false);
+  const PREVIEW_CHARS = 240;
+  const renderSide = (label: string, text: string | null) => {
+    if (!text) {
+      return (
+        <div className="min-w-0">
+          <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-0.5">
+            {label}
+          </p>
+          <p className="text-[11px] text-muted-foreground italic">No text</p>
+        </div>
+      );
+    }
+    const truncated = !showFull && text.length > PREVIEW_CHARS;
+    const display = truncated ? text.slice(0, PREVIEW_CHARS) + "…" : text;
+    return (
+      <div className="min-w-0">
+        <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-0.5">
+          {label}
+        </p>
+        <pre className="text-[11px] font-mono whitespace-pre-wrap break-words bg-background border border-card-border rounded-md p-2 max-h-48 overflow-y-auto">
+          {display}
+        </pre>
+      </div>
+    );
+  };
+  const longEnough =
+    (ocrText.front?.length ?? 0) > PREVIEW_CHARS ||
+    (ocrText.back?.length ?? 0) > PREVIEW_CHARS;
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1.5">
+        <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+          Raw OCR text
+        </p>
+        {longEnough && (
+          <button
+            type="button"
+            onClick={() => setShowFull((v) => !v)}
+            className="text-[10px] text-muted-foreground hover:text-foreground hover-elevate px-1 py-0.5 rounded-md"
+            data-testid={`button-toggle-ocr-text-${fileId}`}
+          >
+            {showFull ? "Show less" : "Show full"}
+          </button>
+        )}
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        {renderSide("Front", ocrText.front)}
+        {renderSide("Back", ocrText.back)}
+      </div>
+    </div>
   );
 }
 
