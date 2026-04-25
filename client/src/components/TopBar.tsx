@@ -1,7 +1,11 @@
 import { Link, useLocation } from "wouter";
-import { Bell, User as UserIcon } from "lucide-react";
+import { User as UserIcon, ShieldCheck } from "lucide-react";
 import Logo from "./Logo";
 import { useAuth } from "@/hooks/use-auth";
+import ScanUsagePill from "./ScanUsagePill";
+import FeedbackButton from "./FeedbackModal";
+
+const ADMIN_EMAIL = "daniel.j.holley@gmail.com";
 
 /**
  * Redesign TopBar. Renders the Holo-P tile logo + wordmark, a notifications
@@ -30,13 +34,24 @@ export default function TopBar() {
           </span>
         </Link>
         <div className="flex items-center gap-1">
-          <button
-            className="w-9 h-9 rounded-full hover:bg-muted flex items-center justify-center text-slate-500 transition-colors"
-            aria-label="Notifications"
-            data-testid="button-notifications"
-          >
-            <Bell className="w-[18px] h-[18px]" />
-          </button>
+          {/* Beta scan usage pill — hidden on phones to keep the header tight,
+              visible from `sm` up. Renders only when the user has a quota. */}
+          <ScanUsagePill />
+          {/* Feedback replaces the placeholder Notifications bell during beta.
+              Wires into /api/feedback → Google Sheet. We can bring Bell back
+              as a real notifications surface post-beta. */}
+          <FeedbackButton />
+          {user?.email?.trim().toLowerCase() === ADMIN_EMAIL && (
+            <button
+              onClick={() => setLocation("/admin")}
+              className="w-9 h-9 rounded-full bg-muted flex items-center justify-center text-ink hover:bg-slate-200 transition-colors"
+              aria-label="Admin"
+              title="Admin"
+              data-testid="button-admin"
+            >
+              <ShieldCheck className="w-[18px] h-[18px]" />
+            </button>
+          )}
           <button
             onClick={() => setLocation("/account")}
             className="w-9 h-9 rounded-full bg-muted flex items-center justify-center text-ink hover:bg-slate-200 transition-colors"

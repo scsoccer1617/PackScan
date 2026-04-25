@@ -234,6 +234,21 @@ export default function Scan() {
         method: "POST",
         body: formData,
       });
+      // Beta scan cap: surface a friendly message + bail before parsing
+      // the body. The server returns { error: 'limit_reached', limit, used }
+      // which we don't need to display — the TopBar usage pill already
+      // renders the numbers, so the toast just needs to explain *why*.
+      if (response.status === 429) {
+        toast({
+          title: "Beta scan limit reached",
+          description:
+            "You've used all your beta scans. Reach out to the dev to bump your quota.",
+          variant: "destructive",
+        });
+        // Refresh quota so the header pill flips to red immediately.
+        queryClient.invalidateQueries({ queryKey: ["/api/user/scan-quota"] });
+        return;
+      }
       if (!response.ok) throw new Error("Analysis failed");
 
       const result = await response.json();
@@ -265,6 +280,8 @@ export default function Scan() {
       // prefix matches all three.
       queryClient.invalidateQueries({ queryKey: ["/api/scan-grades"] });
       queryClient.invalidateQueries({ queryKey: ["/api/scan-grades?limit=100"] });
+      // Bump the header usage pill in lock-step with the server-side count.
+      queryClient.invalidateQueries({ queryKey: ["/api/user/scan-quota"] });
       console.log("[Scan] navigating to /result");
       navigate("/result");
     } catch (error) {

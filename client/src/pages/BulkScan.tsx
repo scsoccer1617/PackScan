@@ -35,6 +35,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { cn } from "@/lib/utils";
+import ScanLimitBanner from "@/components/ScanLimitBanner";
 
 interface ScanBatch {
   id: number;
@@ -222,6 +223,15 @@ export default function BulkScan() {
           <SettingsIcon className="w-4 h-4 text-slate-600" />
         </Link>
       </div>
+
+      {/* Beta scan limit banner. Renders only when the user has a quota
+          and is at/near the cap. Shown above the setup banners so it's
+          the first thing a dealer sees when they hit the wall — we don't
+          want them to retry Sync only to discover items get marked
+          skipped midway. */}
+      <ScanLimitBanner
+        helperText="Bulk batches will mark remaining items as skipped once you hit the cap."
+      />
 
       {/* Setup-incomplete banners */}
       {!googleConnected && (

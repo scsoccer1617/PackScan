@@ -9,6 +9,7 @@ import ScanResult from "@/pages/ScanResult";
 import AddCard from "@/pages/AddCard";
 import CardSearch from "@/pages/CardSearch";
 import CardDatabaseAdmin from "@/pages/CardDatabaseAdmin";
+import AdminUsers from "@/pages/AdminUsers";
 import Login from "@/pages/Login";
 import ForgotPassword from "@/pages/ForgotPassword";
 import ResetPassword from "@/pages/ResetPassword";
@@ -148,6 +149,18 @@ function Router() {
             component={() =>
               user?.email?.trim().toLowerCase() === "daniel.j.holley@gmail.com"
                 ? <CardDatabaseAdmin />
+                : <Redirect to="/" />
+            }
+          />
+          {/* Beta admin: per-user scan limit overrides. Email-only gate
+              client-side; server enforces email on every /api/admin/users
+              route. Separate from card-database admin (which adds a
+              password gate for destructive DB ops). */}
+          <Route
+            path="/admin"
+            component={() =>
+              user?.email?.trim().toLowerCase() === "daniel.j.holley@gmail.com"
+                ? <AdminUsers />
                 : <Redirect to="/" />
             }
           />

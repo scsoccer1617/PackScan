@@ -11,8 +11,14 @@
 
 import { Camera, Mic, PenLine } from "lucide-react";
 import ModeTile from "@/components/ModeTile";
+import ScanLimitBanner from "@/components/ScanLimitBanner";
+import { useScanQuota } from "@/hooks/use-scan-quota";
 
 export default function ScanPicker() {
+  // When the user is at the beta cap, dim the three mode tiles so they
+  // don't think a tap will do something. The server returns 429 either
+  // way — this is just UX polish so the cap state feels deliberate.
+  const { exhausted } = useScanQuota();
   return (
     <div className="pt-6 pb-6">
       <div className="px-4">
@@ -24,9 +30,18 @@ export default function ScanPicker() {
         </p>
       </div>
 
+      <ScanLimitBanner />
+
       {/* Three equal tiles. Larger than Home's version since this is the
-          only content on the page — tap targets should feel confident. */}
-      <section className="mx-4 mt-5 grid grid-cols-3 gap-2.5">
+          only content on the page — tap targets should feel confident.
+          When the beta cap is hit we wash them out (60% opacity, no
+          pointer events) so the affordance reflects the banner above. */}
+      <section
+        className={`mx-4 mt-5 grid grid-cols-3 gap-2.5 ${
+          exhausted ? "opacity-60 pointer-events-none" : ""
+        }`}
+        aria-disabled={exhausted}
+      >
         <ModeTile
           href="/scan/camera"
           icon={<Camera className="w-6 h-6" strokeWidth={2.25} />}
