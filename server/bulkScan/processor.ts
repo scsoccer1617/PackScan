@@ -42,6 +42,35 @@ import { lookupCard as cardDbLookup } from '../cardDatabaseService';
 import { appendCardRow } from '../googleSheets';
 import { searchCardValues, getEbaySearchUrl } from '../ebayService';
 import { getScanQuota, incrementScanCount } from '../scanQuota';
+import { logUserScan, type ScanFieldValues } from '../userScans';
+
+/**
+ * Project the analyzer's loose `analysis` blob down to the ScanFieldValues
+ * shape used by the user-scans logger. Mirrors the projection used in the
+ * single-card scan flow (ScanResult.tsx → snapshotFromCardData) so a row
+ * from bulk-scan is comparable to a row from /scan in /admin/scans.
+ */
+function analysisToScanFieldValues(a: Record<string, any>): ScanFieldValues {
+  return {
+    sport: a.sport ?? null,
+    playerFirstName: a.playerFirstName ?? null,
+    playerLastName: a.playerLastName ?? null,
+    brand: a.brand ?? null,
+    collection: a.collection ?? null,
+    set: a.set ?? null,
+    cardNumber: a.cardNumber ?? null,
+    year: typeof a.year === 'number' ? a.year : (a.year ? Number.parseInt(String(a.year), 10) || null : null),
+    variant: a.variant ?? null,
+    team: a.team ?? null,
+    cmpNumber: a.cmpNumber ?? null,
+    serialNumber: a.serialNumber ?? null,
+    foilType: a.foilType ?? null,
+    isRookie: typeof a.isRookieCard === 'boolean' ? a.isRookieCard : null,
+    isAuto: typeof a.isAutographed === 'boolean' ? a.isAutographed : null,
+    isNumbered: typeof a.isNumbered === 'boolean' ? a.isNumbered : null,
+    isFoil: null,
+  };
+}
 
 // ── Batch lifecycle ──────────────────────────────────────────────────────
 
@@ -591,6 +620,29 @@ async function processItem(batch: ScanBatch, item: ScanBatchItem): Promise<'auto
         backImageUrl: null,
         ebaySearchUrl: typeof analysis.ebaySearchUrl === 'string' ? analysis.ebaySearchUrl : null,
       });
+
+      // Best-effort log to user_scans. Auto-save means the confidence gate
+      // passed AND the dealer never touched the row — strongest possible
+      // trust signal, so we tag it as 'confirmed' with an empty diff. The
+      // detected snapshot IS the final value (no edits possible on this
+      // path). cardId stays null because the bulk pipeline writes to the
+      // user's Google Sheet rather than the local cards table.
+      const fields = analysisToScanFieldValues(analysis);
+      logUserScan({
+        userId: batch.userId,
+        cardId: null,
+        userAction: 'confirmed',
+        detected: fields,
+        final: fields,
+        frontImage: null,
+        backImage: null,
+        scpScore: typeof analysis._scpMatchScore === 'number' ? analysis._scpMatchScore : null,
+        scpMatchedTitle: null,
+        cardDbCorroborated,
+        analyzerVersion: 'bulk_scan_auto_save',
+        fieldsChangedOverride: [],
+      }).catch(() => {});
+
       // Move both files to processed folder.
       if (batch.processedFolderId && batch.sourceFolderId) {
         await Promise.all([

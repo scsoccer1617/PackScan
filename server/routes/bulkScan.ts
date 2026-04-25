@@ -28,6 +28,36 @@ import {
 } from '../bulkScan/processor';
 import { getFolderName, fetchThumbnail, listInboxAllFiles } from '../bulkScan/driveClient';
 import { appendCardRow } from '../googleSheets';
+import { logUserScan, diffScanFields, type ScanFieldValues } from '../userScans';
+
+/**
+ * Project a loose analyzer/form blob down to ScanFieldValues. Same shape
+ * as the bulk-scan processor's projection so review-save rows in
+ * /admin/scans line up with auto-save rows. Kept local rather than
+ * exported from processor.ts to avoid pulling the whole processor module
+ * into the request hot path.
+ */
+function toScanFieldValues(o: Record<string, any>): ScanFieldValues {
+  return {
+    sport: o.sport ?? null,
+    playerFirstName: o.playerFirstName ?? null,
+    playerLastName: o.playerLastName ?? null,
+    brand: o.brand ?? null,
+    collection: o.collection ?? null,
+    set: o.set ?? null,
+    cardNumber: o.cardNumber ?? null,
+    year: typeof o.year === 'number' ? o.year : (o.year ? Number.parseInt(String(o.year), 10) || null : null),
+    variant: o.variant ?? null,
+    team: o.team ?? null,
+    cmpNumber: o.cmpNumber ?? null,
+    serialNumber: o.serialNumber ?? null,
+    foilType: o.foilType ?? null,
+    isRookie: typeof o.isRookieCard === 'boolean' ? o.isRookieCard : null,
+    isAuto: typeof o.isAutographed === 'boolean' ? o.isAutographed : null,
+    isNumbered: typeof o.isNumbered === 'boolean' ? o.isNumbered : null,
+    isFoil: null,
+  };
+}
 
 export function registerBulkScanRoutes(app: Express): void {
   // ── Sync ────────────────────────────────────────────────────────────────
@@ -194,6 +224,37 @@ export function registerBulkScanRoutes(app: Express): void {
     } catch (err: any) {
       console.error(`[bulkScan/route] /review/:itemId/save append failed:`, err);
       return res.status(500).json({ error: err?.message || 'sheet_append_failed' });
+    }
+
+    // Best-effort log to user_scans. The signal here is real: the dealer
+    // pulled this row out of the review queue and either confirmed it as-is
+    // (no edits) or corrected fields. We diff the analyzer's original
+    // snapshot against the merged final and let the diff drive the action:
+    //   - empty diff → 'confirmed' (dealer trusted the analyzer)
+    //   - any diff  → 'declined_edited' (dealer corrected fields)
+    // SCP/cardDb metadata isn't on the persisted analysisResult, so we
+    // leave those null — we'd have to re-run the gate to recover them.
+    try {
+      const detectedFields = toScanFieldValues(snapshot);
+      const finalFields = toScanFieldValues(merged);
+      const diff = diffScanFields(detectedFields, finalFields);
+      const userAction = diff.length === 0 ? 'confirmed' : 'declined_edited';
+      logUserScan({
+        userId,
+        cardId: null,
+        userAction,
+        detected: detectedFields,
+        final: finalFields,
+        frontImage: null,
+        backImage: null,
+        scpScore: null,
+        scpMatchedTitle: null,
+        cardDbCorroborated: null,
+        analyzerVersion: 'bulk_scan_review_save',
+      }).catch(() => {});
+    } catch (logErr) {
+      // Belt-and-suspenders: never let logging block the dealer's save.
+      console.error('[bulkScan/route] user_scans log failed (non-fatal):', logErr);
     }
 
     await db
