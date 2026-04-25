@@ -7,6 +7,8 @@ import {
 } from './googleSheets';
 import { getEbaySearchUrl } from './ebayService';
 import { storage } from './storage';
+import { logUserScan, type ScanFieldValues } from './userScans';
+import type { UserScanAction } from '@shared/schema';
 
 export function registerSheetRoutes(app: Express) {
   app.get('/api/sheets', requireAuth, async (req, res) => {
@@ -92,6 +94,40 @@ export function registerSheetRoutes(app: Express) {
   });
 
   // Append a card row.
+  // Optional `_scanTracking` blob carried alongside the card payload. The
+  // client sets this when the user used 👍 / 👎 on the scan-result screen so
+  // we can log the save into `user_scans` with the right userAction tag and
+  // the original detected-fields snapshot for diffing. None of this affects
+  // the actual sheet write — it's purely for the per-save audit log.
+  const scanFieldValuesSchema = z.object({
+    sport: z.string().optional().nullable(),
+    playerFirstName: z.string().optional().nullable(),
+    playerLastName: z.string().optional().nullable(),
+    brand: z.string().optional().nullable(),
+    collection: z.string().optional().nullable(),
+    set: z.string().optional().nullable(),
+    cardNumber: z.string().optional().nullable(),
+    year: z.union([z.number(), z.string()]).optional().nullable(),
+    variant: z.string().optional().nullable(),
+    team: z.string().optional().nullable(),
+    cmpNumber: z.string().optional().nullable(),
+    serialNumber: z.string().optional().nullable(),
+    foilType: z.string().optional().nullable(),
+    isRookie: z.boolean().optional().nullable(),
+    isAuto: z.boolean().optional().nullable(),
+    isNumbered: z.boolean().optional().nullable(),
+    isFoil: z.boolean().optional().nullable(),
+  }).partial();
+
+  const scanTrackingSchema = z.object({
+    userAction: z.enum(['confirmed', 'declined_edited', 'saved_no_feedback']),
+    detected: scanFieldValuesSchema.optional(),
+    scpScore: z.number().optional().nullable(),
+    scpMatchedTitle: z.string().optional().nullable(),
+    cardDbCorroborated: z.boolean().optional().nullable(),
+    analyzerVersion: z.string().optional().nullable(),
+  });
+
   const appendSchema = z.object({
     sheetId: z.number().optional(),
     card: z.object({
@@ -116,6 +152,7 @@ export function registerSheetRoutes(app: Express) {
       frontImageUrl: z.string().optional().nullable(),
       backImageUrl: z.string().optional().nullable(),
       ebaySearchUrl: z.string().optional().nullable(),
+      _scanTracking: scanTrackingSchema.optional(),
     }),
   });
 
@@ -186,6 +223,63 @@ export function registerSheetRoutes(app: Express) {
         backImageUrl: absolutize(backStored),
         ebaySearchUrl: ebayUrl,
       }, parsed.sheetId);
+
+      // Best-effort log to user_scans. The sheet write is the user's primary
+      // success signal — never block on or fail it because of audit logging.
+      // We don't have a `cards.id` here (this path writes to the user's
+      // Google Sheet, not the local DB), so cardId stays null. The detected
+      // snapshot is whatever the client captured at scan-result render time;
+      // when it's missing (older client) we fall back to using `final` as
+      // both detected and final, which yields fieldsChanged=[] but still
+      // captures the row for review.
+      const tracking = c._scanTracking;
+      const toYearNum = (y: number | string | null | undefined): number | null => {
+        if (y === null || y === undefined || y === '') return null;
+        if (typeof y === 'number') return Number.isFinite(y) ? y : null;
+        const n = Number.parseInt(String(y), 10);
+        return Number.isFinite(n) ? n : null;
+      };
+      const yrNum = toYearNum(c.year ?? null);
+      const detectedSnapshot: ScanFieldValues | undefined = tracking?.detected
+        ? { ...tracking.detected, year: toYearNum(tracking.detected.year ?? null) }
+        : undefined;
+      const finalValues: ScanFieldValues = {
+        sport: c.sport ?? null,
+        playerFirstName: c.playerFirstName ?? null,
+        playerLastName: c.playerLastName ?? null,
+        brand: c.brand ?? null,
+        collection: c.collection ?? null,
+        set: c.set ?? null,
+        cardNumber: c.cardNumber ?? null,
+        year: yrNum,
+        variant: (c.variant ?? c.variation) ?? null,
+        team: null,
+        cmpNumber: c.cmpNumber ?? null,
+        serialNumber: c.serialNumber ?? null,
+        foilType: c.foilType ?? null,
+        isRookie: c.isRookieCard ?? null,
+        isAuto: c.isAutographed ?? null,
+        isNumbered: c.isNumbered ?? null,
+        isFoil: null,
+      };
+      const action: UserScanAction = tracking?.userAction ?? 'saved_no_feedback';
+      logUserScan({
+        userId,
+        cardId: null,
+        userAction: action,
+        detected: detectedSnapshot ?? finalValues,
+        final: finalValues,
+        frontImage: absolutize(frontStored) || null,
+        backImage: absolutize(backStored) || null,
+        scpScore: tracking?.scpScore ?? null,
+        scpMatchedTitle: tracking?.scpMatchedTitle ?? null,
+        cardDbCorroborated: tracking?.cardDbCorroborated ?? null,
+        analyzerVersion: tracking?.analyzerVersion ?? null,
+        // 👍 means "all fields verified" — record empty diff regardless of
+        // string-coercion noise between detected and final.
+        fieldsChangedOverride: action === 'confirmed' ? [] : undefined,
+      }).catch(() => {});
+
       res.json({ ok: true, sheet: result.sheet, sheetUrl: result.sheetUrl });
     } catch (err: any) {
       if (err instanceof NotConnectedError) {

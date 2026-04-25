@@ -13,6 +13,43 @@ import type { CardFormValues } from "@shared/schema";
 interface UserSheet { id: number; googleSheetId: string; title: string; isDefault: boolean; }
 interface SheetsResponse { sheets: UserSheet[]; activeSheetId: number | null; }
 
+// Mirrors the server-side `ScanFieldValues` shape (server/userScans.ts).
+// We only carry what the scan-result screen has visibility into; anything
+// the client doesn't know is left undefined.
+export interface ScanFieldSnapshot {
+  sport?: string | null;
+  playerFirstName?: string | null;
+  playerLastName?: string | null;
+  brand?: string | null;
+  collection?: string | null;
+  set?: string | null;
+  cardNumber?: string | null;
+  year?: number | null;
+  variant?: string | null;
+  team?: string | null;
+  cmpNumber?: string | null;
+  serialNumber?: string | null;
+  foilType?: string | null;
+  isRookie?: boolean | null;
+  isAuto?: boolean | null;
+  isNumbered?: boolean | null;
+  isFoil?: boolean | null;
+}
+
+export type ScanUserAction = 'confirmed' | 'declined_edited' | 'saved_no_feedback';
+
+// Sent alongside the card payload as `_scanTracking`. The server logs this
+// into `user_scans` after a successful append. None of these fields affect
+// the actual sheet write — they're purely for the per-save audit log
+// reviewed at /admin/scans.
+export interface ScanTracking {
+  userAction: ScanUserAction;
+  scpScore?: number | null;
+  scpMatchedTitle?: string | null;
+  cardDbCorroborated?: boolean | null;
+  analyzerVersion?: string | null;
+}
+
 interface AppendCardPayload {
   sport?: string | null;
   year?: number | string | null;
@@ -33,6 +70,7 @@ interface AppendCardPayload {
   frontImageUrl?: string;
   backImageUrl?: string;
   ebaySearchUrl?: string;
+  _scanTracking?: ScanTracking & { detected?: ScanFieldSnapshot };
 }
 
 interface Props {
@@ -48,9 +86,27 @@ interface Props {
    * chip directly below the button.
    */
   compact?: boolean;
+  /**
+   * Optional scan-tracking metadata. When provided, the append payload
+   * carries a `_scanTracking` block so the server can log the save to
+   * `user_scans` with the right action tag (👍 / 👎 / plain) and a diff
+   * against the original detected snapshot. When omitted, the server
+   * falls back to logging as 'saved_no_feedback' with no diff.
+   */
+  scanTracking?: ScanTracking;
+  /** Snapshot of fields as the scanner originally returned them. */
+  initialDetected?: ScanFieldSnapshot;
 }
 
-function buildAppendPayload(cardData: Partial<CardFormValues>, averageValue: number, searchUrl?: string, frontImage?: string, backImage?: string): AppendCardPayload {
+function buildAppendPayload(
+  cardData: Partial<CardFormValues>,
+  averageValue: number,
+  searchUrl?: string,
+  frontImage?: string,
+  backImage?: string,
+  scanTracking?: ScanTracking,
+  initialDetected?: ScanFieldSnapshot,
+): AppendCardPayload {
   return {
     sport: cardData.sport ?? null,
     year: cardData.year ?? null,
@@ -74,10 +130,13 @@ function buildAppendPayload(cardData: Partial<CardFormValues>, averageValue: num
     frontImageUrl: frontImage,
     backImageUrl: backImage,
     ebaySearchUrl: searchUrl,
+    ...(scanTracking
+      ? { _scanTracking: { ...scanTracking, detected: initialDetected } }
+      : {}),
   };
 }
 
-export default function AddToSheetButton({ cardData, averageValue, searchUrl, frontImage, backImage, compact = false }: Props) {
+export default function AddToSheetButton({ cardData, averageValue, searchUrl, frontImage, backImage, compact = false, scanTracking, initialDetected }: Props) {
   const { user } = useAuth();
   const { toast } = useToast();
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -112,7 +171,7 @@ export default function AddToSheetButton({ cardData, averageValue, searchUrl, fr
   const append = useMutation({
     mutationFn: async () => {
       if (!cardData) throw new Error('No card data');
-      const card = buildAppendPayload(cardData, averageValue, searchUrl, frontImage, backImage);
+      const card = buildAppendPayload(cardData, averageValue, searchUrl, frontImage, backImage, scanTracking, initialDetected);
       const body = { sheetId: selectedSheet?.id, card };
       return apiRequest<{ ok: boolean; sheet: UserSheet; sheetUrl: string }>(
         { url: '/api/sheets/append', method: 'POST', body: JSON.stringify(body) }
@@ -130,7 +189,7 @@ export default function AddToSheetButton({ cardData, averageValue, searchUrl, fr
       try { parsed = JSON.parse(msg).error || msg; } catch {}
       const isNotConnected = parsed.includes('Connect Google') || msg.includes('GOOGLE_NOT_CONNECTED');
       if (isNotConnected && cardData) {
-        const card = buildAppendPayload(cardData, averageValue, searchUrl, frontImage, backImage);
+        const card = buildAppendPayload(cardData, averageValue, searchUrl, frontImage, backImage, scanTracking, initialDetected);
         startConnectAndAdd(card);
         return;
       }
