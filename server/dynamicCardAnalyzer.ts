@@ -1452,8 +1452,24 @@ function extractCardNumberPass(
     const numericTokenCount = (line: string) =>
       (line.match(/\b\d+(?:\.\d+)?\b/g) || []).length;
     const startsWithYear = (line: string) => /^\s*(?:19|20)\d{2}\b/.test(line);
-    const isTotalsLine = (line: string) =>
-      /\b(TOTALS?|MAJ\.?\s*LEA|CAREER|MAJORS?|MINORS?)\b/i.test(line);
+    // A line qualifies as a stats-table totals label only when it both
+    // contains a totals keyword AND looks label-shaped — i.e. it's not
+    // running prose. Long sentences in the legal/copyright block at the
+    // bottom of the back routinely contain bare "MAJOR" (e.g. "MAJOR
+    // LEAGUE BASEBALL TRADEMARKS AND COPYRIGHTS ARE USED WITH
+    // PERMISSION OF MAJOR LEAGUE BASEBALL PROPERTIES, INC."). Without
+    // a prose guard, that legalese gets treated as a totals anchor and
+    // rule #4's forward-walk drags the trailing standalone card number
+    // (e.g. 2002 Topps #186 in the bottom-corner banner) into the
+    // stat-block span — silently rejecting the only viable card-#
+    // candidate. Real totals labels are short ("MAJ. LEA. TOTALS",
+    // "CAREER TOTALS", "MINORS TOTALS", "MAJORS"); >=6 alphabetic words
+    // is overwhelmingly prose.
+    const isTotalsLine = (line: string) => {
+      if (!/\b(TOTALS?|MAJ\.?\s*LEA|CAREER|MAJORS?|MINORS?)\b/i.test(line)) return false;
+      const alphaWordCount = (line.match(/\b[A-Za-z]{2,}\b/g) || []).length;
+      return alphaWordCount < 6;
+    };
     const isStatRowLine = (line: string) => {
       const n = numericTokenCount(line);
       if (startsWithYear(line) && n >= 3) return true;
