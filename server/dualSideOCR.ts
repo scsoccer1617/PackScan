@@ -80,6 +80,13 @@ interface YearConfidenceFlags {
     consoleName: string;
     score: number;
   }>;
+  // Set true when CardDB had a row for the same (brand, year, cardNumber)
+  // slot and disagreed with SCP on the player surname. CardDB wins in that
+  // case (it's slot-keyed and hand-curated; SCP is free-text search). The
+  // bulk-scan inbox diagnostic UI surfaces this so the dealer knows the
+  // identification was reconciled across two sources.
+  _scpPlayerOverridden?: boolean;
+  _scpPlayerOverrideReason?: 'carddb_disagreement' | string;
   // Raw OCR text from each side of the card. Truncated to 4 KB per side
   // before persistence so the analysisResult jsonb stays small. Used by
   // the inbox diagnostic UI so the dealer can see exactly what the
@@ -1342,6 +1349,58 @@ async function combineCardResults(
               console.log(`[SCP-first] CardDB set/collection enrichment: ${filled.join(', ')}.`);
             } else {
               console.log('[SCP-first] CardDB row found but set/collection already populated — leaving OCR values in place.');
+            }
+
+            // CardDB-vs-SCP player-name disagreement check.
+            //
+            // For a given (brand, year, cardNumber) slot in CardDB there is
+            // exactly ONE player. SCP's keyword search, however, can return
+            // a same-numbered card from a DIFFERENT sport's product line that
+            // happens to share the same year+brand. The retry-without-player
+            // path (sportscardspro/index.ts) is especially exposed because it
+            // has no sport filter and accepts the highest-scoring candidate
+            // by structural anchors alone.
+            //
+            // Canonical example: 2003 Upper Deck Chipper Jones #384 (baseball).
+            // OCR misread the player from a noisy front (silver foil), the
+            // retry without player searched "2003 Upper Deck 384", and SCP
+            // returned 2003 Upper Deck MVP #384 (Nate Burleson, FOOTBALL) at
+            // score 63 — above the 55 retry floor. CardDB had the correct
+            // Chipper Jones row all along but SCP-first only used CardDB for
+            // set/collection enrichment, so Burleson stuck.
+            //
+            // When CardDB and SCP disagree on the surname for the same
+            // (brand, year, cardNumber) slot, CardDB is authoritative for
+            // the player name (and team). We trust CardDB here because it's
+            // a hand-curated, slot-keyed catalog while SCP is a free-text
+            // search across all sports.
+            try {
+              const dbFirst = String(enrichResult.playerFirstName || '').trim();
+              const dbLast = String(enrichResult.playerLastName || '').trim();
+              const scpLast = String(combined.playerLastName || '').trim();
+              const surnameNorm = (s: string) => s.toLowerCase().replace(/[^a-z]/g, '');
+              if (
+                dbLast && scpLast &&
+                surnameNorm(dbLast) !== surnameNorm(scpLast)
+              ) {
+                console.log(
+                  `[SCP-first] CardDB/SCP player disagreement on (brand="${combined.brand}", year=${combined.year}, cardNumber="${enrichNum}"): ` +
+                  `CardDB="${dbFirst} ${dbLast}" vs SCP="${combined.playerFirstName} ${combined.playerLastName}". ` +
+                  `Preferring CardDB (slot-keyed local catalog beats free-text SCP search across sports).`,
+                );
+                combined.playerFirstName = dbFirst;
+                combined.playerLastName = dbLast;
+                if (enrichResult.team) {
+                  combined.team = enrichResult.team;
+                }
+                // Surface that we overrode SCP’s name so the bulk-scan UI
+                // can show why and the confidence gate can route to review.
+                const flagged = combined as CardFormWithFlags;
+                flagged._scpPlayerOverridden = true;
+                flagged._scpPlayerOverrideReason = 'carddb_disagreement';
+              }
+            } catch (cmpErr: any) {
+              console.warn('[SCP-first] CardDB/SCP player disagreement check threw (non-fatal):', cmpErr?.message || cmpErr);
             }
           } else {
             console.log('[SCP-first] CardDB set/collection enrichment: no matching row — set/collection stay as OCR populated them.');

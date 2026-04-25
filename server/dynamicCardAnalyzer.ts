@@ -825,7 +825,21 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
       style: 'upper' | 'title' | 'lower' | 'other';
     }
     const classifySurnameLine = (line: string): SurnameLineShape | null => {
-      const tokens = line.trim().split(/\s+/).filter(Boolean);
+      // Strip a leading jersey-number token before classification. Many card
+      // designs print the player's jersey number immediately to the left of
+      // the surname in the same name sash ("10 JONES", "7 MANTLE"); Vision
+      // OCR returns the whole sash as a single line. Without this strip the
+      // single-token surname check would reject "10 JONES" as a 2-token line
+      // with a non-suffix tail, and the multi-line first+surname pairing
+      // never fires — forcing the regex fallback to scrape a 2-3 word phrase
+      // from the bio paragraph instead. The 2003 Upper Deck Chipper Jones
+      // back is the canonical example: line 2 = "CHIPPER", line 3 = "10 JONES".
+      // Only strip a 1-3 digit leading token; longer numbers are likelier to
+      // be card numbers / stats / years and shouldn't be treated as jersey #s.
+      const rawTokens = line.trim().split(/\s+/).filter(Boolean);
+      const tokens = (rawTokens.length >= 2 && /^\d{1,3}$/.test(rawTokens[0]))
+        ? rawTokens.slice(1)
+        : rawTokens;
       if (tokens.length === 1) {
         if (!isSingleNameWord(tokens[0])) return null;
         return { surname: tokens[0], suffix: null, style: wordCaseStyle(tokens[0]) };
