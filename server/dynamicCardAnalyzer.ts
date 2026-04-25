@@ -2502,6 +2502,67 @@ function extractCardNumberPass(
       return;
     }
 
+    // Player-name banner: card # is printed inline with the player-name
+    // banner on the back of the card, e.g. "284 MASYN BLAZE WINN -".
+    // OCR collapses the small card-# box and the adjacent name banner
+    // onto a single line, so the standalone-numeric scorer below (which
+    // requires the number to be alone on its line) misses it entirely.
+    //
+    // Pattern: a 1-4 digit number leading a line whose remainder is
+    // dominated by player-name tokens — specifically, the line must
+    // contain the populated cardDetails.playerLastName (or first name)
+    // as a whole-word match, and the leading number must not look like
+    // a year. This is sport-/player-agnostic and rides on the player-
+    // name extraction having already populated cardDetails.
+    //
+    // Why this is safe: trivia prose lines on the back ("How many SBs
+    // for 36YO Lou Brock in 1975?") almost never contain the card's
+    // own player name, and stat-row lines lead with a year (filtered
+    // by the year-range check). The player-name byline anchor is the
+    // same signal used elsewhere as a strong identity guarantee.
+    const playerLastBannerTokens =
+      typeof cardDetails.playerLastName === 'string' && cardDetails.playerLastName.trim()
+        ? cardDetails.playerLastName.trim().toUpperCase().split(/\s+/).filter(t => t.length >= 3)
+        : [];
+    const playerFirstBannerToken =
+      typeof cardDetails.playerFirstName === 'string' && cardDetails.playerFirstName.trim()
+        ? cardDetails.playerFirstName.trim().toUpperCase()
+        : '';
+    if (playerLastBannerTokens.length > 0 || playerFirstBannerToken.length >= 3) {
+      for (let li = 0; li < lines.length; li++) {
+        const ln = lines[li].trim();
+        const m = ln.match(/^(\d{1,4})\s+(.+)$/);
+        if (!m) continue;
+        const num = m[1];
+        const rest = m[2];
+        const numInt = parseInt(num);
+        if (!(numInt > 0 && numInt < 10000)) continue;
+        // Reject years to avoid grabbing copyright/career-start years.
+        if (numInt >= 1900 && numInt <= 2099) continue;
+        // Skip stat-row-shaped lines (4+ standalone numeric tokens after
+        // the leading digit — a stat row like "284 1 2 3 4 5" would
+        // otherwise look like a banner).
+        const numericTokensInRest = rest.split(/\s+/).filter(t => /^\d+(?:\.\d+)?$/.test(t));
+        if (numericTokensInRest.length >= 4) continue;
+        // Player-name byline anchor: require a whole-word match on the
+        // populated player-name tokens. This is what makes the rule
+        // safe — trivia/bio lines almost never contain the card's own
+        // player name.
+        const restUpper = rest.toUpperCase();
+        const lastNameHit = playerLastBannerTokens.some(tok => {
+          const re = new RegExp(`\\b${tok.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`);
+          return re.test(restUpper);
+        });
+        const firstNameHit = playerFirstBannerToken.length >= 3 &&
+          new RegExp(`\\b${playerFirstBannerToken.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(restUpper);
+        if (!lastNameHit && !firstNameHit) continue;
+        if (!acceptCandidate(num, 'player-name-banner')) continue;
+        cardDetails.cardNumber = num;
+        console.log(`Detected card number from player-name banner line ${li}: "${num}" (line: "${ln.slice(0, 80)}")`);
+        return;
+      }
+    }
+
     // Check the first 3 lines for a standalone number as fallback.
     // Skip this fallback when a stronger candidate exists: a standalone
     // numeric line immediately adjacent (±1) to the player-name line.
