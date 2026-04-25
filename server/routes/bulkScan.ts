@@ -201,6 +201,72 @@ export function registerBulkScanRoutes(app: Express): void {
     return res.json({ ok: true });
   });
 
+  // ── Reprocess one item ───────────────────────────────────────────────
+  // Drop a batch item so its files re-discover on the next sync.
+  //
+  // After a sync, items that ended up in 'review', 'failed', or 'skipped'
+  // keep their backFileId / frontFileId pointers in scan_batch_items, and
+  // discoverAndPlanItems uses those ids to dedupe so the same file isn't
+  // re-enqueued on the next sync. That's the right default — nobody wants
+  // duplicate sheet rows on every sync — but it locks the dealer out of
+  // re-running a card after they (a) move the file back to the inbox to
+  // try a different active sheet, or (b) fix something upstream and want
+  // a fresh shot at OCR/SCP.
+  //
+  // This endpoint is the escape hatch: deleting the scan_batch_items row
+  // removes the file ids from the seenFileIds set, so the next sync
+  // re-discovers and re-pairs the file like it's brand new. We block
+  // dropping rows that already auto-saved — those have a sheet row backing
+  // them, and re-syncing would silently double-write.
+  app.post('/api/bulk-scan/items/:itemId/reprocess', requireAuth, async (req: Request, res: Response) => {
+    const userId = (req.user as any)?.id as number | undefined;
+    if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+    const itemId = parseInt(req.params.itemId, 10);
+    if (!Number.isFinite(itemId)) return res.status(400).json({ error: 'Invalid item id' });
+    const [item] = await db
+      .select()
+      .from(scanBatchItems)
+      .where(eq(scanBatchItems.id, itemId))
+      .limit(1);
+    if (!item) return res.status(404).json({ error: 'Item not found' });
+    const [batch] = await db
+      .select()
+      .from(scanBatches)
+      .where(and(eq(scanBatches.id, item.batchId), eq(scanBatches.userId, userId)))
+      .limit(1);
+    if (!batch) return res.status(404).json({ error: 'Batch not found' });
+    if (item.status === 'auto_saved') {
+      // Auto-saved items already wrote a row to the user's sheet. Letting
+      // them be reprocessed would silently double-write that row on the
+      // next sync. Block it explicitly with a clear error so the UI can
+      // surface the reason.
+      return res.status(409).json({
+        error: 'auto_saved_blocks_reprocess',
+        message:
+          'This item already saved to your sheet. Delete the row from the sheet first if you want to reprocess.',
+      });
+    }
+
+    await db.delete(scanBatchItems).where(eq(scanBatchItems.id, itemId));
+    console.log(
+      `[bulkScan/route] /reprocess user=${userId} item=${itemId} (was status=${item.status}) ` +
+        `back=${item.backFileId ?? 'null'} front=${item.frontFileId ?? 'null'} — next sync will re-discover.`,
+    );
+
+    // Recompute the batch's review queue counter — dropping a 'review'
+    // item changes the user-visible badge on this batch.
+    const remaining = await db
+      .select({ id: scanBatchItems.id })
+      .from(scanBatchItems)
+      .where(and(eq(scanBatchItems.batchId, item.batchId), eq(scanBatchItems.status, 'review')));
+    await db
+      .update(scanBatches)
+      .set({ reviewQueueCount: remaining.length })
+      .where(eq(scanBatches.id, item.batchId));
+
+    return res.json({ ok: true });
+  });
+
   // ── Item image (Drive thumbnail proxy) ─────────────────────────────────
   // The review queue needs to render the front and back of each card so a
   // dealer can disambiguate at a glance. Browsers can't hit Drive's
