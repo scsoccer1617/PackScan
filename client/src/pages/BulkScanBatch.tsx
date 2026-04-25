@@ -95,8 +95,17 @@ export default function BulkScanBatch() {
   const batchId = params ? parseInt(params.id, 10) : NaN;
   const { toast } = useToast();
 
+  // The default queryFn only uses `queryKey[0]` as the URL, so we override
+  // here to compose the detail path from the batch id. Without this we
+  // were silently hitting the LIST endpoint and treating the response as a
+  // detail → "Couldn't load batch #N".
   const { data, isLoading, error } = useQuery<BatchResponse>({
     queryKey: ["/api/bulk-scan/batches", batchId],
+    queryFn: async () => {
+      const res = await fetch(`/api/bulk-scan/batches/${batchId}`, { credentials: "include" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+      return res.json();
+    },
     enabled: Number.isFinite(batchId),
   });
 

@@ -196,16 +196,23 @@ export default function BulkScan() {
       {/* Folder status */}
       {inboxConfigured && (
         <section className="mx-4 rounded-2xl bg-card border border-card-border p-4 space-y-2">
+          {/* When the folder name fails to resolve (Drive scope mismatch,
+              folder shared from another account, etc.) we fall back to the
+              raw id rather than "Loading…" so the dealer can at least see
+              something is configured — and the ExternalLink chevron lets
+              them tap through to verify the folder in Drive. */}
           <FolderRow
             label="Inbox"
-            name={foldersData?.names.inbox || "Loading…"}
+            name={foldersData?.names.inbox || foldersData?.folders.inboxFolderId || "Not set"}
+            unresolved={!foldersData?.names.inbox && !!foldersData?.folders.inboxFolderId}
             folderId={foldersData?.folders.inboxFolderId ?? null}
             testId="row-inbox"
           />
           {foldersData?.folders.processedFolderId && (
             <FolderRow
               label="Processed"
-              name={foldersData?.names.processed || "—"}
+              name={foldersData?.names.processed || foldersData?.folders.processedFolderId || "—"}
+              unresolved={!foldersData?.names.processed && !!foldersData?.folders.processedFolderId}
               folderId={foldersData?.folders.processedFolderId ?? null}
               testId="row-processed"
             />
@@ -362,11 +369,13 @@ function FolderRow({
   label,
   name,
   folderId,
+  unresolved,
   testId,
 }: {
   label: string;
   name: string;
   folderId: string | null;
+  unresolved?: boolean;
   testId?: string;
 }) {
   const content = (
@@ -378,7 +387,14 @@ function FolderRow({
         <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
           {label}
         </p>
-        <p className="text-sm font-medium truncate">{name}</p>
+        <p className={`text-sm font-medium truncate ${unresolved ? "font-mono text-[12px] text-foil-amber" : ""}`}>
+          {name}
+        </p>
+        {unresolved && (
+          <p className="text-[10px] text-foil-amber/80 mt-0.5">
+            Reconnect Google to grant Drive access
+          </p>
+        )}
       </div>
       {folderId && (
         <ExternalLink className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
