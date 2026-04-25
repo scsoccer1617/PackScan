@@ -323,6 +323,38 @@ export type CardVariationsInsert = z.infer<typeof cardVariationsInsertSchema>;
 export type CardVariation = typeof cardVariations.$inferSelect;
 
 // =============================================
+// CSV Sync Log — Drive → cardDatabase / cardVariations
+// =============================================
+// One row per successful Drive-driven import. The sync endpoint picks the most
+// recently modified CSV in each Drive folder, then skips the import if a row
+// already exists with the same (table_name, drive_file_id, drive_modified_time)
+// — i.e. the same revision has already been processed. Cron-safe.
+
+export const csvSyncLog = pgTable("csv_sync_log", {
+  id: serial("id").primaryKey(),
+  // 'cards' | 'variations' — matches importHistory.type for easy joins.
+  tableName: text("table_name").notNull(),
+  driveFileId: text("drive_file_id").notNull(),
+  driveFileName: text("drive_file_name").notNull(),
+  // Drive's modifiedTime for the file at the moment of import. Skip key.
+  driveModifiedTime: timestamp("drive_modified_time").notNull(),
+  // Counters reported by importCardsCSV / importVariationsCSV.
+  rowsImported: integer("rows_imported").notNull().default(0),
+  rowsReplaced: integer("rows_replaced").notNull().default(0),
+  errorCount: integer("error_count").notNull().default(0),
+  // 'auto' (cron) | 'manual' (admin button) — useful for activity tracing.
+  trigger: text("trigger").notNull(),
+  importedAt: timestamp("imported_at").defaultNow().notNull(),
+}, (table) => [
+  // Skip-check: WHERE table_name = ? AND drive_file_id = ? AND drive_modified_time = ?
+  index("csv_sync_log_lookup_idx").on(table.tableName, table.driveFileId, table.driveModifiedTime),
+]);
+
+export const csvSyncLogInsertSchema = createInsertSchema(csvSyncLog);
+export type CsvSyncLogInsert = z.infer<typeof csvSyncLogInsertSchema>;
+export type CsvSyncLogEntry = typeof csvSyncLog.$inferSelect;
+
+// =============================================
 // Holo — AI Condition Grading
 // =============================================
 // One row per Holo grading run. A grade can stand alone (attached to a scan

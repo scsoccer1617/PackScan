@@ -25,7 +25,15 @@ import { z } from 'zod';
 import { handleDualSideCardAnalysis } from './dualSideOCR';
 import { extractTextFromImage, analyzeSportsCardImage } from './googleVisionFetch';
 import { importCardsCSV, importVariationsCSV, lookupCard, enrichVoiceFields } from './cardDatabaseService';
-import { cardDatabase, cardVariations } from '../shared/schema';
+import { cardDatabase, cardVariations, csvSyncLog } from '../shared/schema';
+import {
+  findLatestCsvInFolder,
+  downloadFile,
+  findExistingSyncLog,
+  getCardsFolderId,
+  getVariationsFolderId,
+  isDriveSyncConfigured,
+} from './driveSync';
 import { join } from 'path';
 import fs from 'fs';
 import { gunzipSync } from 'zlib';
@@ -2744,6 +2752,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Secret not configured — fail closed so admin routes are never accidentally open.
       return res.status(500).json({ error: 'Admin password not configured on this server' });
     }
+    // Cron / machine-caller bypass: a CRON_TOKEN env secret + matching
+    // x-cron-token header skips the session-and-password check. Used by the
+    // Replit cron that pulls fresh CSVs from Drive on a schedule — cron jobs
+    // have no Express session and no admin password to send. The token is a
+    // separate secret from ADMIN_PASSWORD so machine access can be revoked
+    // independently from the human admin login.
+    const cronToken = process.env.CRON_TOKEN;
+    const providedCron = req.headers['x-cron-token'];
+    if (cronToken && providedCron && providedCron === cronToken) {
+      return next();
+    }
     // Must be signed in as the admin user first — password alone is not enough.
     const userEmail = ((req.user as any)?.email || '').toString().toLowerCase();
     if (!req.isAuthenticated?.() || !userEmail || userEmail !== ADMIN_EMAIL) {
@@ -2911,6 +2930,163 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const job = importJobs.get(req.params.jobId);
     if (!job) return res.status(404).json({ error: 'Job not found or expired' });
     return res.json(job);
+  });
+
+  // ── Drive → cardDatabase / cardVariations sync ──────────────────────────────
+  // Pulls the latest CSV from each Drive folder (cards + variations), feeds it
+  // into the existing import pipeline, and records what was imported in
+  // csv_sync_log so repeat calls (e.g. cron every 30 min) skip unchanged files.
+  // The actual import runs through the same runCardsImportJob /
+  // runVariationsImportJob workers as the upload path so progress UX is shared.
+
+  // GET /api/card-database/drive-sync-status — latest synced revision per table
+  // and whether the env vars are wired. Used to render the admin UI section
+  // and to let the cron know whether it should even attempt a run.
+  app.get(`${apiPrefix}/card-database/drive-sync-status`, requireAdminPassword, async (_req, res) => {
+    try {
+      const configured = isDriveSyncConfigured();
+      // Pull the most recent log row per table_name. Two small queries beats
+      // a window-function query and is portable across Postgres versions.
+      const [latestCards] = await db.select().from(csvSyncLog)
+        .where(eq(csvSyncLog.tableName, 'cards'))
+        .orderBy(desc(csvSyncLog.importedAt))
+        .limit(1);
+      const [latestVariations] = await db.select().from(csvSyncLog)
+        .where(eq(csvSyncLog.tableName, 'variations'))
+        .orderBy(desc(csvSyncLog.importedAt))
+        .limit(1);
+      return res.json({
+        configured,
+        cards: latestCards ?? null,
+        variations: latestVariations ?? null,
+      });
+    } catch (err: any) {
+      console.error('[DriveSync] status error:', err);
+      return res.status(500).json({ error: err.message || 'Failed to read drive sync status' });
+    }
+  });
+
+  // POST /api/card-database/sync-from-drive — picks the latest CSV in each of
+  // the configured Drive folders, skips any whose (file_id, modified_time)
+  // already exists in csv_sync_log, and kicks off background import jobs for
+  // the rest. Returns one jobId per table that started; null when skipped.
+  // Accepts ?force=1 to bypass the skip-check for manual re-imports.
+  app.post(`${apiPrefix}/card-database/sync-from-drive`, requireAdminPassword, async (req, res) => {
+    try {
+      if (!isDriveSyncConfigured()) {
+        return res.status(400).json({
+          error: 'Drive sync is not configured. Set GOOGLE_SERVICE_ACCOUNT_JSON, DRIVE_FOLDER_CARDS_ID, and DRIVE_FOLDER_VARIATIONS_ID secrets and share both folders with the service account email.',
+        });
+      }
+      const force = req.query.force === '1' || (req.body as any)?.force === true;
+      // Cron-token presence on the request distinguishes 'auto' (Replit cron)
+      // from 'manual' (admin button) for the trigger column. Same value is
+      // used by the bypass branch in requireAdminPassword.
+      const trigger: 'auto' | 'manual' = req.headers['x-cron-token'] ? 'auto' : 'manual';
+
+      const summary: {
+        cards: { jobId: string | null; skipped: boolean; file: { fileId: string; fileName: string; modifiedTime: string } | null; reason?: string };
+        variations: { jobId: string | null; skipped: boolean; file: { fileId: string; fileName: string; modifiedTime: string } | null; reason?: string };
+      } = {
+        cards: { jobId: null, skipped: false, file: null },
+        variations: { jobId: null, skipped: false, file: null },
+      };
+
+      // Cards
+      const cardsFile = await findLatestCsvInFolder(getCardsFolderId());
+      if (!cardsFile) {
+        summary.cards.skipped = true;
+        summary.cards.reason = 'No CSV files found in cards folder';
+      } else {
+        summary.cards.file = {
+          fileId: cardsFile.fileId,
+          fileName: cardsFile.fileName,
+          modifiedTime: cardsFile.modifiedTime.toISOString(),
+        };
+        const existing = force ? null : await findExistingSyncLog('cards', cardsFile.fileId, cardsFile.modifiedTime);
+        if (existing) {
+          summary.cards.skipped = true;
+          summary.cards.reason = `Already imported at ${existing.importedAt.toISOString()}`;
+        } else {
+          const buffer = await downloadFile(cardsFile.fileId);
+          const [beforeRow] = await db.select({ count: sql<number>`count(*)::int` }).from(cardDatabase);
+          const countBefore = beforeRow?.count ?? 0;
+          const jobId = randomUUID();
+          importJobs.set(jobId, { status: 'queued', type: 'cards', progress: { processed: 0, total: 0 }, startedAt: Date.now() });
+          // Fire-and-forget the import, then write the sync-log row when it
+          // completes (or skip the log on error so a failed run can retry).
+          (async () => {
+            await runCardsImportJob(jobId, buffer, countBefore);
+            const finalJob = importJobs.get(jobId);
+            if (finalJob?.status === 'done' && finalJob.result) {
+              await db.insert(csvSyncLog).values({
+                tableName: 'cards',
+                driveFileId: cardsFile.fileId,
+                driveFileName: cardsFile.fileName,
+                driveModifiedTime: cardsFile.modifiedTime,
+                rowsImported: finalJob.result.imported,
+                rowsReplaced: finalJob.result.replaced,
+                errorCount: finalJob.result.errorCount,
+                trigger,
+              });
+              console.log(`[DriveSync] cards: imported ${finalJob.result.imported} rows from ${cardsFile.fileName}`);
+            } else if (finalJob?.status === 'error') {
+              console.error(`[DriveSync] cards import failed: ${finalJob.error}`);
+            }
+          })().catch((err) => console.error('[DriveSync] cards post-import logging failed:', err));
+          summary.cards.jobId = jobId;
+        }
+      }
+
+      // Variations
+      const varsFile = await findLatestCsvInFolder(getVariationsFolderId());
+      if (!varsFile) {
+        summary.variations.skipped = true;
+        summary.variations.reason = 'No CSV files found in variations folder';
+      } else {
+        summary.variations.file = {
+          fileId: varsFile.fileId,
+          fileName: varsFile.fileName,
+          modifiedTime: varsFile.modifiedTime.toISOString(),
+        };
+        const existing = force ? null : await findExistingSyncLog('variations', varsFile.fileId, varsFile.modifiedTime);
+        if (existing) {
+          summary.variations.skipped = true;
+          summary.variations.reason = `Already imported at ${existing.importedAt.toISOString()}`;
+        } else {
+          const buffer = await downloadFile(varsFile.fileId);
+          const [beforeRow] = await db.select({ count: sql<number>`count(*)::int` }).from(cardVariations);
+          const countBefore = beforeRow?.count ?? 0;
+          const jobId = randomUUID();
+          importJobs.set(jobId, { status: 'queued', type: 'variations', progress: { processed: 0, total: 0 }, startedAt: Date.now() });
+          (async () => {
+            await runVariationsImportJob(jobId, buffer, countBefore);
+            const finalJob = importJobs.get(jobId);
+            if (finalJob?.status === 'done' && finalJob.result) {
+              await db.insert(csvSyncLog).values({
+                tableName: 'variations',
+                driveFileId: varsFile.fileId,
+                driveFileName: varsFile.fileName,
+                driveModifiedTime: varsFile.modifiedTime,
+                rowsImported: finalJob.result.imported,
+                rowsReplaced: finalJob.result.replaced,
+                errorCount: finalJob.result.errorCount,
+                trigger,
+              });
+              console.log(`[DriveSync] variations: imported ${finalJob.result.imported} rows from ${varsFile.fileName}`);
+            } else if (finalJob?.status === 'error') {
+              console.error(`[DriveSync] variations import failed: ${finalJob.error}`);
+            }
+          })().catch((err) => console.error('[DriveSync] variations post-import logging failed:', err));
+          summary.variations.jobId = jobId;
+        }
+      }
+
+      return res.json(summary);
+    } catch (err: any) {
+      console.error('[DriveSync] sync-from-drive error:', err);
+      return res.status(500).json({ error: err.message || 'Sync failed' });
+    }
   });
 
   // ── Push Dev → Prod ─────────────────────────────────────────────────────────

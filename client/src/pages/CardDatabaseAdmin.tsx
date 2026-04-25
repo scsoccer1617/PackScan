@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
-import { Database, Upload, Trash2, RefreshCw, CheckCircle, AlertCircle, Lock, LogOut, CloudUpload } from "lucide-react";
+import { Database, Upload, Trash2, RefreshCw, CheckCircle, AlertCircle, Lock, LogOut, CloudUpload, FolderSync } from "lucide-react";
 
 const SESSION_KEY = "admin_session_password";
 
@@ -45,6 +45,31 @@ interface PushJobStatus {
   finishedAt?: number;
   tables: PushTableProgress[];
   error?: string;
+}
+
+// Drive sync — latest revision per table, surfaced from /drive-sync-status.
+interface DriveSyncLogEntry {
+  id: number;
+  tableName: 'cards' | 'variations';
+  driveFileId: string;
+  driveFileName: string;
+  driveModifiedTime: string;
+  rowsImported: number;
+  rowsReplaced: number;
+  errorCount: number;
+  trigger: 'auto' | 'manual';
+  importedAt: string;
+}
+
+interface DriveSyncStatus {
+  configured: boolean;
+  cards: DriveSyncLogEntry | null;
+  variations: DriveSyncLogEntry | null;
+}
+
+interface DriveSyncSummary {
+  cards: { jobId: string | null; skipped: boolean; file: { fileId: string; fileName: string; modifiedTime: string } | null; reason?: string };
+  variations: { jobId: string | null; skipped: boolean; file: { fileId: string; fileName: string; modifiedTime: string } | null; reason?: string };
 }
 
 // ── Password Gate ────────────────────────────────────────────────────────────
@@ -136,6 +161,9 @@ function AdminPanel({ password, onLock }: { password: string; onLock: () => void
   const [variationsJob, setVariationsJob] = useState<ImportJobStatus | null>(null);
   const [pushJobId, setPushJobId] = useState<string | null>(null);
   const [pushJob, setPushJob] = useState<PushJobStatus | null>(null);
+  // Drive sync UI state
+  const [driveStatus, setDriveStatus] = useState<DriveSyncStatus | null>(null);
+  const [driveSyncing, setDriveSyncing] = useState(false);
 
   const authHeader = { "x-admin-password": password };
 
@@ -326,6 +354,75 @@ function AdminPanel({ password, onLock }: { password: string; onLock: () => void
   const cardsRunning = !!cardsJobId;
   const variationsRunning = !!variationsJobId;
 
+  // ── Drive sync ---------------------------------------------------------
+  // Status query is run on mount and after every successful sync so the
+  // "Last synced" lines reflect what just happened. Cheap query — just two
+  // limit-1 reads against csv_sync_log.
+  const fetchDriveStatus = useCallback(async () => {
+    try {
+      const res = await fetch("/api/card-database/drive-sync-status", { headers: authHeader });
+      if (res.status === 401) { onLock(); return; }
+      if (!res.ok) return;
+      const status: DriveSyncStatus = await res.json();
+      setDriveStatus(status);
+    } catch { /* transient */ }
+  }, [password, onLock]);
+
+  useEffect(() => { fetchDriveStatus(); }, [fetchDriveStatus]);
+
+  const driveSyncMutation = useMutation({
+    mutationFn: async (force: boolean): Promise<DriveSyncSummary> => {
+      const url = force ? "/api/card-database/sync-from-drive?force=1" : "/api/card-database/sync-from-drive";
+      const res = await fetch(url, { method: "POST", headers: authHeader });
+      if (res.status === 401) throw new Error("Unauthorized");
+      if (!res.ok) {
+        let msg = `Server error (${res.status})`;
+        try { const j = await res.json(); msg = j.error || msg; } catch {}
+        throw new Error(msg);
+      }
+      return res.json();
+    },
+    onMutate: () => { setDriveSyncing(true); },
+    onSuccess: (summary) => {
+      // If a job started, hand it off to the existing pollJob so progress
+      // shows in the same import card. Otherwise just refresh status text.
+      if (summary.cards.jobId) { setCardsJob(null); setCardsJobId(summary.cards.jobId); }
+      if (summary.variations.jobId) { setVariationsJob(null); setVariationsJobId(summary.variations.jobId); }
+      const bothSkipped = summary.cards.skipped && summary.variations.skipped;
+      if (bothSkipped) {
+        toast({
+          title: "Already up to date",
+          description: `Cards: ${summary.cards.reason ?? '—'}. Variations: ${summary.variations.reason ?? '—'}.`,
+        });
+      } else {
+        const started: string[] = [];
+        if (summary.cards.jobId) started.push(`cards ← ${summary.cards.file?.fileName}`);
+        if (summary.variations.jobId) started.push(`variations ← ${summary.variations.file?.fileName}`);
+        toast({
+          title: "Drive sync started",
+          description: started.length ? started.join(' · ') : 'Nothing to do.',
+        });
+      }
+      // Refresh status after a short delay so the new csv_sync_log row from a
+      // completed import is reflected. Imports are background so we re-fetch
+      // on each subsequent stats invalidation too.
+      setTimeout(fetchDriveStatus, 3000);
+    },
+    onError: (err: Error) => {
+      if (err.message === "Unauthorized") { onLock(); }
+      else { toast({ title: "Drive sync failed", description: err.message, variant: "destructive" }); }
+    },
+    onSettled: () => { setDriveSyncing(false); },
+  });
+
+  // Re-fetch status when an import job we kicked off finishes, so "Last synced"
+  // updates without the user clicking Refresh.
+  useEffect(() => {
+    if (cardsJob?.status === 'done' || variationsJob?.status === 'done') {
+      fetchDriveStatus();
+    }
+  }, [cardsJob?.status, variationsJob?.status, fetchDriveStatus]);
+
   return (
     <div className="p-4 space-y-5">
       <div className="flex items-center justify-between">
@@ -364,6 +461,81 @@ function AdminPanel({ password, onLock }: { password: string; onLock: () => void
               </div>
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      {/* Sync from Drive */}
+      <Card>
+        <CardHeader className="pb-2 pt-4 px-4">
+          <CardTitle className="text-sm font-semibold flex items-center gap-1.5">
+            <FolderSync className="w-4 h-4 text-emerald-600" />
+            Sync from Drive
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="px-4 pb-4 space-y-3">
+          {!driveStatus?.configured ? (
+            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">
+              Drive sync not configured. Set <code className="font-mono">GOOGLE_SERVICE_ACCOUNT_JSON</code>,{' '}
+              <code className="font-mono">DRIVE_FOLDER_CARDS_ID</code>, and{' '}
+              <code className="font-mono">DRIVE_FOLDER_VARIATIONS_ID</code> in your environment.
+            </p>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              Pulls the most recently modified CSV from each Drive folder and imports it. Re-imports are skipped if the file hasn’t changed.
+            </p>
+          )}
+
+          <div className="space-y-2">
+            {(['cards', 'variations'] as const).map((key) => {
+              const entry = driveStatus?.[key] ?? null;
+              const label = key === 'cards' ? 'Cards' : 'Variations';
+              return (
+                <div key={key} className="text-xs border border-slate-200 rounded p-2 bg-slate-50">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium text-slate-700">{label}</span>
+                    {entry ? (
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded uppercase tracking-wide ${entry.trigger === 'auto' ? 'bg-blue-100 text-blue-700' : 'bg-slate-200 text-slate-700'}`}>
+                        {entry.trigger}
+                      </span>
+                    ) : (
+                      <span className="text-[10px] text-slate-400">never synced</span>
+                    )}
+                  </div>
+                  {entry ? (
+                    <div className="mt-1 space-y-0.5 text-slate-600">
+                      <div className="truncate font-mono text-[11px]" title={entry.driveFileName}>{entry.driveFileName}</div>
+                      <div className="text-[11px]">
+                        {new Date(entry.importedAt).toLocaleString()} ·{' '}
+                        {entry.rowsImported.toLocaleString()} rows
+                        {entry.rowsReplaced > 0 ? ` (${entry.rowsReplaced.toLocaleString()} replaced)` : ''}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+
+          <Button
+            onClick={() => driveSyncMutation.mutate(false)}
+            disabled={!driveStatus?.configured || driveSyncing || cardsRunning || variationsRunning}
+            size="sm"
+            className="w-full"
+          >
+            {driveSyncing ? (
+              <><RefreshCw className="w-3.5 h-3.5 mr-1.5 animate-spin" /> Checking Drive…</>
+            ) : (
+              <><FolderSync className="w-3.5 h-3.5 mr-1.5" /> Sync now</>
+            )}
+          </Button>
+          <button
+            type="button"
+            onClick={() => driveSyncMutation.mutate(true)}
+            disabled={!driveStatus?.configured || driveSyncing || cardsRunning || variationsRunning}
+            className="w-full text-[11px] text-slate-500 hover:text-slate-700 underline disabled:opacity-50 disabled:no-underline"
+          >
+            Force re-import (ignore last-synced check)
+          </button>
         </CardContent>
       </Card>
 
