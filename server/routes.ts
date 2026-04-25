@@ -41,7 +41,7 @@ import {
 import { saveGrade, listGradesForUser, hydrateGrade, updateGradeIdentification } from './holo/storage';
 import { requireAuth, getUserPreferences } from './auth';
 import { requireScanQuota, incrementScanCount, getScanQuota } from './scanQuota';
-import { logUserScan, type ScanFieldValues } from './userScans';
+import { logUserScan, updateUserScan, type ScanFieldValues } from './userScans';
 import { lookupCard as scpLookupCard, SOURCE_SLUG as SCP_SOURCE_SLUG } from './sportscardspro';
 import type { ScanQueryInput as ScpScanQueryInput } from './sportscardspro';
 import { discoverParallels } from './sportscardspro/parallels';
@@ -692,6 +692,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
             scpMatchedTitle?: string | null;
             cardDbCorroborated?: boolean | null;
             analyzerVersion?: string | null;
+            // Audit-row id from the analyze response. When present we UPDATE
+            // the analyzed_no_save row instead of inserting a duplicate.
+            _userScanId?: number | null;
           }
         | undefined;
       const finalValues: ScanFieldValues = {
@@ -714,7 +717,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         isFoil: cardData.isFoil ?? null,
       };
       const userId = (req.user as any)?.id as number | undefined;
-      logUserScan({
+      const logParams = {
         userId: userId ?? null,
         cardId: newCard?.id ?? null,
         userAction: tracking?.userAction ?? 'saved_no_feedback',
@@ -728,7 +731,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         analyzerVersion: tracking?.analyzerVersion ?? null,
         // 👍 means "no edits regardless of any string-coercion noise"
         fieldsChangedOverride: tracking?.userAction === 'confirmed' ? [] : undefined,
-      }).catch(() => {});
+      };
+      // Promote analyze-time row when client passes scanId; insert otherwise.
+      const userScanId = tracking?._userScanId;
+      if (typeof userScanId === 'number' && userScanId > 0) {
+        updateUserScan(userScanId, logParams).then((updated) => {
+          if (!updated) logUserScan(logParams).catch(() => {});
+        }).catch(() => {});
+      } else {
+        logUserScan(logParams).catch(() => {});
+      }
 
       return res.status(201).json({ 
         card: newCard
@@ -3461,7 +3473,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const adminScansQuerySchema = z.object({
     limit: z.coerce.number().int().min(1).max(200).optional(),
     offset: z.coerce.number().int().min(0).optional(),
-    action: z.enum(['confirmed', 'declined_edited', 'saved_no_feedback']).optional(),
+    action: z.enum(['confirmed', 'declined_edited', 'saved_no_feedback', 'analyzed_no_save']).optional(),
     userId: z.coerce.number().int().positive().optional(),
   });
   app.get(`${apiPrefix}/admin/scans`, requireAuth, requireAdminUser, async (req, res) => {

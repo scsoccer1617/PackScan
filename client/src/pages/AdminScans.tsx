@@ -31,7 +31,7 @@ import { Badge } from "@/components/ui/badge";
 
 const PAGE_SIZE = 50;
 
-type UserAction = "confirmed" | "declined_edited" | "saved_no_feedback";
+type UserAction = "confirmed" | "declined_edited" | "saved_no_feedback" | "analyzed_no_save";
 
 interface ScanListRow {
   id: number;
@@ -97,18 +97,24 @@ const actionLabel: Record<UserAction, string> = {
   confirmed: "Confirmed",
   declined_edited: "Edited",
   saved_no_feedback: "No feedback",
+  analyzed_no_save: "Analyzed only",
 };
 
 const actionIcon: Record<UserAction, JSX.Element> = {
   confirmed: <ThumbsUp className="w-3 h-3" />,
   declined_edited: <ThumbsDown className="w-3 h-3" />,
   saved_no_feedback: <SaveIcon className="w-3 h-3" />,
+  // Analyze-only rows are unsaved scans — use a search-glass to distinguish
+  // visually from the save-related actions.
+  analyzed_no_save: <SaveIcon className="w-3 h-3 opacity-60" />,
 };
 
 const actionTone: Record<UserAction, string> = {
   confirmed: "bg-green-50 text-green-700 border-green-200",
   declined_edited: "bg-amber-50 text-amber-700 border-amber-200",
   saved_no_feedback: "bg-slate-100 text-slate-600 border-slate-200",
+  // Distinct dashed-blue tone so unsaved-scan rows scan-read at a glance.
+  analyzed_no_save: "bg-blue-50 text-blue-700 border-blue-200",
 };
 
 export default function AdminScans() {
@@ -167,7 +173,7 @@ export default function AdminScans() {
       {/* Filter bar */}
       <section className="mx-4 rounded-2xl bg-card border border-card-border p-3 flex items-center gap-2 flex-wrap">
         <span className="text-[12px] text-slate-600 mr-1">Filter:</span>
-        {(["all", "confirmed", "declined_edited", "saved_no_feedback"] as const).map((opt) => {
+        {(["all", "confirmed", "declined_edited", "saved_no_feedback", "analyzed_no_save"] as const).map((opt) => {
           const active = actionFilter === opt;
           const label = opt === "all" ? "All" : actionLabel[opt];
           return (

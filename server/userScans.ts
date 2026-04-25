@@ -22,6 +22,7 @@
 //   .catch(() => {})) so a thrown error here is swallowed and logged.
 
 import { db } from '@db';
+import { eq } from 'drizzle-orm';
 import { userScans, type UserScan, type UserScanAction } from '@shared/schema';
 
 /**
@@ -186,6 +187,72 @@ export async function logUserScan(params: LogUserScanParams): Promise<number | u
   } catch (err) {
     console.error('[user_scans] logUserScan failed:', err);
     return undefined;
+  }
+}
+
+/**
+ * Update an existing user_scans row identified by `scanId`. Used to
+ * promote a row from 'analyzed_no_save' (logged at analyze time) to one
+ * of the three save actions when the user actually saves the card.
+ *
+ * Best-effort — returns true on success, false on any failure (logged but
+ * never thrown). If the row doesn't exist (e.g. logging failed at
+ * analyze time, or scanId is stale), the caller can fall back to a fresh
+ * insert via logUserScan.
+ */
+export async function updateUserScan(
+  scanId: number,
+  params: Omit<LogUserScanParams, 'userId'> & { userId?: number | null },
+): Promise<boolean> {
+  try {
+    const detected = params.detected ?? {};
+    const final = params.final ?? detected;
+
+    const fieldsChanged = params.fieldsChangedOverride
+      ? [...params.fieldsChangedOverride]
+      : diffScanFields(detected, final);
+
+    const result = await db
+      .update(userScans)
+      .set({
+        cardId: params.cardId ?? null,
+        userAction: params.userAction,
+        fieldsChanged,
+        // Final-only update on save — detected was set at analyze time and
+        // we deliberately don't touch it here so the audit row reflects
+        // the original scanner output for review purposes.
+        finalSport: nullableString(final.sport),
+        finalPlayerFirstName: nullableString(final.playerFirstName),
+        finalPlayerLastName: nullableString(final.playerLastName),
+        finalBrand: nullableString(final.brand),
+        finalCollection: nullableString(final.collection),
+        finalSet: nullableString(final.set),
+        finalCardNumber: nullableString(final.cardNumber),
+        finalYear: nullableNumber(final.year),
+        finalVariant: nullableString(final.variant),
+        finalTeam: nullableString(final.team),
+        finalCmpNumber: nullableString(final.cmpNumber),
+        finalSerialNumber: nullableString(final.serialNumber),
+        finalFoilType: nullableString(final.foilType),
+        finalIsRookie: nullableBool(final.isRookie),
+        finalIsAuto: nullableBool(final.isAuto),
+        finalIsNumbered: nullableBool(final.isNumbered),
+        finalIsFoil: nullableBool(final.isFoil),
+        // Save-time metadata that the analyze call may not have known.
+        frontImage: params.frontImage ?? undefined,
+        backImage: params.backImage ?? undefined,
+        scpScore: params.scpScore != null ? String(params.scpScore) : undefined,
+        scpMatchedTitle: params.scpMatchedTitle ?? undefined,
+        cardDbCorroborated: params.cardDbCorroborated ?? undefined,
+        analyzerVersion: params.analyzerVersion ?? undefined,
+      })
+      .where(eq(userScans.id, scanId))
+      .returning({ id: userScans.id });
+
+    return result.length > 0;
+  } catch (err) {
+    console.error(`[user_scans] updateUserScan(scanId=${scanId}) failed:`, err);
+    return false;
   }
 }
 

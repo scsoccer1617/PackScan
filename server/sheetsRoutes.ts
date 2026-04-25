@@ -7,7 +7,7 @@ import {
 } from './googleSheets';
 import { getEbaySearchUrl } from './ebayService';
 import { storage } from './storage';
-import { logUserScan, type ScanFieldValues } from './userScans';
+import { logUserScan, updateUserScan, type ScanFieldValues } from './userScans';
 import type { UserScanAction } from '@shared/schema';
 
 export function registerSheetRoutes(app: Express) {
@@ -126,6 +126,10 @@ export function registerSheetRoutes(app: Express) {
     scpMatchedTitle: z.string().optional().nullable(),
     cardDbCorroborated: z.boolean().optional().nullable(),
     analyzerVersion: z.string().optional().nullable(),
+    // Audit-row id from the analyze response. When present we UPDATE the
+    // analyzed_no_save row in user_scans instead of inserting a new one,
+    // so a single scan produces a single ledger row.
+    _userScanId: z.number().int().positive().optional().nullable(),
   });
 
   const appendSchema = z.object({
@@ -263,7 +267,7 @@ export function registerSheetRoutes(app: Express) {
         isFoil: null,
       };
       const action: UserScanAction = tracking?.userAction ?? 'saved_no_feedback';
-      logUserScan({
+      const logParams = {
         userId,
         cardId: null,
         userAction: action,
@@ -278,7 +282,24 @@ export function registerSheetRoutes(app: Express) {
         // 👍 means "all fields verified" — record empty diff regardless of
         // string-coercion noise between detected and final.
         fieldsChangedOverride: action === 'confirmed' ? [] : undefined,
-      }).catch(() => {});
+      };
+      // Promote the analyze-time row when the client passed back the audit
+      // id from the analyze response. Falls back to a fresh insert when the
+      // id is missing (older clients) or the row no longer exists (logging
+      // failed at analyze time, or the analyzed_no_save row was somehow
+      // pruned). Either way we end up with one row representing the save.
+      const userScanId = (tracking as any)?._userScanId;
+      if (typeof userScanId === 'number' && userScanId > 0) {
+        updateUserScan(userScanId, logParams).then((updated) => {
+          if (!updated) {
+            // Stale id — row missing. Fall through to a clean insert so the
+            // save still gets recorded.
+            logUserScan(logParams).catch(() => {});
+          }
+        }).catch(() => {});
+      } else {
+        logUserScan(logParams).catch(() => {});
+      }
 
       res.json({ ok: true, sheet: result.sheet, sheetUrl: result.sheetUrl });
     } catch (err: any) {

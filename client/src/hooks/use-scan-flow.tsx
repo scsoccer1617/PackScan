@@ -17,6 +17,14 @@ export interface ScanFlowState {
   backImage: string;
   cardData: Partial<CardFormValues> | null;
   holoGrade: HoloGrade | null;
+  /**
+   * Audit-row id returned by /api/analyze-card-dual-images. Threaded back
+   * to the save endpoint as `_scanTracking._userScanId` so the analyze-time
+   * `analyzed_no_save` row gets UPDATEd in place instead of duplicated.
+   * Null when the analyze response didn't include one (older server / log
+   * write failed) — in which case the save falls back to a fresh insert.
+   */
+  userScanId: number | null;
 }
 
 const EMPTY: ScanFlowState = {
@@ -24,6 +32,7 @@ const EMPTY: ScanFlowState = {
   backImage: "",
   cardData: null,
   holoGrade: null,
+  userScanId: null,
 };
 
 interface ScanFlowContextValue extends ScanFlowState {

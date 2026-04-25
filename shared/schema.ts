@@ -608,7 +608,7 @@ export const userScans = pgTable("user_scans", {
   userId: integer("user_id").references(() => users.id, { onDelete: 'set null' }),
   cardId: integer("card_id").references(() => cards.id, { onDelete: 'set null' }),
   scannedAt: timestamp("scanned_at").defaultNow().notNull(),
-  userAction: text("user_action", { enum: ['confirmed', 'declined_edited', 'saved_no_feedback'] }).notNull(),
+  userAction: text("user_action", { enum: ['confirmed', 'declined_edited', 'saved_no_feedback', 'analyzed_no_save'] }).notNull(),
   // List of field names the user changed between detected and final. Empty
   // array (not null) when nothing changed — keeps querying simpler.
   fieldsChanged: jsonb("fields_changed").$type<string[]>().default([]).notNull(),
@@ -668,5 +668,16 @@ export type UserScan = typeof userScans.$inferSelect;
 export type UserScanInsert = typeof userScans.$inferInsert;
 
 // User-facing action labels for the admin UI.
-export const USER_SCAN_ACTIONS = ['confirmed', 'declined_edited', 'saved_no_feedback'] as const;
+//
+// 'analyzed_no_save' is logged at analyze time before the user has decided
+// whether to save. If they later save (and the client passes the scanId),
+// the row is UPDATEd in place to one of the three save actions. If they
+// never save, the row stays as 'analyzed_no_save' so the admin still sees
+// the burned scan attempt in the ledger.
+export const USER_SCAN_ACTIONS = [
+  'confirmed',
+  'declined_edited',
+  'saved_no_feedback',
+  'analyzed_no_save',
+] as const;
 export type UserScanAction = typeof USER_SCAN_ACTIONS[number];
