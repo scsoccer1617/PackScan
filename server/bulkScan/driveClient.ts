@@ -129,6 +129,43 @@ export async function listInboxImages(
 }
 
 /**
+ * Fetch a small Drive thumbnail by url. Drive's thumbnailLink is a hosted
+ * URL that needs an OAuth Bearer token — browsers can't hit it directly.
+ * We proxy through the server so the client can render a low-res preview
+ * without exposing credentials. Falls back to null when the file has no
+ * thumbnail (very rare for image mime-types).
+ */
+export async function fetchThumbnail(
+  userId: number,
+  fileId: string,
+): Promise<{ bytes: Buffer; contentType: string } | null> {
+  try {
+    const { oauth } = await getOAuthClient(userId);
+    const drive = driveFor(oauth);
+    const meta = await drive.files.get({ fileId, fields: 'thumbnailLink,mimeType' });
+    const link = meta.data.thumbnailLink;
+    if (!link) return null;
+    // Bump size to ~640px on the long edge — default is 220 which is
+    // grainy on retina mobile screens. Drive accepts the `=sNNN` suffix.
+    const sizedLink = link.replace(/=s\d+$/, '=s640');
+    const token = (await oauth.getAccessToken()).token;
+    const res = await fetch(sizedLink, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) {
+      console.warn(`[bulkScan/driveClient] fetchThumbnail(${fileId}) status=${res.status}`);
+      return null;
+    }
+    const ab = await res.arrayBuffer();
+    return {
+      bytes: Buffer.from(ab),
+      contentType: res.headers.get('content-type') || 'image/jpeg',
+    };
+  } catch (err: any) {
+    console.warn(`[bulkScan/driveClient] fetchThumbnail(${fileId}) failed: ${err?.message}`);
+    return null;
+  }
+}
+
+/**
  * Download a Drive file as a Buffer. The Vision analyzer wants raw bytes so
  * we buffer the whole response into memory; card scans are small JPEGs
  * (typically under 2 MB) so this is safe. `arraybuffer` responseType keeps

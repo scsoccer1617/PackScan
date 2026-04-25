@@ -419,27 +419,45 @@ function ReviewCard({
   skipping: boolean;
 }) {
   const snapshot = (item.analysisResult || {}) as Record<string, any>;
-  const [player, setPlayer] = useState(
-    [snapshot.playerFirstName, snapshot.playerLastName].filter(Boolean).join(" "),
-  );
-  const [year, setYear] = useState(
-    typeof snapshot.year === "number" ? String(snapshot.year) : snapshot.year || "",
-  );
-  const [brand, setBrand] = useState(snapshot.brand || "");
-  const [cardNumber, setCardNumber] = useState(snapshot.cardNumber || "");
-  const [variant, setVariant] = useState(snapshot.variant || "");
+  // Full sheet-schema-aligned editable state. Booleans stay as booleans;
+  // numerics stay as strings while typing so we can re-empty them.
+  const [player, setPlayer] = useState("");
+  const [year, setYear] = useState("");
+  const [brand, setBrand] = useState("");
+  const [cardNumber, setCardNumber] = useState("");
+  const [variant, setVariant] = useState("");
+  const [sport, setSport] = useState("");
+  const [collection, setCollection] = useState("");
+  const [setName, setSetName] = useState("");
+  const [cmpNumber, setCmpNumber] = useState("");
+  const [foilType, setFoilType] = useState("");
+  const [serialNumber, setSerialNumber] = useState("");
+  const [estimatedValue, setEstimatedValue] = useState("");
+  const [isRookieCard, setIsRookieCard] = useState(false);
+  const [isAutographed, setIsAutographed] = useState(false);
+  const [isNumbered, setIsNumbered] = useState(false);
 
-  // When the item changes (user navigates between review items) reset edits.
+  // When the item changes (user navigates between review items) reset edits
+  // back to the analyzer snapshot. Keep this in one place — if we miss a
+  // field we'd carry stale state across items.
   useEffect(() => {
-    setPlayer(
-      [snapshot.playerFirstName, snapshot.playerLastName].filter(Boolean).join(" "),
-    );
-    setYear(
-      typeof snapshot.year === "number" ? String(snapshot.year) : snapshot.year || "",
-    );
+    setPlayer([snapshot.playerFirstName, snapshot.playerLastName].filter(Boolean).join(" "));
+    setYear(typeof snapshot.year === "number" ? String(snapshot.year) : snapshot.year || "");
     setBrand(snapshot.brand || "");
     setCardNumber(snapshot.cardNumber || "");
     setVariant(snapshot.variant || "");
+    setSport(snapshot.sport || "");
+    setCollection(snapshot.collection || "");
+    setSetName(snapshot.set || "");
+    setCmpNumber(snapshot.cmpNumber || "");
+    setFoilType(snapshot.foilType || "");
+    setSerialNumber(snapshot.serialNumber || "");
+    setEstimatedValue(
+      typeof snapshot.estimatedValue === "number" ? snapshot.estimatedValue.toFixed(2) : "",
+    );
+    setIsRookieCard(!!snapshot.isRookieCard);
+    setIsAutographed(!!snapshot.isAutographed);
+    setIsNumbered(!!snapshot.isNumbered);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [item.id]);
 
@@ -447,13 +465,25 @@ function ReviewCard({
     const trimmed = player.trim();
     const [first, ...rest] = trimmed.split(/\s+/).filter(Boolean);
     const last = rest.join(" ");
+    const parsedYear = year ? Number(year) : null;
+    const parsedValue = estimatedValue ? Number(estimatedValue) : null;
     onSave({
       playerFirstName: first || null,
       playerLastName: last || null,
-      year: year ? Number(year) : null,
+      year: Number.isFinite(parsedYear) ? parsedYear : null,
       brand: brand || null,
       cardNumber: cardNumber || null,
       variant: variant || null,
+      sport: sport || null,
+      collection: collection || null,
+      set: setName || null,
+      cmpNumber: cmpNumber || null,
+      foilType: foilType || null,
+      serialNumber: serialNumber || null,
+      estimatedValue: Number.isFinite(parsedValue) ? parsedValue : null,
+      isRookieCard,
+      isAutographed,
+      isNumbered,
     });
   };
 
@@ -509,8 +539,15 @@ function ReviewCard({
         </div>
       )}
 
-      {/* Editable fields (inline — the full /add-card editor is still there
-          if a dealer wants everything). */}
+      {/* Front + back side-by-side preview — dealers asked for visual
+          context next to the editable fields. Pulls via the proxy endpoint
+          which authenticates against the user's Drive. Falls back to a
+          placeholder div if the file can't be loaded. */}
+      <CardImageStrip itemId={item.id} hasFront={!!item.frontFileId} hasBack={!!item.backFileId} />
+
+      {/* Editable fields — mirrors every column written to Google Sheets so
+          a dealer can save a fully-shaped row from review without bouncing
+          to /add-card. */}
       <div className="grid grid-cols-2 gap-2">
         <EditField
           label="Player"
@@ -527,10 +564,10 @@ function ReviewCard({
           testId="input-review-year"
         />
         <EditField
-          label="Card #"
-          value={cardNumber}
-          onChange={setCardNumber}
-          testId="input-review-card-number"
+          label="Sport"
+          value={sport}
+          onChange={setSport}
+          testId="input-review-sport"
         />
         <EditField
           label="Brand"
@@ -539,27 +576,78 @@ function ReviewCard({
           testId="input-review-brand"
         />
         <EditField
+          label="Set"
+          value={setName}
+          onChange={setSetName}
+          testId="input-review-set"
+        />
+        <EditField
+          label="Collection"
+          value={collection}
+          onChange={setCollection}
+          testId="input-review-collection"
+        />
+        <EditField
+          label="Card #"
+          value={cardNumber}
+          onChange={setCardNumber}
+          testId="input-review-card-number"
+        />
+        <EditField
+          label="CMP #"
+          value={cmpNumber}
+          onChange={setCmpNumber}
+          testId="input-review-cmp"
+        />
+        <EditField
+          label="Foil"
+          value={foilType}
+          onChange={setFoilType}
+          testId="input-review-foil"
+        />
+        <EditField
           label="Variation"
           value={variant}
           onChange={setVariant}
           testId="input-review-variant"
         />
+        <EditField
+          label="Serial #"
+          value={serialNumber}
+          onChange={setSerialNumber}
+          testId="input-review-serial"
+        />
+        <EditField
+          label="Avg. price ($)"
+          value={estimatedValue}
+          onChange={setEstimatedValue}
+          inputMode="numeric"
+          testId="input-review-value"
+        />
       </div>
 
-      {/* Estimated value read-only */}
-      {typeof snapshot.estimatedValue === "number" && (
-        <div className="text-[11px] text-slate-600">
-          Analyzer estimate:{" "}
-          <span className="font-medium text-ink">
-            ${snapshot.estimatedValue.toFixed(2)}
-          </span>
-          {snapshot.set && (
-            <>
-              {" "}· <span className="font-medium text-ink">{snapshot.set}</span>
-            </>
-          )}
-        </div>
-      )}
+      {/* Boolean toggles laid out side-by-side so a dealer can flip them
+          quickly during review. Default to whatever the OCR pulled. */}
+      <div className="grid grid-cols-3 gap-2">
+        <ToggleChip
+          label="Rookie"
+          on={isRookieCard}
+          onChange={setIsRookieCard}
+          testId="toggle-review-rookie"
+        />
+        <ToggleChip
+          label="Auto"
+          on={isAutographed}
+          onChange={setIsAutographed}
+          testId="toggle-review-auto"
+        />
+        <ToggleChip
+          label="Numbered"
+          on={isNumbered}
+          onChange={setIsNumbered}
+          testId="toggle-review-numbered"
+        />
+      </div>
 
       {/* Actions */}
       <div className="flex gap-2 pt-1">
@@ -596,6 +684,105 @@ function ReviewCard({
         </button>
       </div>
     </div>
+  );
+}
+
+function CardImageStrip({
+  itemId,
+  hasFront,
+  hasBack,
+}: {
+  itemId: number;
+  hasFront: boolean;
+  hasBack: boolean;
+}) {
+  if (!hasFront && !hasBack) return null;
+  return (
+    <div className="grid grid-cols-2 gap-2">
+      <CardImage
+        side="front"
+        itemId={itemId}
+        present={hasFront}
+        testId={`review-image-front-${itemId}`}
+      />
+      <CardImage
+        side="back"
+        itemId={itemId}
+        present={hasBack}
+        testId={`review-image-back-${itemId}`}
+      />
+    </div>
+  );
+}
+
+function CardImage({
+  side,
+  itemId,
+  present,
+  testId,
+}: {
+  side: "front" | "back";
+  itemId: number;
+  present: boolean;
+  testId?: string;
+}) {
+  const [errored, setErrored] = useState(false);
+  // Reset error state if the item changes — otherwise the next item's
+  // image won't get a chance to load.
+  useEffect(() => {
+    setErrored(false);
+  }, [itemId]);
+  return (
+    <div
+      className="relative aspect-[2/3] rounded-xl bg-muted/50 border border-card-border overflow-hidden"
+      data-testid={testId}
+    >
+      {present && !errored ? (
+        <img
+          src={`/api/bulk-scan/items/${itemId}/image/${side}`}
+          alt={`${side} of card`}
+          className="absolute inset-0 w-full h-full object-contain"
+          onError={() => setErrored(true)}
+          loading="lazy"
+        />
+      ) : (
+        <div className="absolute inset-0 flex items-center justify-center text-[10px] uppercase tracking-wide text-muted-foreground">
+          {side}
+        </div>
+      )}
+      <span className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded-md bg-black/60 text-white text-[9px] font-medium uppercase tracking-wide">
+        {side}
+      </span>
+    </div>
+  );
+}
+
+function ToggleChip({
+  label,
+  on,
+  onChange,
+  testId,
+}: {
+  label: string;
+  on: boolean;
+  onChange: (v: boolean) => void;
+  testId?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!on)}
+      className={cn(
+        "h-9 rounded-xl text-[11px] font-medium border transition",
+        on
+          ? "bg-foil-violet text-white border-foil-violet"
+          : "bg-card text-slate-600 border-card-border hover-elevate",
+      )}
+      data-testid={testId}
+      aria-pressed={on}
+    >
+      {label}
+    </button>
   );
 }
 
