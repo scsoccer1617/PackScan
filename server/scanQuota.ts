@@ -38,6 +38,12 @@ export interface ScanQuotaState {
   exhausted: boolean;
   /** Cards remaining (>= 0). */
   remaining: number;
+  /**
+   * True for users exempt from the beta cap entirely (currently the admin
+   * account). Quota gates skip the 429 when this is set; the UI pill hides
+   * itself because `limit` stays 0.
+   */
+  unlimited?: boolean;
 }
 
 const QUOTA_NOT_FOUND: ScanQuotaState = {
@@ -47,22 +53,45 @@ const QUOTA_NOT_FOUND: ScanQuotaState = {
   remaining: 0,
 };
 
+// Admin email mirrors the same default used by feedback.ts and routes.ts so a
+// single ADMIN_EMAIL env var (case-insensitive) controls admin gating AND
+// scan-quota exemption together. Beta testers stay capped at users.scanLimit;
+// only the admin runs unlimited so dev/QA can scan freely without burning
+// through testers' quotas.
+const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || 'daniel.j.holley@gmail.com').toLowerCase();
+
 /**
  * Read the current quota state for a user. Returns a fail-open shape (limit=0,
  * exhausted=false) when the user row can't be found — anonymous and unknown
  * users are not quota-gated. Errors bubble; callers decide whether to fail
  * open or closed.
+ *
+ * The admin user (email === ADMIN_EMAIL) is reported as `unlimited:true` with
+ * limit=0 so quota gates skip the cap and the usage pill hides itself.
  */
 export async function getScanQuota(userId: number | undefined | null): Promise<ScanQuotaState> {
   if (!userId) return QUOTA_NOT_FOUND;
   const [row] = await db
-    .select({ limit: users.scanLimit, count: users.scanCount })
+    .select({ limit: users.scanLimit, count: users.scanCount, email: users.email })
     .from(users)
     .where(eq(users.id, userId))
     .limit(1);
   if (!row) return QUOTA_NOT_FOUND;
   const used = row.count ?? 0;
   const limit = row.limit ?? 0;
+  const isAdmin = (row.email || '').toLowerCase() === ADMIN_EMAIL;
+  if (isAdmin) {
+    // Admin runs uncapped. We still report the actual used count for diagnostic
+    // purposes (admin's own scan history is still useful), but limit=0 hides
+    // the pill and exhausted=false ensures every gate passes.
+    return {
+      used,
+      limit: 0,
+      exhausted: false,
+      remaining: 0,
+      unlimited: true,
+    };
+  }
   return {
     used,
     limit,
@@ -110,6 +139,8 @@ export async function requireScanQuota(req: Request, res: Response, next: NextFu
   if (!userId) return next();
   try {
     const quota = await getScanQuota(userId);
+    // Admin / unlimited users always pass.
+    if (quota.unlimited) return next();
     if (quota.limit > 0 && quota.exhausted) {
       return res.status(429).json({
         error: 'limit_reached',
