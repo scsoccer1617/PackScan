@@ -995,6 +995,12 @@ function DetailsTab({
     ["Set", cardData.set || "—"],
     ["Collection", cardData.collection || "—"],
     ["Card #", cardData.cardNumber || "—"],
+    // CMP code is a manufacturer reference number (e.g. "CMP100358") printed
+    // in the fine print on the back of recent cards. Surfaced here so dealers
+    // can build out a CMP → set/parallel mapping. Already syncs to the
+    // Google Sheet ("CMP code" column) regardless of whether it's shown
+    // in the UI.
+    ["CMP code", (cardData as any).cmpNumber || "—"],
     ["Parallel", cardData.foilType || "Base"],
     ["Serial", cardData.serialNumber || "—"],
     ["PSA grade", cardData.psaGrade != null ? `PSA ${cardData.psaGrade}` : "—"],
