@@ -45,10 +45,16 @@ const APP_BASE_URL = process.env.APP_BASE_URL
 export const GOOGLE_CALLBACK_PATH = '/api/auth/google/callback';
 export const GOOGLE_CONNECT_CALLBACK_PATH = '/api/auth/google/connect/callback';
 
+// `drive.file` lets us touch files we created (sheet creation flow); the
+// broader `drive` scope is required for the bulk-scan pipeline because
+// dealers paste arbitrary folder URLs that the app didn't create — listing
+// images, reading folder names, and moving processed files all need full
+// Drive access. We keep both scopes; Google de-dupes overlapping access.
 const GOOGLE_OAUTH_SCOPES = [
   'openid', 'email', 'profile',
   'https://www.googleapis.com/auth/spreadsheets',
   'https://www.googleapis.com/auth/drive.file',
+  'https://www.googleapis.com/auth/drive',
 ];
 
 declare global {

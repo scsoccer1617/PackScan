@@ -96,7 +96,9 @@ export async function listInboxImages(
   const limit = opts.pageLimit ?? 500;
   const files: DriveImageFile[] = [];
   let pageToken: string | undefined;
+  let pages = 0;
   do {
+    pages++;
     const res = await drive.files.list({
       // `and trashed=false` keeps deleted files out. `parents in '<folderId>'`
       // restricts to direct children so we don't recurse into subfolders the
@@ -122,6 +124,7 @@ export async function listInboxImages(
     }
     pageToken = res.data.nextPageToken || undefined;
   } while (pageToken && files.length < limit);
+  console.log(`[bulkScan/driveClient] listInboxImages(${folderId}) user=${userId}: ${files.length} image(s) across ${pages} page(s)`);
   return files;
 }
 
@@ -187,16 +190,23 @@ export async function moveFile(
 /**
  * Resolve a Drive folder name (or verify a folder id) so the UI can surface
  * a human-readable label alongside the raw id. Returns null when the folder
- * doesn't exist or isn't accessible under `drive.file` scope.
+ * doesn't exist or isn't accessible. Logs the failure so we don't have to
+ * play guessing games when a dealer reports "Inbox stuck on loading".
  */
 export async function getFolderName(userId: number, folderId: string): Promise<string | null> {
   try {
     const { oauth } = await getOAuthClient(userId);
     const drive = driveFor(oauth);
     const res = await drive.files.get({ fileId: folderId, fields: 'name,mimeType' });
-    if (res.data.mimeType !== 'application/vnd.google-apps.folder') return null;
+    if (res.data.mimeType !== 'application/vnd.google-apps.folder') {
+      console.warn(`[bulkScan/driveClient] getFolderName(${folderId}): not a folder (mimeType=${res.data.mimeType})`);
+      return null;
+    }
     return res.data.name || null;
-  } catch {
+  } catch (err: any) {
+    const status = err?.response?.status ?? err?.code;
+    const msg = err?.response?.data?.error?.message ?? err?.message ?? 'unknown';
+    console.warn(`[bulkScan/driveClient] getFolderName(${folderId}) for user=${userId} failed: status=${status} msg=${msg}`);
     return null;
   }
 }
