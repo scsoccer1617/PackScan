@@ -143,8 +143,14 @@ export function setupAuth(app: Express) {
     saveUninitialized: false,
     cookie: {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
+      // In the Replit dev workspace the app is loaded inside a cross-site
+      // iframe (replit.com embedding *.picard.replit.dev). Browsers refuse to
+      // send SameSite=Lax cookies in that context, so the user appears logged
+      // out inside the workspace preview even after authenticating in a
+      // standalone tab. Use SameSite=None+Secure in dev so the iframe sees
+      // the session cookie. Production keeps the safer Lax default.
+      secure: process.env.NODE_ENV === 'production' || !!process.env.REPLIT_DEV_DOMAIN,
+      sameSite: process.env.REPLIT_DEV_DOMAIN ? 'none' : 'lax',
       maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
     },
   }));
