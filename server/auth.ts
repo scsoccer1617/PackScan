@@ -38,8 +38,15 @@ function resolveSessionSecret(): string {
 const SESSION_SECRET = resolveSessionSecret();
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_OAUTH_CLIENT_ID;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
-const APP_BASE_URL = process.env.APP_BASE_URL
-  || (process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : '')
+// REPLIT_DEV_DOMAIN is only set inside the dev workspace, never in a published
+// deployment. Prefer it over APP_BASE_URL so the dev process always sends
+// Google a dev-domain callback URL, even when APP_BASE_URL is configured as a
+// shared secret pointing at production. Deployments fall through to
+// APP_BASE_URL as before.
+const APP_BASE_URL = (process.env.REPLIT_DEV_DOMAIN
+  ? `https://${process.env.REPLIT_DEV_DOMAIN}`
+  : '')
+  || process.env.APP_BASE_URL
   || 'http://localhost:5000';
 
 export const GOOGLE_CALLBACK_PATH = '/api/auth/google/callback';
