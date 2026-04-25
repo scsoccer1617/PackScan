@@ -1572,6 +1572,30 @@ function extractCardNumberPass(
         console.log(`[CardNum] Rejecting "${matched}" via ${source} — only appears inside stats block`);
         return false;
       }
+      // Prose-context guard. If the candidate is embedded inside a full
+      // sentence (≥3 surrounding alphabetic words on the same line), it's
+      // overwhelmingly a trivia/bio token, not a card number. Catches
+      // "36YO" inside "How many SBs for 36YO Lou Brock in 1975?" and
+      // similar prose-noise across all sources — numeric, alphanum,
+      // hyphenated, digit-letter-suffix — without ever needing to know
+      // anything card-set-specific.
+      //
+      // Skipped for sources that, by construction, don't read from prose:
+      //   - 'first-line-number' / 'standalone-line-number' — these only
+      //     match lines that are JUST a number, so by definition there's
+      //     no surrounding prose to flag.
+      //   - 'standalone-line-alphanum' — same: regex anchored to a line
+      //     that contains only the token.
+      // Running the guard on these is harmless but wastes a regex; skip
+      // it to keep the hot path tight.
+      const skipProseGuard =
+        source === 'first-line-number' ||
+        source === 'standalone-line-number' ||
+        source === 'standalone-line-alphanum';
+      if (!skipProseGuard && isCandidateInsideProse(matched)) {
+        console.log(`[CardNum] Rejecting "${matched}" via ${source} — token is embedded inside a prose sentence (≥3 surrounding alphabetic words)`);
+        return false;
+      }
       // When a stats block is detected on this side, a bare-numeric candidate
       // that ONLY survives because it appeared as a standalone line is
       // almost certainly a stat-table cell that escaped block detection
@@ -1664,6 +1688,78 @@ function extractCardNumberPass(
       }
     }
     
+    // Helper: is a candidate token embedded in a prose sentence?
+    //
+    // Real card numbers appear in label-like positions: a small box, a banner,
+    // after a `#` sigil, on a line by themselves, or right next to the player
+    // name. They are NEVER the 4th word of a full sentence.
+    //
+    // We classify a line as "prose" when it contains ≥3 alphabetic words
+    // (other than the candidate itself), each ≥2 chars. That's enough to
+    // catch trivia questions like "How many SBs for 36YO Lou Brock in 1975?"
+    // without false-flagging short label-like lines like "MASYN WINN • SS"
+    // (only 2 alphabetic words after stripping bullets) or stat-row headers
+    // like "YEAR CLUB AB H 2B 3B HR RBI AVG" (those are caught by stat-block
+    // detection, and individually most words are 2-3 chars; the prose guard
+    // is a backstop).
+    //
+    // Generic by design — no hardcoded card-set rules, just a structural
+    // signal that the candidate is part of running English text.
+    const findLineForCandidate = (candidate: string): string | undefined => {
+      // Word-boundary search so "36YO" finds the trivia line, but a substring
+      // hit like "284" inside "2845" doesn't trip.
+      const re = new RegExp(`\\b${candidate.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`);
+      return lines.find(l => re.test(l));
+    };
+    const isCandidateInsideProse = (candidate: string): boolean => {
+      const line = findLineForCandidate(candidate);
+      if (!line) return false;
+
+      // PLAYER-NAME BYLINE EXEMPTION. If the line contains the player's
+      // first or last name, it's overwhelmingly a card-back byline like
+      // "284  MASYN BLAZE WINN  •  SS" (where OCR collapsed the boxed
+      // card # and the adjacent name banner onto one line). That's the
+      // EXACT shape Topps Heritage uses, and it's where the real card
+      // number lives. The same player-name signal is used downstream at
+      // the standalone-line scoring; we mirror it here as an exemption
+      // so the prose guard never rejects a candidate sitting next to the
+      // player. Trivia/bio prose almost never contains the player's own
+      // name (the back tells stories about other players or facts).
+      const upperLine = line.toUpperCase();
+      const playerLastTokens =
+        typeof cardDetails.playerLastName === 'string' && cardDetails.playerLastName.trim()
+          ? cardDetails.playerLastName.trim().toUpperCase().split(/\s+/).filter(t => t.length >= 3)
+          : [];
+      const playerFirstUpper =
+        typeof cardDetails.playerFirstName === 'string' && cardDetails.playerFirstName.trim()
+          ? cardDetails.playerFirstName.trim().toUpperCase()
+          : '';
+      for (const tok of playerLastTokens) {
+        const re = new RegExp(`\\b${tok.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`);
+        if (re.test(upperLine)) return false;
+      }
+      if (playerFirstUpper && playerFirstUpper.length >= 3) {
+        const re = new RegExp(`\\b${playerFirstUpper.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`);
+        if (re.test(upperLine)) return false;
+      }
+
+      // Strip the candidate token itself, then count remaining alphabetic
+      // words. We split on whitespace AND punctuation so "36YO," and
+      // "(36YO)" reduce to "36YO". Words must be ≥2 chars and pure A-Z
+      // (case-insensitive) so initials, single letters, and digit tokens
+      // don't pad the count.
+      const candidateRe = new RegExp(`\\b${candidate.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'g');
+      const stripped = line.replace(candidateRe, ' ');
+      const tokens = stripped.split(/[^A-Za-z]+/).filter(t => t.length >= 2);
+      // 3+ surrounding alphabetic words = running prose. With the player-
+      // name byline exemption above, this threshold is safe: real card
+      // numbers either sit on a line of their own (skipped via
+      // skipProseGuard), share a line with the player's name (exempt
+      // above), or share a line with a brand wordmark + at most 1-2
+      // qualifier words (still under threshold).
+      return tokens.length >= 3;
+    };
+
     // Helper: check if a number appears in a player bio context (height, weight, draft pick, etc.)
     const isPlayerBioNumber = (num: string, contextLine: string): boolean => {
       const numVal = parseInt(num);
