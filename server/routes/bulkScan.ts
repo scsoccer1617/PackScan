@@ -86,6 +86,60 @@ export function registerBulkScanRoutes(app: Express): void {
     return res.json({ batch, items });
   });
 
+  // ── Delete a batch ──────────────────────────────────────────────────────
+  // Wipes the batch row and (via FK cascade) every scan_batch_items row
+  // hanging off it. Used to clear out test/dry-run batches and stale
+  // history from the UI without touching Drive or the user's sheet.
+  //
+  // Important caveats the UI surfaces:
+  // - We block deletion while status='running' so the worker doesn't try
+  //   to update rows that just disappeared underneath it.
+  // - Deleting the batch also drops the scan_batch_items rows, which
+  //   means any file ids that were tracked here fall out of the
+  //   seenFileIds dedup set used by discoverAndPlanItems(). If those
+  //   files are still sitting in the Drive inbox they will be picked
+  //   up by the next sync as if brand new — same behavior as the
+  //   per-item Reprocess endpoint, just at batch granularity.
+  // - Auto-saved items already wrote a row to the user's Google Sheet.
+  //   Deleting the batch does NOT remove those sheet rows. If the user
+  //   then moves the auto-saved files back into the inbox, the next
+  //   sync would re-process them and append duplicates. The UI warns
+  //   about this when the batch contains any auto_saved items.
+  app.delete('/api/bulk-scan/batches/:id', requireAuth, async (req: Request, res: Response) => {
+    const userId = (req.user as any)?.id as number | undefined;
+    if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+    const batchId = parseInt(req.params.id, 10);
+    if (!Number.isFinite(batchId)) return res.status(400).json({ error: 'Invalid batch id' });
+    const [batch] = await db
+      .select()
+      .from(scanBatches)
+      .where(and(eq(scanBatches.id, batchId), eq(scanBatches.userId, userId)))
+      .limit(1);
+    if (!batch) return res.status(404).json({ error: 'Batch not found' });
+    if (batch.status === 'running') {
+      return res.status(409).json({
+        error: 'batch_running',
+        message:
+          "This batch is still running. Wait for it to finish before deleting.",
+      });
+    }
+    // Count auto_saved items so we can include the number in the log
+    // line — useful when reconciling sheet history with Holo activity.
+    const autoSaved = await db
+      .select({ id: scanBatchItems.id })
+      .from(scanBatchItems)
+      .where(and(eq(scanBatchItems.batchId, batchId), eq(scanBatchItems.status, 'auto_saved')));
+    // FK on scan_batch_items.batchId is ON DELETE CASCADE, so dropping
+    // the parent row also drops the children in one statement.
+    await db.delete(scanBatches).where(eq(scanBatches.id, batchId));
+    console.log(
+      `[bulkScan/route] /batches/${batchId} DELETE user=${userId} ` +
+        `status=${batch.status} fileCount=${batch.fileCount} ` +
+        `autoSavedItems=${autoSaved.length} dryRun=${batch.dryRun}`,
+    );
+    return res.json({ ok: true });
+  });
+
   // ── Review: save a reviewed item ────────────────────────────────────────
   // Accepts the (potentially edited) card form values from the review UI
   // and appends them to the user's active sheet. Rolls the item from

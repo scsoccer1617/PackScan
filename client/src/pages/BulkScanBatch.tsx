@@ -17,7 +17,7 @@
 // review queue without a manual refresh.
 
 import { useEffect, useMemo, useState } from "react";
-import { Link, useRoute } from "wouter";
+import { Link, useLocation, useRoute } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import {
   ArrowLeft,
@@ -31,6 +31,7 @@ import {
   ChevronUp,
   Info,
   ListChecks,
+  Trash2,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -189,6 +190,43 @@ export default function BulkScanBatch() {
     },
   });
 
+  // Delete the entire batch and its items. The server blocks while
+  // status='running'; we additionally hide the button in that case so
+  // the user never sees a guaranteed-409 click target. On success we
+  // bounce back to the batch list — the current detail view points to
+  // a batch that no longer exists.
+  const [, setLocation] = useLocation();
+  const deleteBatchMutation = useMutation({
+    mutationFn: async () =>
+      apiRequest<{ ok: true }>({
+        url: `/api/bulk-scan/batches/${batchId}`,
+        method: "DELETE",
+      }),
+    onSuccess: () => {
+      toast({
+        title: `Batch #${batchId} deleted`,
+        description: "Drive files and sheet rows were not touched.",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/bulk-scan/batches"] });
+      queryClient.invalidateQueries({
+        queryKey: ["/api/bulk-scan/inbox-diagnostic"],
+      });
+      setLocation("/bulk-scan");
+    },
+    onError: (err: any) => {
+      const raw = String(err?.message || "").replace(/^\d+:\s*/, "");
+      let msg = raw;
+      try {
+        msg = JSON.parse(raw).message || JSON.parse(raw).error || raw;
+      } catch {}
+      toast({
+        title: "Couldn't delete batch",
+        description: msg,
+        variant: "destructive",
+      });
+    },
+  });
+
   const skipMutation = useMutation({
     mutationFn: async (itemId: number) =>
       apiRequest({
@@ -241,7 +279,7 @@ export default function BulkScanBatch() {
         >
           <ArrowLeft className="w-4 h-4 text-slate-600" />
         </Link>
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <h1 className="font-display text-[20px] font-semibold tracking-tight text-ink truncate">
             Batch #{batch.id}
           </h1>
@@ -250,6 +288,33 @@ export default function BulkScanBatch() {
             {new Date(batch.createdAt).toLocaleString()}
           </p>
         </div>
+        {batch.status !== "running" && (
+          <button
+            type="button"
+            onClick={() => {
+              const warn =
+                batch.processedCount > 0
+                  ? " Any cards already saved to your sheet will stay there \u2014 delete those rows manually if you want a true reset."
+                  : "";
+              const ok = window.confirm(
+                `Delete batch #${batch.id}? This removes the batch and its review queue from Holo.${warn}`,
+              );
+              if (!ok) return;
+              deleteBatchMutation.mutate();
+            }}
+            disabled={deleteBatchMutation.isPending}
+            className="w-10 h-10 rounded-xl border border-card-border bg-card flex items-center justify-center text-muted-foreground hover:text-destructive hover-elevate disabled:opacity-50"
+            data-testid="button-delete-batch"
+            aria-label="Delete this batch"
+            title="Delete this batch"
+          >
+            {deleteBatchMutation.isPending ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Trash2 className="w-4 h-4" />
+            )}
+          </button>
+        )}
       </div>
 
       {/* Summary card */}
