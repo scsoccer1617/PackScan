@@ -48,6 +48,12 @@ export interface ScanTracking {
   scpMatchedTitle?: string | null;
   cardDbCorroborated?: boolean | null;
   analyzerVersion?: string | null;
+  /**
+   * Audit-row id returned by /api/analyze-card-dual-images. When present,
+   * the save endpoint UPDATEs the analyzed_no_save row instead of inserting
+   * a new one, so a single scan produces a single ledger row.
+   */
+  _userScanId?: number;
 }
 
 interface AppendCardPayload {

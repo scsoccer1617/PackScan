@@ -270,6 +270,9 @@ export default function Scan() {
         backImage,
         cardData: result.data,
         holoGrade: (result.data.holo as HoloGrade) ?? null,
+        // Audit-row id from analyze; threaded into _scanTracking._userScanId
+        // on save so the row is promoted in place rather than duplicated.
+        userScanId: typeof result._userScanId === 'number' ? result._userScanId : null,
       });
       // Recent Scans (Home), Collection, and Stats all read from
       // /api/scan-grades. The shared queryClient uses staleTime: Infinity,

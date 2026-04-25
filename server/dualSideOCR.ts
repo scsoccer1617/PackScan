@@ -17,6 +17,7 @@ import type { FoilDetectionResult } from './visualFoilDetector';
 import { db } from '@db';
 import { cardVariations, cardDatabase } from '@shared/schema';
 import { and, eq, sql, inArray } from 'drizzle-orm';
+import { logUserScan, type ScanFieldValues } from './userScans';
 
 // Internal year-confidence flags attached to per-side and combined OCR
 // results so the dual-side combiner and downstream lookup loop can reason
@@ -537,9 +538,66 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
     console.log('Combined card analysis result:', JSON.stringify(finalResult, null, 2));
     console.timeEnd('dual-card-analysis-total');
 
+    // ── Audit: log this analyze attempt to user_scans ──────────────────
+    // Every successful analyze burns a quota slot, so we log it as
+    // 'analyzed_no_save' BEFORE the response goes out. If the user later
+    // saves this card (and the client passes _userScanId back to the save
+    // endpoint), the row gets UPDATEd in place to the appropriate save
+    // action. If they never save, the row stays as 'analyzed_no_save' so
+    // the admin still sees the burned attempt in the User Scans ledger.
+    //
+    // Best-effort — logging failures must never block the analyze
+    // response. logUserScan already swallows its own errors.
+    let userScanId: number | undefined;
+    try {
+      const userId = (req.user as any)?.id as number | undefined;
+      const detectedSnapshot: ScanFieldValues = {
+        sport: (finalResult as any).sport ?? null,
+        playerFirstName: (finalResult as any).playerFirstName ?? null,
+        playerLastName: (finalResult as any).playerLastName ?? null,
+        brand: (finalResult as any).brand ?? null,
+        collection: (finalResult as any).collection ?? null,
+        set: (finalResult as any).set ?? null,
+        cardNumber: (finalResult as any).cardNumber ?? null,
+        year: typeof (finalResult as any).year === 'number'
+          ? (finalResult as any).year
+          : (finalResult as any).year
+            ? Number((finalResult as any).year) || null
+            : null,
+        variant: (finalResult as any).variant ?? (finalResult as any).variation ?? null,
+        team: (finalResult as any).team ?? null,
+        cmpNumber: (finalResult as any).cmpNumber ?? null,
+        serialNumber: (finalResult as any).serialNumber ?? null,
+        foilType: (finalResult as any).foilType ?? null,
+        isRookie: (finalResult as any).isRookieCard ?? null,
+        isAuto: (finalResult as any).isAutographed ?? null,
+        isNumbered: (finalResult as any).isNumbered ?? null,
+        isFoil: (finalResult as any).isFoil ?? null,
+      };
+      userScanId = await logUserScan({
+        userId: userId ?? null,
+        cardId: null,
+        userAction: 'analyzed_no_save',
+        detected: detectedSnapshot,
+        // No final values yet — user hasn't saved. logUserScan falls back
+        // to detected when final is omitted, which means an unfinished
+        // analyzed_no_save row reads cleanly in the admin ledger.
+        scpScore: typeof (finalResult as any)._scpMatchScore === 'number'
+          ? (finalResult as any)._scpMatchScore
+          : null,
+        analyzerVersion: 'analyze_card_dual_images',
+      });
+    } catch (logErr) {
+      console.warn('[user_scans] analyze-time log failed (non-fatal):', logErr);
+    }
+
     return res.json({
       success: true,
-      data: finalResult
+      data: finalResult,
+      // Audit row id — client should send this back as _scanTracking._userScanId
+      // on the subsequent save call so we can UPDATE the analyzed_no_save row
+      // instead of inserting a duplicate.
+      _userScanId: userScanId ?? null,
     });
     
   } catch (error: any) {

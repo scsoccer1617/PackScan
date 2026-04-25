@@ -181,6 +181,9 @@ export default function ScanResult() {
   const scanTracking: ScanTracking | undefined = cardData
     ? {
         userAction: feedback === 'none' ? 'saved_no_feedback' : feedback,
+        // Promote the analyze-time audit row instead of inserting a new one.
+        // Falls back to a fresh insert server-side when null.
+        _userScanId: flow.userScanId ?? undefined,
       }
     : undefined;
 
