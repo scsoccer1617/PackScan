@@ -129,11 +129,20 @@ export async function listInboxImages(
 }
 
 /**
- * Fetch a small Drive thumbnail by url. Drive's thumbnailLink is a hosted
- * URL that needs an OAuth Bearer token — browsers can't hit it directly.
- * We proxy through the server so the client can render a low-res preview
- * without exposing credentials. Falls back to null when the file has no
- * thumbnail (very rare for image mime-types).
+ * Fetch a Drive file's bytes for previewing in the review queue.
+ *
+ * We previously tried Drive's `thumbnailLink`, but that route is unreliable:
+ * - thumbnailLink is generated asynchronously and is often null for
+ *   recently uploaded files
+ * - the lh3.googleusercontent.com URL is sometimes signed (works without
+ *   auth) and sometimes requires a Bearer token, and getting it wrong
+ *   either way returns 401/403
+ *
+ * Going straight at the file bytes via `alt=media` is authenticated through
+ * the same OAuth client we already use for listing/moving files, returns the
+ * actual JPEG, and works for every image regardless of thumbnail-generation
+ * status. Card scans are typically <2 MB and the route caches 1h, so the
+ * larger payload is fine for a review-queue preview.
  */
 export async function fetchThumbnail(
   userId: number,
@@ -142,25 +151,22 @@ export async function fetchThumbnail(
   try {
     const { oauth } = await getOAuthClient(userId);
     const drive = driveFor(oauth);
-    const meta = await drive.files.get({ fileId, fields: 'thumbnailLink,mimeType' });
-    const link = meta.data.thumbnailLink;
-    if (!link) return null;
-    // Bump size to ~640px on the long edge — default is 220 which is
-    // grainy on retina mobile screens. Drive accepts the `=sNNN` suffix.
-    const sizedLink = link.replace(/=s\d+$/, '=s640');
-    const token = (await oauth.getAccessToken()).token;
-    const res = await fetch(sizedLink, { headers: { Authorization: `Bearer ${token}` } });
-    if (!res.ok) {
-      console.warn(`[bulkScan/driveClient] fetchThumbnail(${fileId}) status=${res.status}`);
+    const res = await drive.files.get(
+      { fileId, alt: 'media' },
+      { responseType: 'arraybuffer' },
+    );
+    const data = res.data as ArrayBuffer | Buffer | undefined;
+    if (!data) {
+      console.warn(`[bulkScan/driveClient] fetchThumbnail(${fileId}) empty body`);
       return null;
     }
-    const ab = await res.arrayBuffer();
-    return {
-      bytes: Buffer.from(ab),
-      contentType: res.headers.get('content-type') || 'image/jpeg',
-    };
+    const bytes = Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer);
+    const headers = (res.headers || {}) as Record<string, string>;
+    const contentType = headers['content-type'] || headers['Content-Type'] || 'image/jpeg';
+    return { bytes, contentType };
   } catch (err: any) {
-    console.warn(`[bulkScan/driveClient] fetchThumbnail(${fileId}) failed: ${err?.message}`);
+    const status = err?.code || err?.response?.status;
+    console.warn(`[bulkScan/driveClient] fetchThumbnail(${fileId}) failed status=${status} msg=${err?.message}`);
     return null;
   }
 }
