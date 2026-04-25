@@ -227,13 +227,19 @@ export function registerBulkScanRoutes(app: Express): void {
       .limit(1);
     if (!batch) return res.status(404).end();
     const fileId = side === 'front' ? item.frontFileId : item.backFileId;
-    if (!fileId) return res.status(404).end();
+    if (!fileId) {
+      console.warn(`[bulkScan/route] /image item=${itemId} side=${side} has no fileId`);
+      return res.status(404).end();
+    }
     const thumb = await fetchThumbnail(userId, fileId);
-    if (!thumb) return res.status(404).end();
+    if (!thumb) {
+      console.warn(`[bulkScan/route] /image item=${itemId} side=${side} fileId=${fileId} — fetchThumbnail returned null`);
+      return res.status(404).end();
+    }
     res.setHeader('Content-Type', thumb.contentType);
-    // Drive thumbnails for a given file id are stable until the file is
-    // edited (which never happens for our scans), so a 1h browser cache is
-    // safe and saves us 50+ Drive API calls per review session.
+    // Drive file bytes are stable until the file is edited (which never
+    // happens for our scans), so a 1h browser cache is safe and saves us
+    // 50+ Drive API calls per review session.
     res.setHeader('Cache-Control', 'private, max-age=3600');
     res.send(thumb.bytes);
   });
