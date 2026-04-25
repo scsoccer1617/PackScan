@@ -52,6 +52,21 @@ const APP_BASE_URL = (process.env.REPLIT_DEV_DOMAIN
 export const GOOGLE_CALLBACK_PATH = '/api/auth/google/callback';
 export const GOOGLE_CONNECT_CALLBACK_PATH = '/api/auth/google/connect/callback';
 
+// Build the OAuth callback URL from the *incoming request* rather than from a
+// static APP_BASE_URL env var. The same deployment can be reached via multiple
+// hostnames (e.g. packscan.io and sports-card-price-lookup-…replit.app), and
+// Google rejects the callback if the redirect_uri sent during initiation
+// doesn't exactly match the one sent during the callback exchange. Using
+// req.get('host') guarantees both halves of the dance use the exact same URL.
+function googleCallbackURLFor(req: Request): string {
+  const xfProto = req.headers['x-forwarded-proto'];
+  const proto = (Array.isArray(xfProto) ? xfProto[0] : xfProto)?.split(',')[0]?.trim()
+    || req.protocol
+    || 'https';
+  const host = req.get('host');
+  return `${proto}://${host}${GOOGLE_CALLBACK_PATH}`;
+}
+
 // `drive.file` lets us touch files we created (sheet creation flow); the
 // broader `drive` scope is required for the bulk-scan pipeline because
 // dealers paste arbitrary folder URLs that the app didn't create — listing
@@ -328,13 +343,15 @@ export function setupAuth(app: Express) {
       scope: GOOGLE_OAUTH_SCOPES,
       accessType: 'offline',
       prompt: 'consent',
+      callbackURL: googleCallbackURLFor(req),
     } as any)(req, res, next);
   });
   app.get(GOOGLE_CALLBACK_PATH, (req, res, next) => {
     if (!isGoogleConfigured()) return res.redirect('/login?error=google_not_configured');
     passport.authenticate('google', {
       failureRedirect: '/login?error=google_failed',
-    })(req, res, async () => {
+      callbackURL: googleCallbackURLFor(req),
+    } as any)(req, res, async () => {
       // Resume any pending "Add to Google Sheet" the user started before connecting.
       const pending = req.session?.pendingSheetAppend;
       const userId = (req.user as any)?.id as number | undefined;
@@ -365,6 +382,7 @@ export function setupAuth(app: Express) {
       scope: GOOGLE_OAUTH_SCOPES,
       accessType: 'offline',
       prompt: 'consent',
+      callbackURL: googleCallbackURLFor(req),
     } as any)(req, res, next);
   });
 
