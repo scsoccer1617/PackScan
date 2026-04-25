@@ -1837,7 +1837,7 @@ async function combineCardResults(
   if (!scpHit && combined.brand && combined.cardNumber) {
     try {
       const allOcrText = `${frontOCRText}\n${backOCRText}`;
-      const ocrCandidates = extractAllYearCandidates(allOcrText);
+      const ocrCandidates = extractAllYearCandidates(allOcrText, combined.sport);
       const candidateSet = new Set<number>(ocrCandidates);
       if (combined.year && Number(combined.year) > 0) candidateSet.add(Number(combined.year));
       // When the chosen year is low-confidence (came from a copyright line on
@@ -2137,7 +2137,7 @@ async function combineCardResults(
 
       if (shouldRun) {
         const allOcrText = `${frontOCRText}\n${backOCRText}`;
-        const yearCandidates = extractAllYearCandidates(allOcrText);
+        const yearCandidates = extractAllYearCandidates(allOcrText, combined.sport);
         if (combined.year && Number(combined.year) > 0) yearCandidates.push(Number(combined.year));
         const uniqueYears = Array.from(new Set(yearCandidates)).filter(y => y > 0);
         const brandLower = String(combined.brand).toLowerCase();
@@ -2194,7 +2194,7 @@ async function combineCardResults(
               // otherwise fall back to the EARLIEST year (vintage
               // copyright-lag heuristic — same convention used in
               // the year-validation block above).
-              const ocrYears = new Set(extractAllYearCandidates(allOcrText));
+              const ocrYears = new Set(extractAllYearCandidates(allOcrText, combined.sport));
               const ocrGrounded = cardNumMatches.filter(r => ocrYears.has(r.year));
               const pool = ocrGrounded.length > 0 ? ocrGrounded : cardNumMatches;
               const chosen = pool.reduce((a, b) => (b.year < a.year ? b : a));
@@ -2325,7 +2325,7 @@ async function combineCardResults(
                   // copyright lag heuristic) — same logic as the
                   // year-validation block uses when surname doesn't
                   // disambiguate.
-                  const ocrGroundedYears = years.filter(y => extractAllYearCandidates(allOcrText).includes(y));
+                  const ocrGroundedYears = years.filter(y => extractAllYearCandidates(allOcrText, combined.sport).includes(y));
                   const chosenYear = (ocrGroundedYears.length > 0 ? ocrGroundedYears : years)
                     .reduce((a, b) => (b < a ? b : a));
                   combined.year = chosenYear;
