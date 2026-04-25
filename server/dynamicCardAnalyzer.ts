@@ -167,6 +167,13 @@ const PLAYER_NAME_BLOCKLIST: ReadonlySet<string> = new Set([
   'THREADS', 'CERTIFIED', 'ABSOLUTE', 'LIMITED', 'TRIBUTE', 'BRILLIANCE',
   'CLASSICS', 'LEGENDS', 'PROSPECTS', 'SIGNATURES', 'AUTOGRAPHS', 'PARALLELS',
   'AUTOGRAPH', 'ISSUE', 'ISSUES',
+  // Insert-set name fragments that print as their own 2-word sash on the
+  // front, sitting just above the actual player name. "HONOR ROLL[E]" is
+  // the 2002 Upper Deck insert; similar inserts ("FIELD GENERALS", "YOUNG
+  // GUNS", etc.) would otherwise score as priority-1 player-name candidates.
+  // Intentionally exclude common-surname words ("YOUNG", "POWER", "BROWN",
+  // etc.) — those need a different fix (the multi-line tie-break below).
+  'HONOR', 'ROLL', 'ROLLE', 'GENERALS', 'GUNS', 'PHENOMS', 'MASTERS', 'SPOTLIGHTS',
   'VALUED', 'PRIVATE', 'EXCLUSIVE', 'PREMIER', 'PRIME',
   'NATIONAL', 'DIGITAL', 'VINTAGE', 'RETRO', 'REVIVAL', 'REPRINT',
   // Stat/bio terms that appear on card backs and can look like 2-word names
@@ -676,16 +683,74 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
             // so pre-existing behavior is unchanged when a candidate fires it.
             // The broader multi-sport signal lives on `teamAdjacent` below and
             // is applied by the sort comparator.
+            //
+            // POSITION GATE: only apply the priority-0 boost when the candidate
+            // sits in the top portion of the OCR output (first 10 lines). On
+            // dense backgrounds (e.g. the 2002 Upper Deck "Honor Roll" insert
+            // which tiles the words diagonally across the card), an OCR
+            // fragment 20+ lines deep can happen to be followed by a team
+            // word that's part of the same noise tile, falsely promoting
+            // garbage to the highest priority and beating the real player
+            // name lower in the candidate pool. Real player names on card
+            // fronts are within the first 10 OCR lines; on card backs the
+            // bio block (BORN/HT/WT/etc) is rejected by bioPrefixPattern
+            // long before this branch fires.
             const isFollowedByTeamPosition = (i + 1 < rawLines.length) && 
               /PHILLIES|YANKEES|DODGERS|METS|CUBS|BRAVES|ASTROS|RANGERS|PADRES|GIANTS|CARDINALS|NATIONALS|ORIOLES|GUARDIANS|TWINS|RAYS|MARLINS|PIRATES|REDS|BREWERS|TIGERS|ROYALS|ATHLETICS|MARINERS|ANGELS|ROCKIES|DIAMONDBACKS|OUTFIELDER|INFIELDER|PITCHER|CATCHER|SHORTSTOP|BASEMAN|STARTING|CLOSER|RELIEVER/i.test(rawLines[i + 1]);
+            const teamPromotionGated = isFollowedByTeamPosition && i < 10;
             
-            const priority = isFollowedByTeamPosition ? 0 : (i < 5 ? 1 : 2);
+            const priority = teamPromotionGated ? 0 : (i < 10 ? 1 : 2);
             const teamAdjacent = isTeamAdjacentLine(i);
             
-            console.log(`Line-based player name candidate: "${firstName} ${lastName}" (priority: ${priority}, line: ${i}, teamAdjacent: ${teamAdjacent})`);
+            console.log(`Line-based player name candidate: "${firstName} ${lastName}" (priority: ${priority}, line: ${i}, teamAdjacent: ${teamAdjacent}${isFollowedByTeamPosition && !teamPromotionGated ? ', team-promo gated by deep-line position' : ''})`);
             potentialNames.push({ firstName, lastName, source: 'line', priority, teamAdjacent });
           } else if (noNonNameWords && noNumbers && eachWordLen && !consistentCasing) {
             console.log(`[Name] Rejected mixed-case line candidate: "${nameWords.join(' ')}" (line ${i}) — inconsistent token casing suggests OCR split a single logo word`);
+          }
+        }
+
+        // Multi-word salvage pass: when an OCR line has 4-5 valid name-shaped
+        // tokens after stripping leading/trailing junk, the standard 2-3 word
+        // gate above rejects it outright. But on cards with dense background
+        // patterns (e.g. the 2002 Upper Deck "Honor Roll" insert that tiles
+        // its wordmark across the entire back), Vision OCR often concatenates
+        // a fragment of the background with the real player name on a single
+        // line: "ONOR ALBERT PUJOLS ONOR B" → after the >1-char filter strips
+        // "B" and the blocklist now contains "HONOR"/"ROLL" the leading/trailing
+        // pops can't find any blocklisted bookends to remove (the literal
+        // tokens are "ONOR", not "HONOR"). Slide a 2-word window over the
+        // remaining tokens and accept the first window where both tokens are
+        // clean (not in blocklist, length >= 2, valid name shape, consistent
+        // casing). Single use — first match wins, lowest priority (2) so a
+        // proper 2-3 word line still beats this if one exists in the OCR.
+        if (nameWords.length === 4 || nameWords.length === 5) {
+          const noNumbersAll = nameWords.every(w => !/\d/.test(w));
+          if (noNumbersAll) {
+            for (let w = 0; w + 1 < nameWords.length; w++) {
+              const t0 = nameWords[w];
+              const t1 = nameWords[w + 1];
+              const both2plus = t0.length >= 2 && t1.length >= 2;
+              const bothValid = isValidNameChar.test(t0) && isValidNameChar.test(t1);
+              const neitherBlocked = !isNonNameWord(t0) && !isNonNameWord(t1);
+              const caseStyleOf = (x: string): 'upper' | 'title' | 'lower' | 'other' => {
+                if (/^[A-Z]+$/.test(x)) return 'upper';
+                if (/^[A-Z][a-z]+$/.test(x)) return 'title';
+                if (/^[a-z]+$/.test(x)) return 'lower';
+                return 'other';
+              };
+              const c0 = caseStyleOf(t0); const c1 = caseStyleOf(t1);
+              const sameCase = c0 === c1 && c0 !== 'other';
+              if (both2plus && bothValid && neitherBlocked && sameCase) {
+                const firstName = t0.charAt(0).toUpperCase() + t0.slice(1).toLowerCase();
+                const lastName = t1.charAt(0).toUpperCase() + t1.slice(1).toLowerCase();
+                // Salvage candidates always get priority 2 — they come from
+                // noisy lines and should not outrank a clean 2-3 word match.
+                const teamAdjacent = isTeamAdjacentLine(i);
+                console.log(`[Name] Salvaged multi-word line candidate: "${firstName} ${lastName}" from "${nameWords.join(' ')}" (line ${i}, window ${w}, teamAdjacent: ${teamAdjacent})`);
+                potentialNames.push({ firstName, lastName, source: 'line-salvage', priority: 2, teamAdjacent });
+                break;
+              }
+            }
           }
         }
       }
@@ -703,13 +768,15 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
             const firstName = remainingWords[0].charAt(0).toUpperCase() + remainingWords[0].slice(1).toLowerCase();
             const lastName = remainingWords.slice(1).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
             
+            // See comment above on POSITION GATE — same rationale.
             const isFollowedByTeamPosition = (i + 1 < rawLines.length) && 
               /PHILLIES|YANKEES|DODGERS|METS|CUBS|BRAVES|ASTROS|RANGERS|PADRES|GIANTS|CARDINALS|NATIONALS|ORIOLES|GUARDIANS|TWINS|RAYS|MARLINS|PIRATES|REDS|BREWERS|TIGERS|ROYALS|ATHLETICS|MARINERS|ANGELS|ROCKIES|DIAMONDBACKS|OUTFIELDER|INFIELDER|PITCHER|CATCHER|SHORTSTOP|BASEMAN|STARTING|CLOSER|RELIEVER/i.test(rawLines[i + 1]);
+            const teamPromotionGated = isFollowedByTeamPosition && i < 10;
             
-            const priority = isFollowedByTeamPosition ? 0 : (i < 5 ? 1 : 2);
+            const priority = teamPromotionGated ? 0 : (i < 10 ? 1 : 2);
             const teamAdjacent = isTeamAdjacentLine(i);
             
-            console.log(`Card-number-prefixed name candidate: "${firstName} ${lastName}" (priority: ${priority}, line: ${i}, teamAdjacent: ${teamAdjacent})`);
+            console.log(`Card-number-prefixed name candidate: "${firstName} ${lastName}" (priority: ${priority}, line: ${i}, teamAdjacent: ${teamAdjacent}${isFollowedByTeamPosition && !teamPromotionGated ? ', team-promo gated by deep-line position' : ''})`);
             potentialNames.push({ firstName, lastName, source: 'card-number-prefix', priority, teamAdjacent });
           }
         }

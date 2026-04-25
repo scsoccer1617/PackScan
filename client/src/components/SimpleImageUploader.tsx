@@ -64,7 +64,7 @@ export default function SimpleImageUploader({
       <div
         className={`relative border-2 ${
           existingImage ? 'border-slate-300' : 'border-dashed border-slate-400'
-        } rounded-lg bg-slate-50 h-36 flex items-center justify-center overflow-hidden`}
+        } rounded-lg bg-slate-50 aspect-[3/4] flex items-center justify-center overflow-hidden`}
       >
         {existingImage ? (
           // `object-cover` center-crops the preview so the card fills the
