@@ -12,7 +12,8 @@
 
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Users, RefreshCw, AlertCircle, ArrowUp } from "lucide-react";
+import { Link } from "wouter";
+import { Loader2, Users, RefreshCw, AlertCircle, ArrowUp, ScanLine } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -102,15 +103,26 @@ export default function AdminUsers() {
             </p>
           </div>
         </div>
-        <button
-          type="button"
-          onClick={() => refetch()}
-          className="shrink-0 w-10 h-10 rounded-xl border border-card-border bg-card flex items-center justify-center hover-elevate text-slate-600"
-          aria-label="Refresh"
-          data-testid="button-admin-refresh"
-        >
-          <RefreshCw className={`w-4 h-4 ${isLoading ? "animate-spin" : ""}`} />
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          <Link href="/admin/scans">
+            <a
+              className="h-10 px-3 rounded-xl border border-card-border bg-card flex items-center gap-1.5 hover-elevate text-slate-700 text-[13px]"
+              data-testid="link-admin-scans"
+            >
+              <ScanLine className="w-4 h-4" />
+              <span>User scans</span>
+            </a>
+          </Link>
+          <button
+            type="button"
+            onClick={() => refetch()}
+            className="w-10 h-10 rounded-xl border border-card-border bg-card flex items-center justify-center hover-elevate text-slate-600"
+            aria-label="Refresh"
+            data-testid="button-admin-refresh"
+          >
+            <RefreshCw className={`w-4 h-4 ${isLoading ? "animate-spin" : ""}`} />
+          </button>
+        </div>
       </div>
 
       {/* Bump-all toolbar. Default delta is +50 to match the per-user beta

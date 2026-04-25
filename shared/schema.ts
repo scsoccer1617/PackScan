@@ -223,6 +223,36 @@ export const cardSchema = z.object({
   set: z.string().optional(),
   team: z.string().optional(),
   _engine: z.literal('ocr').optional(),
+  // Optional scan-tracking payload. When present, the server logs a row to
+  // user_scans alongside the cards insert. Lets us record the original
+  // detected values, what the user actually saved, and which thumb path
+  // they took (confirmed / declined_edited / saved_no_feedback).
+  _scanTracking: z.object({
+    userAction: z.enum(['confirmed', 'declined_edited', 'saved_no_feedback']),
+    detected: z.object({
+      sport: z.string().optional().nullable(),
+      playerFirstName: z.string().optional().nullable(),
+      playerLastName: z.string().optional().nullable(),
+      brand: z.string().optional().nullable(),
+      collection: z.string().optional().nullable(),
+      set: z.string().optional().nullable(),
+      cardNumber: z.string().optional().nullable(),
+      year: z.number().optional().nullable(),
+      variant: z.string().optional().nullable(),
+      team: z.string().optional().nullable(),
+      cmpNumber: z.string().optional().nullable(),
+      serialNumber: z.string().optional().nullable(),
+      foilType: z.string().optional().nullable(),
+      isRookie: z.boolean().optional().nullable(),
+      isAuto: z.boolean().optional().nullable(),
+      isNumbered: z.boolean().optional().nullable(),
+      isFoil: z.boolean().optional().nullable(),
+    }).optional(),
+    scpScore: z.number().optional().nullable(),
+    scpMatchedTitle: z.string().optional().nullable(),
+    cardDbCorroborated: z.boolean().optional().nullable(),
+    analyzerVersion: z.string().optional().nullable(),
+  }).optional(),
 });
 
 export type CardInsert = z.infer<typeof cardInsertSchema>;
@@ -550,3 +580,93 @@ export const googleDriveFolders = pgTable("google_drive_folders", {
 
 export type GoogleDriveFolders = typeof googleDriveFolders.$inferSelect;
 export type GoogleDriveFoldersInsert = typeof googleDriveFolders.$inferInsert;
+
+// =============================================
+// User Scans — raw scan log for admin review / DB enrichment
+// =============================================
+//
+// Every save action a user takes (👍 confirm, 👎 edit-then-save, or plain
+// save with no feedback) writes one row here. This is intentionally walled
+// off from `cardDatabase` (the curated source of truth) — admin reviews
+// these rows offline and decides what graduates to the reference catalog.
+//
+// `detected*` columns hold the raw scanner output (what the analyzer
+// produced before any user edit). `final*` columns hold what the user
+// actually saved into their `cards` collection. `fieldsChanged` is the
+// per-field diff between the two — empty array means nothing was edited.
+//
+// `userAction`:
+//   - 'confirmed'           → 👍, no edits, highest trust
+//   - 'declined_edited'     → 👎 → edit modal → save, fields in fieldsChanged were corrected
+//   - 'saved_no_feedback'   → user just hit save (no thumb input), weak signal
+//
+// We mirror the image bytes (frontImage / backImage) here so the admin
+// review surface always has the original scan visuals even if the user
+// later deletes the card from their personal collection.
+export const userScans = pgTable("user_scans", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").references(() => users.id, { onDelete: 'set null' }),
+  cardId: integer("card_id").references(() => cards.id, { onDelete: 'set null' }),
+  scannedAt: timestamp("scanned_at").defaultNow().notNull(),
+  userAction: text("user_action", { enum: ['confirmed', 'declined_edited', 'saved_no_feedback'] }).notNull(),
+  // List of field names the user changed between detected and final. Empty
+  // array (not null) when nothing changed — keeps querying simpler.
+  fieldsChanged: jsonb("fields_changed").$type<string[]>().default([]).notNull(),
+  // Detected (raw scanner output)
+  detectedSport: text("detected_sport"),
+  detectedPlayerFirstName: text("detected_player_first_name"),
+  detectedPlayerLastName: text("detected_player_last_name"),
+  detectedBrand: text("detected_brand"),
+  detectedCollection: text("detected_collection"),
+  detectedSet: text("detected_set"),
+  detectedCardNumber: text("detected_card_number"),
+  detectedYear: integer("detected_year"),
+  detectedVariant: text("detected_variant"),
+  detectedTeam: text("detected_team"),
+  detectedCmpNumber: text("detected_cmp_number"),
+  detectedSerialNumber: text("detected_serial_number"),
+  detectedFoilType: text("detected_foil_type"),
+  detectedIsRookie: boolean("detected_is_rookie"),
+  detectedIsAuto: boolean("detected_is_auto"),
+  detectedIsNumbered: boolean("detected_is_numbered"),
+  detectedIsFoil: boolean("detected_is_foil"),
+  // Final (what was saved into cards after any edit)
+  finalSport: text("final_sport"),
+  finalPlayerFirstName: text("final_player_first_name"),
+  finalPlayerLastName: text("final_player_last_name"),
+  finalBrand: text("final_brand"),
+  finalCollection: text("final_collection"),
+  finalSet: text("final_set"),
+  finalCardNumber: text("final_card_number"),
+  finalYear: integer("final_year"),
+  finalVariant: text("final_variant"),
+  finalTeam: text("final_team"),
+  finalCmpNumber: text("final_cmp_number"),
+  finalSerialNumber: text("final_serial_number"),
+  finalFoilType: text("final_foil_type"),
+  finalIsRookie: boolean("final_is_rookie"),
+  finalIsAuto: boolean("final_is_auto"),
+  finalIsNumbered: boolean("final_is_numbered"),
+  finalIsFoil: boolean("final_is_foil"),
+  // Images mirrored from the scan. Stored as URL/path strings (same as cards.frontImage)
+  frontImage: text("front_image"),
+  backImage: text("back_image"),
+  // Optional analyzer / SCP metadata for review filtering. All nullable so
+  // older callers that don't pass these still work.
+  scpScore: numeric("scp_score", { precision: 5, scale: 2 }),
+  scpMatchedTitle: text("scp_matched_title"),
+  cardDbCorroborated: boolean("card_db_corroborated"),
+  analyzerVersion: text("analyzer_version"),
+}, (table) => [
+  index("user_scans_user_idx").on(table.userId),
+  index("user_scans_scanned_at_idx").on(table.scannedAt),
+  index("user_scans_action_idx").on(table.userAction),
+  index("user_scans_card_idx").on(table.cardId),
+]);
+
+export type UserScan = typeof userScans.$inferSelect;
+export type UserScanInsert = typeof userScans.$inferInsert;
+
+// User-facing action labels for the admin UI.
+export const USER_SCAN_ACTIONS = ['confirmed', 'declined_edited', 'saved_no_feedback'] as const;
+export type UserScanAction = typeof USER_SCAN_ACTIONS[number];
