@@ -61,12 +61,28 @@ export async function apiRequest<T = any>(
 
   const res = await fetch(url, config);
   await throwIfResNotOk(res);
-  
-  // Return the parsed JSON data if it exists, otherwise return an empty object
+
+  // Truly empty bodies (204 No Content, or zero-byte 200s) are valid —
+  // return {}. But if the server sent a body, it must be JSON. Silently
+  // swallowing a JSON-parse failure used to mask a serious class of
+  // bugs: when the server route isn't registered (e.g. stale prod
+  // build), Express falls through to the SPA and returns 200 OK with
+  // index.html. The old code treated that HTML as a successful empty
+  // response, so mutations like DELETE /batches/:id would fire their
+  // onSuccess and toast "deleted" while nothing was actually deleted.
+  if (res.status === 204) return {} as T;
+  const text = await res.text();
+  if (!text) return {} as T;
   try {
-    return await res.json();
-  } catch (e) {
-    return {} as T;
+    return JSON.parse(text) as T;
+  } catch {
+    // Surface the first chunk of the body so the dealer/dev can tell
+    // whether they're looking at the SPA fallback ("<!DOCTYPE...") or
+    // some other unexpected response shape.
+    const preview = text.slice(0, 80).replace(/\s+/g, ' ');
+    throw new Error(
+      `Server returned non-JSON response (likely a stale deploy or unregistered route): ${preview}…`,
+    );
   }
 }
 
