@@ -40,6 +40,7 @@ import { evaluateConfidence, isCardDbCorroboration } from './confidenceGate';
 import { normalizeImageOrientation } from '../dualSideOCR';
 import { lookupCard as cardDbLookup } from '../cardDatabaseService';
 import { appendCardRow } from '../googleSheets';
+import { searchCardValues, getEbaySearchUrl } from '../ebayService';
 
 // ── Batch lifecycle ──────────────────────────────────────────────────────
 
@@ -426,6 +427,68 @@ async function processItem(batch: ScanBatch, item: ScanBatchItem): Promise<'auto
     console.warn(`[bulkScan] CardDB corroboration lookup failed for item ${item.id}: ${err?.message}`);
   }
 
+  // eBay value lookup. The analyzer leaves estimatedValue at 0 by default —
+  // the regular /add-card flow does this lookup separately after OCR
+  // (server/routes.ts, the searchCardValues call). Without this step the
+  // bulk-scan pipeline writes 0 into the sheet's Avg. Price column for
+  // every card. Same guard as the /add-card flow: only run when we have
+  // enough identifying info to make a meaningful query.
+  if (
+    analysis.playerFirstName &&
+    analysis.playerLastName &&
+    analysis.brand &&
+    analysis.year
+  ) {
+    try {
+      const playerName = `${analysis.playerFirstName} ${analysis.playerLastName}`;
+      const ebayData = await searchCardValues(
+        playerName,
+        analysis.cardNumber || '',
+        analysis.brand,
+        analysis.year,
+        analysis.collection || '',
+        analysis.condition || '',
+        analysis.isNumbered || false,
+        analysis.foilType || undefined,
+        analysis.serialNumber || undefined,
+        analysis.variant || undefined,
+        analysis.isAutographed || false,
+        undefined,
+        analysis.set || undefined,
+      );
+      const averageValue = ebayData.averageValue || 0;
+      analysis.estimatedValue = averageValue;
+      analysis.ebayResults = ebayData.results || [];
+      analysis.ebaySearchUrl = getEbaySearchUrl(
+        playerName,
+        analysis.cardNumber || '',
+        analysis.brand,
+        analysis.year,
+        analysis.collection || '',
+        analysis.condition || '',
+        analysis.isNumbered || false,
+        analysis.foilType || undefined,
+        analysis.serialNumber || undefined,
+        analysis.variant || undefined,
+        analysis.set || undefined,
+        undefined,
+        analysis.isAutographed || false,
+      );
+      console.log(
+        `[bulkScan] eBay lookup item ${item.id}: ${(ebayData.results || []).length} results, avg=$${averageValue.toFixed(2)}`,
+      );
+    } catch (err: any) {
+      console.warn(`[bulkScan] eBay lookup failed for item ${item.id}: ${err?.message}`);
+      // Leave estimatedValue at whatever the analyzer set (typically 0). We
+      // still let the row save — a missing price is recoverable; a missing
+      // card row is not.
+    }
+  } else {
+    console.log(
+      `[bulkScan] eBay lookup skipped item ${item.id}: insufficient card data (player=${!!analysis.playerFirstName}/${!!analysis.playerLastName} brand=${!!analysis.brand} year=${!!analysis.year})`,
+    );
+  }
+
   // Pairing warnings already live on the item row from discoverAndPlanItems.
   const priorWarnings = asStringArray(item.reviewReasons);
   const gate = evaluateConfidence({
@@ -457,7 +520,7 @@ async function processItem(batch: ScanBatch, item: ScanBatchItem): Promise<'auto
         averagePrice: typeof analysis.estimatedValue === 'number' ? analysis.estimatedValue : null,
         frontImageUrl: null,
         backImageUrl: null,
-        ebaySearchUrl: null,
+        ebaySearchUrl: typeof analysis.ebaySearchUrl === 'string' ? analysis.ebaySearchUrl : null,
       });
       // Move both files to processed folder.
       if (batch.processedFolderId && batch.sourceFolderId) {

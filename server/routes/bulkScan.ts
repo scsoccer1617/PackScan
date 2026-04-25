@@ -135,7 +135,7 @@ export function registerBulkScanRoutes(app: Express): void {
         averagePrice: typeof merged.estimatedValue === 'number' ? merged.estimatedValue : null,
         frontImageUrl: null,
         backImageUrl: null,
-        ebaySearchUrl: null,
+        ebaySearchUrl: typeof merged.ebaySearchUrl === 'string' ? merged.ebaySearchUrl : null,
       });
     } catch (err: any) {
       console.error(`[bulkScan/route] /review/:itemId/save append failed:`, err);
