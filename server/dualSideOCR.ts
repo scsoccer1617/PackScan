@@ -104,6 +104,18 @@ interface YearConfidenceFlags {
     consoleName: string;
     score: number;
   };
+  // Set when SCP returned a hit whose product-name #cardNumber differed
+  // from the cardNumber we queried with. SCP's product search is fuzzy on
+  // text and can drop the cardNumber constraint when the player+brand+year
+  // tokens are strong enough; that's a contradiction signal, not a
+  // correction. Surfaced for the bulk-scan inbox diagnostic.
+  _scpCardNumberMismatch?: {
+    queried: string;
+    returned: string;
+    productName: string;
+    consoleName: string;
+    score: number;
+  };
   // Raw OCR text from each side of the card. Truncated to 4 KB per side
   // before persistence so the analysisResult jsonb stays small. Used by
   // the inbox diagnostic UI so the dealer can see exactly what the
@@ -1362,8 +1374,58 @@ async function combineCardResults(
         // Force the SCP hit branch to be skipped by mutating status.
         // (Mutating a discriminated union is ugly, but the alternative is
         // restructuring this whole block.)
-        (scpResult as { status: string }).status = 'miss';
-        (scpResult as { reason: string }).reason = 'retry_player_conflict';
+        (scpResult as unknown as { status: string }).status = 'miss';
+        (scpResult as unknown as { reason: string }).reason = 'retry_player_conflict';
+      }
+    }
+    // ── CardNumber-mismatch guard ─────────────────────────────────────
+    // SCP's product search performs fuzzy text matching across console
+    // names and product names. When OCR supplies a confident cardNumber
+    // and SCP returns a hit whose own product-name #cardNumber differs,
+    // the search engine effectively threw out our cardNumber constraint
+    // — we asked for #186 and it returned #86. That's a fuzzy-match
+    // failure, not a correction.
+    //
+    // Real example (Brent Abernathy 2002 Topps #186 front):
+    //   queried  cardNumber="186"  player="Bay Brent" (front-OCR junk)
+    //   returned "Brent Barry #86" :: "Basketball Cards 2002 Topps"
+    //                  score=67   (different sport, different cardNumber)
+    // CardDB tiebreak then rehomed #86 to "Keith McDonald (Topps Total)",
+    // wiping the OCR-correct #186 and replacing the player.
+    //
+    // When SCP's parsed cardNumber doesn't match the queried cardNumber,
+    // treat as a miss and let OCR-derived fields stand. Comparison is
+    // case-insensitive with a trim so harmless reformatting ("AA-11"
+    // vs "aa-11") still matches.
+    if (
+      scpResult.status === 'hit' &&
+      scpInput.cardNumber &&
+      String(scpInput.cardNumber).trim().length > 0
+    ) {
+      const queriedNum = String(scpInput.cardNumber).trim().toLowerCase();
+      const returnedNumRaw = scpExtractCardNumber(scpResult.match.productName);
+      const returnedNum = returnedNumRaw ? returnedNumRaw.trim().toLowerCase() : null;
+      if (returnedNum && returnedNum !== queriedNum) {
+        console.log(
+          `[SCP-first] Rejecting hit (score=${scpResult.match.matchScore}) ` +
+            `"${scpResult.match.productName}" :: "${scpResult.match.consoleName}" — ` +
+            `SCP returned cardNumber #${returnedNum} but we queried #${queriedNum}. ` +
+            `Treating as miss; keeping OCR-derived fields.`,
+        );
+        const flagged = combined as CardFormWithFlags;
+        flagged._scpHit = false;
+        flagged._scpMatchScore = scpResult.match.matchScore;
+        flagged._scpStatus = 'miss';
+        flagged._scpReason = 'cardnumber_mismatch';
+        flagged._scpCardNumberMismatch = {
+          queried: queriedNum,
+          returned: returnedNum,
+          productName: scpResult.match.productName,
+          consoleName: scpResult.match.consoleName,
+          score: Number(scpResult.match.matchScore.toFixed(2)),
+        };
+        (scpResult as unknown as { status: string }).status = 'miss';
+        (scpResult as unknown as { reason: string }).reason = 'cardnumber_mismatch';
       }
     }
     if (scpResult.status === 'hit') {

@@ -864,6 +864,21 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
     // entirely, leaving the front analyzer with an empty player name and
     // forcing the back analyzer (which then mis-picked "Draft Pick" out of
     // "16TH-ROUND DRAFT PICK") to be the source of truth.
+    // Geographic team-completion words. These are the SECOND token of a
+    // multi-word team city ("Tampa BAY", "Blue JAYS", "Red SOX", "Red WINGS",
+    // "Maple LEAFS", "Blue JACKETS"). Vision OCR returns each line of a card
+    // sash as its own line, so "TAMPA" and "BAY" arrive on consecutive lines.
+    // The line-pair picker would then happily form a "BAY + <next-line-word>"
+    // candidate ("BAY+BRENT" → "Bay Brent" for a Brent Abernathy front),
+    // shadowing the real "BRENT+ABERNATHY" candidate one line lower.
+    //
+    // None of these tokens are plausible FIRST names in MLB/NFL/NBA/NHL data
+    // — block them as the line-A (first-name) word in the multi-line pair.
+    // Real surname collisions (e.g. Jason Bay) appear as line-A="JASON" /
+    // line-B="BAY", where BAY is the surname (line B) and is unaffected.
+    const GEO_COMPLETION_FIRST_WORDS = new Set([
+      'BAY', 'JAYS', 'SOX', 'WINGS', 'LEAFS', 'JACKETS',
+    ]);
     for (let i = 0; i < Math.min(rawLines.length - 1, 14); i++) {
       const a = rawLines[i].trim();
       const b = rawLines[i + 1].trim();
@@ -873,6 +888,13 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
       // surname word OR a "SURNAME SUFFIX" pair ("GRIFFEY JR.").
       const aWords = a.split(/\s+/);
       if (aWords.length !== 1 || !isSingleNameWord(aWords[0])) continue;
+      // Reject geographic team-completion words as the first-name slot.
+      // "BAY" / "JAYS" / "SOX" etc. are never first names; they are the
+      // tail of a multi-word team city that OCR split across lines.
+      if (GEO_COMPLETION_FIRST_WORDS.has(aWords[0].toUpperCase())) {
+        console.log(`[Name] Skipping multi-line pair starting with geographic-completion word "${aWords[0]}" at line ${i} (likely OCR-split team city like "TAMPA BAY").`);
+        continue;
+      }
       const bShape = classifySurnameLine(b);
       if (!bShape) continue;
       const aStyle = wordCaseStyle(aWords[0]);
