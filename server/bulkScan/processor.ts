@@ -34,7 +34,7 @@ import {
 import { listInboxImages, downloadFile, moveFile, type DriveImageFile } from './driveClient';
 import { or, isNotNull } from 'drizzle-orm';
 import { classifyCardSide } from './sideClassifier';
-import { detectOrientation, applyRotation } from './orientation';
+import { detectOrientation } from './orientation';
 import { pairPages, type ScanPage, type PairedScan } from './pairing';
 import { evaluateConfidence, isCardDbCorroboration } from './confidenceGate';
 import { normalizeImageOrientation } from '../dualSideOCR';
@@ -369,10 +369,25 @@ async function processItem(batch: ScanBatch, item: ScanBatchItem): Promise<'auto
   // Probe back-side orientation (front is assumed right-side-up from the
   // duplex scanner; a future PR can probe the front too at 1× cost).
   //
+  // *** Diagnostic-only as of fix/bulk-scan-back-rotation. ***
+  // We previously physically rotated the back buffer based on this
+  // probe before handing it to the analyzer. That broke OCR on cards
+  // where both 0° and 180° read similarly well to Google Vision but the
+  // analyzer's downstream heuristics are orientation-sensitive (e.g.
+  // 1987 Topps Joel Davis #299: rotated 180°, the analyzer pulled the
+  // player name from a trivia paragraph ("Cliff Chambers... Bert
+  // Blyleven") and the card # "25" from "Topps card was #25" instead of
+  // the actual "299" in the corner). Single-Scan never pre-rotated and
+  // worked correctly, so we now match that behavior: feed the
+  // EXIF-normalized back to the analyzer as-is. The probe still runs so
+  // we can spot-check whether a future scanner produces backs the
+  // analyzer can't read at the buffer's native orientation — in which
+  // case we'd reintroduce a *narrow* rotation rule (much higher
+  // confidence threshold than the +5 / 1.5× rule we used to apply).
+  //
   // Scanner-agnostic: the pipeline only assumes multi-page JPEG/PDF output
   // dropped into a Drive folder — any duplex ADF produces this shape.
   const orient = await detectOrientation(exifBack, `batch${batch.id}#${item.position}/back`);
-  const correctedBack = await applyRotation(exifBack, orient.rotationNeeded);
 
   // Invoke the existing dual-side analyzer via its exported handler. This
   // is the same mock-request pattern routes.ts:2045 uses — we reuse all of
@@ -382,7 +397,7 @@ async function processItem(batch: ScanBatch, item: ScanBatchItem): Promise<'auto
   const mockReq: any = {
     files: {
       frontImage: [buildMockFile(exifFront, item.frontFileName || 'front.jpg')],
-      backImage: [buildMockFile(correctedBack, item.backFileName || 'back.jpg')],
+      backImage: [buildMockFile(exifBack, item.backFileName || 'back.jpg')],
     },
     body: {},
     query: {},
@@ -400,6 +415,20 @@ async function processItem(batch: ScanBatch, item: ScanBatchItem): Promise<'auto
     };
     handleDualSideCardAnalysis(mockReq, mockRes).catch(reject);
   });
+
+  // Stamp the (diagnostic-only) probe decision onto analysisResult so
+  // the inbox-diagnostic UI can surface what the orientation probe
+  // would have done. If we ever see misclassifications correlate with
+  // probeRotation=180 we know to revisit the rule, and conversely if
+  // we see a card whose OCR is empty/garbage and the probe says 180°
+  // would have helped, that's a signal to reintroduce a narrow flip.
+  (analysis as Record<string, any>)._backRotationProbe = {
+    rotationNeeded: orient.rotationNeeded,
+    confidence: orient.confidence,
+    originalWords: orient.debug.originalWords,
+    rotatedWords: orient.debug.rotatedWords,
+    applied: false,
+  };
 
   // CardDB corroboration: independent lookup on the analyzer's output so
   // we can feed it into the confidence gate. `cardDbLookup` runs fast
