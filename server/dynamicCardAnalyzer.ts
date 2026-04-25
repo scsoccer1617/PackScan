@@ -121,6 +121,12 @@ const PLAYER_NAME_BLOCKLIST: ReadonlySet<string> = new Set([
   'NEW', 'SAN', 'LOS', 'SAINT', 'LOUIS', 'KANSAS', 'CITY',
   'SLG', 'OPS', 'AVG', 'WHIP', 'IP', 'AB',
   'BATS', 'THROWS', 'DRAFTED', 'BORN', 'HOME', 'ACQ', 'FREE', 'AGENT',
+  // Draft / round biographical phrases that survive line filters because the
+  // numeric prefix ("16TH-ROUND") gets stripped first, leaving a clean 2-word
+  // "Draft Pick" candidate that the line-based detector can't tell apart
+  // from a real name. Block the words themselves so the candidate is rejected
+  // before it ever competes with the multi-line name sash.
+  'DRAFT', 'PICK', 'PICKS', 'ROUND', 'ROUNDS', 'SUPPLEMENTAL', 'OVERALL', 'SELECTION',
   'HT', 'WT', 'HEIGHT', 'WEIGHT', 'PRINTED', 'USA',
   'ALL', 'STAR', 'COLLECTION', 'FLAGSHIP', 'HERITAGE', 'PRIZM', 'SELECT', 'MOSAIC',
   'REFRACTOR', 'FOIL', 'GOLD', 'SILVER', 'BRONZE', 'PLATINUM', 'SAPPHIRE', 'BLACK',
@@ -172,6 +178,14 @@ const PLAYER_NAME_BLOCKLIST: ReadonlySet<string> = new Set([
   'PITTSBURGH', 'HOUSTON', 'TORONTO', 'SEATTLE', 'OAKLAND', 'TAMPA', 'MIAMI',
   'MINNESOTA', 'CINCINNATI', 'MILWAUKEE', 'DETROIT', 'CLEVELAND', 'BALTIMORE',
   'ARIZONA', 'COLORADO', 'TEXAS', 'DENVER', 'MONTREAL', 'WASHINGTON',
+  // Additional birthplace cities seen on card backs that aren't covered
+  // by the team-city list above. Card backs print "BORN: 3-2-79 — COLUMBUS, MS"
+  // style lines and the city + state postal code can read as a 2-word name.
+  'COLUMBUS', 'MEMPHIS', 'NASHVILLE', 'JACKSONVILLE', 'ORLANDO', 'CHARLOTTE',
+  'INDIANAPOLIS', 'LOUISVILLE', 'OMAHA', 'BUFFALO', 'RICHMOND',
+  'BIRMINGHAM', 'ATLANTA', 'PORTLAND', 'SACRAMENTO', 'FRESNO', 'TUCSON',
+  'ALBUQUERQUE', 'TULSA', 'WICHITA', 'RALEIGH', 'GREENSBORO', 'LEXINGTON',
+  'MODESTO', 'STOCKTON', 'BAKERSFIELD', 'RIVERSIDE', 'ANAHEIM',
 ]);
 
 /**
@@ -558,6 +572,17 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
       // look like player names (e.g. "HOME: CUMANA, VENEZ." → "Cumana Venez.")
       if (bioPrefixPattern.test(line)) continue;
 
+      // Reject lines that come immediately AFTER a bio-prefixed line. Vision OCR
+      // commonly wraps "BORN: 3-2-79 — COLUMBUS, MS" onto two lines, which means
+      // a city + state postal-code pair (e.g. "COLUMBUS, MS") shows up as its
+      // own clean 2-word line and gets accepted as a player-name candidate.
+      // Anchoring against the previous line's bio prefix kills that whole class
+      // of false positive without needing a giant city/state blocklist.
+      if (i > 0 && bioPrefixPattern.test(rawLines[i - 1].trim())) {
+        console.log(`[Name] Skipping line "${line}" — previous line is biographical ("${rawLines[i - 1].trim()}")`);
+        continue;
+      }
+
       // Skip stat-column header lines ("SB SLG BB", "AVG HR RBI", "G AB R H").
       // These routinely survive earlier filters because individual short stat
       // tokens (SB, BB, SO) double as legitimate surname prefixes.
@@ -748,7 +773,17 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
       return null;
     };
 
-    for (let i = 0; i < Math.min(rawLines.length - 1, 8); i++) {
+    // Scan up to the first 14 lines for adjacent first-name + surname pairs.
+    // The previous cap of 8 was too tight for card fronts whose top OCR is
+    // dominated by brand wordmarks, set wordmarks, team names, jersey numbers,
+    // and tiny logo fragments before the actual name sash. Real-world example
+    // (2003 Upper Deck First Pitch front): UPPER / D.E.C.K / Ⓡ / FIRST /
+    // PITCHTM / P / Athletics / 37 / As / SHANE / BAZZELL / STAR ROOKIE —
+    // SHANE+BAZZELL sit on lines 9+10 and the cap-of-8 loop missed them
+    // entirely, leaving the front analyzer with an empty player name and
+    // forcing the back analyzer (which then mis-picked "Draft Pick" out of
+    // "16TH-ROUND DRAFT PICK") to be the source of truth.
+    for (let i = 0; i < Math.min(rawLines.length - 1, 14); i++) {
       const a = rawLines[i].trim();
       const b = rawLines[i + 1].trim();
       if (!a || !b) continue;
@@ -765,7 +800,12 @@ function extractPlayerName(text: string, cardDetails: Partial<CardFormValues>, o
       const firstName = aWords[0].charAt(0).toUpperCase() + aWords[0].slice(1).toLowerCase();
       const surnameTitle = bShape.surname.charAt(0).toUpperCase() + bShape.surname.slice(1).toLowerCase();
       const lastName = bShape.suffix ? `${surnameTitle} ${bShape.suffix}` : surnameTitle;
-      const priority = i < 5 ? 1 : 2;
+      // Bump the priority cutoff from 5 to 10. A multi-line name on lines
+      // 6–9 is still the player name on most modern card fronts — the
+      // visual sash just sits below a stack of logos/wordmarks/jersey nums
+      // in the OCR output. Without this bump, those names competed at the
+      // same priority as biographical-line false positives from the back.
+      const priority = i < 10 ? 1 : 2;
       // For multi-line names the candidate occupies lines i and i+1. Check
       // both neighbours (i-1 above the first-name line, i+2 below the surname
       // line) so a team sash printed above OR below the two-line name sash
