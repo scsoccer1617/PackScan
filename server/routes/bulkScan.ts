@@ -229,11 +229,16 @@ export function registerBulkScanRoutes(app: Express): void {
     const fileId = side === 'front' ? item.frontFileId : item.backFileId;
     if (!fileId) {
       console.warn(`[bulkScan/route] /image item=${itemId} side=${side} has no fileId`);
+      // Don't let browsers cache failures — they stick around for the
+      // full Cache-Control TTL we set on success and prevent recovery
+      // after a fix.
+      res.setHeader('Cache-Control', 'no-store');
       return res.status(404).end();
     }
     const thumb = await fetchThumbnail(userId, fileId);
     if (!thumb) {
       console.warn(`[bulkScan/route] /image item=${itemId} side=${side} fileId=${fileId} — fetchThumbnail returned null`);
+      res.setHeader('Cache-Control', 'no-store');
       return res.status(404).end();
     }
     res.setHeader('Content-Type', thumb.contentType);

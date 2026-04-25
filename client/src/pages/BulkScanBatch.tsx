@@ -746,8 +746,19 @@ function CardImage({
           loading="lazy"
         />
       ) : (
-        <div className="absolute inset-0 flex items-center justify-center text-[10px] uppercase tracking-wide text-muted-foreground">
-          {side}
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 px-3 text-center">
+          <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+            {side}
+          </span>
+          {present && errored ? (
+            <span className="text-[10px] text-destructive">
+              image failed to load
+            </span>
+          ) : !present ? (
+            <span className="text-[10px] text-muted-foreground">
+              no file id
+            </span>
+          ) : null}
         </div>
       )}
       <span className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded-md bg-black/60 text-white text-[9px] font-medium uppercase tracking-wide">
