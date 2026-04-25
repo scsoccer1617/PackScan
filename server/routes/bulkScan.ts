@@ -26,7 +26,7 @@ import {
   getOrInitFolders,
   setUserFolders,
 } from '../bulkScan/processor';
-import { getFolderName } from '../bulkScan/driveClient';
+import { getFolderName, fetchThumbnail } from '../bulkScan/driveClient';
 import { appendCardRow } from '../googleSheets';
 
 export function registerBulkScanRoutes(app: Express): void {
@@ -199,6 +199,43 @@ export function registerBulkScanRoutes(app: Express): void {
       .where(eq(scanBatches.id, item.batchId));
 
     return res.json({ ok: true });
+  });
+
+  // ── Item image (Drive thumbnail proxy) ─────────────────────────────────
+  // The review queue needs to render the front and back of each card so a
+  // dealer can disambiguate at a glance. Browsers can't hit Drive's
+  // thumbnailLink directly (it requires an OAuth Bearer token), so we
+  // proxy. Cached aggressively in the response headers because Drive file
+  // ids are immutable per file content.
+  app.get('/api/bulk-scan/items/:itemId/image/:side', requireAuth, async (req: Request, res: Response) => {
+    const userId = (req.user as any)?.id as number | undefined;
+    if (!userId) return res.status(401).end();
+    const itemId = parseInt(req.params.itemId, 10);
+    const side = req.params.side === 'front' ? 'front' : 'back';
+    if (!Number.isFinite(itemId)) return res.status(400).end();
+    const [item] = await db
+      .select()
+      .from(scanBatchItems)
+      .where(eq(scanBatchItems.id, itemId))
+      .limit(1);
+    if (!item) return res.status(404).end();
+    // Ownership check: only the batch owner can fetch the image.
+    const [batch] = await db
+      .select({ id: scanBatches.id })
+      .from(scanBatches)
+      .where(and(eq(scanBatches.id, item.batchId), eq(scanBatches.userId, userId)))
+      .limit(1);
+    if (!batch) return res.status(404).end();
+    const fileId = side === 'front' ? item.frontFileId : item.backFileId;
+    if (!fileId) return res.status(404).end();
+    const thumb = await fetchThumbnail(userId, fileId);
+    if (!thumb) return res.status(404).end();
+    res.setHeader('Content-Type', thumb.contentType);
+    // Drive thumbnails for a given file id are stable until the file is
+    // edited (which never happens for our scans), so a 1h browser cache is
+    // safe and saves us 50+ Drive API calls per review session.
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.send(thumb.bytes);
   });
 
   // ── Folders config ──────────────────────────────────────────────────────
