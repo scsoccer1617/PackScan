@@ -41,6 +41,7 @@ import { normalizeImageOrientation } from '../dualSideOCR';
 import { lookupCard as cardDbLookup } from '../cardDatabaseService';
 import { appendCardRow } from '../googleSheets';
 import { searchCardValues, getEbaySearchUrl } from '../ebayService';
+import { getScanQuota, incrementScanCount } from '../scanQuota';
 
 // ── Batch lifecycle ──────────────────────────────────────────────────────
 
@@ -198,6 +199,16 @@ export async function runBatch(batchId: number): Promise<void> {
 
     let processed = 0;
     let reviews = 0;
+    // Beta scan quota: track remaining headroom locally so we can stop the
+    // loop cleanly the moment we run out, without making a DB round-trip
+    // before every item. We re-fetch once at the top of the batch and keep
+    // it in sync with the increments we issue below. Items that finish
+    // before quota check (auto_saved/review/skipped from a previous run)
+    // do NOT decrement remaining — they were already counted in their
+    // original run via incrementScanCount.
+    const initialQuota = await getScanQuota(batch.userId);
+    let remaining = initialQuota.limit > 0 ? initialQuota.remaining : Number.POSITIVE_INFINITY;
+    let quotaHit = false;
     for (const item of items) {
       if (item.status === 'auto_saved' || item.status === 'review' || item.status === 'skipped' || item.status === 'failed') {
         // Already handled — skip. Counters get rebuilt below.
@@ -205,10 +216,35 @@ export async function runBatch(batchId: number): Promise<void> {
         if (item.status === 'auto_saved' || item.status === 'review' || item.status === 'skipped') processed++;
         continue;
       }
+      // Quota check before doing any work for this item. Once we hit zero
+      // we mark every remaining pending item as skipped with reason
+      // 'quota_exhausted' so the UI can render a clear "X of Y skipped —
+      // upgrade to continue" banner instead of failing items individually.
+      if (remaining <= 0) {
+        quotaHit = true;
+        await db
+          .update(scanBatchItems)
+          .set({
+            status: 'skipped',
+            reviewReasons: [...(asStringArray(item.reviewReasons)), 'quota_exhausted'],
+            processedAt: new Date(),
+          })
+          .where(eq(scanBatchItems.id, item.id));
+        processed++;
+        await db
+          .update(scanBatches)
+          .set({ processedCount: processed, reviewQueueCount: reviews })
+          .where(eq(scanBatches.id, batchId));
+        continue;
+      }
       try {
         const outcome = await processItem(batch, item);
         if (outcome === 'review') reviews++;
         processed++;
+        // Increment quota only after a real processItem run — the early-skip
+        // branch above does not touch the user's count.
+        await incrementScanCount(batch.userId);
+        if (Number.isFinite(remaining)) remaining = Math.max(0, remaining - 1);
       } catch (err: any) {
         console.error(`[bulkScan] processItem(${item.id}) failed:`, err);
         await db
@@ -220,12 +256,16 @@ export async function runBatch(batchId: number): Promise<void> {
           })
           .where(eq(scanBatchItems.id, item.id));
         processed++;
+        // Failures don't count against quota — the user didn't get a card.
       }
       // Update running counters so the UI can poll progress.
       await db
         .update(scanBatches)
         .set({ processedCount: processed, reviewQueueCount: reviews })
         .where(eq(scanBatches.id, batchId));
+    }
+    if (quotaHit) {
+      console.log(`[bulkScan] Batch ${batchId} reached scan quota for user ${batch.userId}; remaining items marked skipped.`);
     }
 
     await db

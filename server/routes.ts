@@ -40,6 +40,7 @@ import {
 } from './holo/cardGrader';
 import { saveGrade, listGradesForUser, hydrateGrade, updateGradeIdentification } from './holo/storage';
 import { requireAuth, getUserPreferences } from './auth';
+import { requireScanQuota, incrementScanCount, getScanQuota } from './scanQuota';
 import { lookupCard as scpLookupCard, SOURCE_SLUG as SCP_SOURCE_SLUG } from './sportscardspro';
 import type { ScanQueryInput as ScpScanQueryInput } from './sportscardspro';
 import { discoverParallels } from './sportscardspro/parallels';
@@ -979,7 +980,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // OCR endpoint to analyze card images
-  app.post(`${apiPrefix}/analyze-card-image`, upload.single('image'), async (req, res) => {
+  //
+  // Quota: gated by `requireScanQuota` (429 with `limit_reached` if exceeded).
+  // We increment `users.scanCount` once on a successful 200 response via a
+  // res.on('finish') hook so every branch that ends with res.json() (and
+  // there are several below for the various ebay/holo paths) is covered
+  // without sprinkling increment calls through the handler. 4xx/5xx paths
+  // never reach the increment because the status check excludes them.
+  app.post(`${apiPrefix}/analyze-card-image`, requireScanQuota, upload.single('image'), async (req, res) => {
+    const userId = (req.user as any)?.id as number | undefined;
+    res.on('finish', () => {
+      if (res.statusCode === 200) void incrementScanCount(userId);
+    });
     // Check for special cards first by looking at the request
     const file = req.file;
     
@@ -1816,10 +1828,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Dual-image OCR + eBay price lookup endpoint (front for RC, back for details)
-  app.post(`${apiPrefix}/analyze-card-dual-images`, upload.fields([
+  //
+  // Quota: same pattern as /analyze-card-image — `requireScanQuota` rejects
+  // upfront when the user has hit `users.scanLimit`, and a finish-hook
+  // increments scanCount only on 200 responses (the multi-branch ebay
+  // success paths all funnel through res.json with status 200, while
+  // 400/500 exits never count).
+  app.post(`${apiPrefix}/analyze-card-dual-images`, requireScanQuota, upload.fields([
     { name: 'frontImage', maxCount: 1 },
     { name: 'backImage', maxCount: 1 }
   ]), async (req, res) => {
+    const quotaUserId = (req.user as any)?.id as number | undefined;
+    res.on('finish', () => {
+      if (res.statusCode === 200) void incrementScanCount(quotaUserId);
+    });
     // ── Scan-wide latency instrumentation ─────────────────────────────────────
     // Single wall-clock timer around the whole handler so mobile dev-log tailing
     // always gets one authoritative "scan-total" number no matter which exit
@@ -2324,7 +2346,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Combined OCR + eBay price lookup endpoint (legacy single image)
-  app.post(`${apiPrefix}/analyze-card-with-prices`, upload.single('image'), async (req, res) => {
+  //
+  // Quota: see /analyze-card-image — same gate + finish-hook pattern.
+  app.post(`${apiPrefix}/analyze-card-with-prices`, requireScanQuota, upload.single('image'), async (req, res) => {
+    const quotaUserId = (req.user as any)?.id as number | undefined;
+    res.on('finish', () => {
+      if (res.statusCode === 200) void incrementScanCount(quotaUserId);
+    });
     try {
       if (!req.file) {
         return res.status(400).json({ 
@@ -3193,6 +3221,184 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (err: any) {
       console.error('Error fetching scan grades:', err);
       return res.status(500).json({ success: false, error: 'Failed to fetch scan grades' });
+    }
+  });
+
+  // ─── Beta Launch: Scan Quota + Feedback + Admin User Management ───────────
+  // These endpoints support the closed beta (~6 testers + 1 dealer). They
+  // are NOT bolted onto the existing card-database admin routes because:
+  //   1. The existing admin gate requires BOTH email match AND a shared
+  //      ADMIN_PASSWORD header — appropriate for destructive ops like CSV
+  //      imports. The beta admin page (per-user limit edits, count resets)
+  //      is lower-stakes and used during dev, so we drop the password gate
+  //      to reduce friction. Email match alone is sufficient.
+  //   2. Mixing these routes into the destructive-ops middleware would
+  //      force a password prompt on the admin page that the user wouldn't
+  //      want during normal beta operations.
+
+  // GET /api/user/scan-quota — current user's quota state. Used by the header
+  // usage indicator ("X / 50 cards used") and by Single/Bulk Scan to render
+  // a clean "limit reached" empty state instead of letting users try to scan
+  // and getting back a 429.
+  app.get(`${apiPrefix}/user/scan-quota`, requireAuth, async (req, res) => {
+    try {
+      const userId = (req.user as any)?.id as number;
+      const quota = await getScanQuota(userId);
+      return res.json(quota);
+    } catch (err: any) {
+      console.error('[scanQuota] GET /user/scan-quota failed:', err);
+      return res.status(500).json({ error: 'Failed to fetch quota' });
+    }
+  });
+
+  // POST /api/feedback — append a row to the admin's feedback Google Sheet.
+  // Auth-gated so anonymous traffic can't spam the sheet. Body shape is
+  // validated lightly (category + message required); the rest is best-effort
+  // metadata captured from the client.
+  const feedbackBodySchema = z.object({
+    category: z.enum(['Bug', 'Idea', 'Question', 'Other']),
+    message: z.string().trim().min(1).max(4000),
+    pageUrl: z.string().max(2000).optional().nullable(),
+    lastScanId: z.union([z.number(), z.string()]).optional().nullable(),
+  });
+  app.post(`${apiPrefix}/feedback`, requireAuth, async (req, res) => {
+    const parsed = feedbackBodySchema.safeParse(req.body || {});
+    if (!parsed.success) {
+      return res.status(400).json({
+        error: 'invalid_body',
+        details: parsed.error.flatten(),
+      });
+    }
+    try {
+      const { appendFeedbackRow, FeedbackNotConfiguredError } = await import('./feedback');
+      const u = req.user as any;
+      const userAgent = (req.headers['user-agent'] as string | undefined) || null;
+      try {
+        await appendFeedbackRow({
+          userId: u?.id ?? null,
+          userEmail: u?.email ?? null,
+          category: parsed.data.category,
+          message: parsed.data.message,
+          pageUrl: parsed.data.pageUrl ?? null,
+          lastScanId: parsed.data.lastScanId ?? null,
+          userAgent,
+        });
+        return res.json({ success: true });
+      } catch (err: any) {
+        if (err instanceof FeedbackNotConfiguredError) {
+          // 503 (not 500) so the frontend can show a "feedback temporarily
+          // unavailable" message rather than a generic crash toast.
+          console.warn('[feedback] not configured:', err.message);
+          return res.status(503).json({ error: 'feedback_unavailable', detail: err.message });
+        }
+        throw err;
+      }
+    } catch (err: any) {
+      console.error('[feedback] append failed:', err);
+      return res.status(500).json({ error: 'feedback_write_failed' });
+    }
+  });
+
+  // ── Admin user-management gate ───────────────────────────────────────────
+  // Email-only — see top-of-section rationale. Mirrors the email check from
+  // requireAdminPassword but skips the shared-secret header.
+  function requireAdminUser(req: Request, res: Response, next: NextFunction) {
+    const userEmail = ((req.user as any)?.email || '').toString().toLowerCase();
+    if (!req.isAuthenticated?.() || !userEmail || userEmail !== ADMIN_EMAIL) {
+      return res.status(403).json({ error: 'Forbidden: admin access restricted' });
+    }
+    return next();
+  }
+
+  // GET /api/admin/users — table for the admin page. Returns one row per user
+  // with the fields we need to render usage + edit limits. We deliberately
+  // omit token columns (googleAccessToken, password hash) to keep the
+  // response small and avoid leaking secrets to the admin UI.
+  app.get(`${apiPrefix}/admin/users`, requireAuth, requireAdminUser, async (_req, res) => {
+    try {
+      const rows = await db
+        .select({
+          id: schema.users.id,
+          email: schema.users.email,
+          username: schema.users.username,
+          scanLimit: schema.users.scanLimit,
+          scanCount: schema.users.scanCount,
+          createdAt: schema.users.createdAt,
+        })
+        .from(schema.users)
+        .orderBy(desc(schema.users.createdAt));
+      return res.json({ users: rows });
+    } catch (err: any) {
+      console.error('[admin] list users failed:', err);
+      return res.status(500).json({ error: 'Failed to list users' });
+    }
+  });
+
+  // PATCH /api/admin/users/:id — update a single user's scan limit and/or
+  // reset their count. Body: { scanLimit?: number, resetCount?: boolean }.
+  // We accept partial updates so the admin UI can do "edit limit" or
+  // "reset count" independently with a single endpoint.
+  const adminUserPatchSchema = z.object({
+    scanLimit: z.number().int().min(0).max(100000).optional(),
+    resetCount: z.boolean().optional(),
+  }).refine((b) => b.scanLimit !== undefined || b.resetCount === true, {
+    message: 'Provide scanLimit or resetCount',
+  });
+  app.patch(`${apiPrefix}/admin/users/:id`, requireAuth, requireAdminUser, async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) {
+      return res.status(400).json({ error: 'invalid_user_id' });
+    }
+    const parsed = adminUserPatchSchema.safeParse(req.body || {});
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'invalid_body', details: parsed.error.flatten() });
+    }
+    try {
+      const update: Record<string, unknown> = {};
+      if (parsed.data.scanLimit !== undefined) update.scanLimit = parsed.data.scanLimit;
+      if (parsed.data.resetCount) update.scanCount = 0;
+      const [row] = await db
+        .update(schema.users)
+        .set(update)
+        .where(eq(schema.users.id, id))
+        .returning({
+          id: schema.users.id,
+          email: schema.users.email,
+          scanLimit: schema.users.scanLimit,
+          scanCount: schema.users.scanCount,
+        });
+      if (!row) return res.status(404).json({ error: 'user_not_found' });
+      return res.json({ user: row });
+    } catch (err: any) {
+      console.error(`[admin] patch user ${id} failed:`, err);
+      return res.status(500).json({ error: 'Failed to update user' });
+    }
+  });
+
+  // POST /api/admin/users/bump-all — add `delta` to every user's scanLimit.
+  // Used to give all testers another batch of scans at once during beta
+  // (the user's stated workflow when monetization is paused). We allow
+  // negative deltas too in case we need to course-correct, but never let
+  // a user's limit go below zero — clamp at 0 in SQL.
+  const adminBumpSchema = z.object({
+    delta: z.number().int().min(-100000).max(100000),
+  });
+  app.post(`${apiPrefix}/admin/users/bump-all`, requireAuth, requireAdminUser, async (req, res) => {
+    const parsed = adminBumpSchema.safeParse(req.body || {});
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'invalid_body', details: parsed.error.flatten() });
+    }
+    const { delta } = parsed.data;
+    if (delta === 0) return res.json({ updated: 0, delta });
+    try {
+      const result = await db
+        .update(schema.users)
+        .set({ scanLimit: sql`GREATEST(0, ${schema.users.scanLimit} + ${delta})` })
+        .returning({ id: schema.users.id });
+      return res.json({ updated: result.length, delta });
+    } catch (err: any) {
+      console.error('[admin] bump-all failed:', err);
+      return res.status(500).json({ error: 'Failed to bump limits' });
     }
   });
 

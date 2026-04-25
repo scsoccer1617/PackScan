@@ -19,8 +19,19 @@ export const users = pgTable("users", {
   // (notification opts, default sheet, etc.) without another migration.
   // Shape is enforced via `userPreferencesSchema` below.
   preferences: jsonb("preferences"),
+  // Beta scan quota. `scanLimit` is the cap for total cards this user is
+  // allowed to process (Single Scan + each Bulk Scan item count as 1).
+  // `scanCount` is the cumulative count of successfully analyzed cards.
+  // Reset / bumped manually via the admin page; not date-bucketed yet so
+  // we can see real beta usage curves before deciding on a refresh cadence.
+  scanLimit: integer("scan_limit").default(50).notNull(),
+  scanCount: integer("scan_count").default(0).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
+
+// Default beta scan quota for new sign-ups. Stored as a constant so the
+// admin UI and the column default stay in sync.
+export const DEFAULT_BETA_SCAN_LIMIT = 50;
 
 export const insertUserSchema = createInsertSchema(users).pick({
   username: true,
