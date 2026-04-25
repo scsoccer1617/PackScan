@@ -493,6 +493,43 @@ function InboxDiagnostic() {
 }
 
 function InboxDiagnosticRow({ file }: { file: InboxDiagnosticFile }) {
+  const { toast } = useToast();
+  // Reprocess = drop the scan_batch_items row so the next sync rediscovers
+  // and re-pairs this file. Useful after the dealer fixes something
+  // upstream (renames the file, edits a Card DB row, etc.) and wants the
+  // analyzer to take another pass without manually moving files around.
+  // Server blocks auto_saved items with 409 — they already wrote a sheet
+  // row and reprocessing would silently double-write.
+  const reprocessMutation = useMutation({
+    mutationFn: async () => {
+      if (file.itemId == null) throw new Error('No item id');
+      return apiRequest<{ ok: true }>({
+        url: `/api/bulk-scan/items/${file.itemId}/reprocess`,
+        method: 'POST',
+      });
+    },
+    onSuccess: () => {
+      toast({
+        title: 'Queued for reprocessing',
+        description: 'Run Sync to pick this file up again.',
+      });
+      queryClient.invalidateQueries({ queryKey: ['/api/bulk-scan/inbox-diagnostic'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/bulk-scan/batches'] });
+    },
+    onError: (err: any) => {
+      const raw = String(err?.message || '').replace(/^\d+:\s*/, '');
+      let msg = raw;
+      try {
+        msg = JSON.parse(raw).message || JSON.parse(raw).error || raw;
+      } catch {}
+      toast({ title: "Couldn't reprocess", description: msg, variant: 'destructive' });
+    },
+  });
+  // Auto-saved items already wrote a sheet row — server returns 409 if we
+  // try, so don't even show the button. wrong_mimetype / unknown rows
+  // never had a scan_batch_items row, so file.itemId is null.
+  const canReprocess =
+    file.itemId != null && file.disposition !== 'auto_saved_but_not_moved';
   const dispLabel: Record<InboxFileDisposition, string> = {
     auto_saved_but_not_moved: "Saved but not moved",
     review: "In review",
@@ -544,23 +581,37 @@ function InboxDiagnosticRow({ file }: { file: InboxDiagnosticFile }) {
             </p>
           )}
         </div>
-        {hasDetail && (
-          <button
-            type="button"
-            onClick={() => setExpanded((v) => !v)}
-            className="text-[10px] font-medium text-muted-foreground hover:text-foreground hover-elevate px-1.5 py-0.5 rounded-md flex items-center gap-1 shrink-0"
-            data-testid={`button-toggle-detail-${file.fileId}`}
-            aria-expanded={expanded}
-          >
-            {expanded ? "Hide" : "Why?"}
-            <ChevronDown
-              className={cn(
-                "w-3 h-3 transition-transform",
-                expanded ? "rotate-180" : "rotate-0",
-              )}
-            />
-          </button>
-        )}
+        <div className="flex items-center gap-1 shrink-0">
+          {canReprocess && (
+            <button
+              type="button"
+              onClick={() => reprocessMutation.mutate()}
+              disabled={reprocessMutation.isPending}
+              className="text-[10px] font-medium text-muted-foreground hover:text-foreground hover-elevate px-1.5 py-0.5 rounded-md disabled:opacity-50 disabled:pointer-events-none"
+              data-testid={`button-reprocess-${file.fileId}`}
+              title="Drop this row so the next Sync rediscovers and re-analyzes the file."
+            >
+              {reprocessMutation.isPending ? 'Queuing\u2026' : 'Reprocess'}
+            </button>
+          )}
+          {hasDetail && (
+            <button
+              type="button"
+              onClick={() => setExpanded((v) => !v)}
+              className="text-[10px] font-medium text-muted-foreground hover:text-foreground hover-elevate px-1.5 py-0.5 rounded-md flex items-center gap-1"
+              data-testid={`button-toggle-detail-${file.fileId}`}
+              aria-expanded={expanded}
+            >
+              {expanded ? "Hide" : "Why?"}
+              <ChevronDown
+                className={cn(
+                  "w-3 h-3 transition-transform",
+                  expanded ? "rotate-180" : "rotate-0",
+                )}
+              />
+            </button>
+          )}
+        </div>
       </div>
       {hasDetail && expanded && file.detail && (
         <InboxDiagnosticDetailPanel
