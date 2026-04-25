@@ -1,0 +1,217 @@
+// ─── User Scan Logger ───────────────────────────────────────────────────────
+//
+// Logs every save event to the `user_scans` table. This is intentionally
+// walled off from `card_database` (the curated source of truth) — the admin
+// reviews these rows offline at /admin/scans and decides what (if anything)
+// gets promoted to the reference catalog.
+//
+// Three actions:
+//   - 'confirmed'           → 👍 path; user said the scanner output is correct as-is
+//   - 'declined_edited'     → 👎 path; user opened the edit modal, made corrections, and saved
+//   - 'saved_no_feedback'   → user just hit save without using either thumb
+//
+// Per-field diff:
+//   `fieldsChanged` is the list of field names where the saved value differs
+//   from the detected value. Empty on 'confirmed'. Populated on
+//   'declined_edited' and 'saved_no_feedback' (we still record the diff so
+//   plain-save rows are useful for review).
+//
+// Failure mode:
+//   This module is best-effort. We never want a logger glitch to block the
+//   user's actual save. All callers wrap `logUserScan` in try/catch (or
+//   .catch(() => {})) so a thrown error here is swallowed and logged.
+
+import { db } from '@db';
+import { userScans, type UserScan, type UserScanAction } from '@shared/schema';
+
+/**
+ * The detected (raw scanner) and final (post-edit) value bundles.
+ * Everything is optional — older callers may not have every field. The
+ * logger only persists what's provided.
+ */
+export interface ScanFieldValues {
+  sport?: string | null;
+  playerFirstName?: string | null;
+  playerLastName?: string | null;
+  brand?: string | null;
+  collection?: string | null;
+  set?: string | null;
+  cardNumber?: string | null;
+  year?: number | null;
+  variant?: string | null;
+  team?: string | null;
+  cmpNumber?: string | null;
+  serialNumber?: string | null;
+  foilType?: string | null;
+  isRookie?: boolean | null;
+  isAuto?: boolean | null;
+  isNumbered?: boolean | null;
+  isFoil?: boolean | null;
+}
+
+export interface LogUserScanParams {
+  userId: number | null | undefined;
+  cardId?: number | null;
+  userAction: UserScanAction;
+  detected: ScanFieldValues;
+  /**
+   * What the user actually saved. If omitted, falls back to `detected`
+   * (i.e. nothing was edited). Always provide for 'declined_edited' and
+   * 'saved_no_feedback' paths so the diff is meaningful.
+   */
+  final?: ScanFieldValues;
+  frontImage?: string | null;
+  backImage?: string | null;
+  scpScore?: number | null;
+  scpMatchedTitle?: string | null;
+  cardDbCorroborated?: boolean | null;
+  analyzerVersion?: string | null;
+  /**
+   * Override the auto-computed diff. Use when the client tells us
+   * authoritatively which fields it considers "changed" (e.g. when the user
+   * pressed 👍 and we want to record fieldsChanged=[] regardless of any
+   * coercion noise between detected/final).
+   */
+  fieldsChangedOverride?: string[];
+}
+
+/**
+ * Compute the per-field diff between `detected` and `final`. Order matches
+ * the column ordering in the user_scans table for stable review display.
+ */
+export function diffScanFields(detected: ScanFieldValues, final: ScanFieldValues): string[] {
+  const keys: (keyof ScanFieldValues)[] = [
+    'sport',
+    'playerFirstName',
+    'playerLastName',
+    'brand',
+    'collection',
+    'set',
+    'cardNumber',
+    'year',
+    'variant',
+    'team',
+    'cmpNumber',
+    'serialNumber',
+    'foilType',
+    'isRookie',
+    'isAuto',
+    'isNumbered',
+    'isFoil',
+  ];
+  const changed: string[] = [];
+  for (const k of keys) {
+    const a = normalizeForCompare(detected[k]);
+    const b = normalizeForCompare(final[k]);
+    if (a !== b) changed.push(k);
+  }
+  return changed;
+}
+
+function normalizeForCompare(v: unknown): string | null {
+  if (v === null || v === undefined || v === '') return null;
+  if (typeof v === 'string') return v.trim().toLowerCase();
+  if (typeof v === 'boolean') return v ? 'true' : 'false';
+  if (typeof v === 'number') return String(v);
+  return JSON.stringify(v);
+}
+
+/**
+ * Insert one row into user_scans. Best-effort — returns the inserted id on
+ * success, undefined on any failure (logged but never thrown).
+ */
+export async function logUserScan(params: LogUserScanParams): Promise<number | undefined> {
+  try {
+    const detected = params.detected ?? {};
+    const final = params.final ?? detected;
+
+    const fieldsChanged = params.fieldsChangedOverride
+      ? [...params.fieldsChangedOverride]
+      : diffScanFields(detected, final);
+
+    const [row] = await db
+      .insert(userScans)
+      .values({
+        userId: params.userId ?? null,
+        cardId: params.cardId ?? null,
+        userAction: params.userAction,
+        fieldsChanged,
+        // Detected
+        detectedSport: nullableString(detected.sport),
+        detectedPlayerFirstName: nullableString(detected.playerFirstName),
+        detectedPlayerLastName: nullableString(detected.playerLastName),
+        detectedBrand: nullableString(detected.brand),
+        detectedCollection: nullableString(detected.collection),
+        detectedSet: nullableString(detected.set),
+        detectedCardNumber: nullableString(detected.cardNumber),
+        detectedYear: nullableNumber(detected.year),
+        detectedVariant: nullableString(detected.variant),
+        detectedTeam: nullableString(detected.team),
+        detectedCmpNumber: nullableString(detected.cmpNumber),
+        detectedSerialNumber: nullableString(detected.serialNumber),
+        detectedFoilType: nullableString(detected.foilType),
+        detectedIsRookie: nullableBool(detected.isRookie),
+        detectedIsAuto: nullableBool(detected.isAuto),
+        detectedIsNumbered: nullableBool(detected.isNumbered),
+        detectedIsFoil: nullableBool(detected.isFoil),
+        // Final
+        finalSport: nullableString(final.sport),
+        finalPlayerFirstName: nullableString(final.playerFirstName),
+        finalPlayerLastName: nullableString(final.playerLastName),
+        finalBrand: nullableString(final.brand),
+        finalCollection: nullableString(final.collection),
+        finalSet: nullableString(final.set),
+        finalCardNumber: nullableString(final.cardNumber),
+        finalYear: nullableNumber(final.year),
+        finalVariant: nullableString(final.variant),
+        finalTeam: nullableString(final.team),
+        finalCmpNumber: nullableString(final.cmpNumber),
+        finalSerialNumber: nullableString(final.serialNumber),
+        finalFoilType: nullableString(final.foilType),
+        finalIsRookie: nullableBool(final.isRookie),
+        finalIsAuto: nullableBool(final.isAuto),
+        finalIsNumbered: nullableBool(final.isNumbered),
+        finalIsFoil: nullableBool(final.isFoil),
+        // Images + metadata
+        frontImage: params.frontImage ?? null,
+        backImage: params.backImage ?? null,
+        scpScore: params.scpScore != null ? String(params.scpScore) : null,
+        scpMatchedTitle: params.scpMatchedTitle ?? null,
+        cardDbCorroborated: params.cardDbCorroborated ?? null,
+        analyzerVersion: params.analyzerVersion ?? null,
+      })
+      .returning({ id: userScans.id });
+
+    return row?.id;
+  } catch (err) {
+    console.error('[user_scans] logUserScan failed:', err);
+    return undefined;
+  }
+}
+
+function nullableString(v: unknown): string | null {
+  if (v === null || v === undefined) return null;
+  if (typeof v === 'string') {
+    const t = v.trim();
+    return t === '' ? null : t;
+  }
+  return String(v);
+}
+
+function nullableNumber(v: unknown): number | null {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function nullableBool(v: unknown): boolean | null {
+  if (v === null || v === undefined) return null;
+  if (typeof v === 'boolean') return v;
+  if (typeof v === 'string') {
+    if (v === 'true') return true;
+    if (v === 'false') return false;
+  }
+  return null;
+}
+
+export type { UserScan };

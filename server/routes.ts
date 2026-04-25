@@ -41,6 +41,7 @@ import {
 import { saveGrade, listGradesForUser, hydrateGrade, updateGradeIdentification } from './holo/storage';
 import { requireAuth, getUserPreferences } from './auth';
 import { requireScanQuota, incrementScanCount, getScanQuota } from './scanQuota';
+import { logUserScan, type ScanFieldValues } from './userScans';
 import { lookupCard as scpLookupCard, SOURCE_SLUG as SCP_SOURCE_SLUG } from './sportscardspro';
 import type { ScanQueryInput as ScpScanQueryInput } from './sportscardspro';
 import { discoverParallels } from './sportscardspro/parallels';
@@ -677,7 +678,58 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Insert card to database
       const newCard = await storage.createCard(cardInsertData);
-      
+
+      // Log to user_scans (best-effort — never blocks the response). We use
+      // the explicit `_scanTracking` payload from the client when present;
+      // otherwise we fall back to 'saved_no_feedback' with the saved values
+      // serving as both "detected" and "final" so we still capture the row
+      // for admin review even when the client hasn't been updated yet.
+      const tracking = (cardData as any)._scanTracking as
+        | {
+            userAction: 'confirmed' | 'declined_edited' | 'saved_no_feedback';
+            detected?: ScanFieldValues;
+            scpScore?: number | null;
+            scpMatchedTitle?: string | null;
+            cardDbCorroborated?: boolean | null;
+            analyzerVersion?: string | null;
+          }
+        | undefined;
+      const finalValues: ScanFieldValues = {
+        sport: cardData.sport,
+        playerFirstName: cardData.playerFirstName,
+        playerLastName: cardData.playerLastName,
+        brand: cardData.brand,
+        collection: cardData.collection ?? null,
+        set: (cardData as any).set ?? null,
+        cardNumber: cardData.cardNumber,
+        year: cardData.year ?? null,
+        variant: cardData.variant ?? null,
+        team: (cardData as any).team ?? null,
+        cmpNumber: (cardData as any).cmpNumber ?? null,
+        serialNumber: cardData.serialNumber ?? null,
+        foilType: cardData.foilType ?? null,
+        isRookie: cardData.isRookieCard ?? null,
+        isAuto: cardData.isAutographed ?? null,
+        isNumbered: cardData.isNumbered ?? null,
+        isFoil: cardData.isFoil ?? null,
+      };
+      const userId = (req.user as any)?.id as number | undefined;
+      logUserScan({
+        userId: userId ?? null,
+        cardId: newCard?.id ?? null,
+        userAction: tracking?.userAction ?? 'saved_no_feedback',
+        detected: tracking?.detected ?? finalValues,
+        final: finalValues,
+        frontImage: cardInsertData.frontImage ?? null,
+        backImage: cardInsertData.backImage ?? null,
+        scpScore: tracking?.scpScore ?? null,
+        scpMatchedTitle: tracking?.scpMatchedTitle ?? null,
+        cardDbCorroborated: tracking?.cardDbCorroborated ?? null,
+        analyzerVersion: tracking?.analyzerVersion ?? null,
+        // 👍 means "no edits regardless of any string-coercion noise"
+        fieldsChangedOverride: tracking?.userAction === 'confirmed' ? [] : undefined,
+      }).catch(() => {});
+
       return res.status(201).json({ 
         card: newCard
       });
@@ -3399,6 +3451,102 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (err: any) {
       console.error('[admin] bump-all failed:', err);
       return res.status(500).json({ error: 'Failed to bump limits' });
+    }
+  });
+
+  // ─── /admin/scans — user scan review ────────────────────────────────────
+  // List rows from `user_scans`. Same email-only gate as /admin/users. The
+  // table is intentionally large (one row per save event), so we paginate
+  // and let the admin filter by action + user.
+  const adminScansQuerySchema = z.object({
+    limit: z.coerce.number().int().min(1).max(200).optional(),
+    offset: z.coerce.number().int().min(0).optional(),
+    action: z.enum(['confirmed', 'declined_edited', 'saved_no_feedback']).optional(),
+    userId: z.coerce.number().int().positive().optional(),
+  });
+  app.get(`${apiPrefix}/admin/scans`, requireAuth, requireAdminUser, async (req, res) => {
+    const parsed = adminScansQuerySchema.safeParse(req.query || {});
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'invalid_query', details: parsed.error.flatten() });
+    }
+    const limit = parsed.data.limit ?? 50;
+    const offset = parsed.data.offset ?? 0;
+    try {
+      const filters = [] as any[];
+      if (parsed.data.action) filters.push(eq(schema.userScans.userAction, parsed.data.action));
+      if (parsed.data.userId !== undefined) filters.push(eq(schema.userScans.userId, parsed.data.userId));
+
+      // Join users so the admin can see who scanned each card without a
+      // second round-trip. We left-join because `user_scans.user_id` is
+      // nullable (a user-deleted-account scenario keeps the row).
+      const baseQuery = db
+        .select({
+          id: schema.userScans.id,
+          userId: schema.userScans.userId,
+          userEmail: schema.users.email,
+          cardId: schema.userScans.cardId,
+          scannedAt: schema.userScans.scannedAt,
+          userAction: schema.userScans.userAction,
+          fieldsChanged: schema.userScans.fieldsChanged,
+          finalPlayerFirstName: schema.userScans.finalPlayerFirstName,
+          finalPlayerLastName: schema.userScans.finalPlayerLastName,
+          finalBrand: schema.userScans.finalBrand,
+          finalYear: schema.userScans.finalYear,
+          finalCardNumber: schema.userScans.finalCardNumber,
+          finalSet: schema.userScans.finalSet,
+          finalCollection: schema.userScans.finalCollection,
+          finalVariant: schema.userScans.finalVariant,
+          finalTeam: schema.userScans.finalTeam,
+          finalCmpNumber: schema.userScans.finalCmpNumber,
+          frontImage: schema.userScans.frontImage,
+          scpScore: schema.userScans.scpScore,
+          cardDbCorroborated: schema.userScans.cardDbCorroborated,
+        })
+        .from(schema.userScans)
+        .leftJoin(schema.users, eq(schema.users.id, schema.userScans.userId));
+
+      const rows = await (filters.length
+        ? baseQuery.where(and(...filters))
+        : baseQuery)
+        .orderBy(desc(schema.userScans.scannedAt))
+        .limit(limit)
+        .offset(offset);
+
+      const totalRow = await db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(schema.userScans)
+        .where(filters.length ? and(...filters) : sql`true`);
+      const total = totalRow[0]?.count ?? 0;
+
+      return res.json({ scans: rows, total, limit, offset });
+    } catch (err: any) {
+      console.error('[admin] list scans failed:', err);
+      return res.status(500).json({ error: 'Failed to list scans' });
+    }
+  });
+
+  // GET /api/admin/scans/:id — full row including all detected/final fields
+  // and back image. Used by the detail drawer on the admin page.
+  app.get(`${apiPrefix}/admin/scans/:id`, requireAuth, requireAdminUser, async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) {
+      return res.status(400).json({ error: 'invalid_id' });
+    }
+    try {
+      const rows = await db
+        .select({
+          scan: schema.userScans,
+          userEmail: schema.users.email,
+        })
+        .from(schema.userScans)
+        .leftJoin(schema.users, eq(schema.users.id, schema.userScans.userId))
+        .where(eq(schema.userScans.id, id))
+        .limit(1);
+      if (rows.length === 0) return res.status(404).json({ error: 'not_found' });
+      return res.json({ scan: { ...rows[0].scan, userEmail: rows[0].userEmail } });
+    } catch (err: any) {
+      console.error(`[admin] get scan ${id} failed:`, err);
+      return res.status(500).json({ error: 'Failed to load scan' });
     }
   });
 

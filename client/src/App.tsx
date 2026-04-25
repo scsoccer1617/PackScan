@@ -10,6 +10,7 @@ import AddCard from "@/pages/AddCard";
 import CardSearch from "@/pages/CardSearch";
 import CardDatabaseAdmin from "@/pages/CardDatabaseAdmin";
 import AdminUsers from "@/pages/AdminUsers";
+import AdminScans from "@/pages/AdminScans";
 import Login from "@/pages/Login";
 import ForgotPassword from "@/pages/ForgotPassword";
 import ResetPassword from "@/pages/ResetPassword";
@@ -161,6 +162,17 @@ function Router() {
             component={() =>
               user?.email?.trim().toLowerCase() === "daniel.j.holley@gmail.com"
                 ? <AdminUsers />
+                : <Redirect to="/" />
+            }
+          />
+          {/* User-scan review surface. Same email-only gate as /admin. Lists
+              every save event in user_scans; the admin reviews here and
+              decides what (if anything) graduates to the curated cardDB. */}
+          <Route
+            path="/admin/scans"
+            component={() =>
+              user?.email?.trim().toLowerCase() === "daniel.j.holley@gmail.com"
+                ? <AdminScans />
                 : <Redirect to="/" />
             }
           />
