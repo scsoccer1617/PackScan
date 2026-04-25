@@ -29,6 +29,7 @@ import {
   HelpCircle,
   ChevronDown,
   FileQuestion,
+  Trash2,
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
@@ -898,9 +899,53 @@ function FolderRow({
 }
 
 function BatchCard({ batch }: { batch: ScanBatch }) {
+  const { toast } = useToast();
   const created = formatRelative(batch.createdAt);
   const statusMeta = STATUS_META[batch.status];
   const hasReview = batch.reviewQueueCount > 0;
+  // Server blocks deletion while running so the worker doesn't update
+  // rows that just got dropped underneath it. Hide the button entirely
+  // for those rather than render a guaranteed-409 click target.
+  const canDelete = batch.status !== 'running';
+  const deleteMutation = useMutation({
+    mutationFn: async () =>
+      apiRequest<{ ok: true }>({
+        url: `/api/bulk-scan/batches/${batch.id}`,
+        method: 'DELETE',
+      }),
+    onSuccess: () => {
+      toast({
+        title: `Batch #${batch.id} deleted`,
+        description: 'Drive files and sheet rows were not touched.',
+      });
+      queryClient.invalidateQueries({ queryKey: ['/api/bulk-scan/batches'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/bulk-scan/inbox-diagnostic'] });
+    },
+    onError: (err: any) => {
+      const raw = String(err?.message || '').replace(/^\d+:\s*/, '');
+      let msg = raw;
+      try {
+        msg = JSON.parse(raw).message || JSON.parse(raw).error || raw;
+      } catch {}
+      toast({ title: "Couldn't delete batch", description: msg, variant: 'destructive' });
+    },
+  });
+  const handleDelete = (e: React.MouseEvent) => {
+    // The whole card is a <Link> so any click bubbles up to navigation;
+    // the delete button needs to short-circuit both the link and any
+    // accidental hover-elevate parent handlers.
+    e.preventDefault();
+    e.stopPropagation();
+    const warn =
+      batch.processedCount > 0
+        ? " Any cards already saved to your sheet will stay there \u2014 delete those rows manually if you want a true reset."
+        : '';
+    const ok = window.confirm(
+      `Delete batch #${batch.id}? This removes the batch and its review queue from Holo.${warn}`,
+    );
+    if (!ok) return;
+    deleteMutation.mutate();
+  };
 
   return (
     <Link
@@ -958,7 +1003,26 @@ function BatchCard({ batch }: { batch: ScanBatch }) {
             </div>
           )}
         </div>
-        <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0 mt-1" />
+        <div className="flex flex-col items-end gap-2 shrink-0">
+          <ChevronRight className="w-4 h-4 text-muted-foreground mt-1" />
+          {canDelete && (
+            <button
+              type="button"
+              onClick={handleDelete}
+              disabled={deleteMutation.isPending}
+              className="text-muted-foreground hover:text-destructive hover-elevate p-1.5 rounded-md disabled:opacity-50"
+              data-testid={`button-delete-batch-${batch.id}`}
+              aria-label={`Delete batch #${batch.id}`}
+              title="Delete this batch"
+            >
+              {deleteMutation.isPending ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Trash2 className="w-3.5 h-3.5" />
+              )}
+            </button>
+          )}
+        </div>
       </div>
     </Link>
   );
