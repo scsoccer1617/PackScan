@@ -764,6 +764,21 @@ async function combineCardResults(
     'MARINERS', 'MARINER', 'ANGELS', 'ANGEL', 'ROCKIES', 'DIAMONDBACKS', 'DIAMONDBACK',
     'INDIAN', 'INDIANS', 'SOX',
     'OUTFIELDER', 'INFIELDER', 'PITCHER', 'CATCHER', 'LEFT', 'RIGHT', 'THROWS', 'BATS',
+    // Position labels printed on the front of cards as a job title
+    // ("Shortstop", "Outfield", "Designated Hitter"). These are not
+    // surnames and must never be promoted into surname-search
+    // candidates — front OCR for cards like 2024 Topps Heritage Masyn
+    // Winn includes "Shortstop" as a position label, and the catalog
+    // happens to contain insert rows like "(Shortstop Doesn't Touch
+    // Ball)" that produce a unique surname-salvage hit and overwrite
+    // the correct year/cardNumber. Cover long-form position words
+    // across baseball/football/basketball/hockey/soccer.
+    'SHORTSTOP', 'OUTFIELD', 'INFIELD', 'BASEMAN', 'FIRSTBASE', 'SECONDBASE', 'THIRDBASE',
+    'DESIGNATED', 'HITTER', 'UTILITY', 'RELIEVER',
+    'QUARTERBACK', 'RUNNINGBACK', 'FULLBACK', 'HALFBACK', 'TAILBACK', 'TIGHTEND',
+    'CORNERBACK', 'LINEBACKER',
+    'GOALIE', 'GOALKEEPER', 'GOALTENDER', 'DEFENSEMAN',
+    'MIDFIELDER',
     'MAJOR', 'LEAGUE', 'BATTING', 'RECORD', 'STADIUM', 'CLUB', 'COLLECTION',
     'OPENING', 'DAY', 'HERITAGE', 'PRIZM', 'SELECT', 'MOSAIC',
     'BASEBALL', 'CARD', 'ROOKIE', 'STARS', 'MLB',
