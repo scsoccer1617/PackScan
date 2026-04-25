@@ -129,6 +129,48 @@ export async function listInboxImages(
 }
 
 /**
+ * List ALL files in a Drive folder regardless of mimeType. Used by the
+ * inbox diagnostic so the dealer can see why HEIC / PDF / TIFF / random
+ * scans don't show up in the bulk-scan listing. Mirrors listInboxImages
+ * but without the image-only filter.
+ */
+export async function listInboxAllFiles(
+  userId: number,
+  folderId: string,
+  opts: { pageLimit?: number } = {},
+): Promise<DriveImageFile[]> {
+  const { oauth } = await getOAuthClient(userId);
+  const drive = driveFor(oauth);
+  const limit = opts.pageLimit ?? 500;
+  const files: DriveImageFile[] = [];
+  let pageToken: string | undefined;
+  do {
+    const res = await drive.files.list({
+      q: `'${folderId}' in parents and trashed=false and mimeType != 'application/vnd.google-apps.folder'`,
+      fields: 'nextPageToken, files(id,name,mimeType,createdTime,size)',
+      orderBy: 'createdTime asc, name asc',
+      pageSize: 100,
+      pageToken,
+      spaces: 'drive',
+    });
+    const batch = res.data.files || [];
+    for (const f of batch) {
+      if (!f.id || !f.name) continue;
+      files.push({
+        id: f.id,
+        name: f.name,
+        mimeType: f.mimeType || '',
+        createdTime: f.createdTime || new Date().toISOString(),
+        size: f.size ? Number(f.size) : null,
+      });
+      if (files.length >= limit) break;
+    }
+    pageToken = res.data.nextPageToken || undefined;
+  } while (pageToken && files.length < limit);
+  return files;
+}
+
+/**
  * Fetch a Drive file's bytes for previewing in the review queue.
  *
  * We previously tried Drive's `thumbnailLink`, but that route is unreliable:

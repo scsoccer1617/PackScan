@@ -26,7 +26,7 @@ import {
   getOrInitFolders,
   setUserFolders,
 } from '../bulkScan/processor';
-import { getFolderName, fetchThumbnail } from '../bulkScan/driveClient';
+import { getFolderName, fetchThumbnail, listInboxAllFiles } from '../bulkScan/driveClient';
 import { appendCardRow } from '../googleSheets';
 
 export function registerBulkScanRoutes(app: Express): void {
@@ -247,6 +247,128 @@ export function registerBulkScanRoutes(app: Express): void {
     // 50+ Drive API calls per review session.
     res.setHeader('Cache-Control', 'private, max-age=3600');
     res.send(thumb.bytes);
+  });
+
+  // ── Inbox diagnostic ────────────────────────────────────────────────
+  // After a sync, files that *aren't* in the processed folder fall into
+  // a few buckets and the dealer has no way to tell them apart from the
+  // batch detail page. This endpoint lists every file in the inbox and
+  // cross-references it against scan_batch_items so each file gets a
+  // disposition: not-an-image, queued in this batch, sent to review,
+  // skipped, failed, or auto-saved (and the move-to-processed presumably
+  // failed). Read-only, so safe to call any time.
+  app.get('/api/bulk-scan/inbox-diagnostic', requireAuth, async (req: Request, res: Response) => {
+    const userId = (req.user as any)?.id as number | undefined;
+    if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+    const folders = await getOrInitFolders(userId);
+    if (!folders?.inboxFolderId) {
+      return res.status(400).json({ error: 'No inbox folder configured' });
+    }
+    const inboxFolderId = folders.inboxFolderId;
+
+    // Pull every file in the inbox (no mimeType filter — we want to see
+    // HEIC/PDF/TIFF rejects too).
+    let allFiles;
+    try {
+      allFiles = await listInboxAllFiles(userId, inboxFolderId);
+    } catch (err: any) {
+      console.error('[bulkScan/route] /inbox-diagnostic listInboxAllFiles failed:', err);
+      return res.status(500).json({ error: err?.message || 'drive_list_failed' });
+    }
+
+    // Pull every batch item this user has ever produced so we can reverse-
+    // lookup any inbox file id. Keyed by Drive file id (a single item row
+    // can claim two file ids, one per side).
+    const itemRows = await db
+      .select({
+        id: scanBatchItems.id,
+        batchId: scanBatchItems.batchId,
+        status: scanBatchItems.status,
+        reviewReasons: scanBatchItems.reviewReasons,
+        errorMessage: scanBatchItems.errorMessage,
+        backFileId: scanBatchItems.backFileId,
+        frontFileId: scanBatchItems.frontFileId,
+      })
+      .from(scanBatchItems)
+      .innerJoin(scanBatches, eq(scanBatchItems.batchId, scanBatches.id))
+      .where(eq(scanBatches.userId, userId));
+    const itemByFileId = new Map<string, typeof itemRows[number]>();
+    for (const it of itemRows) {
+      if (it.backFileId) itemByFileId.set(it.backFileId, it);
+      if (it.frontFileId) itemByFileId.set(it.frontFileId, it);
+    }
+
+    const ALLOWED_MIME = new Set(['image/jpeg', 'image/jpg', 'image/png']);
+    type Disposition =
+      | 'auto_saved_but_not_moved' // happy path failed at the move step
+      | 'review' // shows up in review queue
+      | 'skipped' // user dismissed in review
+      | 'failed' // analyzer error
+      | 'pending_or_processing' // worker still running / stuck
+      | 'wrong_mimetype' // listInboxImages excluded it
+      | 'unknown'; // not in any item row — weird
+
+    const report = allFiles.map((f) => {
+      const item = itemByFileId.get(f.id);
+      let disposition: Disposition;
+      let reason: string | null = null;
+      if (!item) {
+        if (!ALLOWED_MIME.has(f.mimeType)) {
+          disposition = 'wrong_mimetype';
+          reason = `mimeType '${f.mimeType}' not in jpeg/jpg/png — file is silently skipped during sync.`;
+        } else {
+          disposition = 'unknown';
+          reason = 'File is jpeg/png but no batch item references it. Did sync run since this file was added?';
+        }
+      } else {
+        switch (item.status) {
+          case 'auto_saved':
+            disposition = 'auto_saved_but_not_moved';
+            reason =
+              'Card was saved to your sheet, but the move to the processed folder failed. Check server logs around this batch for "move back/front file failed".';
+            break;
+          case 'review':
+            disposition = 'review';
+            reason = `In review queue. Reasons: ${
+              Array.isArray(item.reviewReasons) && item.reviewReasons.length
+                ? (item.reviewReasons as unknown[]).join(', ')
+                : 'none recorded'
+            }`;
+            break;
+          case 'skipped':
+            disposition = 'skipped';
+            reason = 'You skipped this card in the review queue. Move or delete the file to clean up the inbox.';
+            break;
+          case 'failed':
+            disposition = 'failed';
+            reason = `Analyzer threw: ${item.errorMessage || 'no error message recorded'}`;
+            break;
+          case 'pending':
+          case 'processing':
+          default:
+            disposition = 'pending_or_processing';
+            reason = `Item status is '${item.status}' — either the worker is still running or the batch was interrupted. Try a new sync.`;
+            break;
+        }
+      }
+      return {
+        fileId: f.id,
+        name: f.name,
+        mimeType: f.mimeType,
+        size: f.size,
+        createdTime: f.createdTime,
+        disposition,
+        reason,
+        itemId: item?.id ?? null,
+        batchId: item?.batchId ?? null,
+      };
+    });
+
+    return res.json({
+      inboxFolderId,
+      totalFiles: allFiles.length,
+      files: report,
+    });
   });
 
   // ── Folders config ──────────────────────────────────────────────────────

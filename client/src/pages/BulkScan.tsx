@@ -26,6 +26,9 @@ import {
   Beaker,
   FileSpreadsheet,
   ExternalLink,
+  HelpCircle,
+  ChevronDown,
+  FileQuestion,
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
@@ -65,6 +68,31 @@ interface UserSheet {
 interface SheetsResponse {
   sheets: UserSheet[];
   activeSheetId: number | null;
+}
+
+type InboxFileDisposition =
+  | "auto_saved_but_not_moved"
+  | "review"
+  | "skipped"
+  | "failed"
+  | "pending_or_processing"
+  | "wrong_mimetype"
+  | "unknown";
+interface InboxDiagnosticFile {
+  fileId: string;
+  name: string;
+  mimeType: string;
+  size: number | null;
+  createdTime: string;
+  disposition: InboxFileDisposition;
+  reason: string | null;
+  itemId: number | null;
+  batchId: number | null;
+}
+interface InboxDiagnosticResponse {
+  inboxFolderId: string;
+  totalFiles: number;
+  files: InboxDiagnosticFile[];
 }
 
 export default function BulkScan() {
@@ -359,7 +387,137 @@ export default function BulkScan() {
           </div>
         )}
       </section>
+
+      {/* Inbox diagnostic — lazy-loaded, only when the dealer wants to know
+          why files are still sitting in the inbox after a sync. */}
+      {inboxConfigured && batches.length > 0 && <InboxDiagnostic />}
     </div>
+  );
+}
+
+// ── Inbox diagnostic ───────────────────────────────────────────────────
+function InboxDiagnostic() {
+  const [open, setOpen] = useState(false);
+  const { data, isLoading, isError, error, refetch, isFetching } = useQuery<InboxDiagnosticResponse>({
+    queryKey: ["/api/bulk-scan/inbox-diagnostic"],
+    enabled: open,
+  });
+  return (
+    <section className="mx-4 rounded-2xl bg-card border border-card-border">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center gap-3 px-4 py-3 hover-elevate rounded-2xl text-left"
+        data-testid="button-toggle-inbox-diagnostic"
+        aria-expanded={open}
+      >
+        <div className="w-8 h-8 rounded-xl bg-muted flex items-center justify-center text-slate-600 shrink-0">
+          <HelpCircle className="w-4 h-4" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium">Why are some files still in the inbox?</p>
+          <p className="text-[11px] text-muted-foreground">
+            See the disposition of every file in your Drive inbox folder.
+          </p>
+        </div>
+        <ChevronDown
+          className={cn(
+            "w-4 h-4 text-muted-foreground shrink-0 transition",
+            open && "rotate-180",
+          )}
+        />
+      </button>
+      {open && (
+        <div className="border-t border-card-border px-4 py-3 space-y-2">
+          {isLoading ? (
+            <div className="space-y-2">
+              <div className="h-12 rounded-xl bg-muted/40 animate-pulse" />
+              <div className="h-12 rounded-xl bg-muted/30 animate-pulse" />
+            </div>
+          ) : isError ? (
+            <p className="text-xs text-destructive" data-testid="text-inbox-diagnostic-error">
+              Couldn't load inbox: {(error as any)?.message || "unknown error"}
+            </p>
+          ) : !data || data.files.length === 0 ? (
+            <p className="text-xs text-muted-foreground">
+              Inbox is empty — every file moved to processed.
+            </p>
+          ) : (
+            <>
+              <div className="flex items-center justify-between">
+                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                  {data.totalFiles} file{data.totalFiles === 1 ? "" : "s"} in inbox
+                </p>
+                <button
+                  type="button"
+                  onClick={() => refetch()}
+                  disabled={isFetching}
+                  className="text-[11px] text-foil-violet hover:underline disabled:opacity-50"
+                  data-testid="button-refresh-inbox-diagnostic"
+                >
+                  {isFetching ? "Refreshing…" : "Refresh"}
+                </button>
+              </div>
+              <ul className="space-y-1.5">
+                {data.files.map((f) => (
+                  <InboxDiagnosticRow key={f.fileId} file={f} />
+                ))}
+              </ul>
+            </>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function InboxDiagnosticRow({ file }: { file: InboxDiagnosticFile }) {
+  const dispLabel: Record<InboxFileDisposition, string> = {
+    auto_saved_but_not_moved: "Saved but not moved",
+    review: "In review",
+    skipped: "Skipped",
+    failed: "Analyzer failed",
+    pending_or_processing: "Still processing",
+    wrong_mimetype: "Wrong file type",
+    unknown: "Not seen by sync",
+  };
+  const dispTone: Record<InboxFileDisposition, string> = {
+    auto_saved_but_not_moved: "bg-foil-amber/15 text-foil-amber",
+    review: "bg-foil-violet/15 text-foil-violet",
+    skipped: "bg-muted text-muted-foreground",
+    failed: "bg-destructive/15 text-destructive",
+    pending_or_processing: "bg-foil-amber/15 text-foil-amber",
+    wrong_mimetype: "bg-destructive/15 text-destructive",
+    unknown: "bg-muted text-muted-foreground",
+  };
+  return (
+    <li
+      className="rounded-xl border border-card-border bg-background px-3 py-2 flex items-start gap-2"
+      data-testid={`row-inbox-file-${file.fileId}`}
+    >
+      <FileQuestion className="w-4 h-4 text-muted-foreground shrink-0 mt-0.5" />
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <p className="text-xs font-medium truncate max-w-[220px]" title={file.name}>
+            {file.name}
+          </p>
+          <span
+            className={cn(
+              "inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-medium",
+              dispTone[file.disposition],
+            )}
+            data-testid={`badge-disposition-${file.fileId}`}
+          >
+            {dispLabel[file.disposition]}
+          </span>
+        </div>
+        {file.reason && (
+          <p className="text-[11px] text-muted-foreground mt-0.5">
+            {file.reason}
+          </p>
+        )}
+      </div>
+    </li>
   );
 }
 
