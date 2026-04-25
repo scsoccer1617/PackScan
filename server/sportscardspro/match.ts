@@ -180,11 +180,53 @@ export function extractYear(consoleName: string): number | null {
 
 /**
  * Pull the brand from a console-name. SCP's format is usually
- * "<Sport> Cards <Year> <Brand> <SubSet>". Returns the word immediately
- * after the year.
+ * "<Sport> Cards <Year> <Brand> <SubSet>". The brand can be 1–3 words
+ * ("Topps", "Upper Deck", "O-Pee-Chee" / "O Pee Chee", "Press Pass",
+ * "Stadium Club", "Topps Chrome", "Bowman Chrome", "Topps Heritage").
+ *
+ * The previous version `\b(19|20)\d{2}\s+([A-Za-z][A-Za-z'&.]*)` only ever
+ * grabbed the first space-delimited token, so "1973 O Pee Chee" extracted
+ * as "O" — which then propagated through the whole pipeline as the brand,
+ * masquerading as a real publisher and breaking CardDB lookups + sheet
+ * grouping. This version checks for known multi-word brands first, then
+ * falls back to the single-token grab.
  */
+const MULTI_WORD_BRANDS: Array<{ pattern: RegExp; display: string }> = [
+  // Most specific first — "Topps Chrome" must beat "Topps".
+  { pattern: /\bTopps\s+Chrome(?:\s+Update)?\b/i, display: 'Topps Chrome' },
+  { pattern: /\bBowman\s+Chrome(?:\s+Draft)?\b/i, display: 'Bowman Chrome' },
+  { pattern: /\bBowman\s+Sterling\b/i, display: 'Bowman Sterling' },
+  { pattern: /\bBowman\s+Platinum\b/i, display: 'Bowman Platinum' },
+  { pattern: /\bTopps\s+Heritage\b/i, display: 'Topps Heritage' },
+  { pattern: /\bTopps\s+Finest\b/i, display: 'Topps Finest' },
+  { pattern: /\bTopps\s+Stadium\s+Club\b/i, display: 'Stadium Club' },
+  { pattern: /\bStadium\s+Club\b/i, display: 'Stadium Club' },
+  { pattern: /\bUpper\s+Deck\b/i, display: 'Upper Deck' },
+  { pattern: /\bO[\s-]?Pee[\s-]?Chee\b|\bOPC\b/i, display: 'O-Pee-Chee' },
+  { pattern: /\bPress\s+Pass\b/i, display: 'Press Pass' },
+  { pattern: /\bWild\s+Card\b/i, display: 'Wild Card' },
+  { pattern: /\bRed\s+Heart\b/i, display: 'Red Heart' },
+  { pattern: /\bRed\s+Man\b/i, display: 'Red Man' },
+  { pattern: /\bBerk\s+Ross\b/i, display: 'Berk Ross' },
+  { pattern: /\bWilson\s+Franks\b/i, display: 'Wilson Franks' },
+];
+
 export function extractBrand(consoleName: string): string | null {
-  const m = consoleName.match(/\b(19|20)\d{2}\s+([A-Za-z][A-Za-z'&.]*)/);
+  // Only consider text AFTER the year token — otherwise "Baseball Cards 1973
+  // Topps Heritage" could match "Cards" before reaching the brand window.
+  const yearMatch = consoleName.match(/\b(19|20)\d{2}\b/);
+  const afterYear = yearMatch
+    ? consoleName.slice(yearMatch.index! + yearMatch[0].length)
+    : consoleName;
+
+  for (const { pattern, display } of MULTI_WORD_BRANDS) {
+    if (pattern.test(afterYear)) return display;
+  }
+
+  // Fallback: single-token brand immediately after the year. Allow hyphens
+  // and apostrophes (e.g. "Kellogg's") but stop at whitespace so we don't
+  // pull in subset descriptors.
+  const m = consoleName.match(/\b(19|20)\d{2}\s+([A-Za-z][A-Za-z'&.\-]*)/);
   return m ? m[2] : null;
 }
 
