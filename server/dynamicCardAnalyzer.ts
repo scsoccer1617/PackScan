@@ -196,6 +196,72 @@ const PLAYER_NAME_BLOCKLIST: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Two-year season formats printed on basketball/hockey cards.
+ *
+ * NBA and NHL seasons span calendar years, so card backs print the full
+ * season span (e.g. "2023-24 PANINI NBA HOOPS" on a LeBron James #149).
+ * SCP and CardDB index these cards under the season-START year (2023),
+ * so we extract that as the canonical year candidate.
+ *
+ * Variants accepted (gated on sport ∈ {Basketball, Hockey} to prevent
+ * false positives on baseball/football card backs that print other
+ * year ranges in stat tables):
+ *   - YYYY-YY      e.g. "2023-24"      → 2023
+ *   - YYYY-YYYY    e.g. "2023-2024"    → 2023
+ *   - YYYY/YY      e.g. "2023/24"      → 2023
+ *   - YY-YY        e.g. "23-24"        → 2023 (assumes modern era)
+ *
+ * Each variant additionally requires the second half to be exactly
+ * `first + 1` (mod 100 for two-digit halves). "2023-12" or "23-99"
+ * won't match — the consecutive-year constraint makes this safe even
+ * if the regex sees stat-table ranges.
+ */
+function isSeasonSpanningSport(sport: string | undefined | null): boolean {
+  if (!sport) return false;
+  const s = sport.trim().toLowerCase();
+  return s === 'basketball' || s === 'hockey' || s === 'nba' || s === 'nhl';
+}
+
+function extractTwoYearSeasonStarts(text: string, currentYear: number): number[] {
+  const out: number[] = [];
+  const isValidYear = (y: number) => y >= 1900 && y <= currentYear;
+  const consecutive2 = (firstTwo: number, secondTwo: number) =>
+    secondTwo === (firstTwo + 1) % 100;
+  let m: RegExpExecArray | null;
+
+  // YYYY-YYYY (full four-digit on both sides) — strictest, check first.
+  const fourFour = /\b((?:19|20)\d{2})\s*[-–—]\s*((?:19|20)\d{2})\b/g;
+  while ((m = fourFour.exec(text)) !== null) {
+    const a = parseInt(m[1], 10);
+    const b = parseInt(m[2], 10);
+    if (isValidYear(a) && b === a + 1) out.push(a);
+  }
+
+  // YYYY-YY and YYYY/YY (four-digit start, two-digit end).
+  const fourTwo = /\b((?:19|20)\d{2})\s*[-–—\/]\s*(\d{2})\b/g;
+  while ((m = fourTwo.exec(text)) !== null) {
+    const a = parseInt(m[1], 10);
+    const b = parseInt(m[2], 10);
+    if (isValidYear(a) && consecutive2(a % 100, b)) out.push(a);
+  }
+
+  // YY-YY (two-digit on both sides). Ambiguous era — assume 20YY since
+  // shorthand is overwhelmingly modern. Only accept consecutive pairs,
+  // and only if assembling 20YY produces a year ≤ currentYear.
+  const twoTwo = /(?:^|[^0-9])(\d{2})\s*[-–—\/]\s*(\d{2})(?=$|[^0-9])/g;
+  while ((m = twoTwo.exec(text)) !== null) {
+    const a = parseInt(m[1], 10);
+    const b = parseInt(m[2], 10);
+    if (consecutive2(a, b)) {
+      const y = 2000 + a;
+      if (isValidYear(y)) out.push(y);
+    }
+  }
+
+  return out;
+}
+
+/**
  * Extract every plausible 4-digit year that appears next to a copyright
  * marker (©, (C), &copy;), an OCR-garbled copyright marker (LO/IO/O/Q
  * immediately adjacent to the digits), or a publisher imprint
@@ -203,14 +269,29 @@ const PLAYER_NAME_BLOCKLIST: ReadonlySet<string> = new Set([
  * PANOGRAPHICS/XOGRAPH/KELLOGG). Used by the dual-side combiner as the
  * candidate set for catalog-validated year selection — the catalog tells
  * us which of these candidates is actually the production year.
+ *
+ * For NBA/NHL cards (sport === 'Basketball' | 'Hockey'), additionally
+ * extract the season-start year from two-year season formats printed on
+ * the back ("2023-24" → 2023). See extractTwoYearSeasonStarts above for
+ * the accepted variants. Other sports keep the legacy 4-digit-only
+ * behavior to avoid false positives in stat-table year ranges.
  */
-export function extractAllYearCandidates(text: string): number[] {
+export function extractAllYearCandidates(text: string, sport?: string | null): number[] {
   const years = new Set<number>();
   const currentYear = new Date().getFullYear();
   const accept = (raw: string) => {
     const y = parseInt(raw, 10);
     if (y >= 1900 && y <= currentYear) years.add(y);
   };
+
+  // NBA/NHL cards use season-spanning years ("2023-24"); extract the
+  // season-start before the single-4-digit regex below tries to grab a
+  // candidate from the same span.
+  if (isSeasonSpanningSport(sport)) {
+    for (const y of extractTwoYearSeasonStarts(text, currentYear)) {
+      years.add(y);
+    }
+  }
   let m: RegExpExecArray | null;
 
   // Strict copyright markers: ©, (C), &copy; (optionally with spaces between them)
