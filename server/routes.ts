@@ -2996,7 +2996,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const cardsFile = await findLatestCsvInFolder(getCardsFolderId());
       if (!cardsFile) {
         summary.cards.skipped = true;
-        summary.cards.reason = 'No CSV files found in cards folder';
+        summary.cards.reason = 'No CSV or Google Sheet files found in cards folder';
       } else {
         summary.cards.file = {
           fileId: cardsFile.fileId,
@@ -3008,7 +3008,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           summary.cards.skipped = true;
           summary.cards.reason = `Already imported at ${existing.importedAt.toISOString()}`;
         } else {
-          const buffer = await downloadFile(cardsFile.fileId);
+          const buffer = await downloadFile(cardsFile.fileId, cardsFile.mimeType);
           const [beforeRow] = await db.select({ count: sql<number>`count(*)::int` }).from(cardDatabase);
           const countBefore = beforeRow?.count ?? 0;
           const jobId = randomUUID();
@@ -3042,7 +3042,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const varsFile = await findLatestCsvInFolder(getVariationsFolderId());
       if (!varsFile) {
         summary.variations.skipped = true;
-        summary.variations.reason = 'No CSV files found in variations folder';
+        summary.variations.reason = 'No CSV or Google Sheet files found in variations folder';
       } else {
         summary.variations.file = {
           fileId: varsFile.fileId,
@@ -3054,7 +3054,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           summary.variations.skipped = true;
           summary.variations.reason = `Already imported at ${existing.importedAt.toISOString()}`;
         } else {
-          const buffer = await downloadFile(varsFile.fileId);
+          const buffer = await downloadFile(varsFile.fileId, varsFile.mimeType);
           const [beforeRow] = await db.select({ count: sql<number>`count(*)::int` }).from(cardVariations);
           const countBefore = beforeRow?.count ?? 0;
           const jobId = randomUUID();

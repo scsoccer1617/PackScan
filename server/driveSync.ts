@@ -53,32 +53,56 @@ function getDriveClient() {
 
 // ─── Listing & download ─────────────────────────────────────────────────────
 
+// Drive mime types we accept as a master spreadsheet source. Native Google
+// Sheets are pulled via the `export` endpoint as CSV bytes; uploaded `.csv`
+// files are pulled via `alt=media`. Both end up as the same Buffer shape that
+// the existing importer expects, so the rest of the pipeline doesn't change.
+const MIME_CSV = 'text/csv';
+const MIME_GOOGLE_SHEET = 'application/vnd.google-apps.spreadsheet';
+
 export interface DriveCsvFile {
   fileId: string;
   fileName: string;
   modifiedTime: Date;
   sizeBytes: number | null;
+  /**
+   * Native Drive mimeType. We need this at download time to decide between
+   * `files.get(alt=media)` (for CSV) and `files.export(mimeType=text/csv)`
+   * (for Google Sheets). Stored on the listing result so callers don't have
+   * to round-trip Drive again.
+   */
+  mimeType: string;
 }
 
 /**
- * Find the most recently modified CSV in a Drive folder. Returns null when the
- * folder has no CSVs (so callers can no-op cleanly instead of throwing).
+ * Find the most recently modified spreadsheet in a Drive folder. Returns null
+ * when the folder has no candidates (so callers can no-op cleanly).
+ *
+ * Accepts:
+ *  - Uploaded CSV files (mimeType = text/csv)
+ *  - Native Google Sheets (mimeType = application/vnd.google-apps.spreadsheet)
+ *
+ * The user's workflow generates spreadsheets via Perplexity's google_sheets
+ * connector, so the source of truth lives as a Google Sheet rather than a
+ * re-uploaded CSV. We accept both so historical CSV uploads still work.
  *
  * Filters:
- *  - mimeType = text/csv (the user's masters are exported as CSV; Sheets-native
- *    files are excluded — they would need a separate export step).
  *  - trashed = false (don't grab files the user just deleted).
  */
 export async function findLatestCsvInFolder(folderId: string): Promise<DriveCsvFile | null> {
   if (!folderId) throw new Error('folderId is required');
   const drive = getDriveClient();
-  // Order by modifiedTime desc, take the first CSV. Page size 25 to give us
-  // some headroom for non-CSV junk in the folder without paginating.
+  // Order by modifiedTime desc, take the first match. Page size 25 to give us
+  // some headroom for non-spreadsheet junk in the folder without paginating.
   const res = await drive.files.list({
-    q: `'${folderId}' in parents and mimeType = 'text/csv' and trashed = false`,
+    q: [
+      `'${folderId}' in parents`,
+      `(mimeType = '${MIME_CSV}' or mimeType = '${MIME_GOOGLE_SHEET}')`,
+      `trashed = false`,
+    ].join(' and '),
     orderBy: 'modifiedTime desc',
     pageSize: 25,
-    fields: 'files(id,name,modifiedTime,size)',
+    fields: 'files(id,name,modifiedTime,size,mimeType)',
     // Required for shared drives, harmless on My Drive.
     supportsAllDrives: true,
     includeItemsFromAllDrives: true,
@@ -86,27 +110,55 @@ export async function findLatestCsvInFolder(folderId: string): Promise<DriveCsvF
   const files = res.data.files ?? [];
   if (files.length === 0) return null;
   const top = files[0];
-  if (!top.id || !top.name || !top.modifiedTime) return null;
+  if (!top.id || !top.name || !top.modifiedTime || !top.mimeType) return null;
   return {
     fileId: top.id,
     fileName: top.name,
     modifiedTime: new Date(top.modifiedTime),
+    // Google Sheets don't report a `size` (it's null on the API), only uploaded
+    // CSVs do. UI should treat null as "unknown" rather than zero.
     sizeBytes: top.size ? parseInt(top.size, 10) : null,
+    mimeType: top.mimeType,
   };
 }
 
 /**
- * Download a Drive file's raw bytes. Used for CSVs only — keeps the whole file
- * in memory because the existing importer expects a Buffer. The masters are
- * sub-50 MB, well within Replit's RAM budget.
+ * Download a Drive file's bytes as CSV. Branches on the source mimeType:
+ *  - Uploaded CSV    → `files.get(alt=media)` (raw bytes as-is)
+ *  - Google Sheet    → `files.export(mimeType=text/csv)` (Drive renders the
+ *                       active/first sheet to CSV; multi-tab Sheets only
+ *                       export the first tab — which matches our single-tab
+ *                       master design).
+ *
+ * Either way the caller gets a Buffer it can hand straight to the existing
+ * importCardsCSV / importVariationsCSV pipeline. The masters are sub-50 MB,
+ * well within Replit's RAM budget for an in-memory buffer.
  */
-export async function downloadFile(fileId: string): Promise<Buffer> {
+export async function downloadFile(fileId: string, mimeType?: string): Promise<Buffer> {
   const drive = getDriveClient();
-  const res = await drive.files.get(
-    { fileId, alt: 'media', supportsAllDrives: true },
-    { responseType: 'arraybuffer' },
+
+  // Default to the legacy CSV path when no mimeType is provided so existing
+  // callers (and any external scripts) keep working unchanged.
+  if (!mimeType || mimeType === MIME_CSV) {
+    const res = await drive.files.get(
+      { fileId, alt: 'media', supportsAllDrives: true },
+      { responseType: 'arraybuffer' },
+    );
+    return Buffer.from(res.data as ArrayBuffer);
+  }
+
+  if (mimeType === MIME_GOOGLE_SHEET) {
+    const res = await drive.files.export(
+      { fileId, mimeType: MIME_CSV },
+      { responseType: 'arraybuffer' },
+    );
+    return Buffer.from(res.data as ArrayBuffer);
+  }
+
+  throw new Error(
+    `Drive sync: unsupported mimeType '${mimeType}' for file ${fileId}. ` +
+    `Expected '${MIME_CSV}' or '${MIME_GOOGLE_SHEET}'.`,
   );
-  return Buffer.from(res.data as ArrayBuffer);
 }
 
 // ─── Skip-check against csv_sync_log ────────────────────────────────────────
