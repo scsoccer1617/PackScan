@@ -21,7 +21,9 @@ import { and, eq } from 'drizzle-orm';
 
 // ─── Auth ───────────────────────────────────────────────────────────────────
 
+let cachedAuth: GoogleAuth | null = null;
 let cachedDriveClient: ReturnType<typeof google.drive> | null = null;
+let cachedSheetsClient: ReturnType<typeof google.sheets> | null = null;
 
 function loadServiceAccountCredentials(): Record<string, unknown> {
   const raw = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
@@ -40,15 +42,34 @@ function loadServiceAccountCredentials(): Record<string, unknown> {
   }
 }
 
+// Single GoogleAuth shared across both Drive and Sheets clients so we mint
+// access tokens once. Scopes:
+//   - drive.readonly        — list/get folder contents, download CSV bytes
+//   - spreadsheets.readonly — read full Sheet values without the 10 MB
+//                            files.export limit (which fails for our masters)
+function getAuth(): GoogleAuth {
+  if (cachedAuth) return cachedAuth;
+  const credentials = loadServiceAccountCredentials();
+  cachedAuth = new GoogleAuth({
+    credentials: credentials as any,
+    scopes: [
+      'https://www.googleapis.com/auth/drive.readonly',
+      'https://www.googleapis.com/auth/spreadsheets.readonly',
+    ],
+  });
+  return cachedAuth;
+}
+
 function getDriveClient() {
   if (cachedDriveClient) return cachedDriveClient;
-  const credentials = loadServiceAccountCredentials();
-  const auth = new GoogleAuth({
-    credentials: credentials as any,
-    scopes: ['https://www.googleapis.com/auth/drive.readonly'],
-  });
-  cachedDriveClient = google.drive({ version: 'v3', auth });
+  cachedDriveClient = google.drive({ version: 'v3', auth: getAuth() });
   return cachedDriveClient;
+}
+
+function getSheetsClient() {
+  if (cachedSheetsClient) return cachedSheetsClient;
+  cachedSheetsClient = google.sheets({ version: 'v4', auth: getAuth() });
+  return cachedSheetsClient;
 }
 
 // ─── Listing & download ─────────────────────────────────────────────────────
@@ -123,23 +144,101 @@ export async function findLatestCsvInFolder(folderId: string): Promise<DriveCsvF
 }
 
 /**
+ * RFC 4180 CSV escaping for a single cell value. We do this manually instead of
+ * pulling in a CSV writer dep — the existing importer already understands the
+ * standard form (quoted fields, doubled internal quotes, embedded newlines).
+ */
+function csvEscape(value: unknown): string {
+  const str = value === null || value === undefined ? '' : String(value);
+  // Quote when the cell contains any of: comma, quote, CR, LF.
+  if (/[",\r\n]/.test(str)) {
+    return '"' + str.replace(/"/g, '""') + '"';
+  }
+  return str;
+}
+
+function rowsToCsvBuffer(rows: unknown[][]): Buffer {
+  // Pre-compute max column count so short rows get padded out to header width.
+  // The Sheets API trims trailing empty cells, which would otherwise produce
+  // ragged rows that the importer might reject.
+  let maxCols = 0;
+  for (const r of rows) if (r.length > maxCols) maxCols = r.length;
+
+  const lines: string[] = [];
+  for (const r of rows) {
+    const padded: unknown[] = r.length === maxCols ? r : [...r, ...new Array(maxCols - r.length).fill('')];
+    lines.push(padded.map(csvEscape).join(','));
+  }
+  // Trailing newline keeps things friendly for line-oriented parsers.
+  return Buffer.from(lines.join('\n') + '\n', 'utf8');
+}
+
+/**
+ * Pull a full Google Sheet's values via the Sheets API and serialise to CSV.
+ *
+ * Why not `drive.files.export(mimeType=text/csv)`? Drive's export endpoint has
+ * a hard 10 MB output limit; our masters render past that and fail with
+ * "This file is too large to be exported." The Sheets API has no such limit
+ * — it streams cell values directly — so we read the values ourselves and
+ * format CSV in-process.
+ *
+ * Range strategy: read the first worksheet's full A1 range. Multi-tab Sheets
+ * only get the first tab, matching the single-tab master design we agreed on
+ * (and matching what the old export path did anyway).
+ */
+async function downloadGoogleSheetAsCsv(fileId: string): Promise<Buffer> {
+  const sheets = getSheetsClient();
+
+  // Step 1: discover the first worksheet's title. We can't just request "A:Z"
+  // without a sheet name because the default sheet name isn't always Sheet1.
+  const meta = await sheets.spreadsheets.get({
+    spreadsheetId: fileId,
+    fields: 'sheets(properties(title,sheetId,index))',
+  });
+  const firstSheet = (meta.data.sheets ?? [])
+    .slice()
+    .sort((a, b) => (a.properties?.index ?? 0) - (b.properties?.index ?? 0))[0];
+  const sheetTitle = firstSheet?.properties?.title;
+  if (!sheetTitle) {
+    throw new Error(`Drive sync: spreadsheet ${fileId} has no worksheets`);
+  }
+
+  // Step 2: fetch all values. Quoting the title handles names with spaces or
+  // special chars; we don't bound the range, so Sheets returns just the
+  // populated rectangle (no need to know row/col counts ahead of time).
+  // valueRenderOption=UNFORMATTED_VALUE preserves numeric types but the
+  // importer treats every cell as text, so FORMATTED_VALUE matches the visual
+  // CSV export semantics users expect (e.g., dates render as displayed).
+  const valuesRes = await sheets.spreadsheets.values.get({
+    spreadsheetId: fileId,
+    range: `'${sheetTitle.replace(/'/g, "''")}'`,
+    valueRenderOption: 'FORMATTED_VALUE',
+    dateTimeRenderOption: 'FORMATTED_STRING',
+  });
+
+  const rows = (valuesRes.data.values ?? []) as unknown[][];
+  if (rows.length === 0) {
+    // Empty sheet — return just an empty buffer; the importer will produce a
+    // "no rows" result, which the caller can surface to the UI.
+    return Buffer.from('', 'utf8');
+  }
+  return rowsToCsvBuffer(rows);
+}
+
+/**
  * Download a Drive file's bytes as CSV. Branches on the source mimeType:
- *  - Uploaded CSV    → `files.get(alt=media)` (raw bytes as-is)
- *  - Google Sheet    → `files.export(mimeType=text/csv)` (Drive renders the
- *                       active/first sheet to CSV; multi-tab Sheets only
- *                       export the first tab — which matches our single-tab
- *                       master design).
+ *  - Uploaded CSV  → `drive.files.get(alt=media)` (raw bytes as-is)
+ *  - Google Sheet  → Sheets API values.get + in-process CSV serialisation
+ *                    (avoids Drive's 10 MB export limit)
  *
  * Either way the caller gets a Buffer it can hand straight to the existing
- * importCardsCSV / importVariationsCSV pipeline. The masters are sub-50 MB,
- * well within Replit's RAM budget for an in-memory buffer.
+ * importCardsCSV / importVariationsCSV pipeline.
  */
 export async function downloadFile(fileId: string, mimeType?: string): Promise<Buffer> {
-  const drive = getDriveClient();
-
   // Default to the legacy CSV path when no mimeType is provided so existing
   // callers (and any external scripts) keep working unchanged.
   if (!mimeType || mimeType === MIME_CSV) {
+    const drive = getDriveClient();
     const res = await drive.files.get(
       { fileId, alt: 'media', supportsAllDrives: true },
       { responseType: 'arraybuffer' },
@@ -148,11 +247,7 @@ export async function downloadFile(fileId: string, mimeType?: string): Promise<B
   }
 
   if (mimeType === MIME_GOOGLE_SHEET) {
-    const res = await drive.files.export(
-      { fileId, mimeType: MIME_CSV },
-      { responseType: 'arraybuffer' },
-    );
-    return Buffer.from(res.data as ArrayBuffer);
+    return downloadGoogleSheetAsCsv(fileId);
   }
 
   throw new Error(
