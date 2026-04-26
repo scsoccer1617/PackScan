@@ -82,10 +82,13 @@ function rgbToHueBucket(r: number, g: number, b: number): HueBucket | null {
   // / parallel sets use vivid greens that we want to distinguish from teal.
   if (r >= g && r >= b) {
     if (g >= b) {
-      // Red → Yellow region
-      if (r - g < 40 && g - b > 40) return 'orange';
-      if (g - b < 25 && r - g > 40) return 'red';
+      // Red → Yellow region. Order matters: yellow (high green) → orange (some
+      // green, clearly above blue) → red (very little green). Previously the red
+      // fall-through caught RGB(205,77,22) (Donruss "Orange Holo Laser" border)
+      // because the orange branch required r-g < 40, which is too tight — real
+      // orange spans a much wider red→green gap than that.
       if (g > 0.7 * r) return 'yellow';
+      if (g >= 0.35 * r && g - b > 25) return 'orange';
       return 'red';
     }
     // Red → Magenta/Pink

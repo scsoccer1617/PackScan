@@ -34,10 +34,18 @@ function classifyDominantColor(r: number, g: number, b: number): string | null {
     if (b > r + 20 && b > g + 5 && b > 80) return 'Blue';
   }
   if (g > r + 20 && g > b + 20 && g > 80) return 'Green';
-  if (r > g + 35 && r > b + 35 && r > 100) return 'Red';
-  if (r > 150 && g > 100 && g < 200 && b < 80) return 'Gold';
+  // Gold/Orange/Red are all "red-dominant" hues. Check in increasing-greenness
+  // order: Gold (green close to red, like yellow), Orange (some green), Red
+  // (very little green). Both ordering and channel guards matter:
+  //   - Orange MUST be checked before Red so RGB(205,77,22) (Donruss "Orange
+  //     Holo Laser" border) is not misclassified as Red.
+  //   - Gold MUST require g >= 0.7*r so RGB(223,129,7) and RGB(162,109,22)
+  //     (orange with moderate green) fall through to the Orange rule instead
+  //     of being absorbed by an over-broad Gold range.
+  if (r > 150 && g >= 0.7 * r && g < 200 && b < 80) return 'Gold';
+  if (r > 150 && g >= 50 && g < 150 && b < Math.min(g, 80) && r - g >= 25) return 'Orange';
+  if (r > g + 35 && r > b + 35 && r > 100 && g < 80) return 'Red';
   if (r > 80 && g < 80 && b > r - 30 && b > 80) return 'Purple';
-  if (r > 180 && g > 80 && g < 180 && b < 80) return 'Orange';
   if (r > 180 && g < 150 && b > 130) return 'Pink';
   
   return null;
