@@ -1,3 +1,11 @@
+// DNS fallback — Replit's local resolver (127.0.0.1) intermittently fails to
+// resolve some hosts (e.g. api.ebay.com). Fall back to Google + Cloudflare
+// public resolvers before the local one. Must run before any HTTP client is
+// constructed, so it lives at the very top of the entry point.
+import dns from 'node:dns';
+dns.setDefaultResultOrder('ipv4first');
+dns.setServers(['8.8.8.8', '1.1.1.1', '127.0.0.1']);
+
 import express, { type Request, Response, NextFunction } from "express";
 import fs from 'fs';
 import path from 'path';
