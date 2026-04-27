@@ -565,6 +565,23 @@ export async function detectFoilFromImage(
             `[Region] high-coverage border tint "${regionalColorName}" (avgCoverage=${(borderCoverage * 100).toFixed(1)}%) overrides chrome tint "${detectedColorTint}" — too saturated for ambient reflection`
           );
           detectedColorTint = regionalColorName;
+        } else if (isChromeGlobal && hasVividHighCoverageBorder) {
+          // Coloured-laser / coloured-refractor parallel where the upstream
+          // tint promoter has already escalated detectedColorTint to Silver
+          // or Gold (e.g. Silver coverage 6.6% beat Orange 4.4% in the
+          // global histogram). When the border tint is BOTH high-coverage
+          // (≥70%) AND very saturated (≥150), the parallel identity must
+          // win — chrome reflection cannot produce sat≥150 across ≥70% of
+          // the border region.
+          //
+          // Repro: 2021-22 Donruss #60 Jayson Tatum Orange Laser scanid
+          //   8a4e0fee — Silver promoted to dominant tint upstream, then
+          //   the chrome-global branch kept Silver over Orange border at
+          //   79.9%/sat=192. This branch reverses that for vivid borders.
+          indicators.push(
+            `[Region] vivid high-coverage border tint "${regionalColorName}" (avgCoverage=${(borderCoverage * 100).toFixed(1)}%, avgSat=${borderSaturation}) overrides chrome tint "${detectedColorTint}" — too saturated to be ambient reflection`
+          );
+          detectedColorTint = regionalColorName;
         } else if (isChromeGlobal) {
           indicators.push(`[Region] keeping chrome tint "${detectedColorTint}" over border tint "${regionalColorName}" — chrome reflects ambient colour`);
         } else if (hasVividHighCoverageBorder) {
@@ -614,7 +631,8 @@ export async function detectFoilFromImage(
         hasStrongCenterRainbow &&
         detectedColorTint &&
         detectedColorTint !== 'Silver' &&
-        detectedColorTint !== 'Gold'
+        detectedColorTint !== 'Gold' &&
+        !hasVividHighCoverageBorder
       ) {
         // Global tint locked onto a non-chrome colour (e.g. Aqua because
         // chrome reflected ambient blue light across multiple regions and
@@ -630,8 +648,30 @@ export async function detectFoilFromImage(
         //   borderTint 2/4 strips (below the 3/4 hasBorderTintEvidence
         //   threshold), so neither earlier branch overrode the cumulative
         //   Aqua tint. This branch closes that gap.
+        //
+        // The !hasVividHighCoverageBorder guard prevents this branch from
+        // overriding a saturated coloured-parallel border (e.g. Tatum
+        // Orange Laser scanid a93f5810 — borderTint=Orange at 93.6%/194
+        // with global tint also "Orange" was getting flipped to Silver
+        // here because Orange isn't Silver/Gold and rainbow was strong).
         indicators.push(`[Region] center rainbow signature (score=${regional!.centerRainbowScore.toFixed(2)}, hues=${regional!.centerHueCount}) overrides global tint "${detectedColorTint}" — promoting to Silver`);
         detectedColorTint = 'Silver';
+      } else if (
+        hasStrongCenterRainbow &&
+        detectedColorTint &&
+        detectedColorTint !== 'Silver' &&
+        detectedColorTint !== 'Gold' &&
+        hasVividHighCoverageBorder
+      ) {
+        // Coloured-parallel surface where the global histogram landed on
+        // the parallel's own colour (e.g. Tatum Orange Laser produced a
+        // dominant Orange global tint AND a vivid Orange border). Without
+        // this branch the previous else-if would still flip Orange to
+        // Silver because Orange isn't a chrome tint and the rainbow is
+        // strong. The vivid-border guard is the parallel-identity signal.
+        indicators.push(
+          `[Region] keeping vivid global tint "${detectedColorTint}" over center-rainbow Silver promotion — border evidence (avgCoverage=${(borderCoverage * 100).toFixed(1)}%, avgSat=${borderSaturation}) confirms parallel identity`
+        );
       }
 
       // Strong center rainbow alone is enough evidence to flag as foil,
