@@ -4,6 +4,7 @@ import { CardFormValues } from '@shared/schema';
 import { analyzeSportsCardImage, extractAllYearCandidates } from './dynamicCardAnalyzer';
 import { lookupCard, lookupCardByPlayer } from './cardDatabaseService';
 import { lookupCard as scpLookupCard } from './sportscardspro';
+import { getCatalogEraPolicy } from './sportscardspro/catalogEra';
 import {
   extractCardNumber as scpExtractCardNumber,
   extractParallel as scpExtractParallel,
@@ -3019,6 +3020,36 @@ async function combineCardResults(
     }
     
     if (visualFoilResult?.isFoil && visualFoilResult.foilType) {
+      // Catalog-era gate (PR #146): some brand+year ranges have NO
+      // colour parallels in the SCP catalog (e.g. 1981-1993 Donruss
+      // baseball, 1981-1992 Topps flagship). For these eras the visual
+      // foil detector's output is structurally noise — glossy stock,
+      // flash hot-spots, and white name plates routinely fire the
+      // tinted-Silver tier and Vision "shiny/reflective" labels even
+      // on plain base cards. Reject visual foil results outright for
+      // these eras and skip both the auto-apply path AND the
+      // parallelSuspected fallback, since the structurally-correct
+      // answer is "this is a base card".
+      //
+      // Canonical example: 1991 Donruss #322 John Franco. Glossy blue-
+      // bordered base card with a white "Donruss '91" panel + flash
+      // glare reads as Silver Crackle Foil at confidence ~0.6+. SCP
+      // has no Silver parallel for this card; without this gate the
+      // user is asked "Detected: Silver, is this a parallel?" on a
+      // structurally non-existent parallel.
+      const eraPolicy = getCatalogEraPolicy(combined.brand, combined.year);
+      if (!eraPolicy.allowParallels) {
+        combined.foilType = null;
+        combined.isFoil = false;
+        // Explicitly do NOT set parallelSuspected / suggestedColor here.
+        // The whole point of this gate is that the catalog era has no
+        // colour parallels, so even surfacing a colour-filtered picker
+        // would be wrong.
+        console.log(`[CatalogEra] Visual foil "${visualFoilResult.foilType}" suppressed for ${combined.brand} ${combined.year}: ${eraPolicy.reason}`);
+        if (visualFoilResult.indicators) {
+          visualFoilResult.indicators.push(`[CatalogEra] suppressed: ${eraPolicy.reason}`);
+        }
+      } else {
       // Crackle texture detection is the most unreliable pattern — Chrome card surfaces and
       // jersey colors produce scattered-color signatures that the detector mistakes for Crackle.
       // Require 0.80 confidence for any Crackle-type foilType, regardless of DB validation.
@@ -3184,6 +3215,7 @@ async function combineCardResults(
         console.log(`Visual foil detection successful: ${visualFoilResult.foilType} (confidence: ${visualFoilResult.confidence})`);
       }
       } // end of crackle/chrome guard else block
+      } // end of catalog-era gate else block
       console.log(`Visual indicators: ${visualFoilResult.indicators.join('; ')}`);
     } else if (visualFoilResult && !visualFoilResult.indicators.some(indicator => indicator.includes('Error in visual analysis'))) {
       // Visual detection ran but did not find foil — trust it and clear any foil state.
