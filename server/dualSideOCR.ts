@@ -858,6 +858,86 @@ async function combineCardResults(
     console.log(`[Year] Discarded back year ${backResult.year} (retro-product copyright imprint, front collection "${frontResult.collection}"). No year assigned from back.`);
   }
 
+  // ── Donruss/Leaf publisher-imprint year reconciliation ─────────────────
+  // Leaf, Inc. produced every Donruss baseball card from 1981–1993, and the
+  // back-side legal block prints "© <YYYY> LEAF, INC." using the *production*
+  // year (when print plates were finalised) rather than the *release* year.
+  // For the late-1980s and early-1990s Donruss base sets the imprint year is
+  // consistently one less than the actual card year:
+  //   • 1991 Donruss prints "© 1990 LEAF, INC."
+  //   • 1990 Donruss prints "© 1989 LEAF, INC."
+  //   • 1989 Donruss prints "© 1988 LEAF, INC."
+  //   • etc.
+  // The card front carries the actual release year as a stylized two-digit
+  // tag adjacent to the DONRUSS wordmark ("DONRUSS 91", "DONRUSS 90"). When
+  // OCR mangles the wordmark to JONRUSS/OONRUSS/etc. but the two-digit year
+  // survives next to it, we can reconcile: prefer the front year IF and ONLY
+  // IF it is exactly back+1, the back year came from a copyright marker, and
+  // the brand was identified as Donruss. The strict +1 check prevents a
+  // stat-line two-digit year ("91 Mets 2.53...") from clobbering a correct
+  // back year on cards where the imprint year happens to equal the release
+  // year (rare but possible — e.g. early-1981 print runs).
+  //
+  // Canonical case: scan c55745f6-568f-41bb-85da-ac1cdc271531 — 1991 Donruss
+  // #322 John Franco. Front OCR "JONRUSS\n91\nMets\nJohn Franco\nPITCHER",
+  // back OCR "...1990 LEAF, INC. Printed in USA Series 1...". Combined year
+  // landed at 1990 (back imprint), causing the SCP-first lookup to query
+  // the wrong year and return Danny Tartabull at score 60.
+  if (
+    combined.brand && /^donruss$/i.test(String(combined.brand)) &&
+    hasValue(combined.year) &&
+    (combined as any)._yearFromCopyright === true &&
+    (combined.year as number) >= 1980 &&
+    (combined.year as number) <= 1992
+  ) {
+    // Donruss-fuzzy wordmark regex matching DONRUSS plus common OCR
+    // mis-reads of the stylized 'D' (J/O/Q/U) and 'S' (5). Mirrors the
+    // pattern at dynamicCardAnalyzer.ts:2947.
+    const donrussFuzzy = /\b[DJOQU0]?[O0Q]?[NWR]RU[S5]{1,2}\b/i;
+    // Look for a standalone 2-digit number (with optional leading apostrophe)
+    // within ~30 characters of the Donruss wordmark. Each end of the window
+    // is checked so order doesn't matter ("DONRUSS 91" vs "91 DONRUSS").
+    const frontUpper = (frontOCRText || '').toUpperCase();
+    const wordmarkMatch = frontUpper.match(donrussFuzzy);
+    let frontTwoDigitYear: number | null = null;
+    if (wordmarkMatch && wordmarkMatch.index !== undefined) {
+      const idx = wordmarkMatch.index;
+      const windowStart = Math.max(0, idx - 30);
+      const windowEnd = Math.min(frontUpper.length, idx + wordmarkMatch[0].length + 30);
+      const window = frontUpper.substring(windowStart, windowEnd);
+      // Match any 2-digit number; we'll filter by plausibility below.
+      const yyRegex = /'?(\d{2})\b/g;
+      let m: RegExpExecArray | null;
+      while ((m = yyRegex.exec(window)) !== null) {
+        const yy = parseInt(m[1], 10);
+        // Skip jersey-number-like values that aren't plausible 1980s-90s
+        // Donruss release years (81 through 93). This naturally rejects
+        // "DONRUSS 322" (cardNumber) and "DONRUSS 47" (random tokens).
+        if (yy >= 81 && yy <= 93) {
+          frontTwoDigitYear = 1900 + yy;
+          break;
+        }
+      }
+    }
+    if (frontTwoDigitYear !== null && frontTwoDigitYear === (combined.year as number) + 1) {
+      console.log(
+        `[Year] Donruss/Leaf imprint reconciliation: back year ${combined.year} came from "© <year> LEAF, INC." publisher imprint; ` +
+          `front OCR has Donruss-adjacent two-digit year '${frontTwoDigitYear % 100} (=> ${frontTwoDigitYear}) which is exactly back+1. ` +
+          `Upgrading year ${combined.year} → ${frontTwoDigitYear} (Leaf production year ran one calendar year ahead of release for 1981–1993 Donruss).`,
+      );
+      combined.year = frontTwoDigitYear;
+      // Clear the low-confidence flag — we now have a stronger signal than
+      // the publisher imprint. Stamp a diagnostic flag for analytics.
+      (combined as any)._yearFromCopyright = false;
+      (combined as any)._donrussLeafYearReconciled = true;
+    } else if (frontTwoDigitYear !== null) {
+      console.log(
+        `[Year] Donruss/Leaf imprint reconciliation: front two-digit year ${frontTwoDigitYear} found but does not equal back+1 (${(combined.year as number) + 1}). ` +
+          `Keeping back year ${combined.year} — the strict +1 rule is the only safe upgrade signal.`,
+      );
+    }
+  }
+
   // Log when back has no card number
   if (!hasValue(backResult.cardNumber)) {
     if (hasValue(frontResult.cardNumber)) {
