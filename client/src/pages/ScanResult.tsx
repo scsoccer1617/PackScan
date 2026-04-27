@@ -35,7 +35,7 @@ import ParallelPickerSheet, {
 import CollectionPickerSheet, {
   type CollectionCandidate,
 } from "@/components/CollectionPickerSheet";
-import { Camera, Check, ScanLine, ScanSearch, Sparkles, ThumbsDown, ThumbsUp, X } from "lucide-react";
+import { Camera, Check, Loader2, ScanLine, ScanSearch, Sparkles, ThumbsDown, ThumbsUp, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { CardFormValues } from "@shared/schema";
 import {
@@ -129,6 +129,14 @@ export default function ScanResult() {
   const [showCollectionPicker, setShowCollectionPicker] = useState(false);
   const [collectionCandidates, setCollectionCandidates] = useState<CollectionCandidate[]>([]);
   const [showPriceResults, setShowPriceResults] = useState(false);
+
+  // True while runPostScanFlow is doing async parallel discovery
+  // (fetchParallels round-trip + SCP /catalog/parallels lookup). Drives
+  // the inline "Checking for parallels…" banner and the subtle shimmer
+  // accent under the sticky hero so the user can tell processing isn't
+  // finished even though card-info has already rendered. Cleared the
+  // moment we either show pricing or open a confirm/picker prompt.
+  const [isCheckingParallels, setIsCheckingParallels] = useState(false);
 
   // Tracks whether we already gave the user a moment to let the analyze
   // payload commit into context before considering a redirect. Avoids a
@@ -285,17 +293,29 @@ export default function ScanResult() {
       setShowParallelPicker(false);
     }
     setShowCollectionPicker(false);
-    runPostScanFlow(cardData).catch((err) => {
-      // fetchParallels or any downstream helper failed — don't leave the
-      // page stuck in its pre-price state. Fall through to showing eBay
-      // prices with whatever OCR gave us so the user sees *something*.
-      console.error("[ScanResult] Post-scan flow threw, falling back:", err);
-      toast({
-        title: "Couldn't look up parallels",
-        description: "Showing prices for the detected card instead.",
+    // Surface progress: every async branch in runPostScanFlow ends by
+    // either showing a confirm/picker prompt OR flipping showPriceResults
+    // — both transitions clear isCheckingParallels via the wrapped
+    // setters below, so we just need to flag "true" at the start.
+    setIsCheckingParallels(true);
+    runPostScanFlow(cardData)
+      .catch((err) => {
+        // fetchParallels or any downstream helper failed — don't leave the
+        // page stuck in its pre-price state. Fall through to showing eBay
+        // prices with whatever OCR gave us so the user sees *something*.
+        console.error("[ScanResult] Post-scan flow threw, falling back:", err);
+        toast({
+          title: "Couldn't look up parallels",
+          description: "Showing prices for the detected card instead.",
+        });
+        setShowPriceResults(true);
+      })
+      .finally(() => {
+        // Belt-and-suspenders: even if a future branch forgets to call a
+        // wrapped setter, the banner won't get stuck after the flow
+        // resolves.
+        setIsCheckingParallels(false);
       });
-      setShowPriceResults(true);
-    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cardData]);
 
@@ -339,7 +359,17 @@ export default function ScanResult() {
   const requestShowParallelConfirm = (value: boolean): boolean => {
     if (value && parallelDecidedRef.current) {
       console.log("[ScanResult] skip re-prompt, user already decided");
+      // User already decided — the caller falls through to pricing, so
+      // the banner is no longer relevant. Clearing here avoids leaving
+      // the shimmer on while the next setShowPriceResults(true) runs.
+      setIsCheckingParallels(false);
       return false;
+    }
+    if (value) {
+      // A prompt is about to render — user can take the next action.
+      // Stop the "checking" affordance immediately rather than waiting
+      // for the .finally() above (which fires after the await chain).
+      setIsCheckingParallels(false);
     }
     setShowParallelConfirm(value);
     return value;
@@ -1006,6 +1036,22 @@ export default function ScanResult() {
             />
           </div>
         </div>
+        {/* Subtle in-progress shimmer pinned to the bottom edge of the
+            sticky hero. Even users who don't scroll past the hero see
+            motion that signals "still processing" before the parallel
+            prompt appears. Vanishes the moment a confirm/picker opens
+            or pricing renders. */}
+        {isCheckingParallels &&
+          !showPriceResults &&
+          !showParallelConfirm &&
+          !showParallelPicker &&
+          !showCollectionPicker && (
+            <div
+              className="h-0.5 w-full bg-gradient-to-r from-transparent via-foil-violet to-transparent animate-pulse"
+              aria-hidden="true"
+              data-testid="hero-checking-shimmer"
+            />
+          )}
       </section>
 
       {/* Parallel-confirm prompt (rendered inline so the user can dismiss
@@ -1175,6 +1221,27 @@ export default function ScanResult() {
               userPsaGrade={cardData.psaGrade ?? null}
             />
           )}
+          {/* Async parallel-discovery progress. The card-info hero renders
+              instantly while runPostScanFlow performs two HTTP round-trips
+              (fetchParallels → SCP /catalog/parallels) before deciding
+              whether to prompt or price. Without this banner users
+              reasonably assumed processing was finished and were
+              surprised when the parallel prompt appeared seconds later. */}
+          {isCheckingParallels &&
+            !showPriceResults &&
+            !showParallelConfirm &&
+            !showParallelPicker &&
+            !showCollectionPicker && (
+              <div
+                className="rounded-2xl border border-card-border bg-card p-4 flex items-center gap-3 text-sm text-slate-600"
+                role="status"
+                aria-live="polite"
+                data-testid="banner-checking-parallels"
+              >
+                <Loader2 className="w-4 h-4 animate-spin text-foil-violet shrink-0" />
+                <span>Checking for parallels…</span>
+              </div>
+            )}
           {showPriceResults ? (
             <EbayPriceResults
               cardData={cardData}
@@ -1193,7 +1260,12 @@ export default function ScanResult() {
             <div className="rounded-2xl border border-card-border bg-card p-4 text-sm text-slate-500">
               {showParallelConfirm || showParallelPicker || showCollectionPicker
                 ? "Answer the prompt above to load pricing."
-                : "Looking up pricing…"}
+                : isCheckingParallels
+                  /* Suppress the generic "Looking up pricing…" copy while
+                     the dedicated checking-parallels banner is visible —
+                     two stacked spinners read as redundant. */
+                  ? " "
+                  : "Looking up pricing…"}
             </div>
           )}
         </TabsContent>
