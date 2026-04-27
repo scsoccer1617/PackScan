@@ -483,25 +483,41 @@ export default function ScanResult() {
             cardNumber: data.cardNumber ?? null,
             colorFilter: detected,
           });
-          if (scpResult.parallels.length === 1) {
-            // SCP uniquely identified the parallel — auto-apply.
-            const only = scpResult.parallels[0];
-            applyAndPrice({ ...data, foilType: only.label });
-            return;
-          }
-          if (scpResult.parallels.length >= 2) {
-            // SCP returned multiple candidates — show SCP-shaped picker.
-            // SCP doesn't expose per-parallel serial limits, so leave
-            // serialNumber null — the picker will accept custom serials.
-            const scpOptions: ParallelOption[] = scpResult.parallels.map((p) => ({
-              variationOrParallel: p.label,
-              serialNumber: null,
-            }));
-            setParallelOptions(scpOptions);
-            setDetectedKeyword(extractKeyword(detected));
-            if (requestShowParallelConfirm(true)) return;
-            setShowPriceResults(true);
-            return;
+          // When the server's colour-bucket filter found ZERO real
+          // matches it falls back to returning the unfiltered list
+          // (with filterFellBack=true) so the picker isn't empty. But
+          // for the colour-detected prompt, filterFellBack=true means
+          // "this card has no parallel that matches the detected
+          // colour" — exactly the 1991 Donruss #322 John Franco case
+          // where Holo reads a Silver tint but the set has no Silver
+          // parallel in SCP's catalog. In that situation we must NOT
+          // tell the dealer "Detected: Silver — is this a parallel?"
+          // because the answer is structurally no. Drop into STEP 2b
+          // semantics (unfiltered re-query, no detected-colour copy)
+          // so the picker only fires if the card genuinely has 2+
+          // parallel variants the dealer might own.
+          if (!scpResult.filterFellBack) {
+            if (scpResult.parallels.length === 1) {
+              // SCP uniquely identified the parallel — auto-apply.
+              const only = scpResult.parallels[0];
+              applyAndPrice({ ...data, foilType: only.label });
+              return;
+            }
+            if (scpResult.parallels.length >= 2) {
+              // SCP returned multiple colour-matched candidates — show
+              // SCP-shaped picker. SCP doesn't expose per-parallel
+              // serial limits, so leave serialNumber null — the picker
+              // will accept custom serials.
+              const scpOptions: ParallelOption[] = scpResult.parallels.map((p) => ({
+                variationOrParallel: p.label,
+                serialNumber: null,
+              }));
+              setParallelOptions(scpOptions);
+              setDetectedKeyword(extractKeyword(detected));
+              if (requestShowParallelConfirm(true)) return;
+              setShowPriceResults(true);
+              return;
+            }
           }
 
           // STEP 2b — SCP returned 0 with the color/tier filter applied.
@@ -623,37 +639,48 @@ export default function ScanResult() {
                 })
               : null;
 
-            if (scpSuggested && scpSuggested.parallels.length >= 2) {
-              // Multiple colour-matched SCP parallels — always show the
-              // picker. (We no longer auto-apply on length===1 here:
-              // Vision's colour reading on rainbow/holo cards is
-              // unreliable enough that the dealer should always get a
-              // chance to see the full colour-bucketed options.)
-              const scpOptions: ParallelOption[] = scpSuggested.parallels.map((p) => ({
-                variationOrParallel: p.label,
-                serialNumber: null,
-              }));
-              setParallelOptions(scpOptions);
-              setDetectedKeyword(extractKeyword(suggestedColor));
-              step4ScpReturnedSomething = true;
-              if (requestShowParallelConfirm(true)) return;
-              setShowPriceResults(true);
-              return;
-            }
-            if (scpSuggested && scpSuggested.parallels.length === 1) {
-              // Single colour match — still show picker (with the
-              // matched label pre-selected by virtue of being the only
-              // option) so the dealer can override to "Other".
-              const scpOptions: ParallelOption[] = scpSuggested.parallels.map((p) => ({
-                variationOrParallel: p.label,
-                serialNumber: null,
-              }));
-              setParallelOptions(scpOptions);
-              setDetectedKeyword(extractKeyword(suggestedColor));
-              step4ScpReturnedSomething = true;
-              if (requestShowParallelConfirm(true)) return;
-              setShowPriceResults(true);
-              return;
+            // Same filterFellBack gate as STEP 2: when the server's
+            // colour filter found ZERO real matches it returns the
+            // unfiltered list with filterFellBack=true. Treat that as
+            // "no real colour-matched parallel exists for this card"
+            // and skip the colour-detected picker; we'll fall through
+            // to the unfiltered re-query below, which clears the
+            // detected keyword so we don't mislead the dealer with a
+            // colour Vision guessed but the catalog doesn't support.
+            if (scpSuggested && !scpSuggested.filterFellBack) {
+              if (scpSuggested.parallels.length >= 2) {
+                // Multiple colour-matched SCP parallels — always show
+                // the picker. (We no longer auto-apply on length===1
+                // here: Vision's colour reading on rainbow/holo cards
+                // is unreliable enough that the dealer should always
+                // get a chance to see the full colour-bucketed
+                // options.)
+                const scpOptions: ParallelOption[] = scpSuggested.parallels.map((p) => ({
+                  variationOrParallel: p.label,
+                  serialNumber: null,
+                }));
+                setParallelOptions(scpOptions);
+                setDetectedKeyword(extractKeyword(suggestedColor));
+                step4ScpReturnedSomething = true;
+                if (requestShowParallelConfirm(true)) return;
+                setShowPriceResults(true);
+                return;
+              }
+              if (scpSuggested.parallels.length === 1) {
+                // Single colour match — still show picker (with the
+                // matched label pre-selected by virtue of being the
+                // only option) so the dealer can override to "Other".
+                const scpOptions: ParallelOption[] = scpSuggested.parallels.map((p) => ({
+                  variationOrParallel: p.label,
+                  serialNumber: null,
+                }));
+                setParallelOptions(scpOptions);
+                setDetectedKeyword(extractKeyword(suggestedColor));
+                step4ScpReturnedSomething = true;
+                if (requestShowParallelConfirm(true)) return;
+                setShowPriceResults(true);
+                return;
+              }
             }
 
             // Either no suggestedColor at all, or the colour filter
