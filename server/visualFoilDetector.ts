@@ -25,8 +25,27 @@ function classifyDominantColor(r: number, g: number, b: number): string | null {
   const saturation = maxChannel - minChannel;
   const brightness = (r + g + b) / 3;
   
+  // Silver / chrome detection. Two tiers because chrome reflects ambient
+  // colour: a Silver Prizm photographed under warm light reads cream/
+  // straw, under fluorescent it reads cyan-tinted. The strict tier handles
+  // pure neutral grey; the tinted tier accepts mild colour casts so the
+  // chrome regions actually drive the parallel suggestion instead of
+  // letting a thin coloured border tint win.
+  //
+  // Tinted-tier guards:
+  //   - brightness > 140  -> still bright (chrome, not shadow)
+  //   - saturation < 60   -> mild tint at most
+  //   - r,g,b all > 120   -> all channels bright (rules out warm browns)
+  //   - saturation < 0.35*brightness -> tint scales with brightness so we
+  //     don't accept tan/khaki where one channel dominates
   if (brightness > 160 && saturation < 30 && r > 150 && g > 150 && b > 150) return 'Silver';
-  
+  if (
+    brightness > 140 &&
+    saturation < 60 &&
+    r > 120 && g > 120 && b > 120 &&
+    saturation < 0.35 * brightness
+  ) return 'Silver';
+
   if (saturation < 20) return null;
   
   if ((b > r + 20 && b > g) || (g > r + 10 && b > r + 10 && Math.abs(g - b) < 30)) {

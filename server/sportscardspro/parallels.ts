@@ -185,10 +185,15 @@ export async function discoverParallels(
   //   - a themed/unbucketed parallel that can look blue
   //     ([Sandglitter], [Holiday], [Tinsel], [Ghost], [Clear], …)
   //
-  // So when a colour filter is active we keep three classes:
+  // So when a colour filter is active we keep four classes:
   //   1. Exact colour-bucket matches (Pink filter -> Pink family)
   //   2. Rainbow-family entries + the synthetic base (always)
-  //   3. Un-bucketable entries (canonical === null) — themed parallels
+  //   3. Silver- and Gold-family entries (always) — chrome/foilboard
+  //      parallels reflect whatever ambient colour is hitting them, so a
+  //      Silver Prizm photographed with a blue tint is frequently mis-
+  //      detected as Aqua/Blue. Keep them next to the colour matches so
+  //      the dealer can pick the right one.
+  //   4. Un-bucketable entries (canonical === null) — themed parallels
   //      like Sandglitter that have no colour identity of their own
   //
   // Non-colour filters (Refractor, Autograph) stay strict.
@@ -204,6 +209,11 @@ export async function discoverParallels(
           if (parallelsMatch(opts.colorFilter, p.label)) return true;
           // Always keep the Rainbow family when any colour is detected.
           if (p.canonical === "Rainbow") return true;
+          // Always keep Silver and Gold — chrome neutrals that reflect
+          // ambient colour and are frequently the true parallel when the
+          // visual detector picks up a faint colour tint.
+          if (p.canonical === "Silver") return true;
+          if (p.canonical === "Gold") return true;
           // Always keep themed/un-bucketable parallels.
           if (p.canonical === null) return true;
           return false;
