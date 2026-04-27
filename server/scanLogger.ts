@@ -42,7 +42,29 @@ const HEADERS = [
   'IsFoil',
   'UserDecision',
   'Indicators',
+  'OcrFrontText',
+  'OcrBackText',
+  'ScpMatchScore',
+  'ScpReason',
+  'ScpTopCandidates',
+  'DurationMs',
 ];
+
+// Truncate large free-text fields so the Sheet stays readable. Cells
+// max out at 50,000 chars but pasting 30k of OCR per row makes the
+// sheet unusable. Keep enough to debug card-number / player drift.
+const OCR_TEXT_TRUNCATE_AT = 4000;
+
+function columnIndexToA1(zeroIndex: number): string {
+  // 0 → A, 25 → Z, 26 → AA, etc.
+  let n = zeroIndex;
+  let s = '';
+  while (n >= 0) {
+    s = String.fromCharCode(65 + (n % 26)) + s;
+    n = Math.floor(n / 26) - 1;
+  }
+  return s;
+}
 
 let cachedAuth: GoogleAuth | null = null;
 let cachedSheets: sheets_v4.Sheets | null = null;
@@ -81,9 +103,16 @@ function getSheetsClient(): sheets_v4.Sheets {
 }
 
 /**
- * One-time best-effort header check. We don't rewrite the headers if the
- * row already exists (the user may have customised them) — we only seed
- * the row when row 1 is empty. Failures are swallowed.
+ * One-time best-effort header check.
+ *
+ * Two cases:
+ *   1. Row 1 is empty → seed full HEADERS.
+ *   2. Row 1 is partially populated (older seed had fewer columns than
+ *      the current HEADERS) → extend it to cover any newly added
+ *      trailing columns. We never overwrite existing labels, so users
+ *      who customised earlier columns keep their text.
+ *
+ * Failures are swallowed — the sink is best-effort.
  */
 async function ensureHeadersOnce() {
   if (headerSyncDone) return;
@@ -91,7 +120,10 @@ async function ensureHeadersOnce() {
   try {
     const sheets = getSheetsClient();
     const spreadsheetId = process.env.SCAN_LOG_SHEET_ID!;
-    const got = await sheets.spreadsheets.values.get({ spreadsheetId, range: 'A1:Z1' });
+    // Ask for slightly more than HEADERS in case a future version
+    // shrinks; A:AZ covers 52 columns which is well beyond any
+    // foreseeable schema.
+    const got = await sheets.spreadsheets.values.get({ spreadsheetId, range: 'A1:AZ1' });
     const row = got.data.values?.[0] ?? [];
     if (row.length === 0) {
       await sheets.spreadsheets.values.update({
@@ -99,6 +131,18 @@ async function ensureHeadersOnce() {
         range: 'A1',
         valueInputOption: 'RAW',
         requestBody: { values: [HEADERS] },
+      });
+    } else if (row.length < HEADERS.length) {
+      // Append only the missing trailing labels so we don't clobber
+      // any user-edited cells. Sheets columns are 1-indexed; convert
+      // the next-empty index to its A1 letter.
+      const startCol = columnIndexToA1(row.length); // row.length == next empty col index (0-based)
+      const newLabels = HEADERS.slice(row.length);
+      await sheets.spreadsheets.values.update({
+        spreadsheetId,
+        range: `${startCol}1`,
+        valueInputOption: 'RAW',
+        requestBody: { values: [newLabels] },
       });
     }
   } catch (err) {
@@ -123,6 +167,18 @@ export interface ScanLogFinal {
   confidence?: number;
   isFoil?: boolean;
   userDecision?: string;
+  ocrFrontText?: string;
+  ocrBackText?: string;
+  scpMatchScore?: number | null;
+  scpReason?: string | null;
+  // top candidate list — already shaped on the analysis result as
+  // `_scpTopCandidates`. Render compactly so the cell stays readable.
+  scpTopCandidates?: Array<{
+    productName?: string;
+    consoleName?: string;
+    score?: number;
+  }> | null;
+  durationMs?: number;
 }
 
 export interface ScanLog {
@@ -174,6 +230,17 @@ async function appendRow(ctx: ScanContext, final: ScanLogFinal, indicators: stri
   const spreadsheetId = process.env.SCAN_LOG_SHEET_ID!;
   // Sheets cells max out at 50,000 chars. Trim defensively.
   const indicatorsCell = indicators.join('\n').slice(0, 49000);
+  const ocrFront = (final.ocrFrontText ?? '').slice(0, OCR_TEXT_TRUNCATE_AT);
+  const ocrBack = (final.ocrBackText ?? '').slice(0, OCR_TEXT_TRUNCATE_AT);
+  const candidatesCell = (final.scpTopCandidates ?? [])
+    .map((c, i) => {
+      const score = typeof c.score === 'number' ? c.score.toFixed(2) : '?';
+      const product = c.productName ?? '?';
+      const console_ = c.consoleName ?? '?';
+      return `${i + 1}. [${score}] ${product} :: ${console_}`;
+    })
+    .join('\n')
+    .slice(0, 8000);
   const row = [
     new Date().toISOString(),
     ctx.scanId,
@@ -188,6 +255,12 @@ async function appendRow(ctx: ScanContext, final: ScanLogFinal, indicators: stri
     final.isFoil != null ? String(final.isFoil) : '',
     final.userDecision ?? '',
     indicatorsCell,
+    ocrFront,
+    ocrBack,
+    final.scpMatchScore != null ? final.scpMatchScore.toFixed(2) : '',
+    final.scpReason ?? '',
+    candidatesCell,
+    final.durationMs != null ? String(final.durationMs) : '',
   ];
   await sheets.spreadsheets.values.append({
     spreadsheetId,
