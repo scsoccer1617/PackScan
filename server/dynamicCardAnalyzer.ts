@@ -424,12 +424,31 @@ export async function analyzeSportsCardImage(
       // recovery pass when we have positive evidence the card IS numbered:
       //   • we already extracted a limit-only serial like "/150" — definitely
       //     a numbered card, just couldn't read the numerator, OR
-      //   • another detector flagged isNumbered (text mentions "/N", etc.).
+      //   • another detector flagged isNumbered (text mentions "/N", etc.), OR
+      //   • the OCR text contains an autograph signal — autograph cards are
+      //     almost always serial-numbered parallels (Black/10, Blue/150, etc.)
+      //     and the serial foil-stamp routinely defeats the standard Vision
+      //     pass by sitting over jersey pinstripes or busy art (Luis Gil
+      //     2025 Topps Baseball Stars Autograph #BSA2-LG missed 041/150).
+      // detectCardFeatures() runs AFTER this block, so we evaluate the same
+      // autograph patterns inline here against cleanText.
       // Without this gate, every base card with no serial would burn ~3-5 s
       // of extra Vision time looking for a serial that isn't there.
       const limitOnlySerial = initialSerial.startsWith('/');
-      const numberedSignal = !!cardDetails.isNumbered || limitOnlySerial;
+      const autographSignal =
+        /\bAUTOGRAPH\b/i.test(cleanText) ||
+        /\bAUTO\b/i.test(cleanText) ||
+        /\bSIGNED\b/i.test(cleanText) ||
+        /\bSIGNATURE\b/i.test(cleanText) ||
+        /\bCERTIFIED\s+AUTOGRAPH\b/i.test(cleanText);
+      const numberedSignal =
+        !!cardDetails.isNumbered || limitOnlySerial || autographSignal;
       const shouldRunFocused = !haveCompleteSerial && numberedSignal;
+      if (autographSignal && !cardDetails.isNumbered && !limitOnlySerial) {
+        console.log(
+          `[FocusedOCR] Autograph signal detected in OCR text — running focused-serial pass to recover any foil-stamped serial`
+        );
+      }
 
       if (shouldRunFocused) {
         try {

@@ -523,11 +523,28 @@ export async function detectFoilFromImage(
       //      parallel's identity).
       //   2. Center shows the strong-rainbow signature — unambiguous
       //      Silver/refractor regardless of what the border tint reads.
+      //
+      // EXCEPTION TO EXCEPTION 1: when the border tint shows HIGH-COVERAGE
+      // agreement (≥70% average across agreeing strips), the colour is
+      // saturating the entire border — far beyond what an ambient-light
+      // reflection on chrome would produce. In that case the border tint
+      // IS the parallel's identity, even when the global histogram lands
+      // on Silver/Gold. (Real example: 2025 Topps Baseball Stars
+      // Autographs Luis Gil Blue parallel /150 — borderTint=aqua at 74.5%
+      // avgCoverage was getting overridden by Silver chrome reflection.)
       const isChromeGlobal =
         detectedColorTint === 'Silver' || detectedColorTint === 'Gold';
+      const HIGH_BORDER_COVERAGE = 0.7;
+      const borderCoverage = regional?.borderTint?.coverage ?? 0;
+      const hasHighCoverageBorder = borderCoverage >= HIGH_BORDER_COVERAGE;
 
       if (hasBorderTintEvidence && regionalColorName && detectedColorTint && regionalColorName !== detectedColorTint) {
-        if (isChromeGlobal) {
+        if (isChromeGlobal && hasHighCoverageBorder && !hasStrongCenterRainbow) {
+          indicators.push(
+            `[Region] high-coverage border tint "${regionalColorName}" (avgCoverage=${(borderCoverage * 100).toFixed(1)}%) overrides chrome tint "${detectedColorTint}" — too saturated for ambient reflection`
+          );
+          detectedColorTint = regionalColorName;
+        } else if (isChromeGlobal) {
           indicators.push(`[Region] keeping chrome tint "${detectedColorTint}" over border tint "${regionalColorName}" — chrome reflects ambient colour`);
         } else if (hasStrongCenterRainbow) {
           indicators.push(`[Region] center rainbow signature (score=${regional!.centerRainbowScore.toFixed(2)}, hues=${regional!.centerHueCount}) overrides border tint "${regionalColorName}" — promoting to Silver`);
