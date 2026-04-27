@@ -8,6 +8,7 @@ import {
   Mic,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { formatSeasonYear } from "@/lib/seasonYear";
 import type { CardWithRelations } from "@shared/schema";
 import EditCardModal from "@/components/EditCardModal";
 
@@ -378,7 +379,7 @@ function CollectionGridTile({
           {card.playerFirstName} {card.playerLastName}
         </p>
         <p className="text-[11px] text-muted-foreground truncate">
-          {card.year} {brandName(card) || "Unknown brand"}
+          {formatSeasonYear(card.year, sportName(card)) ?? card.year} {brandName(card) || "Unknown brand"}
         </p>
         <p className="text-[13px] font-display font-semibold mt-1.5">
           {value > 0 ? money(value, 2) : <span className="text-muted-foreground font-sans font-normal">—</span>}
@@ -435,7 +436,7 @@ function CollectionListRow({
           {card.playerFirstName} {card.playerLastName}
         </p>
         <p className="text-[11px] text-muted-foreground truncate">
-          {card.year} {brandName(card)} · {parallelLabel(card)}
+          {formatSeasonYear(card.year, sportName(card)) ?? card.year} {brandName(card)} · {parallelLabel(card)}
         </p>
       </div>
       <div className="text-right">

@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { ExternalLink, TrendingUp, Pencil, RotateCcw, ThumbsUp, ThumbsDown, Check, ScanText } from "lucide-react";
 import { CardFormValues } from "@shared/schema";
 import { apiRequest } from "@/lib/queryClient";
+import { formatSeasonYear, parseSeasonYearInput, isSeasonSport } from "@/lib/seasonYear";
 import VariantCombobox from "@/components/VariantCombobox";
 import FoilTypeSelect from "@/components/FoilTypeSelect";
 import AddToSheetButton from "@/components/AddToSheetButton";
@@ -371,7 +372,29 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
               </div>
               <div>
                 <Label htmlFor="edit-year">Year</Label>
-                <Input id="edit-year" type="number" value={editData.year || ''} onChange={e => updateEditField('year', parseInt(e.target.value) || 0)} />
+                <Input
+                  id="edit-year"
+                  type="text"
+                  inputMode={isSeasonSport(editData.sport) ? 'text' : 'numeric'}
+                  pattern={isSeasonSport(editData.sport) ? '\\d{4}(-\\d{2,4})?' : '\\d{4}'}
+                  placeholder={isSeasonSport(editData.sport) ? 'e.g. 2024-25' : 'e.g. 2024'}
+                  defaultValue={
+                    typeof editData.year === 'number' && editData.year > 0
+                      ? formatSeasonYear(editData.year, editData.sport) ?? String(editData.year)
+                      : ''
+                  }
+                  key={`edit-year-${editData.year}`}
+                  onBlur={(e) => {
+                    const parsed = parseSeasonYearInput(e.target.value);
+                    if (parsed !== null) {
+                      updateEditField('year', parsed);
+                      const formatted = formatSeasonYear(parsed, editData.sport);
+                      if (formatted) e.target.value = formatted;
+                    } else if (e.target.value.trim() === '') {
+                      updateEditField('year', 0);
+                    }
+                  }}
+                />
               </div>
               <div>
                 <Label htmlFor="edit-brand">Brand</Label>
@@ -485,7 +508,7 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
                 </div>
                 <div className="text-base">
                   <span className="font-semibold text-slate-800">Year: </span>
-                  <span className="text-slate-700">{cardData.year || 'Not detected'}</span>
+                  <span className="text-slate-700">{formatSeasonYear(cardData.year, cardData.sport) || 'Not detected'}</span>
                 </div>
                 <div className="text-base">
                   <span className="font-semibold text-slate-800">Brand: </span>

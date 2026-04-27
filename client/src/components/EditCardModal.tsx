@@ -12,6 +12,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { formatSeasonYear, parseSeasonYearInput, isSeasonSport } from "@/lib/seasonYear";
 import EbayValueLookup from "./EbayValueLookup";
 import ServerEbayLookup from "./ServerEbayLookup";
 import FoilTypeSelect from "./FoilTypeSelect";
@@ -177,6 +178,7 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
   const watchedCollection = form.watch('collection');
   const watchedSet = form.watch('set');
   const watchedPlayerLastName = form.watch('playerLastName');
+  const watchedSport = form.watch('sport');
 
   const [collectionOptions, setCollectionOptions] = useState<string[]>([]);
   const [setOptions, setSetOptions] = useState<string[]>([]);
@@ -316,25 +318,58 @@ export default function EditCardModal({ card, isOpen, onClose }: EditCardModalPr
               />
             </div>
 
-            {/* Year */}
+            {/* Year. Stored as an integer (the season's starting year for
+                Basketball/Hockey). Accepts plain "2021" or season "2021-22"
+                input — the latter is parsed back to the integer 2021 before
+                submission. Display value is rendered through formatSeasonYear
+                so the field matches what the rest of the UI shows. */}
             <div className="form-grid">
               <FormField
                 control={form.control}
                 name="year"
-                render={({ field }) => (
-                  <FormItem className="col-span-1 md:col-span-2">
-                    <FormLabel>Year <span className="text-red-500">*</span></FormLabel>
-                    <FormControl>
-                      <Input
-                        type="number"
-                        placeholder="e.g. 2024"
-                        {...field}
-                        onChange={(e) => field.onChange(parseInt(e.target.value) || '')}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
+                render={({ field }) => {
+                  const seasonMode = isSeasonSport(watchedSport);
+                  const displayValue =
+                    typeof field.value === 'number' && field.value > 0
+                      ? formatSeasonYear(field.value, watchedSport) ?? String(field.value)
+                      : '';
+                  return (
+                    <FormItem className="col-span-1 md:col-span-2">
+                      <FormLabel>Year <span className="text-red-500">*</span></FormLabel>
+                      <FormControl>
+                        <Input
+                          type="text"
+                          inputMode={seasonMode ? 'text' : 'numeric'}
+                          pattern={seasonMode ? '\\d{4}(-\\d{2,4})?' : '\\d{4}'}
+                          placeholder={seasonMode ? 'e.g. 2024-25' : 'e.g. 2024'}
+                          defaultValue={displayValue}
+                          key={`year-${field.value}`}
+                          onBlur={(e) => {
+                            const parsed = parseSeasonYearInput(e.target.value);
+                            if (parsed !== null) {
+                              field.onChange(parsed);
+                              // Reformat the visible text after parse so user
+                              // sees the canonical season label.
+                              const formatted = formatSeasonYear(parsed, watchedSport);
+                              if (formatted) e.target.value = formatted;
+                            } else if (e.target.value.trim() === '') {
+                              field.onChange(0);
+                            }
+                            field.onBlur();
+                          }}
+                          onChange={(e) => {
+                            // Live-parse so submit-on-Enter doesn't lose the
+                            // edit, but tolerate intermediate invalid states
+                            // ("2021-" while user is typing).
+                            const parsed = parseSeasonYearInput(e.target.value);
+                            if (parsed !== null) field.onChange(parsed);
+                          }}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  );
+                }}
               />
             </div>
 
