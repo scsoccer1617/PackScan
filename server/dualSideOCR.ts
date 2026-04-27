@@ -1625,6 +1625,47 @@ async function combineCardResults(
           `foilType="${combined.foilType || 'base'}"`,
       );
 
+      // ── Autograph collection routing ──────────────────────────────────
+      // Autograph cards live in DIFFERENT catalog collections than the
+      // base set (e.g. "Baseball Stars Autographs" rather than "Base Set")
+      // and have their OWN parallel set (Black/Blue/Gold/Orange/Platinum/
+      // Red), distinct from the base-set parallels (Silver Crackle/Gold/
+      // etc.). When OCR detected an autograph signal AND the cardNumber
+      // matches the autograph prefix-suffix pattern (e.g. BSA2-LG, AUTO-XX),
+      // force collection routing toward an autograph collection so the
+      // parallel picker queries the correct catalog rows.
+      //
+      // The cardNumber pattern \b[A-Z]{1,4}\d*-[A-Z]{2,5}\b is the same
+      // shape that dynamicCardAnalyzer uses to recognise autograph slots.
+      // We require BOTH the autograph flag AND the cardNumber pattern
+      // because either alone has false positives: the back's "AUTOGRAPH"
+      // word appears on relics/memorabilia too, and short-code card
+      // numbers occasionally appear on non-autograph inserts.
+      //
+      // Real example: 2025 Topps Series 2 Baseball Stars Autographs Luis
+      // Gil #BSA2-LG (Blue parallel /150) was being routed with an empty
+      // collection, so the picker fell through to base-set parallels.
+      const autographCardNumPattern = /^[A-Z]{1,4}\d*-[A-Z]{2,5}$/;
+      const cardNumStr = String(combined.cardNumber || '').trim().toUpperCase();
+      const isAutographCardNumber =
+        cardNumStr.length > 0 && autographCardNumPattern.test(cardNumStr);
+      if (combined.isAutographed && isAutographCardNumber) {
+        const currentCollection = String(combined.collection || '').trim();
+        const looksLikeAutographCollection =
+          /\bautograph/i.test(currentCollection) ||
+          /\bsignature/i.test(currentCollection);
+        if (!looksLikeAutographCollection) {
+          const oldCollection = currentCollection;
+          combined.collection = 'Baseball Stars Autographs';
+          console.log(
+            `[SCP-first] Autograph card detected (isAutographed=true, cardNumber="${cardNumStr}") ` +
+              `— routing collection "${oldCollection || '(empty)'}" → "${combined.collection}". ` +
+              `CardDB enrichment will refine if a more specific collection matches this slot.`
+          );
+          (combined as any)._autographCollectionRouted = true;
+        }
+      }
+
       // CardDB set/collection enrichment on SCP hit. SCP doesn't carry
       // structured set/collection data, so we still query CardDB — but only
       // to fill those two fields. SCP-owned fields (brand/year/cardNumber/
