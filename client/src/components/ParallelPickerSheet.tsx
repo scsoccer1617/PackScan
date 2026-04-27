@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
@@ -49,6 +49,31 @@ function pickDefaultOption(
   return options[0].variationOrParallel;
 }
 
+/**
+ * Reorder options so the keyword-matched default sits at the top of
+ * the rendered list. Non-matching options keep their original relative
+ * order beneath it.
+ *
+ * Without this, Silver could be correctly preselected at index 7 in a
+ * Topps Series 2 set — the radio dot would be active but visually
+ * halfway down the picker, with Aqua / Black / Blue stacked above it.
+ * Users had to scroll to find their preselect.
+ */
+function reorderForDefault(
+  options: ParallelOption[],
+  detectedLabel: string,
+): ParallelOption[] {
+  if (options.length <= 1) return options;
+  const keyword = (detectedLabel || "").trim().toLowerCase();
+  if (!keyword) return options;
+  const idx = options.findIndex(o =>
+    o.variationOrParallel.toLowerCase().includes(keyword),
+  );
+  if (idx <= 0) return options; // no match, or already first
+  const matched = options[idx];
+  return [matched, ...options.slice(0, idx), ...options.slice(idx + 1)];
+}
+
 const CUSTOM_VALUE = CUSTOM_VALUE_INTERNAL;
 const NONE_VALUE = "__none__";
 
@@ -60,15 +85,27 @@ export default function ParallelPickerSheet({
   onConfirm,
   showAllMode = false,
 }: ParallelPickerSheetProps) {
+  // In show-all mode (No-flow second step) the title and behaviour are
+  // generic, and we deliberately don't bias the order toward the
+  // detected colour the user just rejected. In normal mode, hoist the
+  // matched default to the top so the preselected radio is visible at
+  // first paint.
+  const orderedOptions = useMemo(
+    () =>
+      showAllMode
+        ? options
+        : reorderForDefault(options, detectedLabel),
+    [options, detectedLabel, showAllMode],
+  );
   const [selected, setSelected] = useState<string>(() =>
-    pickDefaultOption(options, detectedLabel),
+    pickDefaultOption(orderedOptions, detectedLabel),
   );
   const [customText, setCustomText] = useState("");
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    if (open && options.length > 0) {
-      setSelected(pickDefaultOption(options, detectedLabel));
+    if (open && orderedOptions.length > 0) {
+      setSelected(pickDefaultOption(orderedOptions, detectedLabel));
       setCustomText("");
       // Force the picker list back to the top whenever the sheet opens.
       // Without this, Radix's focus management inside the Sheet (and any
@@ -82,7 +119,7 @@ export default function ParallelPickerSheet({
         });
       });
     }
-  }, [open, options]);
+  }, [open, orderedOptions]);
 
   const handleConfirm = () => {
     if (selected === CUSTOM_VALUE) {
@@ -95,7 +132,7 @@ export default function ParallelPickerSheet({
       // so eBay's broader fallback can still find the right card.
       onConfirm("");
     } else {
-      const opt = options.find(o => o.variationOrParallel === selected);
+      const opt = orderedOptions.find(o => o.variationOrParallel === selected);
       onConfirm(selected, opt?.serialNumber ?? undefined);
     }
   };
@@ -123,7 +160,7 @@ export default function ParallelPickerSheet({
         </SheetHeader>
 
         <div ref={scrollRef} className="flex-1 overflow-y-auto py-2 space-y-1 min-h-0">
-          {options.map(opt => (
+          {orderedOptions.map(opt => (
             <PickerRow
               key={opt.variationOrParallel}
               label={opt.variationOrParallel}
