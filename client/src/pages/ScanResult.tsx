@@ -14,6 +14,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { useScanFlow } from "@/hooks/use-scan-flow";
+import { formatSeasonYear } from "@/lib/seasonYear";
 import { useToast } from "@/hooks/use-toast";
 import { usePreferences } from "@/hooks/use-preferences";
 import { Switch } from "@/components/ui/switch";
@@ -843,7 +844,7 @@ export default function ScanResult() {
                   the Details tab). */}
               <div className="text-[11px] text-slate-500 uppercase tracking-wider font-medium flex items-center gap-1 flex-wrap">
                 <span>
-                  {cardData.year} {cardData.brand}
+                  {formatSeasonYear(cardData.year, cardData.sport) ?? cardData.year ?? ""} {cardData.brand}
                 </span>
                 <span className="text-slate-400">·</span>
                 <span>#{cardData.cardNumber || "?"}</span>
@@ -1104,7 +1105,7 @@ function DetailsTab({
 
   const rows: [string, string][] = [
     ["Player", playerName(cardData) || "—"],
-    ["Year", cardData.year ? String(cardData.year) : "—"],
+    ["Year", formatSeasonYear(cardData.year, cardData.sport) ?? "—"],
     ["Brand", cardData.brand || "—"],
     // Set appears above Collection so the ordering matches the edit form
     // and reads top-down from "where in the product line" → "which box".
