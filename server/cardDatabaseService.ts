@@ -46,6 +46,17 @@ export interface CardLookupInput {
    * hand-curated list of subset names — the DB itself is the vocabulary.
    */
   ocrText?: string;
+  /**
+   * Detected sport for this scan (e.g. "Basketball", "Football", "Hockey",
+   * "Baseball"). When provided, the lookup filters out rows whose `brandId`
+   * suffix names a different sport — a basketball OCR scan will never match
+   * a `panini_football` row even if brand+year+cardNumber happen to overlap.
+   * The cardDatabase has no `sport` column today; brandId suffixes
+   * (e.g. "panini_basketball", "topps_baseball") are the de-facto sport
+   * indicator. Cross-sport overlap is the canonical 2024-25 Hoops failure
+   * mode where Brunson #74 was being matched against unrelated sport rows.
+   */
+  sport?: string;
 }
 
 export interface CardLookupResult {
@@ -331,12 +342,35 @@ export async function importVariationsCSV(csvBuffer: Buffer, onProgress?: (proce
  * Look up a card in the database given OCR-detected fields.
  * Returns authoritative card data if found, or { found: false } to signal fallback.
  */
+/**
+ * Map a detected sport label to the lowercase token that appears as the
+ * brandId suffix in cardDatabase (e.g. "Basketball" → "basketball"). Returns
+ * null when the sport is unknown / "Not detected" so the caller can skip the
+ * filter rather than reject every row. Generic across brands — brandId
+ * convention is `<brand>_<sport>` for every modern entry.
+ */
+function sportTokenForBrandId(sport: string | undefined | null): string | null {
+  if (!sport) return null;
+  const s = sport.trim().toLowerCase();
+  if (!s || s === 'not detected' || s === 'unknown') return null;
+  // Pass-through for the canonical four sports plus their league-name aliases.
+  if (s === 'basketball' || s === 'nba') return 'basketball';
+  if (s === 'football' || s === 'nfl') return 'football';
+  if (s === 'baseball' || s === 'mlb') return 'baseball';
+  if (s === 'hockey' || s === 'nhl') return 'hockey';
+  return null;
+}
+
 export async function lookupCard(input: CardLookupInput): Promise<CardLookupResult> {
-  const { brand, year, collection, cardNumber, serialNumber, playerLastName, ocrText } = input;
+  const { brand, year, collection, cardNumber, serialNumber, playerLastName, ocrText, sport } = input;
 
   if (!brand || !year || !cardNumber) {
     return { found: false, source: 'ocr_fallback' };
   }
+
+  // Resolve sport token early so both the initial fetch and the year-shift
+  // fallback can apply the same brandId-suffix guard.
+  const sportToken = sportTokenForBrandId(sport);
 
   try {
     // Normalize brand for fuzzy matching
@@ -370,6 +404,31 @@ export async function lookupCard(input: CardLookupInput): Promise<CardLookupResu
       )
       .limit(200);
 
+    // Sport filter via brandId suffix. brandId convention is
+    // "<brand>_<sport>" (e.g. "panini_basketball", "topps_baseball"). When the
+    // OCR detected a definite sport, drop rows whose brandId names a
+    // different sport — these are cross-sport collisions where brand+year+
+    // cardNumber happen to overlap across product lines (the canonical
+    // Brunson #74 NBA Hoops failure mode where lookups picked up unrelated
+    // sport rows). Rows with no clear sport suffix in their brandId pass
+    // through unchanged so non-modern catalog data isn't accidentally hidden.
+    const filterBySport = (rows: typeof cardRows): typeof cardRows => {
+      if (!sportToken) return rows;
+      const filtered = rows.filter(r => {
+        const bid = (r.brandId || '').toLowerCase();
+        // No sport indicator in brandId — keep (older / non-conventional
+        // imports where the suffix may be missing).
+        if (!/_[a-z]+$/.test(bid)) return true;
+        // Suffix must match the detected sport. Anything else is dropped.
+        return bid.endsWith(`_${sportToken}`);
+      });
+      if (filtered.length !== rows.length) {
+        console.log(`[CardDB] Sport filter ("${sportToken}"): ${rows.length} → ${filtered.length} rows after dropping cross-sport brandId matches`);
+      }
+      return filtered;
+    };
+    cardRows = filterBySport(cardRows);
+
     // ── Step 1a: Off-by-one year fallback (copyright→release convention) ──
     // Several manufacturers consistently printed the prior-year copyright on
     // the card back, even though the card was sold as the next year's set.
@@ -387,7 +446,7 @@ export async function lookupCard(input: CardLookupInput): Promise<CardLookupResu
     const tryYearShift = async (shifted: number, label: string) => {
       if (shifted < 1900 || shifted > new Date().getFullYear() + 1) return;
       if (cardRows.length > 0) return;
-      const shiftedRows = await db
+      const shiftedRowsRaw = await db
         .select()
         .from(cardDatabase)
         .where(
@@ -401,6 +460,7 @@ export async function lookupCard(input: CardLookupInput): Promise<CardLookupResu
           )
         )
         .limit(10);
+      const shiftedRows = filterBySport(shiftedRowsRaw);
       if (shiftedRows.length > 0) {
         console.log(`[CardDB] ${label} year fallback: no match for ${year} ${brandNorm} #${cardNumNorm}; found ${shiftedRows.length} match(es) at year ${shifted}`);
         cardRows = shiftedRows;
@@ -681,11 +741,12 @@ export async function lookupCard(input: CardLookupInput): Promise<CardLookupResu
         )
         .limit(50);
 
-      if (prefixRows.length > 0) {
-        console.log(`[CardDB] Prefix match found ${prefixRows.length} candidate(s) for "${cardNumNorm}"`);
+      const prefixRowsFiltered = filterBySport(prefixRows);
+      if (prefixRowsFiltered.length > 0) {
+        console.log(`[CardDB] Prefix match found ${prefixRowsFiltered.length} candidate(s) for "${cardNumNorm}"`);
         // Score each candidate: boost rows whose player name contains the OCR player last name
         const lastNameNorm = (playerLastName || '').trim().toLowerCase();
-        const scored = prefixRows.map(r => {
+        const scored = prefixRowsFiltered.map(r => {
           const dbName = r.playerName.toLowerCase();
           const nameMatch = lastNameNorm && dbName.includes(lastNameNorm) ? 100 : 0;
           return { row: r, score: nameMatch };
@@ -724,9 +785,10 @@ export async function lookupCard(input: CardLookupInput): Promise<CardLookupResu
           )
         )
         .limit(50);
-      if (anyYearRows.length > 0) {
-        console.log(`[CardDB] Cross-year fallback: no match for ${brandNorm} year=${year} #${cardNumNorm}; found ${anyYearRows.length} match(es) across other years — letting tiebreak pick`);
-        cardRows = anyYearRows;
+      const anyYearRowsFiltered = filterBySport(anyYearRows);
+      if (anyYearRowsFiltered.length > 0) {
+        console.log(`[CardDB] Cross-year fallback: no match for ${brandNorm} year=${year} #${cardNumNorm}; found ${anyYearRowsFiltered.length} match(es) across other years — letting tiebreak pick`);
+        cardRows = anyYearRowsFiltered;
         sortCandidatesByPreference(cardRows, 'cross-year fallback');
       }
     }
@@ -765,9 +827,10 @@ export async function lookupCard(input: CardLookupInput): Promise<CardLookupResu
             )
           )
           .limit(200);
-        if (playerRows.length > 0) {
-          console.log(`[CardDB] Autograph-parallel fallback: card number "${cardNumNorm}" not found; falling back to player "${playerLastName}" lookup → ${playerRows.length} candidate(s)`);
-          cardRows = playerRows;
+        const playerRowsFiltered = filterBySport(playerRows);
+        if (playerRowsFiltered.length > 0) {
+          console.log(`[CardDB] Autograph-parallel fallback: card number "${cardNumNorm}" not found; falling back to player "${playerLastName}" lookup → ${playerRowsFiltered.length} candidate(s)`);
+          cardRows = playerRowsFiltered;
           autographFallbackUsed = true;
           // Run the same OCR-vocab + base-set tiebreak we use for the
           // multi-row card-number path. Without this, the player fallback
@@ -885,6 +948,10 @@ export interface PlayerAnchoredLookupInput {
    *  the real card is T88-82) would tie T88-82 against base-set #1 and
    *  refuse to auto-correct. */
   cardNumberHint?: string;
+  /** Optional: sport context (e.g. "Basketball", "NBA") used to filter
+   *  cardDatabase rows by brandId suffix so an NBA scan can't reach
+   *  across to a baseball/football brand row at the same brand+year+lastName. */
+  sport?: string;
 }
 
 /**
@@ -919,6 +986,7 @@ export async function lookupCardByPlayer(
     const brandNorm = normalizeBrand(brand);
     const lastNameNorm = playerLastName.trim().toLowerCase();
     const firstNameNorm = playerFirstName?.trim().toLowerCase() || '';
+    const sportToken = sportTokenForBrandId(input.sport);
 
     // Build a list of candidate rows across the exact year plus ±1 (the
     // surrounding retry window that the main lookupCard loop already
@@ -930,7 +998,7 @@ export async function lookupCardByPlayer(
     let allRows: Array<typeof cardDatabase.$inferSelect> = [];
     for (const yr of yearCandidates) {
       if (yr < 1900 || yr > new Date().getFullYear() + 1) continue;
-      const rows = await db
+      const rowsRaw = await db
         .select()
         .from(cardDatabase)
         .where(
@@ -941,8 +1009,19 @@ export async function lookupCardByPlayer(
           )
         )
         .limit(50);
+      // Apply the same brandId-suffix sport guard used by the primary
+      // lookup path so the player-anchored fallback can't reach across
+      // sports either (e.g. an NBA OCR scan must not match a baseball
+      // brandId player row).
+      const rows = sportToken
+        ? rowsRaw.filter(r => {
+            const bid = (r.brandId || '').toLowerCase();
+            if (!/_[a-z]+$/.test(bid)) return true;
+            return bid.endsWith(`_${sportToken}`);
+          })
+        : rowsRaw;
       if (rows.length > 0) {
-        console.log(`[CardDB] Player-anchored probe year=${yr} lastName="${lastNameNorm}" → ${rows.length} candidate row(s)`);
+        console.log(`[CardDB] Player-anchored probe year=${yr} lastName="${lastNameNorm}" → ${rows.length} candidate row(s)${sportToken && rows.length !== rowsRaw.length ? ` (filtered ${rowsRaw.length}→${rows.length} by sport=${sportToken})` : ''}`);
         allRows.push(...rows);
       }
     }

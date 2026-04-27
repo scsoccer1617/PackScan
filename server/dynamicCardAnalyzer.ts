@@ -2201,6 +2201,25 @@ function extractCardNumberPass(
         console.log(`[CardNum] Skipping year-cardnumber compound "${matchedToken}" — preceded by "(" (career-year range)`);
         continue;
       }
+      // Skip season-span tokens like "2024-25" (NBA/NHL season notation).
+      // The trailing two digits == (YYYY % 100) + 1 means this is a season
+      // span, not a vintage <year>-<cardNumber> identifier. Real vintage
+      // identifiers don't follow this consecutive-year shape (e.g. a 1982
+      // card numbered 17 is "1982-17", not "1982-83"). This catches the
+      // dominant NBA Hoops failure mode: "2024-25 PANINI - HAUNTED HOOPS
+      // BASKETBALL" was being mined as cardNumber=25 across every Hoops
+      // card on the back's publisher line, then propagating to SCP / CardDB
+      // as a wrong-card lookup. Season-span detection is sport-agnostic.
+      const yearStart = parseInt(matchedToken.match(/^(\d{4})/)?.[1] || '0', 10);
+      const candNum = parseInt(candidate, 10);
+      if (
+        yearStart > 0 &&
+        candidate.length === 2 &&
+        candNum === ((yearStart + 1) % 100)
+      ) {
+        console.log(`[CardNum] Skipping year-cardnumber compound "${matchedToken}" — looks like a season span (${yearStart}-${candidate}), not a card identifier`);
+        continue;
+      }
       // Look back ~30 chars for trusted markers.
       const lookback = text.slice(Math.max(0, idx - 30), idx);
       const trusted = trustedPrefixRe.test(lookback);
@@ -3119,6 +3138,20 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>,
       skipLegalFallback?: boolean;
     }> = [
       { pattern: /RIFLEMAN/i, name: "Rifleman" },
+      // Modern Panini basketball product lines. "NBA HOOPS" / "NBAHOOPS"
+      // (the OCR-collapsed wordmark) is the brand-set name printed on every
+      // Hoops card front and reaches the back as "PANINI - HAUNTED HOOPS
+      // BASKETBALL" (the seasonal collection sub-line). Match the more
+      // specific Haunted Hoops sub-line first so it doesn't collapse to the
+      // base Hoops collection. Order matters — the loop breaks on first
+      // match.
+      { pattern: /HAUNTED\s*HOOPS/i, name: "Haunted Hoops", brandOverride: "Panini" },
+      { pattern: /\bNBA\s*HOOPS\b|\bNBAHOOPS\b/i, name: "NBA Hoops", brandOverride: "Panini" },
+      // Other modern Topps/Panini basketball product lines.
+      { pattern: /POWER\s+PLAYERS/i, name: "Power Players" },
+      { pattern: /8[-\s]?BIT\s+BALLERS?/i, name: "8-Bit Ballers" },
+      { pattern: /PREMIUM\s+STOCK/i, name: "Premium Stock" },
+      { pattern: /\bFLAGSHIP\b/i, name: "Flagship" },
       { pattern: /HERITAGE/i, name: "Heritage" },
       { pattern: /ALLEN & GINTER|ALLEN AND GINTER/i, name: "Allen & Ginter" },
       { pattern: /BOWMAN CHROME/i, name: "Bowman Chrome", skipLegalFallback: true },
@@ -3229,6 +3262,33 @@ function extractCardMetadata(text: string, cardDetails: Partial<CardFormValues>,
     const unreliableCopyrightBrands = /^(LEAF|DONRUSS)$/i;
     const isUnreliableBrandYear = (matchedBrand: string | undefined): boolean =>
       !!matchedBrand && unreliableCopyrightBrands.test(matchedBrand.replace(/\s+/g, ' ').trim());
+
+    // SEASON-SPAN PUBLISHER IMPRINT (NBA/NHL only):
+    // Card backs like "2024-25 PANINI - HAUNTED HOOPS" or "2023-24 PANINI
+    // NBA HOOPS" pair a season span directly with the publisher imprint.
+    // The standard `brandYearGlobalPattern` below uses `[\s,.;:]+` between
+    // year and brand, so the `-25` in `2024-25 PANINI` blocks it from
+    // matching, and downstream stat-row years (e.g. "2023-24 PURDUE") win
+    // instead — pulling the wrong season-start year (2023 vs 2024).
+    //
+    // For NBA/NHL only, look for `YYYY-YY <PUBLISHER>` with a consecutive
+    // two-year span, and treat it as the strongest year signal — equivalent
+    // confidence to a copyright line. Gate on sport to prevent baseball/
+    // football false positives where stat tables print year ranges.
+    if (isSeasonSpanningSport(cardDetails.sport)) {
+      const seasonSpanPubPattern = /\b((?:19|20)\d{2})\s*[-–—]\s*(\d{2})\s*[-,.;:\s]*(?:THE\s+)?(TOPPS|LEAF|BOWMAN|FLEER|DONRUSS|SCORE|UPPER\s+DECK|PANINI)\b/i;
+      const spanMatch = text.match(seasonSpanPubPattern);
+      if (spanMatch) {
+        const startYear = parseInt(spanMatch[1], 10);
+        const endTwo = parseInt(spanMatch[2], 10);
+        const consecutive = endTwo === ((startYear + 1) % 100);
+        if (consecutive && startYear >= 1900 && startYear <= new Date().getFullYear()) {
+          cardDetails.year = startYear;
+          console.log(`Using season-span publisher imprint as card date: ${startYear} (from "${spanMatch[0]}") — sport=${cardDetails.sport}, beats stat-row year candidates.`);
+          return;
+        }
+      }
+    }
 
     // Brand+year detection. Scan ALL matches in the text (not just the first)
     // and prioritise ones that look like an actual copyright line:
