@@ -536,7 +536,28 @@ export async function detectFoilFromImage(
         detectedColorTint === 'Silver' || detectedColorTint === 'Gold';
       const HIGH_BORDER_COVERAGE = 0.7;
       const borderCoverage = regional?.borderTint?.coverage ?? 0;
+      const borderSaturation = regional?.borderTint?.avgSaturation ?? 0;
       const hasHighCoverageBorder = borderCoverage >= HIGH_BORDER_COVERAGE;
+      // A border tint that's BOTH high-coverage AND very saturated is
+      // unambiguous parallel evidence — the colour is too vivid and too
+      // pervasive to be ambient light reflecting off chrome (which produces
+      // softer, lower-saturation tints) or photo lighting bleed. When this
+      // signal fires, even the strong-rainbow signature shouldn't override
+      // it: real coloured-laser/refractor parallels (Donruss Orange Laser,
+      // Optic Pink Velocity, etc.) DO produce a center rainbow because
+      // their surface is foiled too. The border colour is what identifies
+      // which parallel it is.
+      //
+      // Repro: 2021-22 Donruss #60 Jayson Tatum Orange Laser —
+      //   borderTint=Orange at 70.1% coverage, avgSat=191, with center
+      //   rainbow score=1.00 hueCount=7. The strong-rainbow override
+      //   promoted it to Silver instead of keeping the Orange parallel
+      //   identity. Saturation threshold of 150 keeps the gate tight
+      //   enough that a chrome card with mild ambient reflection (sat <100)
+      //   still gets promoted to Silver as before.
+      const VERY_HIGH_BORDER_SATURATION = 150;
+      const hasVividHighCoverageBorder =
+        hasHighCoverageBorder && borderSaturation >= VERY_HIGH_BORDER_SATURATION;
 
       if (hasBorderTintEvidence && regionalColorName && detectedColorTint && regionalColorName !== detectedColorTint) {
         if (isChromeGlobal && hasHighCoverageBorder && !hasStrongCenterRainbow) {
@@ -546,6 +567,14 @@ export async function detectFoilFromImage(
           detectedColorTint = regionalColorName;
         } else if (isChromeGlobal) {
           indicators.push(`[Region] keeping chrome tint "${detectedColorTint}" over border tint "${regionalColorName}" — chrome reflects ambient colour`);
+        } else if (hasVividHighCoverageBorder) {
+          // Coloured-laser / coloured-refractor parallel: vivid saturated
+          // border + center rainbow. Rainbow is from the foil surface, but
+          // the border colour is what names the parallel.
+          indicators.push(
+            `[Region] vivid high-coverage border tint "${regionalColorName}" (avgCoverage=${(borderCoverage * 100).toFixed(1)}%, avgSat=${borderSaturation}) wins over center-rainbow Silver promotion — too saturated to be ambient reflection`
+          );
+          detectedColorTint = regionalColorName;
         } else if (hasStrongCenterRainbow) {
           indicators.push(`[Region] center rainbow signature (score=${regional!.centerRainbowScore.toFixed(2)}, hues=${regional!.centerHueCount}) overrides border tint "${regionalColorName}" — promoting to Silver`);
           detectedColorTint = 'Silver';
@@ -554,7 +583,16 @@ export async function detectFoilFromImage(
           detectedColorTint = regionalColorName;
         }
       } else if (hasBorderTintEvidence && regionalColorName && !detectedColorTint) {
-        if (hasStrongCenterRainbow) {
+        if (hasVividHighCoverageBorder) {
+          // Same gate as the disagreement branch above: a vivid saturated
+          // border tint is the parallel's identity, not ambient reflection.
+          // The strong-rainbow path is reserved for chromes whose border is
+          // soft/low-saturation (true ambient bleed).
+          indicators.push(
+            `[Region] vivid high-coverage border tint "${regionalColorName}" (avgCoverage=${(borderCoverage * 100).toFixed(1)}%, avgSat=${borderSaturation}) adopted instead of center-rainbow Silver — global tint was empty`
+          );
+          detectedColorTint = regionalColorName;
+        } else if (hasStrongCenterRainbow) {
           // Strong center rainbow + empty global tint = a chrome surface
           // that the global histogram quantised away (warm chromes that
           // didn't pass classifyDominantColor). Trust the rainbow
