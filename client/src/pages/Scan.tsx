@@ -218,22 +218,51 @@ export default function Scan() {
       return;
     }
 
+    // ── Diagnostic timing markers ──────────────────────────────────────
+    // We were seeing the server-side scan log row land in the Sheet ~30s
+    // before the UI showed results. These markers narrow down where the
+    // wall-clock is going (compress → network → parse → navigate →
+    // results render → picker open). Stash a global timestamp so the
+    // ScanResult page can finish the chain.
+    const timing = {
+      clickedAt: performance.now(),
+      compressDoneAt: 0,
+      requestSentAt: 0,
+      responseReceivedAt: 0,
+      navigateAt: 0,
+    };
+    (window as any).__holoScanTiming = timing;
+    console.log('[holo-timing] click → starting compress');
+
     setAnalyzing(true);
     try {
       const [backBlob, frontBlob] = await Promise.all([
         compressImage(backImage),
         frontImage ? compressImage(frontImage) : Promise.resolve(null),
       ]);
+      timing.compressDoneAt = performance.now();
+      console.log(
+        `[holo-timing] compress complete +${(timing.compressDoneAt - timing.clickedAt).toFixed(0)}ms`,
+      );
 
       const formData = new FormData();
       formData.append("backImage", backBlob, "back.jpg");
       if (frontBlob) formData.append("frontImage", frontBlob, "front.jpg");
       if (scanIdRef.current) formData.append("scanId", scanIdRef.current);
 
+      timing.requestSentAt = performance.now();
+      console.log(
+        `[holo-timing] request sent +${(timing.requestSentAt - timing.clickedAt).toFixed(0)}ms`,
+      );
       const response = await fetch("/api/analyze-card-dual-images", {
         method: "POST",
         body: formData,
       });
+      timing.responseReceivedAt = performance.now();
+      console.log(
+        `[holo-timing] response received +${(timing.responseReceivedAt - timing.clickedAt).toFixed(0)}ms ` +
+          `(network+server: ${(timing.responseReceivedAt - timing.requestSentAt).toFixed(0)}ms)`,
+      );
       // Beta scan cap: surface a friendly message + bail before parsing
       // the body. The server returns { error: 'limit_reached', limit, used }
       // which we don't need to display — the TopBar usage pill already
@@ -285,6 +314,11 @@ export default function Scan() {
       queryClient.invalidateQueries({ queryKey: ["/api/scan-grades?limit=100"] });
       // Bump the header usage pill in lock-step with the server-side count.
       queryClient.invalidateQueries({ queryKey: ["/api/user/scan-quota"] });
+      timing.navigateAt = performance.now();
+      console.log(
+        `[holo-timing] navigate(/result) +${(timing.navigateAt - timing.clickedAt).toFixed(0)}ms ` +
+          `(json parse+state: ${(timing.navigateAt - timing.responseReceivedAt).toFixed(0)}ms)`,
+      );
       console.log("[Scan] navigating to /result");
       navigate("/result");
     } catch (error) {
