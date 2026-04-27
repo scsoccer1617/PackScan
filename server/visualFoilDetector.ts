@@ -555,6 +555,28 @@ export async function detectFoilFromImage(
         // signature — still a chrome surface.
         indicators.push(`[Region] center rainbow signature (score=${regional!.centerRainbowScore.toFixed(2)}, hues=${regional!.centerHueCount}) — adopting Silver`);
         detectedColorTint = 'Silver';
+      } else if (
+        hasStrongCenterRainbow &&
+        detectedColorTint &&
+        detectedColorTint !== 'Silver' &&
+        detectedColorTint !== 'Gold'
+      ) {
+        // Global tint locked onto a non-chrome colour (e.g. Aqua because
+        // chrome reflected ambient blue light across multiple regions and
+        // the cumulative Aqua coverage beat single-region Silver), AND
+        // the border-tint evidence wasn't strong enough to trip the
+        // earlier override branch (e.g. only 2/4 strips agreed). The
+        // strong center-rainbow signature is the unambiguous chrome
+        // fingerprint — trust it over the global histogram.
+        //
+        // Repro: Trea Turner 2025 Topps #450 silver-foil
+        //   Sheet rows 16:13:24 (Aqua) vs 16:14:55 (Silver). Same card,
+        //   identical hueCount=5 rainbowScore=1.00. The Aqua run had
+        //   borderTint 2/4 strips (below the 3/4 hasBorderTintEvidence
+        //   threshold), so neither earlier branch overrode the cumulative
+        //   Aqua tint. This branch closes that gap.
+        indicators.push(`[Region] center rainbow signature (score=${regional!.centerRainbowScore.toFixed(2)}, hues=${regional!.centerHueCount}) overrides global tint "${detectedColorTint}" — promoting to Silver`);
+        detectedColorTint = 'Silver';
       }
 
       // Strong center rainbow alone is enough evidence to flag as foil,
