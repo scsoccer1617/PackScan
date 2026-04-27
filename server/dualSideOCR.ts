@@ -1797,6 +1797,7 @@ async function combineCardResults(
             serialNumber: combined.serialNumber || undefined,
             playerLastName: combined.playerLastName || undefined,
             ocrText: `${frontOCRText}\n${backOCRText}`,
+            sport: combined.sport || undefined,
           });
           if (enrichResult.found) {
             let filled: string[] = [];
@@ -2029,6 +2030,7 @@ async function combineCardResults(
               serialNumber: combined.serialNumber || undefined,
               playerLastName: combined.playerLastName || undefined,
               ocrText: `${frontOCRText}\n${backOCRText}`,
+              sport: combined.sport || undefined,
             });
             if (enrichResult.found) {
               const filled: string[] = [];
@@ -2241,6 +2243,7 @@ async function combineCardResults(
       serialNumber: combined.serialNumber,
       playerLastName: combined.playerLastName,
       ocrText: combinedOcrText,
+      sport: combined.sport || undefined,
     });
     if (result.found) {
       if (opts?.requireNameMatch) {
@@ -2905,6 +2908,7 @@ async function combineCardResults(
             playerFirstName: combined.playerFirstName || undefined,
             collection: combined.collection || undefined,
             cardNumberHint: combined.cardNumber || undefined,
+            sport: combined.sport || undefined,
           });
           if (pResult.found) {
             found = applyDbResult(pResult, 'player-anchored fallback');
