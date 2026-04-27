@@ -18,6 +18,7 @@ import { db } from '@db';
 import { cardVariations, cardDatabase } from '@shared/schema';
 import { and, eq, sql, inArray } from 'drizzle-orm';
 import { logUserScan, type ScanFieldValues } from './userScans';
+import { startScanLog } from './scanLogger';
 
 // Internal year-confidence flags attached to per-side and combined OCR
 // results so the dual-side combiner and downstream lookup loop can reason
@@ -589,6 +590,47 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
       });
     } catch (logErr) {
       console.warn('[user_scans] analyze-time log failed (non-fatal):', logErr);
+    }
+
+    // Append a scan-log row to the configured Sheet (no-op when the
+    // sink is disabled or unconfigured — see scanLogger.ts). Fire-and-
+    // forget; the response is not awaited on the Sheets append.
+    try {
+      const visualFoilResult = (combinedResult as any)?._visualFoilResult ?? null;
+      const playerName = [
+        (finalResult as any).playerFirstName,
+        (finalResult as any).playerLastName,
+      ]
+        .filter((s) => typeof s === 'string' && s.trim().length > 0)
+        .join(' ');
+      const scanLog = startScanLog({
+        scanId: scanId ?? `noscan-${Date.now()}`,
+        brand: finalResult.brand,
+        year: finalResult.year as any,
+        set: [finalResult.collection, finalResult.set]
+          .filter((s) => typeof s === 'string' && s.trim().length > 0)
+          .join(' · '),
+        cardNumber: finalResult.cardNumber as any,
+        player: playerName,
+        detectedColor: visualFoilResult?.foilType ?? '',
+      });
+      if (visualFoilResult) {
+        for (const line of (visualFoilResult.indicators ?? [])) {
+          scanLog.addIndicator(line);
+        }
+        scanLog.setFinal({
+          foilType: finalResult.foilType ?? visualFoilResult.foilType ?? '',
+          confidence: visualFoilResult.confidence,
+          isFoil: visualFoilResult.isFoil,
+        });
+      } else {
+        scanLog.setFinal({
+          foilType: finalResult.foilType ?? '',
+        });
+      }
+      scanLog.flush();
+    } catch (logErr) {
+      console.warn('[scanLogger] flush failed (non-fatal):', logErr);
     }
 
     return res.json({
@@ -2586,7 +2628,16 @@ async function combineCardResults(
     } else {
       console.log('No front image buffer available for visual detection');
     }
-    
+
+    // Stash the visual detection result on `combined` so the outer
+    // handler can flush a scan-log row containing the full indicators.
+    // Underscore-prefixed keys are filtered out before the response is
+    // serialised — see ensureRequiredFields / the response shaping in
+    // handleDualSideCardAnalysis.
+    if (visualFoilResult) {
+      (combined as any)._visualFoilResult = visualFoilResult;
+    }
+
     // Foil detection only uses the front image - back images have colored backgrounds
     // (e.g., red Topps backs) that cause false positives
     if (!frontImageBuffer) {
