@@ -1476,11 +1476,29 @@ async function combineCardResults(
       // e7a63919-ff78-475c-aace-512261f978d2 — OCR read "John Franco" front
       // and back of a 1990 Donruss #322, SCP returned Danny Tartabull at
       // score 60). Apply the same surname-conflict reject to BOTH paths.
+      //
+      // Multi-token last-name handling: card backs frequently print the
+      // player's full legal name ("JOHN ANTHONY FRANCO", "HOWARD BRUCE
+      // SUTTER") which the line-based extractor renders as
+      // playerLastName="Anthony Franco" / "Bruce Sutter". Naively
+      // stripping whitespace + lowercasing yields "anthonyfranco" — which
+      // never equals the front-side single-token "franco". That broke
+      // dual-side surname agreement on the canonical 1990 Donruss #322
+      // John Franco scan (c55745f6-568f-41bb-85da-ac1cdc271531) so the
+      // PR #141 guard never fired and SCP's wrong-player hit (Tartabull,
+      // score 60) stuck. Compare on the LAST token only — the same rule
+      // already used by the catalog player check above (lines 1102-1107).
+      const lastSurnameToken = (s: string | null | undefined): string => {
+        const trimmed = String(s || '').trim();
+        if (!trimmed) return '';
+        const tokens = trimmed.split(/\s+/).filter(Boolean);
+        return tokens.length > 0 ? tokens[tokens.length - 1] : '';
+      };
       const surnameNorm = (s: string | null | undefined) =>
         String(s || '').toLowerCase().replace(/[^a-z]/g, '');
-      const ocrLast = surnameNorm(combined.playerLastName);
-      const frontLast = surnameNorm(frontResult.playerLastName);
-      const backLast = surnameNorm(backResult.playerLastName);
+      const ocrLast = surnameNorm(lastSurnameToken(combined.playerLastName));
+      const frontLast = surnameNorm(lastSurnameToken(frontResult.playerLastName));
+      const backLast = surnameNorm(lastSurnameToken(backResult.playerLastName));
       const dualSideAgreement =
         frontLast.length >= 3 && backLast.length >= 3 && frontLast === backLast;
       const catalogValidated =
@@ -1823,7 +1841,14 @@ async function combineCardResults(
       const promoCandidates = scpResult.topCandidates ?? [];
       const ocrYear = (combined.year as number | null | undefined) ?? null;
       const ocrBrand = (combined.brand || '').trim();
-      const ocrLast = (combined.playerLastName || '').trim();
+      // Multi-token last names (e.g. "Anthony Franco" from a back-side
+      // "JOHN ANTHONY FRANCO" full-legal-name imprint) need to compare on
+      // the LAST token only — the SCP product name lists the common name,
+      // never the full legal name. Same rationale as the surname-conflict
+      // guard above.
+      const ocrLastFull = (combined.playerLastName || '').trim();
+      const ocrLastTokens = ocrLastFull.split(/\s+/).filter(Boolean);
+      const ocrLast = ocrLastTokens.length > 0 ? ocrLastTokens[ocrLastTokens.length - 1] : '';
       let promoted: { productName: string; consoleName: string; score: number } | null = null;
       if (
         scpResult.reason === 'below_threshold' &&
