@@ -160,6 +160,38 @@ export default function ScanResult() {
   const frontImage = flow.frontImage;
   const backImage = flow.backImage;
 
+  // ── Diagnostic timing markers ────────────────────────────────────────
+  // Picks up the timestamp set by Scan.tsx and logs how long it took
+  // for the result page to actually mount and for the picker confirm /
+  // sheet to surface. The user reports a few-second gap between results
+  // rendering and the picker appearing — these markers prove or
+  // disprove that.
+  const timingRef = useRef<{ confirmLogged: boolean; pickerLogged: boolean }>({
+    confirmLogged: false,
+    pickerLogged: false,
+  });
+  useEffect(() => {
+    const t = (window as any).__holoScanTiming;
+    if (t && typeof t.clickedAt === 'number') {
+      const elapsed = performance.now() - t.clickedAt;
+      console.log(`[holo-timing] /result mounted +${elapsed.toFixed(0)}ms`);
+    }
+  }, []);
+  useEffect(() => {
+    const t = (window as any).__holoScanTiming;
+    if (!t || typeof t.clickedAt !== 'number') return;
+    if (showParallelConfirm && !timingRef.current.confirmLogged) {
+      timingRef.current.confirmLogged = true;
+      const elapsed = performance.now() - t.clickedAt;
+      console.log(`[holo-timing] parallel-confirm shown +${elapsed.toFixed(0)}ms`);
+    }
+    if (showParallelPicker && !timingRef.current.pickerLogged) {
+      timingRef.current.pickerLogged = true;
+      const elapsed = performance.now() - t.clickedAt;
+      console.log(`[holo-timing] parallel-picker shown +${elapsed.toFixed(0)}ms`);
+    }
+  }, [showParallelConfirm, showParallelPicker]);
+
   // ——— Scan-feedback (👍 / 👎) state ———
   //
   // `feedback` tracks what the user clicked on the Card-info section header.
