@@ -15,9 +15,41 @@ interface ParallelPickerSheetProps {
   cardDescription: string;
   options: ParallelOption[];
   onConfirm: (foilType: string, serialNumber?: string) => void;
+  /** When true, the title is generic ("Which parallel is this?") instead
+   *  of colour-specific. Used after the user has tapped "No" on the
+   *  detected colour and asked to see all parallels. */
+  showAllMode?: boolean;
 }
 
-const CUSTOM_VALUE = "__custom__";
+const CUSTOM_VALUE_INTERNAL = "__custom__";
+
+/**
+ * Pick the most-likely default option for the picker.
+ *
+ * When the detector reports a specific colour (e.g. "Silver"), the picker
+ * keeps Silver, Gold, Rainbow, and themed parallels in view. The previous
+ * implementation defaulted to options[0], which was alphabetically Gold
+ * for many sets — wrong when Silver was actually detected. This helper
+ * preselects the first option whose label contains the detected colour
+ * keyword, falling back to options[0] when no match exists (e.g. show-all
+ * mode or a colour the catalogue doesn't carry).
+ */
+function pickDefaultOption(
+  options: ParallelOption[],
+  detectedLabel: string,
+): string {
+  if (options.length === 0) return CUSTOM_VALUE_INTERNAL;
+  const keyword = (detectedLabel || "").trim().toLowerCase();
+  if (keyword) {
+    const match = options.find(o =>
+      o.variationOrParallel.toLowerCase().includes(keyword),
+    );
+    if (match) return match.variationOrParallel;
+  }
+  return options[0].variationOrParallel;
+}
+
+const CUSTOM_VALUE = CUSTOM_VALUE_INTERNAL;
 const NONE_VALUE = "__none__";
 
 export default function ParallelPickerSheet({
@@ -26,14 +58,17 @@ export default function ParallelPickerSheet({
   cardDescription,
   options,
   onConfirm,
+  showAllMode = false,
 }: ParallelPickerSheetProps) {
-  const [selected, setSelected] = useState<string>(() => options[0]?.variationOrParallel ?? CUSTOM_VALUE);
+  const [selected, setSelected] = useState<string>(() =>
+    pickDefaultOption(options, detectedLabel),
+  );
   const [customText, setCustomText] = useState("");
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (open && options.length > 0) {
-      setSelected(options[0].variationOrParallel);
+      setSelected(pickDefaultOption(options, detectedLabel));
       setCustomText("");
       // Force the picker list back to the top whenever the sheet opens.
       // Without this, Radix's focus management inside the Sheet (and any
@@ -80,7 +115,9 @@ export default function ParallelPickerSheet({
         <SheetHeader className="shrink-0 pb-2">
           <SheetTitle className="flex items-center gap-2">
             <Layers className="h-5 w-5 text-blue-600" />
-            Which {detectedLabel} parallel is this?
+            {showAllMode || !detectedLabel
+              ? "Which parallel is this?"
+              : `Which ${detectedLabel} parallel is this?`}
           </SheetTitle>
           <SheetDescription className="text-sm">{cardDescription}</SheetDescription>
         </SheetHeader>
