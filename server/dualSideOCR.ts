@@ -295,6 +295,10 @@ export async function runFrontSideAnalyzer(
 export async function handleDualSideCardAnalysis(req: MulterRequest, res: Response) {
   console.log('=== DUAL SIDE OCR HANDLER CALLED ===');
   console.time('dual-card-analysis-total');
+  // Wall-clock start so the scan log can record how long the server
+  // spent on this scan. The flush block below subtracts this from
+  // Date.now() right before res.json().
+  const handlerStartedAt = Date.now();
   try {
     // Check if we have at least one image
     if (!req.files || Object.keys(req.files).length === 0) {
@@ -614,6 +618,19 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
         player: playerName,
         detectedColor: visualFoilResult?.foilType ?? '',
       });
+      // Diagnostic context useful for triaging both foil drift AND
+      // card-number / player drift. The OCR text shows what the vision
+      // pipeline actually read; the SCP fields show whether the right
+      // card won the catalogue match.
+      const scpMatchScore =
+        typeof (finalResult as any)._scpMatchScore === 'number'
+          ? (finalResult as any)._scpMatchScore
+          : null;
+      const scpReason = (finalResult as any)._scpReason ?? null;
+      const scpTopCandidates = Array.isArray((finalResult as any)._scpTopCandidates)
+        ? (finalResult as any)._scpTopCandidates
+        : null;
+      const durationMs = Date.now() - handlerStartedAt;
       if (visualFoilResult) {
         for (const line of (visualFoilResult.indicators ?? [])) {
           scanLog.addIndicator(line);
@@ -622,10 +639,22 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
           foilType: finalResult.foilType ?? visualFoilResult.foilType ?? '',
           confidence: visualFoilResult.confidence,
           isFoil: visualFoilResult.isFoil,
+          ocrFrontText: frontOCRText,
+          ocrBackText: backOCRText,
+          scpMatchScore,
+          scpReason,
+          scpTopCandidates,
+          durationMs,
         });
       } else {
         scanLog.setFinal({
           foilType: finalResult.foilType ?? '',
+          ocrFrontText: frontOCRText,
+          ocrBackText: backOCRText,
+          scpMatchScore,
+          scpReason,
+          scpTopCandidates,
+          durationMs,
         });
       }
       scanLog.flush();

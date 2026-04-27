@@ -500,11 +500,19 @@ export async function detectFoilFromImage(
       // once, producing the strong-rainbow signature.
       //
       // Threshold tuned from real scans: rainbowScore ≥ 0.9 with hueCount
-      // ≥ 6 is the unambiguous silver-foil fingerprint. Genuine coloured
+      // ≥ 5 is the unambiguous silver-foil fingerprint. Genuine coloured
       // parallels typically score 0.5–0.7 with 3–4 hues.
+      //
+      // We previously required hueCount ≥ 6, but Sheet logs of the same
+      // physical Silver Prizm captured at slightly different angles
+      // produced hueCount=5 and hueCount=6 interchangeably (both at
+      // rainbowScore=1.00). The 6-hue gate caused a once-every-3-or-4
+      // flake where Silver was rejected with confidence 0.00. A perfect
+      // rainbow score with 5 hues is still well outside the 3–4 hue
+      // range of true coloured parallels.
       const hasStrongCenterRainbow =
         (regional?.centerRainbowScore ?? 0) >= 0.9 &&
-        (regional?.centerHueCount ?? 0) >= 6;
+        (regional?.centerHueCount ?? 0) >= 5;
 
       // If the global tint and the border tint disagree, prefer the border
       // tint — it's the more reliable signal for parallel borders.
