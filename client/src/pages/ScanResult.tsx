@@ -102,7 +102,25 @@ export default function ScanResult() {
   // while this page is mounted.
   const [showParallelPicker, setShowParallelPicker] = useState(false);
   const [showParallelConfirm, setShowParallelConfirm] = useState(false);
+  // Two-step "No" flow: when the user disagrees with the detected
+  // colour we ask whether the card is a parallel at all, instead of
+  // immediately saving as base. "reject" is the secondary state shown
+  // after No is tapped on the colour-specific prompt.
+  const [parallelConfirmStage, setParallelConfirmStage] = useState<
+    "detected" | "reject"
+  >("detected");
   const [parallelOptions, setParallelOptions] = useState<ParallelOption[]>([]);
+  // Picker mode: when true the picker title is generic ("Which parallel
+  // is this?") and the keyword-preselect is skipped — used after the
+  // user rejects the detected colour and asks to see all parallels.
+  const [pickerShowAllMode, setPickerShowAllMode] = useState(false);
+  // Unfiltered list of every parallel for this card, captured the first
+  // time fetchParallels runs in runPostScanFlow. Used by the "show all
+  // parallels" branch of the No-flow so the user can pick across
+  // colours / serialised tiers when our colour detection was wrong.
+  // Serialised-only sets stay serialised-only because that's a property
+  // of the catalogue, not of the colour filter.
+  const allParallelsRef = useRef<ParallelOption[]>([]);
   // SCP-backed parallel discovery. Called in STEP 3 before the local-DB
   // "show everything" fallback — filters by Holo's detected color so the
   // picker only surfaces parallels that SCP actually has for this card.
@@ -336,6 +354,13 @@ export default function ScanResult() {
         data.collection,
         data.set,
       );
+      // Cache the full list so the No-flow's "show all parallels" branch
+      // can present every option for this card. STEP 1 below filters by
+      // serial when the card is serialised; that constraint is a
+      // catalogue property, so even in show-all mode we keep it.
+      allParallelsRef.current = detectedSerial
+        ? filterBySerialNumber(allOptions, detectedSerial)
+        : allOptions;
 
       // STEP 1 — Serial limit match.
       //
@@ -708,20 +733,52 @@ export default function ScanResult() {
   const handleParallelConfirmYes = () => {
     parallelDecidedRef.current = true;
     setShowParallelConfirm(false);
+    setParallelConfirmStage("detected");
+    setPickerShowAllMode(false);
     setShowParallelPicker(true);
   };
 
+  // First No press: switch the modal to "Is this card a parallel?"
+  // instead of immediately saving as base. Two-step flow keeps the user
+  // in the parallel-picking context when our colour detection was wrong
+  // but the card is still a parallel — previous behaviour collapsed
+  // "wrong colour" and "not a parallel" into the same path and lost any
+  // chance to reach the right parallel.
   const handleParallelConfirmNo = () => {
+    setParallelConfirmStage("reject");
+  };
+
+  // Secondary No: confirmed not a parallel — save as base.
+  const handleParallelRejectConfirmNo = () => {
     if (!cardData) return;
     parallelDecidedRef.current = true;
     setShowParallelConfirm(false);
     setShowParallelPicker(false);
     setParallelOptions([]);
     setDetectedKeyword("");
+    setParallelConfirmStage("detected");
     setShowPriceResults(true);
     // Clear the OCR-detected foil so the downstream flow doesn't ask
     // again and eBay searches run against the base card.
     flow.setCardData({ ...cardData, foilType: "" });
+  };
+
+  // Secondary Yes: it IS a parallel but we got the colour wrong — open
+  // the picker without a colour filter so the user can pick across all
+  // available parallels for this card. Serialised-only sets stay
+  // serialised-only because that's a catalogue property, not a colour
+  // filter (the unfiltered list already reflects whichever serialised /
+  // non-serialised universe the card lives in).
+  const handleParallelRejectConfirmYes = () => {
+    parallelDecidedRef.current = true;
+    setShowParallelConfirm(false);
+    setParallelConfirmStage("detected");
+    if (allParallelsRef.current.length > 0) {
+      setParallelOptions(allParallelsRef.current);
+    }
+    setDetectedKeyword("");
+    setPickerShowAllMode(true);
+    setShowParallelPicker(true);
   };
 
   const handleScanAnother = () => {
@@ -893,8 +950,16 @@ export default function ScanResult() {
       </section>
 
       {/* Parallel-confirm prompt (rendered inline so the user can dismiss
-          false-positive foil detections without opening the picker). */}
-      {showParallelConfirm && (
+          false-positive foil detections without opening the picker).
+          Two stages:
+            1. "detected"  — "Detected: <colour>. Is this a parallel?"
+            2. "reject"    — after No, "Is this card a parallel?" with
+                            [Yes, show all parallels] / [No, save as base]
+          The reject stage prevents the previous behaviour of conflating
+          "wrong colour" with "not a parallel" — a user with a real
+          parallel and a mis-detected colour now has a path to the right
+          one without scanning the card again. */}
+      {showParallelConfirm && parallelConfirmStage === "detected" && (
         <div className="px-4 pt-4">
           <div className="rounded-2xl border border-card-border bg-card p-4 space-y-3">
             <h2 className="font-display text-base font-semibold text-ink flex items-center gap-2">
@@ -926,6 +991,36 @@ export default function ScanResult() {
           </div>
         </div>
       )}
+      {showParallelConfirm && parallelConfirmStage === "reject" && (
+        <div className="px-4 pt-4">
+          <div className="rounded-2xl border border-card-border bg-card p-4 space-y-3">
+            <h2 className="font-display text-base font-semibold text-ink flex items-center gap-2">
+              <ScanSearch className="w-4 h-4" /> Is this card a parallel?
+            </h2>
+            {cardDescription && <p className="text-sm text-slate-500">{cardDescription}</p>}
+            <p className="text-sm text-ink">
+              We may have picked the wrong colour. Pick from all parallels
+              for this card, or save as base.
+            </p>
+            <div className="grid grid-cols-1 gap-2">
+              <button
+                onClick={handleParallelRejectConfirmYes}
+                className="h-11 rounded-xl bg-foil text-white font-semibold"
+                data-testid="button-parallel-reject-yes"
+              >
+                Yes, show all parallels
+              </button>
+              <button
+                onClick={handleParallelRejectConfirmNo}
+                className="h-11 rounded-xl bg-slate-100 text-ink font-semibold"
+                data-testid="button-parallel-reject-no"
+              >
+                No, save as base
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Picker sheets — controlled here, triggered by post-scan flow */}
       <ParallelPickerSheet
@@ -934,6 +1029,7 @@ export default function ScanResult() {
         cardDescription={cardDescription}
         options={parallelOptions}
         onConfirm={handleParallelConfirm}
+        showAllMode={pickerShowAllMode}
       />
       <CollectionPickerSheet
         open={showCollectionPicker}
