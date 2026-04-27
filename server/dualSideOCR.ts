@@ -89,6 +89,13 @@ interface YearConfidenceFlags {
   // identification was reconciled across two sources.
   _scpPlayerOverridden?: boolean;
   _scpPlayerOverrideReason?: 'carddb_disagreement' | string;
+  // Set true when SCP returned status=miss reason=below_threshold but the
+  // top candidate's year+brand+surname all matched OCR, so we treated it
+  // as a hit and populated combined.* from the candidate. Surfaced for
+  // diagnostics so the bulk-scan inbox can flag a card as "identified by
+  // OCR-corroborated below-threshold candidate" rather than a clean SCP hit.
+  _scpPromotedFromBelowThreshold?: boolean;
+  _scpPromotedReason?: 'ocr_year_brand_surname_match' | string;
   // Set true when the catalog player check confirmed the back-side OCR
   // surname against card_database for this brand+year. SCP-first uses
   // this signal to reject no-player-retry hits whose recovered player
@@ -1731,6 +1738,186 @@ async function combineCardResults(
       // api_error miss carries an errorMessage we want to surface verbatim.
       if (scpResult.reason === 'api_error' && scpResult.errorMessage) {
         flagged._scpReason = `api_error: ${scpResult.errorMessage}`;
+      }
+
+      // ─── OCR-corroborated promotion (below_threshold) ──────────────────
+      // SCP's MATCH_THRESHOLD (65) is conservative. When SCP returns
+      // `below_threshold` but the top candidate independently agrees with
+      // OCR on year + brand + surname, we promote it to a hit. The three
+      // OCR signals corroborate the candidate, so the score gap doesn't
+      // matter — we'd be falling through to CardDB and re-deriving the
+      // same row anyway, but without the parallel/cardNumber that the SCP
+      // candidate carries.
+      //
+      // Canonical example: 2025 Topps Series 2 Trea Turner #450 Silver
+      // Crackle. SCP returns three candidates tied at 60.00, the top one
+      // being "Trea Turner #450" :: "Baseball Cards 2025 Topps Series 2".
+      // OCR independently read year=2025, brand=Topps, lastName=Turner —
+      // all three match — so the candidate is the right card and we miss
+      // the cardNumber/set enrichment by not promoting.
+      //
+      // We only promote when:
+      //   • reason === 'below_threshold' (no_results / api_error / etc.
+      //     don't carry candidates worth trusting)
+      //   • OCR gave us non-empty year, brand, AND surname
+      //   • candidate's year matches OCR year exactly
+      //   • candidate's brand matches OCR brand (substring, case-insensitive)
+      //   • candidate's productName contains the OCR surname as a whole
+      //     token (case-insensitive)
+      //
+      // We DO NOT require cardNumber agreement — the cardNumber is exactly
+      // what we're trying to recover (OCR often missed it on the back).
+      const promoCandidates = scpResult.topCandidates ?? [];
+      const ocrYear = (combined.year as number | null | undefined) ?? null;
+      const ocrBrand = (combined.brand || '').trim();
+      const ocrLast = (combined.playerLastName || '').trim();
+      let promoted: { productName: string; consoleName: string; score: number } | null = null;
+      if (
+        scpResult.reason === 'below_threshold' &&
+        promoCandidates.length > 0 &&
+        ocrYear &&
+        ocrBrand &&
+        ocrLast
+      ) {
+        for (const cand of promoCandidates) {
+          const candYear = scpExtractYear(cand.consoleName);
+          const candBrand = scpExtractBrand(cand.consoleName);
+          if (!candYear || candYear !== ocrYear) continue;
+          if (!candBrand) continue;
+          const brandMatches =
+            candBrand.toLowerCase().includes(ocrBrand.toLowerCase()) ||
+            ocrBrand.toLowerCase().includes(candBrand.toLowerCase());
+          if (!brandMatches) continue;
+          const productNorm = cand.productName.toLowerCase().replace(/[^a-z]/g, ' ');
+          const surnameNorm = ocrLast.toLowerCase().replace(/[^a-z]/g, '');
+          if (!surnameNorm) continue;
+          // Whole-token surname match: "turner" in "trea turner 450" → yes;
+          // "ner" in "renner" → no.
+          const surnameRe = new RegExp(`(^|\\s)${surnameNorm}(\\s|$)`, 'i');
+          if (!surnameRe.test(productNorm)) continue;
+          promoted = cand;
+          break;
+        }
+      }
+
+      if (promoted) {
+        const { productName, consoleName, score } = promoted;
+        const scpYear = scpExtractYear(consoleName);
+        const scpBrand = scpExtractBrand(consoleName);
+        const scpNumber = scpExtractCardNumber(productName);
+        const scpParallel = scpExtractParallel(productName);
+        const scpName = scpExtractPlayerName(productName);
+        console.log(
+          `[SCP-first] PROMOTING below_threshold candidate (score=${score}) ` +
+            `"${productName}" :: "${consoleName}" — OCR corroboration: ` +
+            `year=${ocrYear} brand="${ocrBrand}" surname="${ocrLast}" all match.`,
+        );
+        scpHit = true;
+        flagged._scpHit = true;
+        flagged._scpStatus = 'hit';
+        flagged._scpMatchScore = score;
+        flagged._scpReason = `promoted_from_below_threshold (score=${score})`;
+        flagged._scpPromotedFromBelowThreshold = true;
+        flagged._scpPromotedReason = 'ocr_year_brand_surname_match';
+
+        // Mirror the population logic from the hit branch above. SCP
+        // overwrites only fields it parsed non-null; OCR values stay for
+        // anything SCP can't extract.
+        if (scpYear) {
+          combined.year = scpYear;
+          flagged._yearFromCatalogProbe = true;
+          flagged._yearFromBackOnly = false;
+          flagged._yearFromCopyright = false;
+          flagged._yearFromBareFallback = false;
+          flagged._yearFromSurnameProbe = false;
+        }
+        if (scpBrand) combined.brand = scpBrand;
+        if (scpNumber) combined.cardNumber = scpNumber;
+        if (scpParallel) combined.foilType = scpParallel;
+        if (scpName) {
+          const suffixes = new Set(['Jr', 'Jr.', 'Sr', 'Sr.', 'II', 'III', 'IV', 'V']);
+          const parts = scpName.split(/\s+/).filter(p => p.length > 0);
+          if (parts.length === 1) {
+            combined.playerFirstName = '';
+            combined.playerLastName = parts[0];
+          } else if (parts.length >= 2) {
+            const tail: string[] = [];
+            while (parts.length > 1 && suffixes.has(parts[parts.length - 1])) {
+              tail.unshift(parts.pop() as string);
+            }
+            const last = parts.pop() as string;
+            combined.playerFirstName = parts.join(' ');
+            combined.playerLastName = tail.length > 0 ? `${last} ${tail.join(' ')}` : last;
+          }
+        }
+        console.log(
+          `[SCP-first] Populated from promoted candidate: brand="${combined.brand}" year=${combined.year} ` +
+            `cardNumber="${combined.cardNumber}" player="${combined.playerFirstName} ${combined.playerLastName}" ` +
+            `foilType="${combined.foilType || 'base'}"`,
+        );
+
+        // Run the same CardDB set/collection enrichment as the hit branch
+        // so promoted hits end up with the same downstream shape (set,
+        // collection, CardDB-vs-SCP player reconciliation).
+        try {
+          const enrichNum = String(combined.cardNumber || '').trim();
+          if (combined.brand && combined.year && enrichNum) {
+            const enrichResult = await lookupCard({
+              brand: combined.brand,
+              year: combined.year as number,
+              collection: combined.collection || undefined,
+              cardNumber: enrichNum,
+              serialNumber: combined.serialNumber || undefined,
+              playerLastName: combined.playerLastName || undefined,
+              ocrText: `${frontOCRText}\n${backOCRText}`,
+            });
+            if (enrichResult.found) {
+              const filled: string[] = [];
+              if (!combined.set && enrichResult.set) {
+                combined.set = enrichResult.set;
+                filled.push(`set="${enrichResult.set}"`);
+              }
+              if (!combined.collection && enrichResult.collection) {
+                combined.collection = enrichResult.collection;
+                filled.push(`collection="${enrichResult.collection}"`);
+              }
+              if (filled.length > 0) {
+                console.log(`[SCP-first] (promoted) CardDB set/collection enrichment: ${filled.join(', ')}.`);
+              } else {
+                console.log('[SCP-first] (promoted) CardDB row found but set/collection already populated — leaving OCR values in place.');
+              }
+              // CardDB-vs-SCP player disagreement check (same as hit branch).
+              try {
+                const dbFirst = String(enrichResult.playerFirstName || '').trim();
+                const dbLast = String(enrichResult.playerLastName || '').trim();
+                const scpLast = String(combined.playerLastName || '').trim();
+                const surnameNorm = (s: string) => s.toLowerCase().replace(/[^a-z]/g, '');
+                if (dbLast && scpLast && surnameNorm(dbLast) !== surnameNorm(scpLast)) {
+                  console.log(
+                    `[SCP-first] (promoted) CardDB/SCP player disagreement on (brand="${combined.brand}", year=${combined.year}, cardNumber="${enrichNum}"): ` +
+                    `CardDB="${dbFirst} ${dbLast}" vs SCP="${combined.playerFirstName} ${combined.playerLastName}". ` +
+                    `Preferring CardDB.`,
+                  );
+                  combined.playerFirstName = dbFirst;
+                  combined.playerLastName = dbLast;
+                  if (enrichResult.team) {
+                    combined.team = enrichResult.team;
+                  }
+                  flagged._scpPlayerOverridden = true;
+                  flagged._scpPlayerOverrideReason = 'carddb_disagreement';
+                }
+              } catch (cmpErr: any) {
+                console.warn('[SCP-first] (promoted) CardDB/SCP player disagreement check threw (non-fatal):', cmpErr?.message || cmpErr);
+              }
+            } else {
+              console.log('[SCP-first] (promoted) CardDB set/collection enrichment: no matching row.');
+            }
+          }
+        } catch (enrichErr: any) {
+          console.warn('[SCP-first] (promoted) CardDB set/collection enrichment threw (non-fatal):', enrichErr?.message || enrichErr);
+        }
+
+        console.log('[SCP-first] (promoted) Skipping main CardDB lookup — SCP promotion owns brand/year/cardNumber/player/parallel.');
       }
     }
   } catch (err: any) {
