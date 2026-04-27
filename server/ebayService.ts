@@ -273,9 +273,25 @@ function prioritizeListingsByCardMatch(
     if (cardNumber && cardNumber.trim()) {
       // Look for exact card number match with common formats
       const cardNumRegex = new RegExp(`\\b${cardNumber}\\b|#${cardNumber}\\b|${cardNumber}\\s|\\s${cardNumber}\\b`, 'i');
-      if (cardNumRegex.test(title)) {
+      const ourCardNumMatched = cardNumRegex.test(title);
+      if (ourCardNumMatched) {
         score += 75;
         matchedElements.push(`card #${cardNumber}`);
+      } else {
+        // Penalize listings whose title carries a DIFFERENT `#XXX` token.
+        // Without this, name (100) + year (60) + brand (40) = 200 clears
+        // the 150 floor and wrong-card listings show up. Repro: scanning
+        // 2025 Topps Holiday Cam Smith #H121 surfaced "2025 Topps Now #9
+        // Cam Smith" listings because the score floor was met even though
+        // the card # was clearly wrong. We only fire this when the title
+        // has *some* card-# token — listings with no `#XXX` at all (common
+        // in graded-slab listings or eBay sellers who omit it) are left
+        // alone so we don't over-penalize correct matches.
+        const otherCardNumMatch = /(?:^|\s)#([A-Z]{0,4}-?\d{1,4}[A-Z]?)\b/i.exec(result.title);
+        if (otherCardNumMatch && otherCardNumMatch[1].toLowerCase() !== cardNumber.toLowerCase()) {
+          score -= 150;
+          matchedElements.push(`wrong card # (#${otherCardNumMatch[1]} vs #${cardNumber})`);
+        }
       }
     }
     
@@ -318,6 +334,18 @@ function prioritizeListingsByCardMatch(
         'flawless', 'noir', 'spectra', 'obsidian', 'clearly authentic',
         '1st edition', 'first edition', 'mega box', 'holiday',
         'bowman chrome', 'topps chrome', 'bowman draft', 'bowman sterling',
+        // Topps Now is a daily-commemorative product line distinct from
+        // every other Topps set. Without it here, scanning a Topps Holiday
+        // (or Series 1/2) card for the same player surfaces "Topps Now"
+        // listings as comps because nothing penalises the wrong product
+        // line. Cam Smith #H121 repro: "2025 Topps Now #9 Cam Smith"
+        // listings dominated price comps because no penalty fired.
+        // We list only the two-word phrase "topps now" — a bare "now" would
+        // false-positive on every "buy it now" listing.
+        'topps now',
+        // Less common but distinct product lines that share player+year+brand
+        // with base Series releases.
+        'pristine', 'finest flashbacks', 'fire', 'transcendent',
       ];
       for (const indicator of COLLECTION_INDICATORS) {
         // Skip indicators that describe OUR card's product line (collection OR set).
@@ -609,7 +637,14 @@ export async function searchCardValues(
       parts.push(playerName);
       
       if (includeCardNumber && cardNumber) {
-        parts.push(/^\d+$/.test(cardNumber) ? `#${cardNumber}` : cardNumber);
+        // Always prefix `#` regardless of whether the number is digits-only
+        // or alphanumeric. Repro: Cam Smith #H121 (2025 Topps Holiday) was
+        // shipping `H121` without `#`, eBay's tokenizer relaxed it to a
+        // fuzzy match, and "Topps Now #9" listings dominated. Sellers who
+        // omit `#` (e.g. just "H121") still match because eBay treats `#`
+        // as a soft prefix; sellers who include it match exactly. Same
+        // edit lives in getEbaySearchUrl below — keep them in sync.
+        parts.push(`#${cardNumber}`);
       }
       
       const effectiveVariant = variantOverride !== undefined ? variantOverride : (includeVariant ? variantKeyword : '');
@@ -1303,7 +1338,10 @@ export function getEbaySearchUrl(
   if (searchProductLine) parts.push(searchProductLine);
   parts.push(playerName);
   if (!isGradedTier && cardNumber) {
-    parts.push(/^\d+$/.test(cardNumber) ? `#${cardNumber}` : cardNumber);
+    // Mirror of buildKeywords above — always prefix `#` so alphanumeric
+    // card numbers like H121 (Topps Holiday) or US## (Topps Update) get
+    // tokenized as a unit instead of relaxed by eBay's matcher.
+    parts.push(`#${cardNumber}`);
   }
 
   let keywords = parts.filter(Boolean).join(' ');
