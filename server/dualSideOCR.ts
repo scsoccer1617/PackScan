@@ -1446,7 +1446,7 @@ async function combineCardResults(
         ` brand="${scpInput.brand || '(none)'}" cardNumber="${scpInput.cardNumber || '(none)'}" parallel="${scpInput.parallel || '(none)'}"`,
     );
     const scpResult = await scpLookupCard(scpInput, { userId: null });
-    // ── No-player-retry conflict guard ────────────────────────────────
+    // ── SCP-vs-OCR surname conflict guard ─────────────────────────────
     // SCP's no-player retry drops the player name from the search query
     // and accepts the highest-scoring product at the same brand/year/
     // cardNumber slot above a relaxed 55 floor. That's a useful safety
@@ -1467,7 +1467,15 @@ async function combineCardResults(
     // check above. When confident OCR disagrees with the retry-
     // recovered surname, we drop the SCP hit entirely and let the
     // OCR-derived fields stand. CardDB-only enrichment still runs.
-    if (scpResult.status === 'hit' && scpResult.match.recoveredByRetry) {
+    if (scpResult.status === 'hit') {
+      // Originally guarded on `recoveredByRetry` only — the no-player retry
+      // path is the textbook case for SCP returning the wrong player.
+      // Real-world scans show first-pass SCP hits can also rank a different
+      // player higher when cardNumber+brand+year tokens dominate and the
+      // player tokens are weak (canonical example: scan
+      // e7a63919-ff78-475c-aace-512261f978d2 — OCR read "John Franco" front
+      // and back of a 1990 Donruss #322, SCP returned Danny Tartabull at
+      // score 60). Apply the same surname-conflict reject to BOTH paths.
       const surnameNorm = (s: string | null | undefined) =>
         String(s || '').toLowerCase().replace(/[^a-z]/g, '');
       const ocrLast = surnameNorm(combined.playerLastName);
@@ -1489,17 +1497,21 @@ async function combineCardResults(
           dualSideAgreement ? 'front+back surnames agree' : null,
           catalogValidated ? 'back surname catalog-validated' : null,
         ].filter(Boolean).join(', ');
+        const path = scpResult.match.recoveredByRetry ? 'no-player-retry' : 'first-pass';
+        const reasonCode = scpResult.match.recoveredByRetry
+          ? 'retry_player_conflict'
+          : 'first_pass_player_conflict';
         console.log(
-          `[SCP-first] Rejecting no-player-retry hit (score=${scpResult.match.matchScore}) ` +
+          `[SCP-first] Rejecting ${path} hit (score=${scpResult.match.matchScore}) ` +
             `"${scpResult.match.productName}" :: "${scpResult.match.consoleName}" — ` +
-            `recovered surname "${recoveredLast}" conflicts with confident OCR surname ` +
+            `SCP surname "${recoveredLast}" conflicts with confident OCR surname ` +
             `"${ocrLast}" (${evidence}). Treating as miss; keeping OCR-derived fields.`,
         );
         const flagged = combined as CardFormWithFlags;
         flagged._scpHit = false;
         flagged._scpMatchScore = scpResult.match.matchScore;
         flagged._scpStatus = 'miss';
-        flagged._scpReason = 'retry_player_conflict';
+        flagged._scpReason = reasonCode;
         flagged._scpRetryRejected = true;
         flagged._scpRetryRejectedReason = 'player_conflict_with_confident_ocr';
         flagged._scpRetryRejectedHit = {
@@ -1511,7 +1523,7 @@ async function combineCardResults(
         // (Mutating a discriminated union is ugly, but the alternative is
         // restructuring this whole block.)
         (scpResult as unknown as { status: string }).status = 'miss';
-        (scpResult as unknown as { reason: string }).reason = 'retry_player_conflict';
+        (scpResult as unknown as { reason: string }).reason = reasonCode;
       }
     }
     // ── CardNumber-mismatch guard ─────────────────────────────────────
