@@ -45,6 +45,20 @@ function classifyDominantColor(r: number, g: number, b: number): string | null {
     r > 120 && g > 120 && b > 120 &&
     saturation < 0.35 * brightness
   ) return 'Silver';
+  // Warm-chrome tier: Silver foilboard photographed under warm lighting
+  // can read as cream/straw with saturation up to ~85 (e.g. RGB(184,159,
+  // 104) sat=80 from the Trea Turner scan). The descending-channel guard
+  // r >= g >= b ensures we only catch warm tints (red>green>blue), and
+  // the saturation/brightness ratio under 0.65 keeps genuinely orange or
+  // gold foils (where one channel dominates more dramatically) out.
+  if (
+    brightness > 130 &&
+    saturation < 90 &&
+    r > 120 && g > 110 && b > 80 &&
+    r >= g && g >= b &&
+    saturation < 0.65 * brightness &&
+    g >= 0.82 * r
+  ) return 'Silver';
 
   if (saturation < 20) return null;
   
@@ -476,44 +490,76 @@ export async function detectFoilFromImage(
 
       indicators.push(`Numbered card context: isNumbered=${isNumbered}, numberedEvidence=${hasNumberedCardEvidence}`);
 
+      // Center-rainbow signature: when the central region of the card
+      // shows a strong rainbow pattern (high score AND many distinct
+      // hues), that IS the silver/refractor signature — not a separate
+      // colour parallel. A genuine coloured parallel (Pink Prizm, Blue
+      // Holo Foil) tints the entire surface, so its center is mostly that
+      // single colour with a modest rainbow. A Silver Prizm / Refractor /
+      // Foilboard has a chrome surface that reflects every colour at
+      // once, producing the strong-rainbow signature.
+      //
+      // Threshold tuned from real scans: rainbowScore ≥ 0.9 with hueCount
+      // ≥ 6 is the unambiguous silver-foil fingerprint. Genuine coloured
+      // parallels typically score 0.5–0.7 with 3–4 hues.
+      const hasStrongCenterRainbow =
+        (regional?.centerRainbowScore ?? 0) >= 0.9 &&
+        (regional?.centerHueCount ?? 0) >= 6;
+
       // If the global tint and the border tint disagree, prefer the border
       // tint — it's the more reliable signal for parallel borders.
       //
-      // EXCEPTION: Silver and Gold are chrome neutrals that REFLECT ambient
-      // colour. A Silver Prizm photographed under any non-neutral lighting
-      // will have a colour cast in its border strips — that cast is the
-      // ambient reflection, not the parallel's identity. So when the global
-      // tint is Silver or Gold and that bucket has more same-color coverage
-      // than the border tint, keep the chrome classification. Center
-      // rainbow remains supporting evidence (it's the rainbow signature of
-      // a Silver/refractor parallel, not a separate colour).
+      // EXCEPTIONS where we keep / promote chrome:
+      //   1. detectedColorTint is already Silver/Gold (chrome reflects
+      //      ambient colour, so border tint is the reflection, not the
+      //      parallel's identity).
+      //   2. Center shows the strong-rainbow signature — unambiguous
+      //      Silver/refractor regardless of what the border tint reads.
       const isChromeGlobal =
         detectedColorTint === 'Silver' || detectedColorTint === 'Gold';
-      const chromeCoverage = isChromeGlobal
-        ? detectedTints
-            .filter((t) => t.name === detectedColorTint)
-            .reduce((sum, t) => sum + t.coverage, 0)
-        : 0;
-      const borderCoverage = regional?.borderTint?.coverage ?? 0;
-      const chromeBeatsBorder = isChromeGlobal && chromeCoverage >= borderCoverage;
 
       if (hasBorderTintEvidence && regionalColorName && detectedColorTint && regionalColorName !== detectedColorTint) {
-        if (chromeBeatsBorder) {
-          indicators.push(`[Region] keeping chrome tint "${detectedColorTint}" (coverage=${(chromeCoverage * 100).toFixed(1)}%) over border tint "${regionalColorName}" (coverage=${(borderCoverage * 100).toFixed(1)}%) — chrome reflects ambient colour`);
+        if (isChromeGlobal) {
+          indicators.push(`[Region] keeping chrome tint "${detectedColorTint}" over border tint "${regionalColorName}" — chrome reflects ambient colour`);
+        } else if (hasStrongCenterRainbow) {
+          indicators.push(`[Region] center rainbow signature (score=${regional!.centerRainbowScore.toFixed(2)}, hues=${regional!.centerHueCount}) overrides border tint "${regionalColorName}" — promoting to Silver`);
+          detectedColorTint = 'Silver';
         } else {
           indicators.push(`[Region] overriding global tint "${detectedColorTint}" with border tint "${regionalColorName}"`);
           detectedColorTint = regionalColorName;
         }
       } else if (hasBorderTintEvidence && regionalColorName && !detectedColorTint) {
-        // Global histogram missed the color entirely (fingers/reflections);
-        // adopt the regional tint as the working color.
-        indicators.push(`[Region] adopting border tint "${regionalColorName}" — global tint was empty`);
-        detectedColorTint = regionalColorName;
+        if (hasStrongCenterRainbow) {
+          // Strong center rainbow + empty global tint = a chrome surface
+          // that the global histogram quantised away (warm chromes that
+          // didn't pass classifyDominantColor). Trust the rainbow
+          // signature over the ambient border reflection.
+          indicators.push(`[Region] center rainbow signature (score=${regional!.centerRainbowScore.toFixed(2)}, hues=${regional!.centerHueCount}) — adopting Silver instead of border tint "${regionalColorName}"`);
+          detectedColorTint = 'Silver';
+        } else {
+          // Global histogram missed the color entirely (fingers/reflections);
+          // adopt the regional tint as the working color.
+          indicators.push(`[Region] adopting border tint "${regionalColorName}" — global tint was empty`);
+          detectedColorTint = regionalColorName;
+        }
+      } else if (!detectedColorTint && hasStrongCenterRainbow) {
+        // No global tint, no border tint either, but a strong rainbow
+        // signature — still a chrome surface.
+        indicators.push(`[Region] center rainbow signature (score=${regional!.centerRainbowScore.toFixed(2)}, hues=${regional!.centerHueCount}) — adopting Silver`);
+        detectedColorTint = 'Silver';
       }
 
-      if ((hasMetallicColors || hasBorderTintEvidence) && detectedColorTint && (hasLabelSupport || hasVeryStrongColorEvidence || hasNumberedCardEvidence || hasStrongColorEvidence) && (hasStrongSimilarTints || hasModestSimilarTints || totalTintCoverage > 0.25 || hasNumberedCardEvidence || hasStrongColorEvidence)) {
+      // Strong center rainbow alone is enough evidence to flag as foil,
+      // even without metallic-colour or vivid-tint corroboration. This
+      // covers the warm-chrome case where Vision quantises chrome regions
+      // into unnamed colours and they don't make it into detectedTints.
+      const chromeCoverageBoost = hasStrongCenterRainbow
+        ? Math.min(0.5, (regional?.centerRainbowScore ?? 0) * 0.5)
+        : 0;
+
+      if ((hasMetallicColors || hasBorderTintEvidence || hasStrongCenterRainbow) && detectedColorTint && (hasLabelSupport || hasVeryStrongColorEvidence || hasNumberedCardEvidence || hasStrongColorEvidence || hasStrongCenterRainbow) && (hasStrongSimilarTints || hasModestSimilarTints || totalTintCoverage > 0.25 || hasNumberedCardEvidence || hasStrongColorEvidence || hasStrongCenterRainbow)) {
         isFoil = true;
-        confidence += Math.min(0.6, totalColorVariance * 2 + totalTintCoverage);
+        confidence += Math.min(0.6, totalColorVariance * 2 + totalTintCoverage + chromeCoverageBoost);
         
         const { texture: colorTexture, textureConfidence: colorTextureConf, textureIndicators } = detectTextureFromColors(parsedColors);
         indicators.push(...textureIndicators);
