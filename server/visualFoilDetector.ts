@@ -348,6 +348,33 @@ export async function detectFoilFromImage(
         }
       }
       
+      // Promote Silver/Gold to the dominant tint when their cumulative
+      // coverage beats the first-detected tint. Vision returns dominant
+      // colours roughly by coverage, but a small Aqua region can land in
+      // detectedColorTint first if its individual pixelFraction edges out
+      // any single chrome region. Aggregating across all chrome samples
+      // makes the chrome win on cards where it's the bulk of the surface.
+      const coverageByName: Record<string, number> = {};
+      for (const t of detectedTints) {
+        coverageByName[t.name] = (coverageByName[t.name] ?? 0) + t.coverage;
+      }
+      const silverCoverage = coverageByName['Silver'] ?? 0;
+      const goldCoverage = coverageByName['Gold'] ?? 0;
+      const currentDominantCoverage = detectedColorTint
+        ? coverageByName[detectedColorTint] ?? 0
+        : 0;
+      if (silverCoverage > currentDominantCoverage && silverCoverage >= goldCoverage) {
+        if (detectedColorTint !== 'Silver') {
+          indicators.push(`[Tint] promoting Silver to dominant tint (coverage=${(silverCoverage * 100).toFixed(1)}% > ${detectedColorTint || 'none'}=${(currentDominantCoverage * 100).toFixed(1)}%)`);
+          detectedColorTint = 'Silver';
+        }
+      } else if (goldCoverage > currentDominantCoverage) {
+        if (detectedColorTint !== 'Gold') {
+          indicators.push(`[Tint] promoting Gold to dominant tint (coverage=${(goldCoverage * 100).toFixed(1)}% > ${detectedColorTint || 'none'}=${(currentDominantCoverage * 100).toFixed(1)}%)`);
+          detectedColorTint = 'Gold';
+        }
+      }
+
       const hasSimilarTints = detectedTints.length >= 2 && 
         detectedTints.some(t => t.name === detectedColorTint && t !== detectedTints[0]);
       const totalTintCoverage = detectedTints.reduce((sum, t) => sum + t.coverage, 0);
@@ -451,9 +478,32 @@ export async function detectFoilFromImage(
 
       // If the global tint and the border tint disagree, prefer the border
       // tint — it's the more reliable signal for parallel borders.
+      //
+      // EXCEPTION: Silver and Gold are chrome neutrals that REFLECT ambient
+      // colour. A Silver Prizm photographed under any non-neutral lighting
+      // will have a colour cast in its border strips — that cast is the
+      // ambient reflection, not the parallel's identity. So when the global
+      // tint is Silver or Gold and that bucket has more same-color coverage
+      // than the border tint, keep the chrome classification. Center
+      // rainbow remains supporting evidence (it's the rainbow signature of
+      // a Silver/refractor parallel, not a separate colour).
+      const isChromeGlobal =
+        detectedColorTint === 'Silver' || detectedColorTint === 'Gold';
+      const chromeCoverage = isChromeGlobal
+        ? detectedTints
+            .filter((t) => t.name === detectedColorTint)
+            .reduce((sum, t) => sum + t.coverage, 0)
+        : 0;
+      const borderCoverage = regional?.borderTint?.coverage ?? 0;
+      const chromeBeatsBorder = isChromeGlobal && chromeCoverage >= borderCoverage;
+
       if (hasBorderTintEvidence && regionalColorName && detectedColorTint && regionalColorName !== detectedColorTint) {
-        indicators.push(`[Region] overriding global tint "${detectedColorTint}" with border tint "${regionalColorName}"`);
-        detectedColorTint = regionalColorName;
+        if (chromeBeatsBorder) {
+          indicators.push(`[Region] keeping chrome tint "${detectedColorTint}" (coverage=${(chromeCoverage * 100).toFixed(1)}%) over border tint "${regionalColorName}" (coverage=${(borderCoverage * 100).toFixed(1)}%) — chrome reflects ambient colour`);
+        } else {
+          indicators.push(`[Region] overriding global tint "${detectedColorTint}" with border tint "${regionalColorName}"`);
+          detectedColorTint = regionalColorName;
+        }
       } else if (hasBorderTintEvidence && regionalColorName && !detectedColorTint) {
         // Global histogram missed the color entirely (fingers/reflections);
         // adopt the regional tint as the working color.
