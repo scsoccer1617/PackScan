@@ -1405,6 +1405,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         limit: limitNum,
         requireCardNumber: typeof cardNumber === 'string' ? cardNumber : undefined,
         requirePlayerLastName: lastName,
+        scannedParallel: typeof parallel === 'string' ? parallel : undefined,
       });
       // Trim the response to the active surface — `sold`/`soldAvailable`
       // are kept off the wire so clients don't accidentally render an
