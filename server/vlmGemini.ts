@@ -14,6 +14,7 @@ import { GoogleGenAI } from '@google/genai';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { VLM_FULL_PROMPT, VLM_PROMPT_VERSION } from './vlmPrompts';
+import { normalizeGeminiResult } from './geminiNormalize';
 
 let cachedClient: GoogleGenAI | null = null;
 
@@ -167,7 +168,13 @@ export async function analyzeCardBuffersWithGemini(
     .trim();
 
   try {
-    return JSON.parse(cleaned) as GeminiCardResult;
+    // Normalize at the boundary: Gemini sometimes returns the literal
+    // string "None detected" (and other sentinels) for parallel.name
+    // and set, defeating downstream "is this empty?" gates. Convert
+    // sentinels to null here so every consumer reads a consistent
+    // shape. See server/geminiNormalize.ts for the sentinel tables.
+    const parsed = JSON.parse(cleaned) as GeminiCardResult;
+    return normalizeGeminiResult(parsed as Record<string, any>) as GeminiCardResult;
   } catch (err: any) {
     throw new Error(
       `Gemini JSON parse error: ${err.message}. First 200 chars: ${cleaned.slice(0, 200)}`
