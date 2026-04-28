@@ -1367,14 +1367,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return res.status(200).json({ parallels: [], filterFellBack: false, query: '' });
   });
 
-  // ───────── Picker eBay Browse search (DORMANT — PR #163) ─────────
-  // The /api/picker/ebay-search endpoint and its server/ebayPickerSearch.ts
-  // module are intentionally not mounted. PR #163 removed the eBay listings
-  // step from the Gemini-authority picker after user testing — the picker
-  // now closes on Yes/No without showing listings. The eBay Browse client
-  // module is preserved on disk so a future revert (or a different surface)
-  // can revive the listings UI without re-implementing the search path.
-  // Same dormant-code pattern PR #162 used for the legacy CardDB lookup.
+  // ───────── eBay Active comps (PR #165) ─────────
+  // Active-listings-only Browse API search keyed off final Gemini fields +
+  // user-confirmed parallel. PR #163 unmounted the original picker-only
+  // /api/picker/ebay-search route; PR #165 brings the underlying
+  // ebayPickerSearch module back under a cleaner /api/ebay/comps name and
+  // points the result-screen Price tab + the persistent hero "Avg" at it.
+  //
+  // Active-only by design — the user explicitly confirmed they don't have
+  // sold-listings access through the eBay APIs currently in use, so the
+  // sold tab from PR #162 is not revived. The dormant module's `sold` /
+  // `soldAvailable` fields stay as-is (always empty) so a future MSI-access
+  // unlock can flip them on without changing the response shape.
+  app.get(`${apiPrefix}/ebay/comps`, async (req, res) => {
+    try {
+      const { pickerSearch, buildPickerQuery } = await import('./ebayPickerSearch.js');
+      const { year, brand, set, cardNumber, player, parallel, query: rawQuery, limit } = req.query;
+      const query = (typeof rawQuery === 'string' && rawQuery.trim())
+        ? rawQuery.trim()
+        : buildPickerQuery({
+            year: typeof year === 'string' ? year : undefined,
+            brand: typeof brand === 'string' ? brand : undefined,
+            set: typeof set === 'string' ? set : undefined,
+            cardNumber: typeof cardNumber === 'string' ? cardNumber : undefined,
+            player: typeof player === 'string' ? player : undefined,
+            parallel: typeof parallel === 'string' ? parallel : undefined,
+          });
+      const limitNum = Math.max(1, Math.min(parseInt(typeof limit === 'string' ? limit : '10', 10) || 10, 50));
+      const result = await pickerSearch(query, { limit: limitNum });
+      // Trim the response to the active surface — `sold`/`soldAvailable`
+      // are kept off the wire so clients don't accidentally render an
+      // unavailable Sold tab. The dormant fields still exist server-side
+      // for the eventual MSI-access flip.
+      return res.json({ query: result.query, active: result.active });
+    } catch (err: any) {
+      console.error('[ebay/comps] failed:', err?.message || err);
+      return res.status(500).json({ query: '', active: [], error: 'eBay comps lookup failed' });
+    }
+  });
 
   // ── Voice Lookup: transcribe + extract structured card fields ─────────────
   // Public endpoint — user speaks a card ("2025 Topps Series One Nolan

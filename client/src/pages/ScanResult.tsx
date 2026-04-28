@@ -19,7 +19,7 @@ import { useToast } from "@/hooks/use-toast";
 import { usePreferences } from "@/hooks/use-preferences";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import EbayPriceResults from "@/components/EbayPriceResults";
+import EbayActiveComps from "@/components/EbayActiveComps";
 import { HoloGradeCard } from "@/components/HoloGradeCard";
 import GradedPriceBreakdown from "@/components/GradedPriceBreakdown";
 import CatalogPriceStrip from "@/components/CatalogPriceStrip";
@@ -979,16 +979,14 @@ export default function ScanResult() {
 
   const tone = holoGrade ? gradeTone(holoGrade.overall) : null;
 
-  // Formatted avg-asking-price label for the hero subtitle. Only shows
-  // after the first price lookup returns a non-zero average.
+  // Formatted avg label for the hero subtitle. Only shows after the
+  // active-comps lookup returns a non-zero average. PR #165: source is
+  // the Active eBay listings on the Price tab, so a single "Avg" label
+  // covers it — no asking/sold disambiguation when there's one source.
   const avgPriceLabel = priceInfo && priceInfo.averageValue > 0
-    ? `${priceInfo.dataType === 'current' ? 'Avg asking' : 'Avg sold'} ${new Intl.NumberFormat('en-US', {
+    ? `Avg ${new Intl.NumberFormat('en-US', {
         style: 'currency',
         currency: 'USD',
-        // Match the Price tab formatter (EbayPriceResults.formatPrice) which
-        // uses the default currency fraction digits (2 decimals). Previously
-        // the hero rounded to whole dollars (e.g. "$1" vs "$1.31"), which
-        // looked inconsistent with the listings total on the Price tab.
       }).format(priceInfo.averageValue)}`
     : null;
 
@@ -1298,18 +1296,31 @@ export default function ScanResult() {
               </div>
             )}
           {showPriceResults ? (
-            <EbayPriceResults
+            // PR #165: Active eBay listings come from /api/ebay/comps
+            // (re-mounted ebayPickerSearch module), keyed off final
+            // Gemini fields + the parallel the user picked in the
+            // terminal picker. EbayActiveComps owns the listings list
+            // AND bubbles the average up to the persistent hero header
+            // via setPriceInfo. EbayPriceResults' active-listings path
+            // (legacy /api/ebay-search) is no longer mounted here —
+            // having two stacked Active sections is what masked the
+            // listings in the first place — but the module is left on
+            // disk because GradedPriceBreakdown still uses its
+            // graded-tier helpers indirectly.
+            <EbayActiveComps
               cardData={cardData}
-              frontImage={frontImage}
-              backImage={backImage}
-              pricingOnly
-              onPriceData={setPriceInfo}
-              onCardDataUpdate={(updatedData) => {
-                // Re-run the disambiguation flow when the serial limit
-                // changed (e.g. user typed "041/150" OCR missed); otherwise
-                // just save the edits and re-price in place.
-                flow.setCardData(updatedData);
-              }}
+              onAverage={({ average, query }) =>
+                setPriceInfo({
+                  averageValue: average,
+                  // Active-only data source — the hero header label is
+                  // just "Avg" now, but we keep the dataType field so
+                  // the existing AddToSheet payload doesn't shift shape.
+                  dataType: 'current',
+                  searchUrl: query
+                    ? `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(query)}&LH_BIN=1`
+                    : null,
+                })
+              }
             />
           ) : (
             <div className="rounded-2xl border border-card-border bg-card p-4 text-sm text-slate-500">
