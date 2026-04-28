@@ -67,11 +67,11 @@ export default function SimpleImageUploader({
         } rounded-lg bg-slate-50 aspect-[3/4] flex items-center justify-center overflow-hidden`}
       >
         {existingImage ? (
-          // `object-cover` center-crops the preview so the card fills the
-          // frame instead of being letterboxed inside a grey box. The raw
-          // capture already keeps the card well-centered, so cropping a
-          // few percent off each edge removes visible fingers/background
-          // without clipping the card itself.
+          // `object-cover` so the 2.5:3.5 cropped card fills the
+          // 3:4 thumbnail box. PR #164 made capture crop tight to the
+          // guide, so the source image is already just the card —
+          // cover here only nudges aspect (~5%), no fingers/background
+          // to hide.
           <img
             src={existingImage}
             alt={`${label} preview`}
