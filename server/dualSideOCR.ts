@@ -761,6 +761,38 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
         ? (finalResult as any)._scpTopCandidates
         : null;
       const durationMs = Date.now() - handlerStartedAt;
+
+      // Gemini observability — pulled off the diagnostic stash that the
+      // overlay set on the combined result. When Gemini didn't run / failed,
+      // _gemini is undefined and the year/brand/player slots stay empty in
+      // the log; we still record the prompt version so we can correlate by
+      // deploy. _legacyCombined captures the SCP/OCR pipeline state BEFORE
+      // the Gemini overlay overwrote it.
+      const geminiResultLog = (finalResult as any)._gemini ?? null;
+      const legacyCombinedLog = (finalResult as any)._legacyCombined ?? null;
+      const geminiPromptVersion =
+        (finalResult as any)._geminiPromptVersion ?? VLM_INFO.promptVersion ?? null;
+      const geminiYear =
+        geminiResultLog && typeof geminiResultLog.year === 'number'
+          ? geminiResultLog.year
+          : null;
+      const geminiBrand =
+        geminiResultLog && typeof geminiResultLog.brand === 'string' && geminiResultLog.brand.trim()
+          ? geminiResultLog.brand.trim()
+          : null;
+      const geminiPlayer =
+        geminiResultLog && typeof geminiResultLog.player === 'string' && geminiResultLog.player.trim()
+          ? geminiResultLog.player.trim()
+          : null;
+      const legacyYear =
+        legacyCombinedLog && legacyCombinedLog.year != null
+          ? legacyCombinedLog.year
+          : null;
+      const scpGroundingSkipped =
+        typeof (finalResult as any)._scpGroundingSkipped === 'boolean'
+          ? (finalResult as any)._scpGroundingSkipped
+          : null;
+
       if (visualFoilResult) {
         for (const line of (visualFoilResult.indicators ?? [])) {
           scanLog.addIndicator(line);
@@ -775,6 +807,12 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
           scpReason,
           scpTopCandidates,
           durationMs,
+          geminiPromptVersion,
+          geminiYear,
+          geminiBrand,
+          geminiPlayer,
+          legacyYear,
+          scpGroundingSkipped,
         });
       } else {
         scanLog.setFinal({
@@ -785,6 +823,12 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
           scpReason,
           scpTopCandidates,
           durationMs,
+          geminiPromptVersion,
+          geminiYear,
+          geminiBrand,
+          geminiPlayer,
+          legacyYear,
+          scpGroundingSkipped,
         });
       }
       scanLog.flush();
