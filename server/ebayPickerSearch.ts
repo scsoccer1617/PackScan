@@ -51,24 +51,44 @@ const SPORTS_CARDS_CATEGORY = '261328';
 // + player) matches the base AND every parallel — pulling parallel
 // listings into the average and inflating estimated value. These keywords
 // are eBay-tokenized as `-"keyword"` exclusions and re-checked client-
-// side via word-boundary regex. The list is intentionally aggressive;
-// downside is that base-card titles that legitimately contain a team
-// name with a color word ("Red Sox", "Blackhawks") may also be filtered
-// — see PR body trade-off note.
+// side via word-boundary regex.
+//
+// Two collision modes the list intentionally avoids:
+//   1. Set names containing exclusion keywords ("Topps Chrome",
+//      "Bowman Chrome", "Panini Prizm"). Chrome is NOT in the list — it's
+//      a default finish for whole product lines. Smart-skip below
+//      additionally drops any listed keyword that's already a substring
+//      of the query (e.g. base "Topps Chrome" scan won't exclude Chrome).
+//   2. Team/player names with color words (Red Sox, Blackhawks, Blue
+//      Jays, Reds). Generic colors Red/Blue/Black/Green/Orange/Yellow/
+//      Purple are intentionally absent. Pink/Teal/Bronze/Gold/Silver are
+//      kept — those are rare in team names and very common as parallel
+//      qualifiers.
 const PARALLEL_EXCLUSION_KEYWORDS = [
-  // Color parallels
-  'Gold', 'Silver', 'Black', 'Red', 'Blue', 'Green', 'Orange', 'Pink', 'Purple', 'Teal', 'Yellow', 'Bronze',
-  // Finishes
-  'Refractor', 'Prizm', 'Diamante', 'Holo', 'Holographic', 'Chrome', 'Mojo', 'Wave', 'Shimmer', 'Crackle',
+  // Specific colored parallels (Pink/Teal/Bronze rarely in team names;
+  // Gold/Silver are almost always parallel qualifiers)
+  'Pink', 'Teal', 'Bronze', 'Gold', 'Silver',
+  // Finishes (Chrome deliberately omitted — set-name collision)
+  'Refractor', 'Prizm', 'Diamante', 'Holo', 'Holographic', 'Mojo', 'Wave',
+  'Shimmer', 'Crackle', 'Foilboard', 'Rainbow',
   // Special parallels
   'Atomic', 'Disco', 'Hyper', 'Mosaic', 'Optic', 'Variation', 'SP', 'SSP',
+  'SuperFractor', 'Lava', 'Tiger', 'Dragon', 'Fireworks', 'Pulsar',
+  'Negative', 'Inverted',
   // Premium/numbered
   'Auto', 'Autograph', 'Patch', 'Relic', 'Jersey', 'Numbered',
   // Print runs (eBay tokenizes -/150 as exclusion)
   '/150', '/99', '/75', '/50', '/25', '/10', '/5', '/1',
-  // Black Friday / holiday inserts
-  'Blackout', 'Friday Exclusive',
+  // Black Friday / holiday / Fanatics inserts. `Foil` is NOT a standalone
+  // entry — too many base titles say "foil-stamped" / "gold foil logo".
+  // `Logo Foil` is the multi-word form that targets Fanatics Exclusive
+  // Logo Foil parallels surfaced in user testing.
+  'Blackout', 'Friday Exclusive', 'Fanatics Exclusive', 'Logo Foil',
 ];
+
+function escapeRegex(input: string): string {
+  return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 /**
  * A scanned card is "base" when the picker captured no parallel — either
@@ -170,11 +190,29 @@ export async function pickerSearch(
   // Necessary because card identity alone (year + brand + # + player)
   // matches base AND every parallel of that card — see PR body for the
   // Jokic #101 example where 4/5 returned listings were parallels.
+  //
+  // Smart skip: filter out any keyword already present in the query
+  // (e.g. base "Topps Chrome" scan has "Chrome" in the query — excluding
+  // it would zero-out results). The same `safeExclusions` array drives
+  // both the query exclusion and the post-filter regex below.
   const isBase = isBaseCard(opts?.scannedParallel);
+  let safeExclusions: string[] = [];
   if (isBase) {
-    const exclusions = PARALLEL_EXCLUSION_KEYWORDS.map((kw) => `-"${kw}"`).join(' ');
-    query = `${query} ${exclusions}`;
-    console.log(`[pickerSearch] base-card detected — appended ${PARALLEL_EXCLUSION_KEYWORDS.length} parallel exclusions`);
+    const queryLower = query.toLowerCase();
+    safeExclusions = PARALLEL_EXCLUSION_KEYWORDS.filter((kw) => {
+      const pattern = new RegExp(`\\b${escapeRegex(kw)}\\b`, 'i');
+      return !pattern.test(queryLower);
+    });
+    if (safeExclusions.length > 0) {
+      const exclusions = safeExclusions.map((kw) => `-"${kw}"`).join(' ');
+      query = `${query} ${exclusions}`;
+      const skipped = PARALLEL_EXCLUSION_KEYWORDS.length - safeExclusions.length;
+      console.log(
+        `[pickerSearch] base-card detected — appended ${safeExclusions.length}/${PARALLEL_EXCLUSION_KEYWORDS.length} parallel exclusions (skipped: ${skipped} found in query)`,
+      );
+    } else {
+      console.log('[pickerSearch] base-card detected but all exclusions overlap with query — skipping');
+    }
   }
 
   let active: PickerListing[] = [];
@@ -216,15 +254,13 @@ export async function pickerSearch(
     // Defense-in-depth: even with `-keyword` server-side exclusions,
     // listings that put parallel keywords in non-title fields can slip
     // through. For base cards, also drop any title containing a parallel
-    // keyword via word-boundary regex.
-    if (isBase && mapped.length > 0) {
+    // keyword via word-boundary regex. Uses the same smart-skipped
+    // `safeExclusions` array so a base "Topps Chrome" scan doesn't drop
+    // every Chrome listing.
+    if (isBase && mapped.length > 0 && safeExclusions.length > 0) {
       const beforeBase = mapped.length;
       const exclusionRegex = new RegExp(
-        '\\b(' +
-          PARALLEL_EXCLUSION_KEYWORDS.map((kw) =>
-            kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
-          ).join('|') +
-          ')\\b',
+        '\\b(' + safeExclusions.map(escapeRegex).join('|') + ')\\b',
         'i',
       );
       mapped = mapped.filter((item) => !exclusionRegex.test(item.title));
