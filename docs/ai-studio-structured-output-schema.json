@@ -1,0 +1,88 @@
+{
+  "type": "object",
+  "properties": {
+    "subjectType": { "type": "string", "enum": ["card", "pack", "blaster", "hanger", "box"] },
+    "sport": { "type": "string", "nullable": true },
+    "player": { "type": "string", "nullable": true },
+    "year": { "type": "integer", "nullable": true },
+    "yearPrintedRaw": { "type": "string", "nullable": true },
+    "brand": { "type": "string", "nullable": true },
+    "set": { "type": "string", "nullable": true },
+    "collection": { "type": "string", "nullable": true },
+    "cardNumber": { "type": "string", "nullable": true },
+    "cmpCode": { "type": "string", "nullable": true },
+    "parallel": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "nullable": true },
+        "isFoil": { "type": "boolean" },
+        "isRefractor": { "type": "boolean" },
+        "borderTint": { "type": "string", "nullable": true },
+        "saturation": { "type": "string", "nullable": true }
+      },
+      "required": ["name", "isFoil", "isRefractor", "borderTint", "saturation"]
+    },
+    "isAutograph": { "type": "boolean" },
+    "isRelic": { "type": "boolean" },
+    "isRookie": { "type": "boolean" },
+    "printRun": { "type": "integer", "nullable": true },
+    "team": { "type": "string", "nullable": true },
+    "position": { "type": "string", "nullable": true },
+    "confidence": {
+      "type": "object",
+      "properties": {
+        "player": { "type": "number", "nullable": true },
+        "year": { "type": "number", "nullable": true },
+        "set": { "type": "number", "nullable": true },
+        "collection": { "type": "number", "nullable": true },
+        "cardNumber": { "type": "number", "nullable": true },
+        "cmpCode": { "type": "number", "nullable": true },
+        "parallel": { "type": "number", "nullable": true }
+      },
+      "required": ["player", "year", "set", "collection", "cardNumber", "cmpCode", "parallel"]
+    },
+    "notes": { "type": "string", "nullable": true }
+  },
+  "required": [
+    "subjectType",
+    "sport",
+    "player",
+    "year",
+    "yearPrintedRaw",
+    "brand",
+    "set",
+    "collection",
+    "cardNumber",
+    "cmpCode",
+    "parallel",
+    "isAutograph",
+    "isRelic",
+    "isRookie",
+    "printRun",
+    "team",
+    "position",
+    "confidence",
+    "notes"
+  ],
+  "propertyOrdering": [
+    "subjectType",
+    "sport",
+    "player",
+    "yearPrintedRaw",
+    "cmpCode",
+    "year",
+    "brand",
+    "set",
+    "collection",
+    "cardNumber",
+    "parallel",
+    "isAutograph",
+    "isRelic",
+    "isRookie",
+    "printRun",
+    "team",
+    "position",
+    "confidence",
+    "notes"
+  ]
+}
