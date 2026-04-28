@@ -4,6 +4,38 @@ import { CardFormValues } from '@shared/schema';
 import { analyzeSportsCardImage, extractAllYearCandidates } from './dynamicCardAnalyzer';
 import { lookupCard, lookupCardByPlayer } from './cardDatabaseService';
 import { lookupCard as scpLookupCard } from './sportscardspro';
+
+/**
+ * SCP grounding gate.
+ *
+ * Historically, the SCP-first pipeline overwrote year/brand/cardNumber/
+ * foilType/player on the combined result with whatever it parsed out of the
+ * SCP `consoleName` / `productName` strings. That worked when SCP's match was
+ * actually correct, but whenever SCP returned the wrong slot (especially via
+ * the no-player retry, or via `promoted_from_below_threshold`) it silently
+ * clobbered OCR values that were already correct — most painfully on year,
+ * where SCP's parsed year is just the leading 4-digit token of
+ * "YYYY Topps Update Series" and is wrong any time SCP's fuzzy match lands
+ * on a different season's near-clone product.
+ *
+ * As of PR #155, Gemini VLM is the primary signal in the scan flow and runs
+ * its overlay AFTER `combineCardResults`. When Gemini returns a year, it
+ * correctly overwrites SCP's bad year. When Gemini returns null (e.g. the
+ * model call fails or the response can't be parsed), SCP's bad year sticks.
+ *
+ * This flag stops SCP from writing grounding fields (year/brand/cardNumber/
+ * foilType/player) at all. Diagnostic flags (_scpHit, _scpMatchScore,
+ * _scpReason, _scpStatus, _scpTopCandidates) and pricing/parallel-picker
+ * downstream flows (which read SCP separately) are unaffected.
+ *
+ * Default: gating is ON (`SCP_GROUNDING_ENABLED=false` is the default).
+ * Set `SCP_GROUNDING_ENABLED=true` to restore the legacy SCP-overwrite
+ * behaviour for diagnostic comparisons.
+ */
+function isScpGroundingEnabled(): boolean {
+  const raw = String(process.env.SCP_GROUNDING_ENABLED ?? '').trim().toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
+}
 import { getCatalogEraPolicy } from './sportscardspro/catalogEra';
 import {
   extractCardNumber as scpExtractCardNumber,
@@ -128,6 +160,13 @@ interface YearConfidenceFlags {
     consoleName: string;
     score: number;
   };
+  // Set true when the SCP grounding gate (env var SCP_GROUNDING_ENABLED)
+  // suppressed SCP's writes to year/brand/cardNumber/foilType/player on
+  // this scan. Diagnostic _scpHit/_scpMatchScore/_scpReason flags are still
+  // recorded so the bulk-scan inbox can show the SCP outcome even though
+  // it didn't drive the saved card. Default behaviour as of PR #158:
+  // grounding is OFF (Gemini overlay is authoritative).
+  _scpGroundingSkipped?: boolean;
   // Raw OCR text from each side of the card. Truncated to 4 KB per side
   // before persistence so the analysisResult jsonb stays small. Used by
   // the inbox diagnostic UI so the dealer can see exactly what the
@@ -1781,37 +1820,52 @@ async function combineCardResults(
       // Overwrite SCP-owned fields. We only overwrite when SCP produced a
       // non-null parsed value — missing pieces (e.g. SCP console-name without
       // a recognizable year token) leave the OCR value intact.
-      if (scpYear) {
-        combined.year = scpYear;
-        // SCP is a stronger year signal than any OCR/catalog probe below.
-        const flagged = combined as CardFormWithFlags;
-        flagged._yearFromCatalogProbe = true;
-        flagged._yearFromBackOnly = false;
-        flagged._yearFromCopyright = false;
-        flagged._yearFromBareFallback = false;
-        flagged._yearFromSurnameProbe = false;
-      }
-      if (scpBrand) combined.brand = scpBrand;
-      if (scpNumber) combined.cardNumber = scpNumber;
-      if (scpParallel) combined.foilType = scpParallel;
-      if (scpName) {
-        // Split "First Middle Last" into first / last. Preserve Jr./Sr./II/III/IV
-        // suffixes as part of the last name so card dealers still see them.
-        const suffixes = new Set(['Jr', 'Jr.', 'Sr', 'Sr.', 'II', 'III', 'IV', 'V']);
-        const parts = scpName.split(/\s+/).filter(p => p.length > 0);
-        if (parts.length === 1) {
-          combined.playerFirstName = '';
-          combined.playerLastName = parts[0];
-        } else if (parts.length >= 2) {
-          // Pull off any trailing suffix(es) so they stay glued to the last name.
-          const tail: string[] = [];
-          while (parts.length > 1 && suffixes.has(parts[parts.length - 1])) {
-            tail.unshift(parts.pop() as string);
-          }
-          const last = parts.pop() as string;
-          combined.playerFirstName = parts.join(' ');
-          combined.playerLastName = tail.length > 0 ? `${last} ${tail.join(' ')}` : last;
+      //
+      // GROUNDING GATE: Skip writing grounding fields when SCP_GROUNDING_ENABLED
+      // is unset/false (the safe default). Gemini overlay (PR #155) is the
+      // authoritative signal; SCP's parsed values frequently clobber correct
+      // OCR/Gemini fields when SCP fuzzy-matches a near-clone product from a
+      // different season. Diagnostic _scp* flags above still record the hit.
+      if (isScpGroundingEnabled()) {
+        if (scpYear) {
+          combined.year = scpYear;
+          // SCP is a stronger year signal than any OCR/catalog probe below.
+          const flagged = combined as CardFormWithFlags;
+          flagged._yearFromCatalogProbe = true;
+          flagged._yearFromBackOnly = false;
+          flagged._yearFromCopyright = false;
+          flagged._yearFromBareFallback = false;
+          flagged._yearFromSurnameProbe = false;
         }
+        if (scpBrand) combined.brand = scpBrand;
+        if (scpNumber) combined.cardNumber = scpNumber;
+        if (scpParallel) combined.foilType = scpParallel;
+        if (scpName) {
+          // Split "First Middle Last" into first / last. Preserve Jr./Sr./II/III/IV
+          // suffixes as part of the last name so card dealers still see them.
+          const suffixes = new Set(['Jr', 'Jr.', 'Sr', 'Sr.', 'II', 'III', 'IV', 'V']);
+          const parts = scpName.split(/\s+/).filter(p => p.length > 0);
+          if (parts.length === 1) {
+            combined.playerFirstName = '';
+            combined.playerLastName = parts[0];
+          } else if (parts.length >= 2) {
+            // Pull off any trailing suffix(es) so they stay glued to the last name.
+            const tail: string[] = [];
+            while (parts.length > 1 && suffixes.has(parts[parts.length - 1])) {
+              tail.unshift(parts.pop() as string);
+            }
+            const last = parts.pop() as string;
+            combined.playerFirstName = parts.join(' ');
+            combined.playerLastName = tail.length > 0 ? `${last} ${tail.join(' ')}` : last;
+          }
+        }
+      } else {
+        console.log(
+          '[SCP-first] Grounding gate ON (SCP_GROUNDING_ENABLED!=true) — skipping ' +
+          `field overwrite. Would have written: year=${scpYear ?? '?'} brand=${scpBrand ?? '?'} ` +
+          `cardNumber=${scpNumber ?? '?'} parallel=${scpParallel ?? 'base'} player="${scpName ?? '?'}".`,
+        );
+        (combined as CardFormWithFlags)._scpGroundingSkipped = true;
       }
       console.log(
         `[SCP-first] Populated from SCP: brand="${combined.brand}" year=${combined.year} ` +
@@ -2066,32 +2120,47 @@ async function combineCardResults(
         // Mirror the population logic from the hit branch above. SCP
         // overwrites only fields it parsed non-null; OCR values stay for
         // anything SCP can't extract.
-        if (scpYear) {
-          combined.year = scpYear;
-          flagged._yearFromCatalogProbe = true;
-          flagged._yearFromBackOnly = false;
-          flagged._yearFromCopyright = false;
-          flagged._yearFromBareFallback = false;
-          flagged._yearFromSurnameProbe = false;
-        }
-        if (scpBrand) combined.brand = scpBrand;
-        if (scpNumber) combined.cardNumber = scpNumber;
-        if (scpParallel) combined.foilType = scpParallel;
-        if (scpName) {
-          const suffixes = new Set(['Jr', 'Jr.', 'Sr', 'Sr.', 'II', 'III', 'IV', 'V']);
-          const parts = scpName.split(/\s+/).filter(p => p.length > 0);
-          if (parts.length === 1) {
-            combined.playerFirstName = '';
-            combined.playerLastName = parts[0];
-          } else if (parts.length >= 2) {
-            const tail: string[] = [];
-            while (parts.length > 1 && suffixes.has(parts[parts.length - 1])) {
-              tail.unshift(parts.pop() as string);
-            }
-            const last = parts.pop() as string;
-            combined.playerFirstName = parts.join(' ');
-            combined.playerLastName = tail.length > 0 ? `${last} ${tail.join(' ')}` : last;
+        //
+        // GROUNDING GATE: same as the first-pass hit branch — skip writes
+        // when SCP_GROUNDING_ENABLED is unset/false (safe default). Diagnostic
+        // flags (_scpHit, _scpMatchScore, _scpReason, _scpPromotedFromBelowThreshold)
+        // are kept above so the scan log still records that a promotion fired.
+        if (isScpGroundingEnabled()) {
+          if (scpYear) {
+            combined.year = scpYear;
+            flagged._yearFromCatalogProbe = true;
+            flagged._yearFromBackOnly = false;
+            flagged._yearFromCopyright = false;
+            flagged._yearFromBareFallback = false;
+            flagged._yearFromSurnameProbe = false;
           }
+          if (scpBrand) combined.brand = scpBrand;
+          if (scpNumber) combined.cardNumber = scpNumber;
+          if (scpParallel) combined.foilType = scpParallel;
+          if (scpName) {
+            const suffixes = new Set(['Jr', 'Jr.', 'Sr', 'Sr.', 'II', 'III', 'IV', 'V']);
+            const parts = scpName.split(/\s+/).filter(p => p.length > 0);
+            if (parts.length === 1) {
+              combined.playerFirstName = '';
+              combined.playerLastName = parts[0];
+            } else if (parts.length >= 2) {
+              const tail: string[] = [];
+              while (parts.length > 1 && suffixes.has(parts[parts.length - 1])) {
+                tail.unshift(parts.pop() as string);
+              }
+              const last = parts.pop() as string;
+              combined.playerFirstName = parts.join(' ');
+              combined.playerLastName = tail.length > 0 ? `${last} ${tail.join(' ')}` : last;
+            }
+          }
+        } else {
+          console.log(
+            '[SCP-first] Grounding gate ON (SCP_GROUNDING_ENABLED!=true) — skipping ' +
+            `promoted-candidate field overwrite. Would have written: year=${scpYear ?? '?'} ` +
+            `brand=${scpBrand ?? '?'} cardNumber=${scpNumber ?? '?'} parallel=${scpParallel ?? 'base'} ` +
+            `player="${scpName ?? '?'}".`,
+          );
+          (combined as CardFormWithFlags)._scpGroundingSkipped = true;
         }
         console.log(
           `[SCP-first] Populated from promoted candidate: brand="${combined.brand}" year=${combined.year} ` +
