@@ -89,6 +89,35 @@ export async function analyzeCardWithGemini(
   resultTemplate?: string,
   opts: AnalyzeOptions = {}
 ): Promise<GeminiCardResult> {
+  const [front, back] = await Promise.all([
+    fs.readFile(frontPath),
+    fs.readFile(backPath),
+  ]);
+  return analyzeCardBuffersWithGemini(
+    front,
+    back,
+    {
+      ...opts,
+      frontMime: mimeFromPath(frontPath),
+      backMime: mimeFromPath(backPath),
+    },
+    promptOrSystem,
+    resultTemplate,
+  );
+}
+
+/**
+ * Buffer-input variant of analyzeCardWithGemini. Used by the live scan
+ * pipeline where front/back image buffers are already in memory after EXIF
+ * orientation normalization — avoids a redundant fs round-trip.
+ */
+export async function analyzeCardBuffersWithGemini(
+  frontBuffer: Buffer,
+  backBuffer: Buffer,
+  opts: AnalyzeOptions & { frontMime?: string; backMime?: string } = {},
+  promptOrSystem?: string,
+  resultTemplate?: string,
+): Promise<GeminiCardResult> {
   const client = getClient();
   const model = opts.model || 'gemini-2.5-flash';
 
@@ -103,10 +132,8 @@ export async function analyzeCardWithGemini(
     fullPrompt = VLM_FULL_PROMPT;
   }
 
-  const [front, back] = await Promise.all([
-    fs.readFile(frontPath),
-    fs.readFile(backPath),
-  ]);
+  const frontMime = opts.frontMime || 'image/jpeg';
+  const backMime = opts.backMime || 'image/jpeg';
 
   const response = await client.models.generateContent({
     model,
@@ -115,8 +142,8 @@ export async function analyzeCardWithGemini(
         role: 'user',
         parts: [
           { text: fullPrompt },
-          { inlineData: { data: front.toString('base64'), mimeType: mimeFromPath(frontPath) } },
-          { inlineData: { data: back.toString('base64'), mimeType: mimeFromPath(backPath) } },
+          { inlineData: { data: frontBuffer.toString('base64'), mimeType: frontMime } },
+          { inlineData: { data: backBuffer.toString('base64'), mimeType: backMime } },
         ],
       },
     ],

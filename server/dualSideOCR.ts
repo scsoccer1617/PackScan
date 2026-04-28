@@ -20,6 +20,8 @@ import { cardVariations, cardDatabase } from '@shared/schema';
 import { and, eq, sql, inArray } from 'drizzle-orm';
 import { logUserScan, type ScanFieldValues } from './userScans';
 import { startScanLog } from './scanLogger';
+import { analyzeCardBuffersWithGemini, type GeminiCardResult, VLM_INFO } from './vlmGemini';
+import { applyGeminiToCombined } from './vlmApply';
 
 // Internal year-confidence flags attached to per-side and combined OCR
 // results so the dual-side combiner and downstream lookup loop can reason
@@ -492,15 +494,53 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
         ? Promise.resolve({ result: preliminaryEntry.frontResult, ocrText: preliminaryEntry.frontOCRText })
         : analyzeSide('front', frontImage);
 
-    const [frontSide, backSide] = await Promise.all([
+    // ── Gemini VLM (primary signal) ──────────────────────────────────────
+    // Per user direction (Apr 28, 2026): Gemini is the authoritative scan
+    // signal. Legacy OCR runs in parallel for diagnostic logging only — its
+    // output never overwrites Gemini fields. CardDB grounding is intentionally
+    // skipped because the catalog is solid for baseball but not yet built up
+    // for other sports; Gemini must work standalone for the broader card mix.
+    //
+    // We require BOTH front and back images to fire Gemini. Single-side
+    // scans fall back to legacy-only because the prompt is built around
+    // dual-image input.
+    const geminiPromise: Promise<GeminiCardResult | null> =
+      (frontImage && backImage && process.env.GEMINI_API_KEY)
+        ? (async () => {
+            try {
+              console.time('gemini-vlm');
+              const result = await analyzeCardBuffersWithGemini(
+                frontImage.buffer,
+                backImage.buffer,
+                {
+                  frontMime: frontImage.mimetype || 'image/jpeg',
+                  backMime: backImage.mimetype || 'image/jpeg',
+                },
+              );
+              console.timeEnd('gemini-vlm');
+              return result;
+            } catch (err: any) {
+              console.warn('[vlm-gemini] analysis failed (non-fatal, falling back to legacy OCR):', err?.message || err);
+              return null;
+            }
+          })()
+        : Promise.resolve(null);
+
+    const [frontSide, backSide, geminiResult] = await Promise.all([
       frontAnalysisPromise,
       analyzeSide('back', backImage),
+      geminiPromise,
     ]);
     frontResult = frontSide.result;
     frontOCRText = frontSide.ocrText;
     backResult = backSide.result;
     backOCRText = backSide.ocrText;
     console.timeEnd('dual-analyzers');
+    if (geminiResult) {
+      console.log(`[vlm-gemini] ok promptVersion=${VLM_INFO.promptVersion} player="${geminiResult.player ?? ''}" year=${geminiResult.year ?? '?'} brand=${geminiResult.brand ?? '?'} set=${geminiResult.set ?? '?'} collection=${geminiResult.collection ?? '?'} #${geminiResult.cardNumber ?? '?'} parallel="${geminiResult.parallel?.name ?? 'None'}"`);
+    } else {
+      console.log('[vlm-gemini] no result — legacy OCR is authoritative for this scan');
+    }
 
     // Combine the results with priority to front image for player name, number, and rookie status
     // and priority to back image for copyright year, stats, and detailed information
@@ -540,6 +580,47 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
       });
     }
 
+    // ── Gemini overlay (authoritative) ───────────────────────────────────
+    // Stash a snapshot of the legacy combined result for diagnostic logging
+    // BEFORE Gemini overwrites it. Then overlay Gemini's fields. We never
+    // throw — if Gemini didn't return anything, the combined result is left
+    // exactly as the legacy pipeline produced it (graceful fallback).
+    if (geminiResult) {
+      try {
+        const legacySnapshot = {
+          playerFirstName: (combinedResult as any).playerFirstName ?? null,
+          playerLastName: (combinedResult as any).playerLastName ?? null,
+          year: (combinedResult as any).year ?? null,
+          brand: (combinedResult as any).brand ?? null,
+          set: (combinedResult as any).set ?? null,
+          collection: (combinedResult as any).collection ?? null,
+          cardNumber: (combinedResult as any).cardNumber ?? null,
+          foilType: (combinedResult as any).foilType ?? null,
+          variant: (combinedResult as any).variant ?? null,
+          sport: (combinedResult as any).sport ?? null,
+          team: (combinedResult as any).team ?? null,
+        };
+        applyGeminiToCombined(combinedResult, geminiResult);
+        (combinedResult as any)._legacyCombined = legacySnapshot;
+        (combinedResult as any)._gemini = geminiResult;
+        (combinedResult as any)._geminiPromptVersion = VLM_INFO.promptVersion;
+        // _engine stays 'ocr' so the persisted-card schema literal still passes;
+        // _vlmAuthoritative is the agent-side flag for analytics / scan log.
+        (combinedResult as any)._vlmAuthoritative = true;
+        console.log('[vlm-gemini] overlaid onto combined result. Final fields:', JSON.stringify({
+          playerFirstName: (combinedResult as any).playerFirstName,
+          playerLastName: (combinedResult as any).playerLastName,
+          year: (combinedResult as any).year,
+          brand: (combinedResult as any).brand,
+          set: (combinedResult as any).set,
+          collection: (combinedResult as any).collection,
+          cardNumber: (combinedResult as any).cardNumber,
+          foilType: (combinedResult as any).foilType,
+        }));
+      } catch (overlayErr: any) {
+        console.warn('[vlm-gemini] overlay failed (non-fatal):', overlayErr?.message || overlayErr);
+      }
+    }
 
     // Make sure we have all required fields with defaults if needed
     combinedResult._engine = combinedResult._engine ?? 'ocr';
