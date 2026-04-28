@@ -34,14 +34,12 @@ interface CardCameraCaptureProps {
 // directly rather than re-implementing that math in JS.
 const GUIDE_ASPECT = 2.5 / 3.5;
 
-// Breathing room around the guide rect when we crop at capture time.
-// The guide is a *suggestion*, not a hard edge — users rarely nail the
-// alignment to the pixel, and a too-tight crop slices off corner ticks,
-// edge borders, or the tips of autograph signatures. 8% on each side
-// (so a guide that's 72% of container width expands to ~85% of what the
-// camera sees horizontally) preserves the visual framing without
-// breaking the "what's inside the guide is what gets saved" promise.
-const CROP_PADDING_FRAC = 0.08;
+// PR #164: crop matches the visible guide rect exactly — no padding.
+// PR #163 used 8% breathing room, which left fingers/sleeve/table visible
+// on the review, analyzing, and result thumbnails. The user's mental
+// model is "what's inside the white scan frame is what gets saved"; any
+// padding violates that. Users that miss the alignment can Retake.
+const CROP_PADDING_FRAC = 0;
 
 // Shared MediaStream cached at module scope so reopening the camera (e.g.
 // front → back capture chain) reuses the same hardware stream and the
