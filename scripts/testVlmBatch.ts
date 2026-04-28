@@ -54,7 +54,8 @@ async function findPairs(dir: string, idFilter?: Set<string>): Promise<CardPair[
   const backs = new Map<string, string>();
 
   for (const f of files) {
-    const m = f.match(/^(.+?)_(front|back)\.(jpg|jpeg|png|webp)$/i);
+    // Allow .jpg / .jpeg / .png / .webp
+    const m = f.match(/^(.+?)_(front|back)\.(jpe?g|png|webp)$/i);
     if (!m) continue;
     const [, id, side] = m;
     if (side.toLowerCase() === 'front') fronts.set(id, f);
@@ -99,15 +100,51 @@ async function runLegacyForPair(frontPath: string, backPath: string): Promise<Le
     return { error: `front: ${fr._err}; back: ${br._err}` };
   }
 
+  // CardFormValues (shared/schema.ts) splits the player name into
+  // playerFirstName + playerLastName, and uses 'collection' (not 'set').
+  // Read from both sides; back side usually has the cleaner set + cardNumber,
+  // front usually has the cleaner player name.
   const pick = (k: string) => fr?.[k] ?? br?.[k] ?? null;
+  const first = pick('playerFirstName');
+  const last = pick('playerLastName');
+  const player = [first, last].filter(Boolean).join(' ').trim() || null;
+
+  // Distinguish the "Vision returned its hardcoded fallback" case (year =
+  // current year, all string fields empty) from a real extraction. The
+  // fallback at googleVisionFetch.ts:1372 returns { year: getFullYear(),
+  // sport: '', brand: '' } when extraction fails entirely.
+  const currentYear = new Date().getFullYear();
+  const looksLikeFallback = (r: any) =>
+    r &&
+    !r._err &&
+    r.year === currentYear &&
+    !r.playerFirstName &&
+    !r.playerLastName &&
+    !r.cardNumber &&
+    !r.collection;
+  const bothFallback = looksLikeFallback(fr) && looksLikeFallback(br);
+
+  if (bothFallback) {
+    return {
+      error: 'Vision returned default fallback for both sides (no text extracted)',
+      player: null,
+      year: null,
+      brand: null,
+      set: null,
+      cardNumber: null,
+      parallel: null,
+      sport: null,
+    };
+  }
+
   return {
-    player: pick('playerName') ?? pick('player'),
-    year: pick('year'),
-    brand: pick('brand'),
-    set: pick('collection') ?? pick('set'),
+    player,
+    year: pick('year') === currentYear && !player ? null : pick('year'),
+    brand: pick('brand') || null,
+    set: pick('collection') || null,
     cardNumber: pick('cardNumber'),
-    parallel: pick('parallel'),
-    sport: pick('sport'),
+    parallel: pick('foilType') || pick('variant') || null,
+    sport: pick('sport') || null,
   };
 }
 
