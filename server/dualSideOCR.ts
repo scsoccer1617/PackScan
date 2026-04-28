@@ -3,47 +3,7 @@ import sharp from 'sharp';
 import { CardFormValues } from '@shared/schema';
 import { analyzeSportsCardImage, extractAllYearCandidates } from './dynamicCardAnalyzer';
 import { lookupCard, lookupCardByPlayer } from './cardDatabaseService';
-import { lookupCard as scpLookupCard } from './sportscardspro';
-
-/**
- * SCP grounding gate.
- *
- * Historically, the SCP-first pipeline overwrote year/brand/cardNumber/
- * foilType/player on the combined result with whatever it parsed out of the
- * SCP `consoleName` / `productName` strings. That worked when SCP's match was
- * actually correct, but whenever SCP returned the wrong slot (especially via
- * the no-player retry, or via `promoted_from_below_threshold`) it silently
- * clobbered OCR values that were already correct — most painfully on year,
- * where SCP's parsed year is just the leading 4-digit token of
- * "YYYY Topps Update Series" and is wrong any time SCP's fuzzy match lands
- * on a different season's near-clone product.
- *
- * As of PR #155, Gemini VLM is the primary signal in the scan flow and runs
- * its overlay AFTER `combineCardResults`. When Gemini returns a year, it
- * correctly overwrites SCP's bad year. When Gemini returns null (e.g. the
- * model call fails or the response can't be parsed), SCP's bad year sticks.
- *
- * This flag stops SCP from writing grounding fields (year/brand/cardNumber/
- * foilType/player) at all. Diagnostic flags (_scpHit, _scpMatchScore,
- * _scpReason, _scpStatus, _scpTopCandidates) and pricing/parallel-picker
- * downstream flows (which read SCP separately) are unaffected.
- *
- * Default: gating is ON (`SCP_GROUNDING_ENABLED=false` is the default).
- * Set `SCP_GROUNDING_ENABLED=true` to restore the legacy SCP-overwrite
- * behaviour for diagnostic comparisons.
- */
-function isScpGroundingEnabled(): boolean {
-  const raw = String(process.env.SCP_GROUNDING_ENABLED ?? '').trim().toLowerCase();
-  return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
-}
 import { getCatalogEraPolicy } from './sportscardspro/catalogEra';
-import {
-  extractCardNumber as scpExtractCardNumber,
-  extractParallel as scpExtractParallel,
-  extractYear as scpExtractYear,
-  extractBrand as scpExtractBrand,
-  extractPlayerName as scpExtractPlayerName,
-} from './sportscardspro/match';
 import { extractProductLine } from './productLineExtractor';
 import { batchExtractTextFromImages, clearOcrCache } from './googleVisionFetch';
 import type { FoilDetectionResult } from './visualFoilDetector';
@@ -87,86 +47,9 @@ interface YearConfidenceFlags {
     playerName: string;
     isRookieCard: boolean;
   }>;
-  // SCP-first outcome. Used by the bulk-scan confidence gate to decide
-  // between auto-save and review queue without re-running SCP on the
-  // server. `_scpHit` is true when SCP returned a hit above its internal
-  // threshold; `_scpMatchScore` is the 0–100 score of that hit.
-  _scpHit?: boolean;
-  _scpMatchScore?: number;
-  // Diagnostic snapshot of the SCP-first probe so the bulk-scan inbox
-  // diagnostic UI can explain *why* a card landed in review without
-  // re-running SCP. _scpQuery is the input we sent; _scpStatus is
-  // 'hit' | 'miss' | 'threw' | 'skipped'; _scpReason is the SCP miss
-  // reason on miss (no_results / below_threshold / api_error /
-  // not_configured) or the throw message when _scpStatus='threw'.
-  // _scpTopCandidates carries the top 3 below-threshold hits with their
-  // 0–100 score so the dealer can see how close SCP got.
-  _scpQuery?: {
-    playerName: string | null;
-    year: number | null;
-    brand: string | null;
-    collection: string | null;
-    setName: string | null;
-    cardNumber: string | null;
-    parallel: string | null;
-  };
-  _scpStatus?: 'hit' | 'miss' | 'threw' | 'skipped';
-  _scpReason?: string | null;
-  _scpTopCandidates?: Array<{
-    productName: string;
-    consoleName: string;
-    score: number;
-  }>;
-  // Set true when CardDB had a row for the same (brand, year, cardNumber)
-  // slot and disagreed with SCP on the player surname. CardDB wins in that
-  // case (it's slot-keyed and hand-curated; SCP is free-text search). The
-  // bulk-scan inbox diagnostic UI surfaces this so the dealer knows the
-  // identification was reconciled across two sources.
-  _scpPlayerOverridden?: boolean;
-  _scpPlayerOverrideReason?: 'carddb_disagreement' | string;
-  // Set true when SCP returned status=miss reason=below_threshold but the
-  // top candidate's year+brand+surname all matched OCR, so we treated it
-  // as a hit and populated combined.* from the candidate. Surfaced for
-  // diagnostics so the bulk-scan inbox can flag a card as "identified by
-  // OCR-corroborated below-threshold candidate" rather than a clean SCP hit.
-  _scpPromotedFromBelowThreshold?: boolean;
-  _scpPromotedReason?: 'ocr_year_brand_surname_match' | string;
   // Set true when the catalog player check confirmed the back-side OCR
-  // surname against card_database for this brand+year. SCP-first uses
-  // this signal to reject no-player-retry hits whose recovered player
-  // disagrees with our catalog-grounded OCR name (the retry hit is then
-  // a contradiction signal, not a correction).
+  // surname against card_database for this brand+year.
   _backPlayerCatalogValidated?: boolean;
-  // Set true when SCP returned a no-player-retry hit but we rejected it
-  // because the recovered player disagreed with confident OCR. Surfaced
-  // for the bulk-scan inbox diagnostic so dealers can see why we kept
-  // the OCR-derived identification instead of SCP's.
-  _scpRetryRejected?: boolean;
-  _scpRetryRejectedReason?: 'player_conflict_with_confident_ocr' | string;
-  _scpRetryRejectedHit?: {
-    productName: string;
-    consoleName: string;
-    score: number;
-  };
-  // Set when SCP returned a hit whose product-name #cardNumber differed
-  // from the cardNumber we queried with. SCP's product search is fuzzy on
-  // text and can drop the cardNumber constraint when the player+brand+year
-  // tokens are strong enough; that's a contradiction signal, not a
-  // correction. Surfaced for the bulk-scan inbox diagnostic.
-  _scpCardNumberMismatch?: {
-    queried: string;
-    returned: string;
-    productName: string;
-    consoleName: string;
-    score: number;
-  };
-  // Set true when the SCP grounding gate (env var SCP_GROUNDING_ENABLED)
-  // suppressed SCP's writes to year/brand/cardNumber/foilType/player on
-  // this scan. Diagnostic _scpHit/_scpMatchScore/_scpReason flags are still
-  // recorded so the bulk-scan inbox can show the SCP outcome even though
-  // it didn't drive the saved card. Default behaviour as of PR #158:
-  // grounding is OFF (Gemini overlay is authoritative).
-  _scpGroundingSkipped?: boolean;
   // Raw OCR text from each side of the card. Truncated to 4 KB per side
   // before persistence so the analysisResult jsonb stays small. Used by
   // the inbox diagnostic UI so the dealer can see exactly what the
@@ -717,9 +600,6 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
         // No final values yet — user hasn't saved. logUserScan falls back
         // to detected when final is omitted, which means an unfinished
         // analyzed_no_save row reads cleanly in the admin ledger.
-        scpScore: typeof (finalResult as any)._scpMatchScore === 'number'
-          ? (finalResult as any)._scpMatchScore
-          : null,
         analyzerVersion: 'analyze_card_dual_images',
       });
     } catch (logErr) {
@@ -748,25 +628,13 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
         player: playerName,
         detectedColor: visualFoilResult?.foilType ?? '',
       });
-      // Diagnostic context useful for triaging both foil drift AND
-      // card-number / player drift. The OCR text shows what the vision
-      // pipeline actually read; the SCP fields show whether the right
-      // card won the catalogue match.
-      const scpMatchScore =
-        typeof (finalResult as any)._scpMatchScore === 'number'
-          ? (finalResult as any)._scpMatchScore
-          : null;
-      const scpReason = (finalResult as any)._scpReason ?? null;
-      const scpTopCandidates = Array.isArray((finalResult as any)._scpTopCandidates)
-        ? (finalResult as any)._scpTopCandidates
-        : null;
       const durationMs = Date.now() - handlerStartedAt;
 
       // Gemini observability — pulled off the diagnostic stash that the
       // overlay set on the combined result. When Gemini didn't run / failed,
       // _gemini is undefined and the year/brand/player slots stay empty in
       // the log; we still record the prompt version so we can correlate by
-      // deploy. _legacyCombined captures the SCP/OCR pipeline state BEFORE
+      // deploy. _legacyCombined captures the OCR pipeline state BEFORE
       // the Gemini overlay overwrote it.
       const geminiResultLog = (finalResult as any)._gemini ?? null;
       const legacyCombinedLog = (finalResult as any)._legacyCombined ?? null;
@@ -788,10 +656,6 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
         legacyCombinedLog && legacyCombinedLog.year != null
           ? legacyCombinedLog.year
           : null;
-      const scpGroundingSkipped =
-        typeof (finalResult as any)._scpGroundingSkipped === 'boolean'
-          ? (finalResult as any)._scpGroundingSkipped
-          : null;
 
       if (visualFoilResult) {
         for (const line of (visualFoilResult.indicators ?? [])) {
@@ -803,32 +667,24 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
           isFoil: visualFoilResult.isFoil,
           ocrFrontText: frontOCRText,
           ocrBackText: backOCRText,
-          scpMatchScore,
-          scpReason,
-          scpTopCandidates,
           durationMs,
           geminiPromptVersion,
           geminiYear,
           geminiBrand,
           geminiPlayer,
           legacyYear,
-          scpGroundingSkipped,
         });
       } else {
         scanLog.setFinal({
           foilType: finalResult.foilType ?? '',
           ocrFrontText: frontOCRText,
           ocrBackText: backOCRText,
-          scpMatchScore,
-          scpReason,
-          scpTopCandidates,
           durationMs,
           geminiPromptVersion,
           geminiYear,
           geminiBrand,
           geminiPlayer,
           legacyYear,
-          scpGroundingSkipped,
         });
       }
       scanLog.flush();
@@ -1658,641 +1514,11 @@ async function combineCardResults(
     console.log(`Set isNumbered=true based on serial number: ${combined.serialNumber}`);
   }
 
-  // ─── SCP-First Authority ────────────────────────────────────────────────────
-  // SCP is the authoritative catalog for brand/year/cardNumber/playerName/parallel.
-  // It covers the major sports (baseball, football, basketball, hockey) far more
-  // comprehensively than our local card_database, so we ask SCP first using the
-  // OCR-derived query fields. If SCP returns a confident match (score ≥ 65),
-  // we overwrite the OCR-owned scan fields with SCP's values and skip the
-  // entire CardDB path below — year-probe disambiguation, surname-catalog
-  // search, and the main tryLookup block. CardDB still runs on SCP miss as a
-  // silent fallback, and set/collection enrichment from CardDB only fires when
-  // SCP has already been skipped.
-  //
-  // OCR-owned fields (CMP code, rookie flag, autograph flag, serial number,
-  // variant, team) are NEVER overwritten by SCP or CardDB — those are signals
-  // only the card image itself carries authoritatively.
-  let scpHit = false;
-  // Always stamp the SCP query input on the combined result, even before
-  // we know the outcome. The bulk-scan inbox-diagnostic UI uses this to
-  // show "here's what we asked SCP" for every card, hit or miss.
-  const scpPlayerName = `${combined.playerFirstName || ''} ${combined.playerLastName || ''}`.trim();
-  const scpInput = {
-    playerName: scpPlayerName || null,
-    year: (combined.year as number | null | undefined) ?? null,
-    brand: combined.brand || null,
-    collection: combined.collection || null,
-    setName: (combined as any).set || null,
-    cardNumber: combined.cardNumber || null,
-    parallel: combined.foilType || null,
-  };
-  (combined as CardFormWithFlags)._scpQuery = { ...scpInput };
-  try {
-    console.log(
-      `[SCP-first] Probing SCP: player="${scpInput.playerName || '(none)'}" year=${scpInput.year || '(none)'}` +
-        ` brand="${scpInput.brand || '(none)'}" cardNumber="${scpInput.cardNumber || '(none)'}" parallel="${scpInput.parallel || '(none)'}"`,
-    );
-    const scpResult = await scpLookupCard(scpInput, { userId: null });
-    // ── SCP-vs-OCR surname conflict guard ─────────────────────────────
-    // SCP's no-player retry drops the player name from the search query
-    // and accepts the highest-scoring product at the same brand/year/
-    // cardNumber slot above a relaxed 55 floor. That's a useful safety
-    // net when OCR misread the player (e.g. modern silver-foil fronts),
-    // but it has a sharp failure mode: when OCR is actually CORRECT and
-    // the player simply isn't in SCP's index for that exact slot, the
-    // retry happily returns a same-numbered card from a *different
-    // sport's product line* (Adrian Peterson football for a Brent
-    // Abernathy baseball card, Santiago Espinal for Masyn Winn, etc.).
-    // Adopting that retry hit then overrides the OCR-correct player
-    // name with someone unrelated.
-    //
-    // Treat a retry-recovered hit as a CONTRADICTION SIGNAL when OCR
-    // already has a confident player identification. "Confident" =
-    // either (a) front and back surface the same surname (independent
-    // cross-validation) or (b) the back-side surname was confirmed
-    // against card_database for this brand+year by the catalog player
-    // check above. When confident OCR disagrees with the retry-
-    // recovered surname, we drop the SCP hit entirely and let the
-    // OCR-derived fields stand. CardDB-only enrichment still runs.
-    if (scpResult.status === 'hit') {
-      // Originally guarded on `recoveredByRetry` only — the no-player retry
-      // path is the textbook case for SCP returning the wrong player.
-      // Real-world scans show first-pass SCP hits can also rank a different
-      // player higher when cardNumber+brand+year tokens dominate and the
-      // player tokens are weak (canonical example: scan
-      // e7a63919-ff78-475c-aace-512261f978d2 — OCR read "John Franco" front
-      // and back of a 1990 Donruss #322, SCP returned Danny Tartabull at
-      // score 60). Apply the same surname-conflict reject to BOTH paths.
-      //
-      // Multi-token last-name handling: card backs frequently print the
-      // player's full legal name ("JOHN ANTHONY FRANCO", "HOWARD BRUCE
-      // SUTTER") which the line-based extractor renders as
-      // playerLastName="Anthony Franco" / "Bruce Sutter". Naively
-      // stripping whitespace + lowercasing yields "anthonyfranco" — which
-      // never equals the front-side single-token "franco". That broke
-      // dual-side surname agreement on the canonical 1990 Donruss #322
-      // John Franco scan (c55745f6-568f-41bb-85da-ac1cdc271531) so the
-      // PR #141 guard never fired and SCP's wrong-player hit (Tartabull,
-      // score 60) stuck. Compare on the LAST token only — the same rule
-      // already used by the catalog player check above (lines 1102-1107).
-      const lastSurnameToken = (s: string | null | undefined): string => {
-        const trimmed = String(s || '').trim();
-        if (!trimmed) return '';
-        const tokens = trimmed.split(/\s+/).filter(Boolean);
-        return tokens.length > 0 ? tokens[tokens.length - 1] : '';
-      };
-      const surnameNorm = (s: string | null | undefined) =>
-        String(s || '').toLowerCase().replace(/[^a-z]/g, '');
-      const ocrLast = surnameNorm(lastSurnameToken(combined.playerLastName));
-      const frontLast = surnameNorm(lastSurnameToken(frontResult.playerLastName));
-      const backLast = surnameNorm(lastSurnameToken(backResult.playerLastName));
-      const dualSideAgreement =
-        frontLast.length >= 3 && backLast.length >= 3 && frontLast === backLast;
-      const catalogValidated =
-        (combined as CardFormWithFlags)._backPlayerCatalogValidated === true;
-      const ocrConfident = dualSideAgreement || catalogValidated;
-      const recoveredName = scpExtractPlayerName(scpResult.match.productName);
-      const recoveredLast = surnameNorm(
-        (recoveredName || '').split(/\s+/).filter(Boolean).pop() || '',
-      );
-      const surnameConflict =
-        ocrLast.length >= 3 && recoveredLast.length >= 3 && ocrLast !== recoveredLast;
-      if (ocrConfident && surnameConflict) {
-        const evidence = [
-          dualSideAgreement ? 'front+back surnames agree' : null,
-          catalogValidated ? 'back surname catalog-validated' : null,
-        ].filter(Boolean).join(', ');
-        const path = scpResult.match.recoveredByRetry ? 'no-player-retry' : 'first-pass';
-        const reasonCode = scpResult.match.recoveredByRetry
-          ? 'retry_player_conflict'
-          : 'first_pass_player_conflict';
-        console.log(
-          `[SCP-first] Rejecting ${path} hit (score=${scpResult.match.matchScore}) ` +
-            `"${scpResult.match.productName}" :: "${scpResult.match.consoleName}" — ` +
-            `SCP surname "${recoveredLast}" conflicts with confident OCR surname ` +
-            `"${ocrLast}" (${evidence}). Treating as miss; keeping OCR-derived fields.`,
-        );
-        const flagged = combined as CardFormWithFlags;
-        flagged._scpHit = false;
-        flagged._scpMatchScore = scpResult.match.matchScore;
-        flagged._scpStatus = 'miss';
-        flagged._scpReason = reasonCode;
-        flagged._scpRetryRejected = true;
-        flagged._scpRetryRejectedReason = 'player_conflict_with_confident_ocr';
-        flagged._scpRetryRejectedHit = {
-          productName: scpResult.match.productName,
-          consoleName: scpResult.match.consoleName,
-          score: Number(scpResult.match.matchScore.toFixed(2)),
-        };
-        // Force the SCP hit branch to be skipped by mutating status.
-        // (Mutating a discriminated union is ugly, but the alternative is
-        // restructuring this whole block.)
-        (scpResult as unknown as { status: string }).status = 'miss';
-        (scpResult as unknown as { reason: string }).reason = reasonCode;
-      }
-    }
-    // ── CardNumber-mismatch guard ─────────────────────────────────────
-    // SCP's product search performs fuzzy text matching across console
-    // names and product names. When OCR supplies a confident cardNumber
-    // and SCP returns a hit whose own product-name #cardNumber differs,
-    // the search engine effectively threw out our cardNumber constraint
-    // — we asked for #186 and it returned #86. That's a fuzzy-match
-    // failure, not a correction.
-    //
-    // Real example (Brent Abernathy 2002 Topps #186 front):
-    //   queried  cardNumber="186"  player="Bay Brent" (front-OCR junk)
-    //   returned "Brent Barry #86" :: "Basketball Cards 2002 Topps"
-    //                  score=67   (different sport, different cardNumber)
-    // CardDB tiebreak then rehomed #86 to "Keith McDonald (Topps Total)",
-    // wiping the OCR-correct #186 and replacing the player.
-    //
-    // When SCP's parsed cardNumber doesn't match the queried cardNumber,
-    // treat as a miss and let OCR-derived fields stand. Comparison is
-    // case-insensitive with a trim so harmless reformatting ("AA-11"
-    // vs "aa-11") still matches.
-    if (
-      scpResult.status === 'hit' &&
-      scpInput.cardNumber &&
-      String(scpInput.cardNumber).trim().length > 0
-    ) {
-      const queriedNum = String(scpInput.cardNumber).trim().toLowerCase();
-      const returnedNumRaw = scpExtractCardNumber(scpResult.match.productName);
-      const returnedNum = returnedNumRaw ? returnedNumRaw.trim().toLowerCase() : null;
-      if (returnedNum && returnedNum !== queriedNum) {
-        console.log(
-          `[SCP-first] Rejecting hit (score=${scpResult.match.matchScore}) ` +
-            `"${scpResult.match.productName}" :: "${scpResult.match.consoleName}" — ` +
-            `SCP returned cardNumber #${returnedNum} but we queried #${queriedNum}. ` +
-            `Treating as miss; keeping OCR-derived fields.`,
-        );
-        const flagged = combined as CardFormWithFlags;
-        flagged._scpHit = false;
-        flagged._scpMatchScore = scpResult.match.matchScore;
-        flagged._scpStatus = 'miss';
-        flagged._scpReason = 'cardnumber_mismatch';
-        flagged._scpCardNumberMismatch = {
-          queried: queriedNum,
-          returned: returnedNum,
-          productName: scpResult.match.productName,
-          consoleName: scpResult.match.consoleName,
-          score: Number(scpResult.match.matchScore.toFixed(2)),
-        };
-        (scpResult as unknown as { status: string }).status = 'miss';
-        (scpResult as unknown as { reason: string }).reason = 'cardnumber_mismatch';
-      }
-    }
-    if (scpResult.status === 'hit') {
-      scpHit = true;
-      const { productName, consoleName, matchScore } = scpResult.match;
-      // Stamp the SCP outcome onto the combined result so downstream
-      // consumers (notably the bulk-scan confidence gate) can reason about
-      // how confident the identification is without re-running SCP.
-      (combined as CardFormWithFlags)._scpHit = true;
-      (combined as CardFormWithFlags)._scpMatchScore = matchScore;
-      (combined as CardFormWithFlags)._scpStatus = 'hit';
-      (combined as CardFormWithFlags)._scpReason = null;
-      const scpYear = scpExtractYear(consoleName);
-      const scpBrand = scpExtractBrand(consoleName);
-      const scpNumber = scpExtractCardNumber(productName);
-      const scpParallel = scpExtractParallel(productName);
-      const scpName = scpExtractPlayerName(productName);
-      console.log(
-        `[SCP-first] HIT score=${matchScore} "${productName}" :: "${consoleName}" — ` +
-          `year=${scpYear ?? '?'} brand=${scpBrand ?? '?'} cardNumber=${scpNumber ?? '?'} ` +
-          `parallel=${scpParallel ?? 'base'} player="${scpName ?? '?'}"`,
-      );
-      // Overwrite SCP-owned fields. We only overwrite when SCP produced a
-      // non-null parsed value — missing pieces (e.g. SCP console-name without
-      // a recognizable year token) leave the OCR value intact.
-      //
-      // GROUNDING GATE: Skip writing grounding fields when SCP_GROUNDING_ENABLED
-      // is unset/false (the safe default). Gemini overlay (PR #155) is the
-      // authoritative signal; SCP's parsed values frequently clobber correct
-      // OCR/Gemini fields when SCP fuzzy-matches a near-clone product from a
-      // different season. Diagnostic _scp* flags above still record the hit.
-      if (isScpGroundingEnabled()) {
-        if (scpYear) {
-          combined.year = scpYear;
-          // SCP is a stronger year signal than any OCR/catalog probe below.
-          const flagged = combined as CardFormWithFlags;
-          flagged._yearFromCatalogProbe = true;
-          flagged._yearFromBackOnly = false;
-          flagged._yearFromCopyright = false;
-          flagged._yearFromBareFallback = false;
-          flagged._yearFromSurnameProbe = false;
-        }
-        if (scpBrand) combined.brand = scpBrand;
-        if (scpNumber) combined.cardNumber = scpNumber;
-        if (scpParallel) combined.foilType = scpParallel;
-        if (scpName) {
-          // Split "First Middle Last" into first / last. Preserve Jr./Sr./II/III/IV
-          // suffixes as part of the last name so card dealers still see them.
-          const suffixes = new Set(['Jr', 'Jr.', 'Sr', 'Sr.', 'II', 'III', 'IV', 'V']);
-          const parts = scpName.split(/\s+/).filter(p => p.length > 0);
-          if (parts.length === 1) {
-            combined.playerFirstName = '';
-            combined.playerLastName = parts[0];
-          } else if (parts.length >= 2) {
-            // Pull off any trailing suffix(es) so they stay glued to the last name.
-            const tail: string[] = [];
-            while (parts.length > 1 && suffixes.has(parts[parts.length - 1])) {
-              tail.unshift(parts.pop() as string);
-            }
-            const last = parts.pop() as string;
-            combined.playerFirstName = parts.join(' ');
-            combined.playerLastName = tail.length > 0 ? `${last} ${tail.join(' ')}` : last;
-          }
-        }
-      } else {
-        console.log(
-          '[SCP-first] Grounding gate ON (SCP_GROUNDING_ENABLED!=true) — skipping ' +
-          `field overwrite. Would have written: year=${scpYear ?? '?'} brand=${scpBrand ?? '?'} ` +
-          `cardNumber=${scpNumber ?? '?'} parallel=${scpParallel ?? 'base'} player="${scpName ?? '?'}".`,
-        );
-        (combined as CardFormWithFlags)._scpGroundingSkipped = true;
-      }
-      console.log(
-        `[SCP-first] Populated from SCP: brand="${combined.brand}" year=${combined.year} ` +
-          `cardNumber="${combined.cardNumber}" player="${combined.playerFirstName} ${combined.playerLastName}" ` +
-          `foilType="${combined.foilType || 'base'}"`,
-      );
-
-      // ── Autograph collection routing ──────────────────────────────────
-      // Autograph cards live in DIFFERENT catalog collections than the
-      // base set (e.g. "Baseball Stars Autographs" rather than "Base Set")
-      // and have their OWN parallel set (Black/Blue/Gold/Orange/Platinum/
-      // Red), distinct from the base-set parallels (Silver Crackle/Gold/
-      // etc.). When OCR detected an autograph signal AND the cardNumber
-      // matches the autograph prefix-suffix pattern (e.g. BSA2-LG, AUTO-XX),
-      // force collection routing toward an autograph collection so the
-      // parallel picker queries the correct catalog rows.
-      //
-      // The cardNumber pattern \b[A-Z]{1,4}\d*-[A-Z]{2,5}\b is the same
-      // shape that dynamicCardAnalyzer uses to recognise autograph slots.
-      // We require BOTH the autograph flag AND the cardNumber pattern
-      // because either alone has false positives: the back's "AUTOGRAPH"
-      // word appears on relics/memorabilia too, and short-code card
-      // numbers occasionally appear on non-autograph inserts.
-      //
-      // Real example: 2025 Topps Series 2 Baseball Stars Autographs Luis
-      // Gil #BSA2-LG (Blue parallel /150) was being routed with an empty
-      // collection, so the picker fell through to base-set parallels.
-      const autographCardNumPattern = /^[A-Z]{1,4}\d*-[A-Z]{2,5}$/;
-      const cardNumStr = String(combined.cardNumber || '').trim().toUpperCase();
-      const isAutographCardNumber =
-        cardNumStr.length > 0 && autographCardNumPattern.test(cardNumStr);
-      if (combined.isAutographed && isAutographCardNumber) {
-        const currentCollection = String(combined.collection || '').trim();
-        const looksLikeAutographCollection =
-          /\bautograph/i.test(currentCollection) ||
-          /\bsignature/i.test(currentCollection);
-        if (!looksLikeAutographCollection) {
-          const oldCollection = currentCollection;
-          combined.collection = 'Baseball Stars Autographs';
-          console.log(
-            `[SCP-first] Autograph card detected (isAutographed=true, cardNumber="${cardNumStr}") ` +
-              `— routing collection "${oldCollection || '(empty)'}" → "${combined.collection}". ` +
-              `CardDB enrichment will refine if a more specific collection matches this slot.`
-          );
-          (combined as any)._autographCollectionRouted = true;
-        }
-      }
-
-      // CardDB set/collection enrichment on SCP hit. SCP doesn't carry
-      // structured set/collection data, so we still query CardDB — but only
-      // to fill those two fields. SCP-owned fields (brand/year/cardNumber/
-      // playerName/parallel) are NEVER touched by this enrichment path;
-      // only combined.set and combined.collection are updated, and only
-      // when they're currently empty so a CardDB miss / stale row can't
-      // clobber what SCP already gave us. Runs with the SCP-corrected
-      // (brand, year, cardNumber) so the DB lookup uses the authoritative
-      // identifiers rather than the raw OCR values.
-      try {
-        const enrichNum = String(combined.cardNumber || '').trim();
-        if (combined.brand && combined.year && enrichNum) {
-          const enrichResult = await lookupCard({
-            brand: combined.brand,
-            year: combined.year as number,
-            collection: combined.collection || undefined,
-            cardNumber: enrichNum,
-            serialNumber: combined.serialNumber || undefined,
-            playerLastName: combined.playerLastName || undefined,
-            ocrText: `${frontOCRText}\n${backOCRText}`,
-            sport: combined.sport || undefined,
-          });
-          if (enrichResult.found) {
-            let filled: string[] = [];
-            if (!combined.set && enrichResult.set) {
-              combined.set = enrichResult.set;
-              filled.push(`set="${enrichResult.set}"`);
-            }
-            if (!combined.collection && enrichResult.collection) {
-              combined.collection = enrichResult.collection;
-              filled.push(`collection="${enrichResult.collection}"`);
-            }
-            if (filled.length > 0) {
-              console.log(`[SCP-first] CardDB set/collection enrichment: ${filled.join(', ')}.`);
-            } else {
-              console.log('[SCP-first] CardDB row found but set/collection already populated — leaving OCR values in place.');
-            }
-
-            // CardDB-vs-SCP player-name disagreement check.
-            //
-            // For a given (brand, year, cardNumber) slot in CardDB there is
-            // exactly ONE player. SCP's keyword search, however, can return
-            // a same-numbered card from a DIFFERENT sport's product line that
-            // happens to share the same year+brand. The retry-without-player
-            // path (sportscardspro/index.ts) is especially exposed because it
-            // has no sport filter and accepts the highest-scoring candidate
-            // by structural anchors alone.
-            //
-            // Canonical example: 2003 Upper Deck Chipper Jones #384 (baseball).
-            // OCR misread the player from a noisy front (silver foil), the
-            // retry without player searched "2003 Upper Deck 384", and SCP
-            // returned 2003 Upper Deck MVP #384 (Nate Burleson, FOOTBALL) at
-            // score 63 — above the 55 retry floor. CardDB had the correct
-            // Chipper Jones row all along but SCP-first only used CardDB for
-            // set/collection enrichment, so Burleson stuck.
-            //
-            // When CardDB and SCP disagree on the surname for the same
-            // (brand, year, cardNumber) slot, CardDB is authoritative for
-            // the player name (and team). We trust CardDB here because it's
-            // a hand-curated, slot-keyed catalog while SCP is a free-text
-            // search across all sports.
-            try {
-              const dbFirst = String(enrichResult.playerFirstName || '').trim();
-              const dbLast = String(enrichResult.playerLastName || '').trim();
-              const scpLast = String(combined.playerLastName || '').trim();
-              const surnameNorm = (s: string) => s.toLowerCase().replace(/[^a-z]/g, '');
-              if (
-                dbLast && scpLast &&
-                surnameNorm(dbLast) !== surnameNorm(scpLast)
-              ) {
-                console.log(
-                  `[SCP-first] CardDB/SCP player disagreement on (brand="${combined.brand}", year=${combined.year}, cardNumber="${enrichNum}"): ` +
-                  `CardDB="${dbFirst} ${dbLast}" vs SCP="${combined.playerFirstName} ${combined.playerLastName}". ` +
-                  `Preferring CardDB (slot-keyed local catalog beats free-text SCP search across sports).`,
-                );
-                combined.playerFirstName = dbFirst;
-                combined.playerLastName = dbLast;
-                if (enrichResult.team) {
-                  combined.team = enrichResult.team;
-                }
-                // Surface that we overrode SCP’s name so the bulk-scan UI
-                // can show why and the confidence gate can route to review.
-                const flagged = combined as CardFormWithFlags;
-                flagged._scpPlayerOverridden = true;
-                flagged._scpPlayerOverrideReason = 'carddb_disagreement';
-              }
-            } catch (cmpErr: any) {
-              console.warn('[SCP-first] CardDB/SCP player disagreement check threw (non-fatal):', cmpErr?.message || cmpErr);
-            }
-          } else {
-            console.log('[SCP-first] CardDB set/collection enrichment: no matching row — set/collection stay as OCR populated them.');
-          }
-        }
-      } catch (enrichErr: any) {
-        console.warn('[SCP-first] CardDB set/collection enrichment threw (non-fatal):', enrichErr?.message || enrichErr);
-      }
-
-      console.log('[SCP-first] Skipping main CardDB lookup — SCP owns brand/year/cardNumber/player/parallel.');
-    } else {
-      console.log(`[SCP-first] MISS (${scpResult.reason}) — falling through to CardDB.`);
-      const flagged = combined as CardFormWithFlags;
-      flagged._scpHit = false;
-      flagged._scpStatus = 'miss';
-      flagged._scpReason = scpResult.reason;
-      if (scpResult.topCandidates && scpResult.topCandidates.length > 0) {
-        flagged._scpTopCandidates = scpResult.topCandidates.map(c => ({
-          productName: c.productName,
-          consoleName: c.consoleName,
-          score: Number(c.score.toFixed(2)),
-        }));
-      }
-      // api_error miss carries an errorMessage we want to surface verbatim.
-      if (scpResult.reason === 'api_error' && scpResult.errorMessage) {
-        flagged._scpReason = `api_error: ${scpResult.errorMessage}`;
-      }
-
-      // ─── OCR-corroborated promotion (below_threshold) ──────────────────
-      // SCP's MATCH_THRESHOLD (65) is conservative. When SCP returns
-      // `below_threshold` but the top candidate independently agrees with
-      // OCR on year + brand + surname, we promote it to a hit. The three
-      // OCR signals corroborate the candidate, so the score gap doesn't
-      // matter — we'd be falling through to CardDB and re-deriving the
-      // same row anyway, but without the parallel/cardNumber that the SCP
-      // candidate carries.
-      //
-      // Canonical example: 2025 Topps Series 2 Trea Turner #450 Silver
-      // Crackle. SCP returns three candidates tied at 60.00, the top one
-      // being "Trea Turner #450" :: "Baseball Cards 2025 Topps Series 2".
-      // OCR independently read year=2025, brand=Topps, lastName=Turner —
-      // all three match — so the candidate is the right card and we miss
-      // the cardNumber/set enrichment by not promoting.
-      //
-      // We only promote when:
-      //   • reason === 'below_threshold' (no_results / api_error / etc.
-      //     don't carry candidates worth trusting)
-      //   • OCR gave us non-empty year, brand, AND surname
-      //   • candidate's year matches OCR year exactly
-      //   • candidate's brand matches OCR brand (substring, case-insensitive)
-      //   • candidate's productName contains the OCR surname as a whole
-      //     token (case-insensitive)
-      //
-      // We DO NOT require cardNumber agreement — the cardNumber is exactly
-      // what we're trying to recover (OCR often missed it on the back).
-      const promoCandidates = scpResult.topCandidates ?? [];
-      const ocrYear = (combined.year as number | null | undefined) ?? null;
-      const ocrBrand = (combined.brand || '').trim();
-      // Multi-token last names (e.g. "Anthony Franco" from a back-side
-      // "JOHN ANTHONY FRANCO" full-legal-name imprint) need to compare on
-      // the LAST token only — the SCP product name lists the common name,
-      // never the full legal name. Same rationale as the surname-conflict
-      // guard above.
-      const ocrLastFull = (combined.playerLastName || '').trim();
-      const ocrLastTokens = ocrLastFull.split(/\s+/).filter(Boolean);
-      const ocrLast = ocrLastTokens.length > 0 ? ocrLastTokens[ocrLastTokens.length - 1] : '';
-      let promoted: { productName: string; consoleName: string; score: number } | null = null;
-      if (
-        scpResult.reason === 'below_threshold' &&
-        promoCandidates.length > 0 &&
-        ocrYear &&
-        ocrBrand &&
-        ocrLast
-      ) {
-        for (const cand of promoCandidates) {
-          const candYear = scpExtractYear(cand.consoleName);
-          const candBrand = scpExtractBrand(cand.consoleName);
-          if (!candYear || candYear !== ocrYear) continue;
-          if (!candBrand) continue;
-          const brandMatches =
-            candBrand.toLowerCase().includes(ocrBrand.toLowerCase()) ||
-            ocrBrand.toLowerCase().includes(candBrand.toLowerCase());
-          if (!brandMatches) continue;
-          const productNorm = cand.productName.toLowerCase().replace(/[^a-z]/g, ' ');
-          const surnameNorm = ocrLast.toLowerCase().replace(/[^a-z]/g, '');
-          if (!surnameNorm) continue;
-          // Whole-token surname match: "turner" in "trea turner 450" → yes;
-          // "ner" in "renner" → no.
-          const surnameRe = new RegExp(`(^|\\s)${surnameNorm}(\\s|$)`, 'i');
-          if (!surnameRe.test(productNorm)) continue;
-          promoted = cand;
-          break;
-        }
-      }
-
-      if (promoted) {
-        const { productName, consoleName, score } = promoted;
-        const scpYear = scpExtractYear(consoleName);
-        const scpBrand = scpExtractBrand(consoleName);
-        const scpNumber = scpExtractCardNumber(productName);
-        const scpParallel = scpExtractParallel(productName);
-        const scpName = scpExtractPlayerName(productName);
-        console.log(
-          `[SCP-first] PROMOTING below_threshold candidate (score=${score}) ` +
-            `"${productName}" :: "${consoleName}" — OCR corroboration: ` +
-            `year=${ocrYear} brand="${ocrBrand}" surname="${ocrLast}" all match.`,
-        );
-        scpHit = true;
-        flagged._scpHit = true;
-        flagged._scpStatus = 'hit';
-        flagged._scpMatchScore = score;
-        flagged._scpReason = `promoted_from_below_threshold (score=${score})`;
-        flagged._scpPromotedFromBelowThreshold = true;
-        flagged._scpPromotedReason = 'ocr_year_brand_surname_match';
-
-        // Mirror the population logic from the hit branch above. SCP
-        // overwrites only fields it parsed non-null; OCR values stay for
-        // anything SCP can't extract.
-        //
-        // GROUNDING GATE: same as the first-pass hit branch — skip writes
-        // when SCP_GROUNDING_ENABLED is unset/false (safe default). Diagnostic
-        // flags (_scpHit, _scpMatchScore, _scpReason, _scpPromotedFromBelowThreshold)
-        // are kept above so the scan log still records that a promotion fired.
-        if (isScpGroundingEnabled()) {
-          if (scpYear) {
-            combined.year = scpYear;
-            flagged._yearFromCatalogProbe = true;
-            flagged._yearFromBackOnly = false;
-            flagged._yearFromCopyright = false;
-            flagged._yearFromBareFallback = false;
-            flagged._yearFromSurnameProbe = false;
-          }
-          if (scpBrand) combined.brand = scpBrand;
-          if (scpNumber) combined.cardNumber = scpNumber;
-          if (scpParallel) combined.foilType = scpParallel;
-          if (scpName) {
-            const suffixes = new Set(['Jr', 'Jr.', 'Sr', 'Sr.', 'II', 'III', 'IV', 'V']);
-            const parts = scpName.split(/\s+/).filter(p => p.length > 0);
-            if (parts.length === 1) {
-              combined.playerFirstName = '';
-              combined.playerLastName = parts[0];
-            } else if (parts.length >= 2) {
-              const tail: string[] = [];
-              while (parts.length > 1 && suffixes.has(parts[parts.length - 1])) {
-                tail.unshift(parts.pop() as string);
-              }
-              const last = parts.pop() as string;
-              combined.playerFirstName = parts.join(' ');
-              combined.playerLastName = tail.length > 0 ? `${last} ${tail.join(' ')}` : last;
-            }
-          }
-        } else {
-          console.log(
-            '[SCP-first] Grounding gate ON (SCP_GROUNDING_ENABLED!=true) — skipping ' +
-            `promoted-candidate field overwrite. Would have written: year=${scpYear ?? '?'} ` +
-            `brand=${scpBrand ?? '?'} cardNumber=${scpNumber ?? '?'} parallel=${scpParallel ?? 'base'} ` +
-            `player="${scpName ?? '?'}".`,
-          );
-          (combined as CardFormWithFlags)._scpGroundingSkipped = true;
-        }
-        console.log(
-          `[SCP-first] Populated from promoted candidate: brand="${combined.brand}" year=${combined.year} ` +
-            `cardNumber="${combined.cardNumber}" player="${combined.playerFirstName} ${combined.playerLastName}" ` +
-            `foilType="${combined.foilType || 'base'}"`,
-        );
-
-        // Run the same CardDB set/collection enrichment as the hit branch
-        // so promoted hits end up with the same downstream shape (set,
-        // collection, CardDB-vs-SCP player reconciliation).
-        try {
-          const enrichNum = String(combined.cardNumber || '').trim();
-          if (combined.brand && combined.year && enrichNum) {
-            const enrichResult = await lookupCard({
-              brand: combined.brand,
-              year: combined.year as number,
-              collection: combined.collection || undefined,
-              cardNumber: enrichNum,
-              serialNumber: combined.serialNumber || undefined,
-              playerLastName: combined.playerLastName || undefined,
-              ocrText: `${frontOCRText}\n${backOCRText}`,
-              sport: combined.sport || undefined,
-            });
-            if (enrichResult.found) {
-              const filled: string[] = [];
-              if (!combined.set && enrichResult.set) {
-                combined.set = enrichResult.set;
-                filled.push(`set="${enrichResult.set}"`);
-              }
-              if (!combined.collection && enrichResult.collection) {
-                combined.collection = enrichResult.collection;
-                filled.push(`collection="${enrichResult.collection}"`);
-              }
-              if (filled.length > 0) {
-                console.log(`[SCP-first] (promoted) CardDB set/collection enrichment: ${filled.join(', ')}.`);
-              } else {
-                console.log('[SCP-first] (promoted) CardDB row found but set/collection already populated — leaving OCR values in place.');
-              }
-              // CardDB-vs-SCP player disagreement check (same as hit branch).
-              try {
-                const dbFirst = String(enrichResult.playerFirstName || '').trim();
-                const dbLast = String(enrichResult.playerLastName || '').trim();
-                const scpLast = String(combined.playerLastName || '').trim();
-                const surnameNorm = (s: string) => s.toLowerCase().replace(/[^a-z]/g, '');
-                if (dbLast && scpLast && surnameNorm(dbLast) !== surnameNorm(scpLast)) {
-                  console.log(
-                    `[SCP-first] (promoted) CardDB/SCP player disagreement on (brand="${combined.brand}", year=${combined.year}, cardNumber="${enrichNum}"): ` +
-                    `CardDB="${dbFirst} ${dbLast}" vs SCP="${combined.playerFirstName} ${combined.playerLastName}". ` +
-                    `Preferring CardDB.`,
-                  );
-                  combined.playerFirstName = dbFirst;
-                  combined.playerLastName = dbLast;
-                  if (enrichResult.team) {
-                    combined.team = enrichResult.team;
-                  }
-                  flagged._scpPlayerOverridden = true;
-                  flagged._scpPlayerOverrideReason = 'carddb_disagreement';
-                }
-              } catch (cmpErr: any) {
-                console.warn('[SCP-first] (promoted) CardDB/SCP player disagreement check threw (non-fatal):', cmpErr?.message || cmpErr);
-              }
-            } else {
-              console.log('[SCP-first] (promoted) CardDB set/collection enrichment: no matching row.');
-            }
-          }
-        } catch (enrichErr: any) {
-          console.warn('[SCP-first] (promoted) CardDB set/collection enrichment threw (non-fatal):', enrichErr?.message || enrichErr);
-        }
-
-        console.log('[SCP-first] (promoted) Skipping main CardDB lookup — SCP promotion owns brand/year/cardNumber/player/parallel.');
-      }
-    }
-  } catch (err: any) {
-    // Never let SCP-first failures block the scan. Fall through to CardDB.
-    console.warn('[SCP-first] threw unexpectedly (non-fatal, falling through to CardDB):', err?.message || err);
-    const flagged = combined as CardFormWithFlags;
-    flagged._scpHit = false;
-    flagged._scpStatus = 'threw';
-    flagged._scpReason = err?.message ? String(err.message) : 'unknown_error';
-  }
-
   // ─── Card Database Lookup ───────────────────────────────────────────────────
   // Use authoritative DB data when OCR successfully detected brand + year + card number.
   // DB provides: player name, team, rookie flag, collection, variation.
   // OCR foil/serial/condition data is preserved and not overwritten.
   // dbVariation is stashed here and applied AFTER visual/text foil detection as a fallback.
-  // SCP-first gate: on SCP hit we skip the year-probe, surname-catalog search,
-  // and main tryLookup block entirely. set/collection stay as OCR populated them.
   let dbVariation: string | null = null;
   // Set to true when the catalog confirmed a card hit but no parallel
   // variation row matched the serial-number rule (no detected serial → no
@@ -2508,7 +1734,7 @@ async function combineCardResults(
   // if the back-side surname looked usable.
   let yearProbeFoundCatalogHit = false;
 
-  if (!scpHit && combined.brand && combined.cardNumber) {
+  if (combined.brand && combined.cardNumber) {
     try {
       const allOcrText = `${frontOCRText}\n${backOCRText}`;
       const ocrCandidates = extractAllYearCandidates(allOcrText, combined.sport);
@@ -3022,7 +2248,7 @@ async function combineCardResults(
     }
   }
 
-  if (!scpHit && combined.brand && combined.year && combined.cardNumber) {
+  if (combined.brand && combined.year && combined.cardNumber) {
     // If the OCR text contains the literal "<year>-<cardNumber>"
     // compound (vintage convention printed in the © legal block,
     // e.g. "© TCMA LTD. 1982-17"), then BOTH year and cardNumber
@@ -3142,8 +2368,6 @@ async function combineCardResults(
     } catch (err: any) {
       console.error('[CardDB] Lookup failed (non-fatal):', err.message);
     }
-  } else if (scpHit) {
-    console.log('[CardDB] Skipping lookup — SCP-first already supplied authoritative brand/year/cardNumber/player/parallel.');
   } else {
     console.log(`[CardDB] Skipping lookup — insufficient OCR fields: brand="${combined.brand}" year=${combined.year} cardNumber="${combined.cardNumber}"`);
   }

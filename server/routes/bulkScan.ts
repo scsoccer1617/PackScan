@@ -558,10 +558,10 @@ export function registerBulkScanRoutes(app: Express): void {
         },
         scp: {
           status: scpStatus,
-          reason: typeof analysis._scpReason === 'string' ? analysis._scpReason : null,
-          matchScore: typeof analysis._scpMatchScore === 'number' ? analysis._scpMatchScore : null,
+          reason: null,
+          matchScore: null,
           query: analysis._scpQuery && typeof analysis._scpQuery === 'object' ? analysis._scpQuery : null,
-          topCandidates: Array.isArray(analysis._scpTopCandidates) ? analysis._scpTopCandidates : [],
+          topCandidates: [],
         },
         ocrText: {
           front: typeof analysis._frontOCRText === 'string' ? analysis._frontOCRText : null,
