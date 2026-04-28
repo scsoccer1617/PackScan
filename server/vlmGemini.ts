@@ -44,6 +44,7 @@ export interface GeminiCardResult {
   yearPrintedRaw?: string | null;
   brand?: string | null;
   set?: string | null;
+  collection?: string | null;
   cardNumber?: string | null;
   parallel?: {
     name?: string | null;
@@ -58,7 +59,10 @@ export interface GeminiCardResult {
   printRun?: number | string | null;
   team?: string | null;
   position?: string | null;
-  confidence?: Record<string, number | null>;
+  /** Numeric confidence map. Older prompt versions returned string labels
+   *  ("High"/"Medium"/"Low") here; current prompt requires floats 0.0–1.0,
+   *  but downstream code should still tolerate either shape. */
+  confidence?: Record<string, number | string | null>;
   notes?: string | null;
 }
 

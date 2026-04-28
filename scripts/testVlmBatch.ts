@@ -178,8 +178,7 @@ function printResult(r: RunResult): void {
   // Header row for this card
   console.log('├──────┴─────────┴─────────┴──────────────────────┴──────┴──────────┴───────────────────────┴────────┴──────────────────┤');
 
-  const widths = [22, 6, 10, 23, 8, 18];
-  const cols = ['Player', 'Year', 'Brand', 'Set', 'Card #', 'Parallel'];
+  const widths = [22, 6, 10, 18, 18, 8, 18];
 
   const g = r.gemini;
   const l = r.legacy;
@@ -189,16 +188,18 @@ function printResult(r: RunResult): void {
     trunc(g?.year, widths[1]).padEnd(widths[1]),
     trunc(g?.brand, widths[2]).padEnd(widths[2]),
     trunc(g?.set, widths[3]).padEnd(widths[3]),
-    trunc(g?.cardNumber, widths[4]).padEnd(widths[4]),
-    trunc(g?.parallel?.name, widths[5]).padEnd(widths[5]),
+    trunc(g?.collection, widths[4]).padEnd(widths[4]),
+    trunc(g?.cardNumber, widths[5]).padEnd(widths[5]),
+    trunc(g?.parallel?.name, widths[6]).padEnd(widths[6]),
   ];
   const legacyCells = [
     trunc(l?.player, widths[0]).padEnd(widths[0]),
     trunc(l?.year, widths[1]).padEnd(widths[1]),
     trunc(l?.brand, widths[2]).padEnd(widths[2]),
     trunc(l?.set, widths[3]).padEnd(widths[3]),
-    trunc(l?.cardNumber, widths[4]).padEnd(widths[4]),
-    trunc(l?.parallel, widths[5]).padEnd(widths[5]),
+    trunc(l?.collection, widths[4]).padEnd(widths[4]),
+    trunc(l?.cardNumber, widths[5]).padEnd(widths[5]),
+    trunc(l?.parallel, widths[6]).padEnd(widths[6]),
   ];
 
   printRow(r.id, `${r.geminiMs ?? '?'}ms`, 'GEMINI', geminiCells);
@@ -227,8 +228,8 @@ async function main() {
 
   console.log(`Found ${pairs.length} pair(s): ${pairs.map(p => p.id).join(', ')}\n`);
 
-  const widths = [22, 6, 10, 23, 8, 18];
-  const cols = ['Player', 'Year', 'Brand', 'Set', 'Card #', 'Parallel'];
+  const widths = [22, 6, 10, 18, 18, 8, 18];
+  const cols = ['Player', 'Year', 'Brand', 'Set', 'Collection', 'Card #', 'Parallel'];
   console.log('┌──────┬─────────┬─────────┬' + cols.map((c, i) => '─'.repeat(widths[i] + 2)).join('┬') + '┐');
   const header = ['ID  ', 'Time   ', 'Source ', ...cols.map((c, i) => c.padEnd(widths[i]))];
   console.log('│ ' + header.join(' │ ') + ' │');
