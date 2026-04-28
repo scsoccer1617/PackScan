@@ -563,12 +563,16 @@ async function processItem(batch: ScanBatch, item: ScanBatchItem): Promise<'auto
         parallel: analysis.variant || null,
       });
       const result = await pickerSearch(query, {
-        limit: 10,
+        limit: 5,
         requireCardNumber: analysis.cardNumber || null,
         requirePlayerLastName: analysis.playerLastName || null,
-        // Match buildPickerQuery's parallel source above so the base-card
-        // exclusion logic mirrors what the query was actually built with.
+        // Match buildPickerQuery's parallel source above so the relevance
+        // ranker scores against the same parallel that drove the query.
         scannedParallel: analysis.variant || analysis.foilType || null,
+        brand: analysis.brand,
+        set: analysis.set || analysis.collection || null,
+        year: analysis.year,
+        playerFirstName: analysis.playerFirstName,
       });
       const active = result.active || [];
       const averageValue = active.length > 0
