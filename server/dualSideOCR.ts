@@ -657,6 +657,21 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
         legacyCombinedLog && legacyCombinedLog.year != null
           ? legacyCombinedLog.year
           : null;
+      // PR #166: raw parallel.name + set off the Gemini stash so the scan
+      // log captures exactly what the model returned, even when the
+      // overlay coerced "None detected" into an empty foilType. Empty
+      // string when Gemini didn't run / didn't emit the field.
+      const geminiParallel =
+        geminiResultLog &&
+        geminiResultLog.parallel &&
+        typeof geminiResultLog.parallel.name === 'string' &&
+        geminiResultLog.parallel.name.trim()
+          ? geminiResultLog.parallel.name.trim()
+          : null;
+      const geminiSet =
+        geminiResultLog && typeof geminiResultLog.set === 'string' && geminiResultLog.set.trim()
+          ? geminiResultLog.set.trim()
+          : null;
 
       if (visualFoilResult) {
         for (const line of (visualFoilResult.indicators ?? [])) {
@@ -674,6 +689,8 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
           geminiBrand,
           geminiPlayer,
           legacyYear,
+          geminiParallel,
+          geminiSet,
         });
       } else {
         scanLog.setFinal({
@@ -686,6 +703,8 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
           geminiBrand,
           geminiPlayer,
           legacyYear,
+          geminiParallel,
+          geminiSet,
         });
       }
       scanLog.flush();
