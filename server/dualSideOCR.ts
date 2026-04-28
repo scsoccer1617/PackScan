@@ -537,7 +537,7 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
     backOCRText = backSide.ocrText;
     console.timeEnd('dual-analyzers');
     if (geminiResult) {
-      console.log(`[vlm-gemini] ok promptVersion=${VLM_INFO.promptVersion} player="${geminiResult.player ?? ''}" year=${geminiResult.year ?? '?'} brand=${geminiResult.brand ?? '?'} set=${geminiResult.set ?? '?'} collection=${geminiResult.collection ?? '?'} #${geminiResult.cardNumber ?? '?'} parallel="${geminiResult.parallel?.name ?? 'None'}"`);
+      console.log(`[vlm-gemini] ok promptVersion=${VLM_INFO.promptVersion} player="${geminiResult.player ?? ''}" year=${geminiResult.year ?? '?'} brand=${geminiResult.brand ?? '?'} set=${geminiResult.set ?? '?'} collection=${geminiResult.collection ?? '?'} #${geminiResult.cardNumber ?? '?'} cmp=${geminiResult.cmpCode ?? '?'} parallel="${geminiResult.parallel?.name ?? 'None'}"`);
     } else {
       console.log('[vlm-gemini] no result — legacy OCR is authoritative for this scan');
     }
@@ -595,6 +595,7 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
           set: (combinedResult as any).set ?? null,
           collection: (combinedResult as any).collection ?? null,
           cardNumber: (combinedResult as any).cardNumber ?? null,
+          cmpNumber: (combinedResult as any).cmpNumber ?? null,
           foilType: (combinedResult as any).foilType ?? null,
           variant: (combinedResult as any).variant ?? null,
           sport: (combinedResult as any).sport ?? null,
@@ -615,6 +616,7 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
           set: (combinedResult as any).set,
           collection: (combinedResult as any).collection,
           cardNumber: (combinedResult as any).cardNumber,
+          cmpNumber: (combinedResult as any).cmpNumber,
           foilType: (combinedResult as any).foilType,
         }));
       } catch (overlayErr: any) {
