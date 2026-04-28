@@ -251,6 +251,10 @@ export function registerBulkScanRoutes(app: Express): void {
         scpMatchedTitle: null,
         cardDbCorroborated: null,
         analyzerVersion: 'bulk_scan_review_save',
+        // Persist the analyzer's original snapshot — the same blob we just
+        // diffed against the dealer's edits. Lets /admin/scans render the
+        // pre-edit DETECTED column from a single source of truth.
+        geminiSnapshot: snapshot,
       }).catch(() => {});
     } catch (logErr) {
       // Belt-and-suspenders: never let logging block the dealer's save.

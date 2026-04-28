@@ -68,12 +68,31 @@ export interface LogUserScanParams {
   cardDbCorroborated?: boolean | null;
   analyzerVersion?: string | null;
   /**
+   * Full Gemini analyzer payload at scan time. Stored as stringified JSON
+   * in the `gemini_snapshot` column and used by /admin/scans as the
+   * authoritative DETECTED snapshot — separate from the per-field
+   * `detectedX` columns so the admin sees exactly what the model emitted
+   * before any client-side coercion. Accepts an object (will be stringified)
+   * or a pre-stringified JSON string. Persisted on insert; never mutated
+   * by updateUserScan.
+   */
+  geminiSnapshot?: unknown;
+  /**
    * Override the auto-computed diff. Use when the client tells us
    * authoritatively which fields it considers "changed" (e.g. when the user
    * pressed 👍 and we want to record fieldsChanged=[] regardless of any
    * coercion noise between detected/final).
    */
   fieldsChangedOverride?: string[];
+}
+
+function serializeSnapshot(v: unknown): string | null {
+  if (v == null) return null;
+  if (typeof v === 'string') {
+    const t = v.trim();
+    return t === '' ? null : t;
+  }
+  try { return JSON.stringify(v); } catch { return null; }
 }
 
 /**
@@ -180,6 +199,7 @@ export async function logUserScan(params: LogUserScanParams): Promise<number | u
         scpMatchedTitle: params.scpMatchedTitle ?? null,
         cardDbCorroborated: params.cardDbCorroborated ?? null,
         analyzerVersion: params.analyzerVersion ?? null,
+        geminiSnapshot: serializeSnapshot(params.geminiSnapshot),
       })
       .returning({ id: userScans.id });
 
@@ -212,15 +232,23 @@ export async function updateUserScan(
       ? [...params.fieldsChangedOverride]
       : diffScanFields(detected, final);
 
+    // Promote anonymous analyze-time rows to authed when userId is now
+    // known (e.g. session became available between analyze and save).
+    // `undefined` skips the column so we never blow away a userId that
+    // was already attached to the row.
+    const userIdSet = params.userId != null ? params.userId : undefined;
+
     const result = await db
       .update(userScans)
       .set({
+        ...(userIdSet !== undefined ? { userId: userIdSet } : {}),
         cardId: params.cardId ?? null,
         userAction: params.userAction,
         fieldsChanged,
-        // Final-only update on save — detected was set at analyze time and
-        // we deliberately don't touch it here so the audit row reflects
-        // the original scanner output for review purposes.
+        // Final-only update on save — detected and the geminiSnapshot were
+        // set at analyze time and we deliberately don't touch them here so
+        // the audit row always reflects the original scanner output for
+        // review purposes (even after the user edits and re-saves).
         finalSport: nullableString(final.sport),
         finalPlayerFirstName: nullableString(final.playerFirstName),
         finalPlayerLastName: nullableString(final.playerLastName),

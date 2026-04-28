@@ -279,6 +279,12 @@ export function registerSheetRoutes(app: Express) {
         scpMatchedTitle: tracking?.scpMatchedTitle ?? null,
         cardDbCorroborated: tracking?.cardDbCorroborated ?? null,
         analyzerVersion: tracking?.analyzerVersion ?? null,
+        // Forward the original detected blob the client tracked at
+        // scan-result render time. updateUserScan never overwrites an
+        // existing geminiSnapshot, so this only matters for the fresh-
+        // insert fallback path (older clients without _userScanId, or
+        // when the analyze-time row went missing).
+        geminiSnapshot: detectedSnapshot ?? null,
         // 👍 means "all fields verified" — record empty diff regardless of
         // string-coercion noise between detected and final.
         fieldsChangedOverride: action === 'confirmed' ? [] : undefined,

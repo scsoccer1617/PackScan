@@ -598,6 +598,11 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
         cardId: null,
         userAction: 'analyzed_no_save',
         detected: detectedSnapshot,
+        // Persist the full Gemini payload so /admin/scans can show the
+        // original model output even after the user edits and re-saves.
+        // The row's geminiSnapshot is intentionally never mutated by
+        // updateUserScan — see userScans.ts.
+        geminiSnapshot: finalResult,
         // No final values yet — user hasn't saved. logUserScan falls back
         // to detected when final is omitted, which means an unfinished
         // analyzed_no_save row reads cleanly in the admin ledger.
