@@ -566,6 +566,9 @@ async function processItem(batch: ScanBatch, item: ScanBatchItem): Promise<'auto
         limit: 10,
         requireCardNumber: analysis.cardNumber || null,
         requirePlayerLastName: analysis.playerLastName || null,
+        // Match buildPickerQuery's parallel source above so the base-card
+        // exclusion logic mirrors what the query was actually built with.
+        scannedParallel: analysis.variant || analysis.foilType || null,
       });
       const active = result.active || [];
       const averageValue = active.length > 0

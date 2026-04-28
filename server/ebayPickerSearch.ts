@@ -46,6 +46,51 @@ const BROWSE_SEARCH_URL = 'https://api.ebay.com/buy/browse/v1/item_summary/searc
 // supports non-sports cards.
 const SPORTS_CARDS_CATEGORY = '261328';
 
+// Parallel/insert keywords to exclude from base-card eBay searches. When
+// the picker captured no parallel, the identity query (year + brand + #
+// + player) matches the base AND every parallel — pulling parallel
+// listings into the average and inflating estimated value. These keywords
+// are eBay-tokenized as `-"keyword"` exclusions and re-checked client-
+// side via word-boundary regex. The list is intentionally aggressive;
+// downside is that base-card titles that legitimately contain a team
+// name with a color word ("Red Sox", "Blackhawks") may also be filtered
+// — see PR body trade-off note.
+const PARALLEL_EXCLUSION_KEYWORDS = [
+  // Color parallels
+  'Gold', 'Silver', 'Black', 'Red', 'Blue', 'Green', 'Orange', 'Pink', 'Purple', 'Teal', 'Yellow', 'Bronze',
+  // Finishes
+  'Refractor', 'Prizm', 'Diamante', 'Holo', 'Holographic', 'Chrome', 'Mojo', 'Wave', 'Shimmer', 'Crackle',
+  // Special parallels
+  'Atomic', 'Disco', 'Hyper', 'Mosaic', 'Optic', 'Variation', 'SP', 'SSP',
+  // Premium/numbered
+  'Auto', 'Autograph', 'Patch', 'Relic', 'Jersey', 'Numbered',
+  // Print runs (eBay tokenizes -/150 as exclusion)
+  '/150', '/99', '/75', '/50', '/25', '/10', '/5', '/1',
+  // Black Friday / holiday inserts
+  'Blackout', 'Friday Exclusive',
+];
+
+/**
+ * A scanned card is "base" when the picker captured no parallel — either
+ * an empty string, null/undefined, or a known sentinel left over from the
+ * pre-PR #168 normalization layer (defense in depth).
+ */
+function isBaseCard(parallel?: string | null): boolean {
+  if (parallel == null) return true;
+  const normalized = parallel.trim().toLowerCase();
+  if (!normalized) return true;
+  const baseSentinels = new Set([
+    'none detected',
+    'none',
+    'base',
+    'base set',
+    'n/a',
+    'na',
+    'no parallel',
+  ]);
+  return baseSentinels.has(normalized);
+}
+
 function mapItem(item: any): PickerListing {
   return {
     title: item.title || '',
@@ -103,6 +148,11 @@ export interface PickerSearchOptions {
    *  fuzzy and lets through "Drake (something else)" or "Drake Maye" when
    *  the scanned card was Drake Powell. */
   requirePlayerLastName?: string | null;
+  /** The parallel name the picker captured (or empty for base). Used to
+   *  decide whether to apply parallel-keyword exclusions in the eBay
+   *  query. When this is empty/null/sentinel, the card is treated as
+   *  base and parallel listings are filtered out. */
+  scannedParallel?: string | null;
 }
 
 export async function pickerSearch(
@@ -110,9 +160,21 @@ export async function pickerSearch(
   opts?: PickerSearchOptions,
 ): Promise<PickerSearchResponse> {
   const limit = Math.max(1, Math.min(opts?.limit ?? 10, 50));
-  const query = (rawQuery || '').replace(/\s{2,}/g, ' ').trim();
+  let query = (rawQuery || '').replace(/\s{2,}/g, ' ').trim();
   if (!query) {
     return { query: '', active: [], sold: [], soldAvailable: false };
+  }
+
+  // When the scanned card is base, append eBay negative-keyword filters
+  // so listings with parallel/insert keywords are excluded server-side.
+  // Necessary because card identity alone (year + brand + # + player)
+  // matches base AND every parallel of that card — see PR body for the
+  // Jokic #101 example where 4/5 returned listings were parallels.
+  const isBase = isBaseCard(opts?.scannedParallel);
+  if (isBase) {
+    const exclusions = PARALLEL_EXCLUSION_KEYWORDS.map((kw) => `-"${kw}"`).join(' ');
+    query = `${query} ${exclusions}`;
+    console.log(`[pickerSearch] base-card detected — appended ${PARALLEL_EXCLUSION_KEYWORDS.length} parallel exclusions`);
   }
 
   let active: PickerListing[] = [];
@@ -149,6 +211,24 @@ export async function pickerSearch(
         return true;
       });
       console.log(`[pickerSearch] precision-filter: ${mapped.length}/${before} kept (cardNum="${cardNum}", lastName="${lastName}")`);
+    }
+
+    // Defense-in-depth: even with `-keyword` server-side exclusions,
+    // listings that put parallel keywords in non-title fields can slip
+    // through. For base cards, also drop any title containing a parallel
+    // keyword via word-boundary regex.
+    if (isBase && mapped.length > 0) {
+      const beforeBase = mapped.length;
+      const exclusionRegex = new RegExp(
+        '\\b(' +
+          PARALLEL_EXCLUSION_KEYWORDS.map((kw) =>
+            kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+          ).join('|') +
+          ')\\b',
+        'i',
+      );
+      mapped = mapped.filter((item) => !exclusionRegex.test(item.title));
+      console.log(`[pickerSearch] base-card title-filter: ${mapped.length}/${beforeBase} kept`);
     }
     active = mapped;
     console.log(`[pickerSearch] active: ${active.length}/${rawItems.length} for "${query}"`);
