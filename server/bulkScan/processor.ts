@@ -562,7 +562,11 @@ async function processItem(batch: ScanBatch, item: ScanBatchItem): Promise<'auto
         player: playerName,
         parallel: analysis.variant || null,
       });
-      const result = await pickerSearch(query, { limit: 10 });
+      const result = await pickerSearch(query, {
+        limit: 10,
+        requireCardNumber: analysis.cardNumber || null,
+        requirePlayerLastName: analysis.playerLastName || null,
+      });
       const active = result.active || [];
       const averageValue = active.length > 0
         ? active.reduce((sum, l) => sum + (l.price || 0), 0) / active.length

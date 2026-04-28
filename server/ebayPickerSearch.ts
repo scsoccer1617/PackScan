@@ -41,9 +41,10 @@ export interface PickerSearchResponse {
 }
 
 const BROWSE_SEARCH_URL = 'https://api.ebay.com/buy/browse/v1/item_summary/search';
-// Trading cards category — keeps the search inside the cards leaf so a
-// player name like "Russell Wilson" doesn't pull authentic-jersey hits.
-const SPORTS_CARDS_CATEGORY = '213';
+// eBay's "Sports Trading Cards" leaf category. Tighter than 213 (which
+// covers Pokémon, MTG, non-sports). Switch back to 213 if PackScan ever
+// supports non-sports cards.
+const SPORTS_CARDS_CATEGORY = '261328';
 
 function mapItem(item: any): PickerListing {
   return {
@@ -76,17 +77,37 @@ export function buildPickerQuery(parts: {
   if (parts.brand && parts.brand.trim()) segments.push(parts.brand.trim());
   if (parts.set && parts.set.trim()) segments.push(parts.set.trim());
   if (parts.cardNumber && String(parts.cardNumber).trim()) {
-    const num = String(parts.cardNumber).trim();
-    segments.push(num.startsWith('#') ? num : `#${num}`);
+    // Strip leading # if present, then quote so eBay treats it as a
+    // required phrase. Card numbers like "80BK-68" or "8B-28" are sparse
+    // enough that quoted phrase matching dramatically tightens results.
+    const num = String(parts.cardNumber).trim().replace(/^#/, '');
+    segments.push(`"${num}"`);
   }
-  if (parts.player && parts.player.trim()) segments.push(parts.player.trim());
+  if (parts.player && parts.player.trim()) {
+    // Quote player name so "Drake Powell" doesn't match listings with
+    // just "Drake" or just "Powell" in the title.
+    segments.push(`"${parts.player.trim()}"`);
+  }
   if (parts.parallel && parts.parallel.trim()) segments.push(parts.parallel.trim());
   return segments.join(' ').replace(/\s{2,}/g, ' ').trim();
 }
 
+export interface PickerSearchOptions {
+  limit?: number;
+  /** Card number to require in result titles (case-insensitive). When
+   *  present, listings whose titles don't contain this exact substring
+   *  are dropped from `active`. Strip leading `#` before passing. */
+  requireCardNumber?: string | null;
+  /** Player last name to require in result titles (case-insensitive).
+   *  Listings missing the surname are dropped — eBay's keyword search is
+   *  fuzzy and lets through "Drake (something else)" or "Drake Maye" when
+   *  the scanned card was Drake Powell. */
+  requirePlayerLastName?: string | null;
+}
+
 export async function pickerSearch(
   rawQuery: string,
-  opts?: { limit?: number },
+  opts?: PickerSearchOptions,
 ): Promise<PickerSearchResponse> {
   const limit = Math.max(1, Math.min(opts?.limit ?? 10, 50));
   const query = (rawQuery || '').replace(/\s{2,}/g, ' ').trim();
@@ -102,7 +123,7 @@ export async function pickerSearch(
         q: query,
         category_ids: SPORTS_CARDS_CATEGORY,
         limit,
-        sort: 'newlyListed',
+        // No sort param → eBay defaults to best-match (relevance).
       },
       headers: {
         Authorization: `Bearer ${token}`,
@@ -111,7 +132,25 @@ export async function pickerSearch(
       timeout: 20000,
     });
     const rawItems: any[] = resp.data?.itemSummaries ?? [];
-    active = rawItems.map(mapItem).filter((i) => i.price > 0 && i.title);
+    let mapped = rawItems.map(mapItem).filter((i) => i.price > 0 && i.title);
+
+    // Tighten precision: require both card number and last name in title.
+    // eBay's keyword `q` is fuzzy by design — quoted phrases narrow the
+    // server-side match, and this client-side post-filter catches the
+    // long-tail loose hits that still come through.
+    const cardNum = (opts?.requireCardNumber || '').trim().replace(/^#/, '').toLowerCase();
+    const lastName = (opts?.requirePlayerLastName || '').trim().toLowerCase();
+    if (cardNum || lastName) {
+      const before = mapped.length;
+      mapped = mapped.filter((item) => {
+        const title = item.title.toLowerCase();
+        if (cardNum && !title.includes(cardNum)) return false;
+        if (lastName && !title.includes(lastName)) return false;
+        return true;
+      });
+      console.log(`[pickerSearch] precision-filter: ${mapped.length}/${before} kept (cardNum="${cardNum}", lastName="${lastName}")`);
+    }
+    active = mapped;
     console.log(`[pickerSearch] active: ${active.length}/${rawItems.length} for "${query}"`);
   } catch (err: any) {
     console.warn('[pickerSearch] active search failed:', err?.response?.data || err?.message || err);

@@ -1394,7 +1394,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
             parallel: typeof parallel === 'string' ? parallel : undefined,
           });
       const limitNum = Math.max(1, Math.min(parseInt(typeof limit === 'string' ? limit : '10', 10) || 10, 50));
-      const result = await pickerSearch(query, { limit: limitNum });
+      // Last name is the final whitespace-separated token in the player
+      // string ("Drake Powell" → "Powell", "Ronald Acuña Jr." → "Jr.").
+      // The post-filter requires both card number AND last name in the
+      // listing title, so even a weak last-name token still combines with
+      // the card-number gate to produce tight matches.
+      const playerStr = typeof player === 'string' ? player : undefined;
+      const lastName = playerStr ? playerStr.trim().split(/\s+/).pop() ?? null : null;
+      const result = await pickerSearch(query, {
+        limit: limitNum,
+        requireCardNumber: typeof cardNumber === 'string' ? cardNumber : undefined,
+        requirePlayerLastName: lastName,
+      });
       // Trim the response to the active surface — `sold`/`soldAvailable`
       // are kept off the wire so clients don't accidentally render an
       // unavailable Sold tab. The dormant fields still exist server-side
