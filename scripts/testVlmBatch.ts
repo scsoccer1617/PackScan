@@ -205,6 +205,10 @@ function printResult(r: RunResult): void {
   printRow(r.id, `${r.geminiMs ?? '?'}ms`, 'GEMINI', geminiCells);
   printRow('', `${r.legacyMs ?? '?'}ms`, 'LEGACY', legacyCells);
 
+  // Surface the CMP-code anchor when Gemini read one. Doesn't fit in the
+  // fixed-column table, so we print it as a one-line annotation under the
+  // row — lets us eyeball CMP detection across the batch at a glance.
+  if (g?.cmpCode) console.log(`│   gemini cmp:   ${trunc(g.cmpCode, 100)}`);
   if (r.geminiError) console.log(`│   gemini error: ${trunc(r.geminiError, 100)}`);
   if (r.legacyError) console.log(`│   legacy error: ${trunc(r.legacyError, 100)}`);
 }

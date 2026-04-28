@@ -104,6 +104,17 @@ export function applyGeminiToCombined(
     combined.cardNumber = gemini.cardNumber.trim();
   }
 
+  // ── CMP code (manufacturer reference) ────────────────────────────────
+  // Topps/Panini stamp a small CMPxxxxx ref in the back-side legal strip;
+  // we read it verbatim. Light normalization: strip whitespace and force
+  // the prefix to upper case ("cmp123" → "CMP123") so identical anchors
+  // collapse across scans.
+  if (typeof gemini.cmpCode === 'string' && gemini.cmpCode.trim()) {
+    const raw = gemini.cmpCode.trim().replace(/\s+/g, '');
+    const normalized = /^cmp/i.test(raw) ? `CMP${raw.slice(3)}` : raw;
+    combined.cmpNumber = normalized;
+  }
+
   // ── Sport ──────────────────────────────────────────────────────────────
   if (typeof gemini.sport === 'string' && gemini.sport.trim()) {
     combined.sport = gemini.sport.trim();

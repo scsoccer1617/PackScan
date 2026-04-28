@@ -46,6 +46,10 @@ export interface GeminiCardResult {
   set?: string | null;
   collection?: string | null;
   cardNumber?: string | null;
+  /** Manufacturer reference code printed in the back-side legal strip
+   *  (e.g. "CMP100358"). Used as a structural anchor for set/collection
+   *  disambiguation when present. Null when not visible or unreadable. */
+  cmpCode?: string | null;
   parallel?: {
     name?: string | null;
     isFoil?: boolean;

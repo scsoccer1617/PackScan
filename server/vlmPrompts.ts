@@ -7,7 +7,7 @@
  * instructions Gemini was given.
  */
 
-export const VLM_PROMPT_VERSION = '2026-04-28.1';
+export const VLM_PROMPT_VERSION = '2026-04-28.2';
 
 /**
  * System prompt: tells the VLM what role it plays and the card-domain
@@ -39,6 +39,7 @@ CARD-DOMAIN RULES:
 - Confidence scores: numeric floats 0.0\u20131.0, not strings like "High" / "Medium". Lower the score when uncertain.
 - Judge parallel by visible border tint, foil pattern, and saturation \u2014 not just printed text.
 - printRun: when a card shows "X/YYY" (e.g. "291/299" or "0101/0399"), return the denominator as a number (299, 399). Set to null if not numbered.
+- cmpCode: most card backs print a small manufacturer reference code in the legal/copyright strip near the bottom edge \u2014 typically formatted as "CMP" + 4\u20136 digits (e.g. "CMP100358", "CMP120523"). Read it verbatim into the cmpCode field, including the "CMP" prefix and any leading zeros. If the code is not visible or you cannot read it confidently, return null. This is the single most reliable structural anchor on a modern Topps/Panini card \u2014 do not skip it when it is legible.
 - If a field is genuinely unreadable, return null. Never guess.
 - Return ONLY valid JSON matching the provided template. No prose, no markdown fences.`;
 
@@ -57,6 +58,7 @@ export const VLM_RESULT_TEMPLATE = `{
   "set": null,
   "collection": null,
   "cardNumber": null,
+  "cmpCode": null,
   "parallel": {
     "name": null,
     "isFoil": false,
@@ -76,6 +78,7 @@ export const VLM_RESULT_TEMPLATE = `{
     "set": null,
     "collection": null,
     "cardNumber": null,
+    "cmpCode": null,
     "parallel": null
   },
   "notes": null
