@@ -56,7 +56,7 @@ export function evaluateConfidence(input: ConfidenceGateInput): ConfidenceGateOu
 
   // Pull flags defensively so a missing field never throws.
   const scpHit = !!analysis?._scpHit;
-  const scpScore = typeof analysis?._scpMatchScore === 'number' ? analysis._scpMatchScore : 0;
+  const scpScore = 0;
   const cardNumberLowConfidence = !!analysis?._cardNumberLowConfidence;
   const variationAmbiguous = !!analysis?._variationAmbiguous;
   const collectionAmbiguous = !!analysis?._collectionAmbiguous;

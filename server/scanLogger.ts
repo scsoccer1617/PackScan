@@ -44,13 +44,10 @@ const HEADERS = [
   'Indicators',
   'OcrFrontText',
   'OcrBackText',
-  'ScpMatchScore',
-  'ScpReason',
-  'ScpTopCandidates',
   'DurationMs',
   // Gemini VLM observability (PR #158): which prompt version ran, what
   // Gemini actually returned for the four most-watched fields, and what
-  // the legacy SCP/OCR pipeline had BEFORE the Gemini overlay overwrote
+  // the legacy OCR pipeline had BEFORE the Gemini overlay overwrote
   // it. When GeminiYear is empty the model call returned null (failed,
   // unparseable, or empty response) and the LegacyYear is what landed
   // on the saved card. Lets us tell at a glance whether a wrong year
@@ -60,7 +57,6 @@ const HEADERS = [
   'GeminiBrand',
   'GeminiPlayer',
   'LegacyYear',
-  'ScpGroundingSkipped',
 ];
 
 // Truncate large free-text fields so the Sheet stays readable. Cells
@@ -182,15 +178,6 @@ export interface ScanLogFinal {
   userDecision?: string;
   ocrFrontText?: string;
   ocrBackText?: string;
-  scpMatchScore?: number | null;
-  scpReason?: string | null;
-  // top candidate list — already shaped on the analysis result as
-  // `_scpTopCandidates`. Render compactly so the cell stays readable.
-  scpTopCandidates?: Array<{
-    productName?: string;
-    consoleName?: string;
-    score?: number;
-  }> | null;
   durationMs?: number;
   // Gemini VLM observability fields. All are optional — when the model
   // call failed entirely, the year/brand/player slots are left empty
@@ -201,13 +188,10 @@ export interface ScanLogFinal {
   geminiBrand?: string | null;
   geminiPlayer?: string | null;
   // Year on the combined result BEFORE the Gemini overlay ran. Helps us
-  // see whether the legacy SCP/OCR pipeline had it right and Gemini
+  // see whether the legacy OCR pipeline had it right and Gemini
   // overrode it, or whether legacy was wrong and Gemini either fixed
   // it or didn't run.
   legacyYear?: number | string | null;
-  // True when the SCP grounding gate (PR #158) suppressed SCP's
-  // overwrite of year/brand/cardNumber/foilType/player on this scan.
-  scpGroundingSkipped?: boolean | null;
 }
 
 export interface ScanLog {
@@ -261,15 +245,6 @@ async function appendRow(ctx: ScanContext, final: ScanLogFinal, indicators: stri
   const indicatorsCell = indicators.join('\n').slice(0, 49000);
   const ocrFront = (final.ocrFrontText ?? '').slice(0, OCR_TEXT_TRUNCATE_AT);
   const ocrBack = (final.ocrBackText ?? '').slice(0, OCR_TEXT_TRUNCATE_AT);
-  const candidatesCell = (final.scpTopCandidates ?? [])
-    .map((c, i) => {
-      const score = typeof c.score === 'number' ? c.score.toFixed(2) : '?';
-      const product = c.productName ?? '?';
-      const console_ = c.consoleName ?? '?';
-      return `${i + 1}. [${score}] ${product} :: ${console_}`;
-    })
-    .join('\n')
-    .slice(0, 8000);
   const row = [
     new Date().toISOString(),
     ctx.scanId,
@@ -286,9 +261,6 @@ async function appendRow(ctx: ScanContext, final: ScanLogFinal, indicators: stri
     indicatorsCell,
     ocrFront,
     ocrBack,
-    final.scpMatchScore != null ? final.scpMatchScore.toFixed(2) : '',
-    final.scpReason ?? '',
-    candidatesCell,
     final.durationMs != null ? String(final.durationMs) : '',
     // Gemini observability tail (PR #158)
     final.geminiPromptVersion ?? '',
@@ -296,7 +268,6 @@ async function appendRow(ctx: ScanContext, final: ScanLogFinal, indicators: stri
     final.geminiBrand ?? '',
     final.geminiPlayer ?? '',
     final.legacyYear != null ? String(final.legacyYear) : '',
-    final.scpGroundingSkipped != null ? String(final.scpGroundingSkipped) : '',
   ];
   await sheets.spreadsheets.values.append({
     spreadsheetId,

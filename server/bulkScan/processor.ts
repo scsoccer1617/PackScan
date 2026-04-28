@@ -636,7 +636,6 @@ async function processItem(batch: ScanBatch, item: ScanBatchItem): Promise<'auto
         final: fields,
         frontImage: null,
         backImage: null,
-        scpScore: typeof analysis._scpMatchScore === 'number' ? analysis._scpMatchScore : null,
         scpMatchedTitle: null,
         cardDbCorroborated,
         analyzerVersion: 'bulk_scan_auto_save',
