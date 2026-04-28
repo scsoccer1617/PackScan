@@ -401,12 +401,32 @@ export default function ScanResult() {
     // PR #162: Gemini-authority picker shortcut. When the analyze response
     // carried a `_gemini` payload (the VLM ran), trust its parallel reading
     // and route the dealer through the two-step Gemini picker instead of
-    // the legacy SCP/variationsDB ladder. The picker handles both the
-    // "Gemini emitted a parallel" and "Gemini said base / nothing" cases.
+    // the legacy SCP/variationsDB ladder.
+    //
+    // PR #167: skip the picker entirely when Gemini returned no parallel
+    // (empty / null / whitespace). The previous behaviour rendered a
+    // "Potential parallel detected: None detected" Yes/No prompt that
+    // forced an interaction even though there was nothing to confirm —
+    // the user would tap Yes to mean "yes, base," which is confusing.
+    // Falling straight through to pricing treats the card as base; if
+    // the user disagrees they can still type a parallel via the Card
+    // info Edit button on the result screen.
     const geminiPayload = (data as any)._gemini;
     if (geminiPayload && !parallelDecidedRef.current) {
+      const geminiParallelRaw = (geminiPayload?.parallel?.name ?? null) as string | null;
+      const hasGeminiParallel = !!(geminiParallelRaw && geminiParallelRaw.trim());
+      if (hasGeminiParallel) {
+        setIsCheckingParallels(false);
+        setShowGeminiPicker(true);
+        return;
+      }
+      // Gemini ran but found no parallel — short-circuit straight to
+      // pricing. Mark the parallel decision as made so any later branch
+      // in this same effect run doesn't re-open a picker on the way
+      // down.
+      parallelDecidedRef.current = true;
       setIsCheckingParallels(false);
-      setShowGeminiPicker(true);
+      setShowPriceResults(true);
       return;
     }
 
