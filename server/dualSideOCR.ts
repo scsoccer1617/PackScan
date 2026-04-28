@@ -14,6 +14,7 @@ import { logUserScan, type ScanFieldValues } from './userScans';
 import { startScanLog } from './scanLogger';
 import { analyzeCardBuffersWithGemini, type GeminiCardResult, VLM_INFO } from './vlmGemini';
 import { applyGeminiToCombined } from './vlmApply';
+import { isCardDbLookupEnabled } from './featureFlags';
 
 // Internal year-confidence flags attached to per-side and combined OCR
 // results so the dual-side combiner and downstream lookup loop can reason
@@ -1734,7 +1735,12 @@ async function combineCardResults(
   // if the back-side surname looked usable.
   let yearProbeFoundCatalogHit = false;
 
-  if (combined.brand && combined.cardNumber) {
+  const cardDbEnabled = isCardDbLookupEnabled();
+  if (!cardDbEnabled) {
+    console.log('[CardDB] Lookup disabled by CARDDB_LOOKUP_ENABLED flag — Gemini VLM is authoritative for this scan.');
+  }
+
+  if (cardDbEnabled && combined.brand && combined.cardNumber) {
     try {
       const allOcrText = `${frontOCRText}\n${backOCRText}`;
       const ocrCandidates = extractAllYearCandidates(allOcrText, combined.sport);
@@ -2248,7 +2254,7 @@ async function combineCardResults(
     }
   }
 
-  if (combined.brand && combined.year && combined.cardNumber) {
+  if (cardDbEnabled && combined.brand && combined.year && combined.cardNumber) {
     // If the OCR text contains the literal "<year>-<cardNumber>"
     // compound (vintage convention printed in the © legal block,
     // e.g. "© TCMA LTD. 1982-17"), then BOTH year and cardNumber

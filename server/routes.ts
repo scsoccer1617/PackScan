@@ -1319,18 +1319,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         error: parsed.error.issues.map((i) => i.message).join('; '),
       });
     }
-    try {
-      const userId = (req.user as any)?.id as number | undefined;
-      const input: ScpScanQueryInput = parsed.data;
-      const result = await scpLookupCard(input, { userId: userId ?? null });
-      return res.status(200).json(result);
-    } catch (err: any) {
-      // Defense-in-depth: the orchestrator is supposed to never throw,
-      // but a bug in the persistence layer could leak. Return a miss so
-      // the client renders normally.
-      console.error('[catalog/match] unexpected throw:', err?.message || err);
-      return res.status(200).json({ status: 'miss', reason: 'api_error', query: '' });
-    }
+    // PR #162: SCP grounding removed. Picker is now Gemini-authoritative
+    // and uses live eBay Browse API for listings — no catalog overlay.
+    // Endpoint returns a stable miss shape so any client still calling it
+    // renders cleanly (CatalogPriceStrip handles `status: 'miss'`).
+    return res.status(200).json({ status: 'miss', reason: 'scp_disabled', query: '' });
   });
 
   // ───────── SportsCardsPro parallel discovery (PR #38b) ─────────
@@ -1366,16 +1359,58 @@ export async function registerRoutes(app: Express): Promise<Server> {
         error: parsed.error.issues.map((i) => i.message).join('; '),
       });
     }
-    try {
-      const { colorFilter, limit, ...scan } = parsed.data;
-      const result = await discoverParallels(scan as ScpScanQueryInput, {
-        colorFilter: colorFilter ?? null,
-        limit,
+    // PR #162: SCP parallel discovery removed — picker now uses Gemini's
+    // detected parallel verbatim plus a free-text fallback (no whitelist
+    // filtering). Endpoint kept to avoid breaking any in-flight clients;
+    // returns an empty list so callers fall through to their no-parallels
+    // code path.
+    return res.status(200).json({ parallels: [], filterFellBack: false, query: '' });
+  });
+
+  // ───────── Picker eBay Browse search (PR #162) ─────────
+  // Live eBay search powering the Gemini-authority picker. Accepts either
+  // a free-text query or a structured `parts` object — the latter lets the
+  // client send the Gemini-emitted fields and have the server build the
+  // canonical query string. Always returns 200; on credential / network
+  // failure the active list comes back empty rather than blocking the UI.
+  const pickerEbaySearchSchema = z.object({
+    query: z.string().trim().min(1).max(200).optional(),
+    parts: z
+      .object({
+        year: z.union([z.number(), z.string()]).nullable().optional(),
+        brand: z.string().nullable().optional(),
+        set: z.string().nullable().optional(),
+        cardNumber: z.string().nullable().optional(),
+        player: z.string().nullable().optional(),
+        parallel: z.string().nullable().optional(),
+      })
+      .optional(),
+    limit: z.number().int().positive().max(50).optional(),
+  });
+
+  app.post(`${apiPrefix}/picker/ebay-search`, async (req: Request, res: Response) => {
+    const parsed = pickerEbaySearchSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        query: '',
+        active: [],
+        sold: [],
+        soldAvailable: false,
+        error: parsed.error.issues.map((i) => i.message).join('; '),
       });
+    }
+    try {
+      const { pickerSearch, buildPickerQuery } = await import('./ebayPickerSearch');
+      const queryString =
+        parsed.data.query?.trim() ||
+        (parsed.data.parts ? buildPickerQuery(parsed.data.parts) : '');
+      const result = await pickerSearch(queryString, { limit: parsed.data.limit });
       return res.status(200).json(result);
     } catch (err: any) {
-      console.error('[catalog/parallels] unexpected throw:', err?.message || err);
-      return res.status(200).json({ parallels: [], filterFellBack: false, query: '' });
+      console.error('[picker/ebay-search] unexpected throw:', err?.message || err);
+      return res
+        .status(200)
+        .json({ query: '', active: [], sold: [], soldAvailable: false });
     }
   });
 
@@ -1525,104 +1560,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         parallel: fields.parallel || null,
       };
 
-      // SCP-first gate (voice path): fire SCP first, then ONLY fall back to
-      // CardDB enrichment when SCP misses. Previously SCP and CardDB fired in
-      // parallel; that let CardDB contradict SCP-owned fields on SCP hits.
-      // CardDB remains the silent fallback for sports/sets SCP doesn't cover.
-      //
-      // Still fire-and-forget at the outer level — the client response doesn't
-      // wait on either lookup; the speculative-scp endpoint polls for both
-      // results when the confirm sheet is submitted.
-      (async () => {
-        const specStart = Date.now();
-        let specResult: Awaited<ReturnType<typeof scpLookupCard>> | null = null;
-        try {
-          specResult = await scpLookupCard(specInput, { userId: userId ?? null });
-          updatePendingScan(voiceScanId, { scpResult: specResult });
-          console.log(
-            `[voice-preliminary-scp-${voiceScanId}] ${specResult.status}` +
-              (specResult.status === 'miss'
-                ? ` (${specResult.reason})`
-                : ` score=${specResult.match.matchScore}`) +
-              ` took ${Date.now() - specStart}ms`,
-          );
-        } catch (err: any) {
-          console.warn(
-            `[voice-preliminary-scp-${voiceScanId}] threw unexpectedly:`,
-            err?.message || err,
-          );
-        }
-
-        // CardDB enrichment strategy based on SCP outcome:
-        //  - SCP hit  → still call CardDB, but only forward set/collection to
-        //    the client. SCP already owns brand/year/cardNumber/playerName/
-        //    parallel, and CardDB doesn't have structured set/collection
-        //    anywhere else, so we run enrichment with the SCP-corrected
-        //    fields and strip everything except set/collection from the hit.
-        //  - SCP miss → run CardDB as the full silent fallback (same as before).
-        const scpHit = !!specResult && specResult.status === 'hit';
-        // When SCP hit, use the SCP-corrected brand/year/cardNumber for the
-        // enrichment query so CardDB is matched against the authoritative
-        // identifiers — not the raw voice input that SCP may have corrected.
-        const scpMatch = scpHit && specResult!.status === 'hit' ? specResult!.match : null;
-        let enrichBrand = fields.brand || null;
-        let enrichYear: number | null = fields.year ?? null;
-        let enrichCardNumber = fields.cardNumber || null;
-        if (scpMatch) {
-          const { extractYear, extractBrand, extractCardNumber } = await import('./sportscardspro/match');
-          enrichYear = extractYear(scpMatch.consoleName) ?? enrichYear;
-          enrichBrand = extractBrand(scpMatch.consoleName) ?? enrichBrand;
-          enrichCardNumber = extractCardNumber(scpMatch.productName) ?? enrichCardNumber;
-        }
-
-        const cardDbStart = Date.now();
-        try {
-          const enrichment = await enrichVoiceFields({
-            brand: enrichBrand,
-            year: enrichYear,
-            collection: fields.collection || null,
-            cardNumber: enrichCardNumber,
-            playerFirstName: first || null,
-            playerLastName: last || null,
-            serialNumber: fields.serialNumber || null,
-            parallelHint: fields.parallel || null,
-          });
-
-          if (scpHit && enrichment) {
-            // Filter the hit down to set/collection only. The client's merge
-            // logic reads every populated field on dbHit, so leaving the other
-            // fields populated would let CardDB stomp SCP-owned values on the
-            // client side. Keep `found: true` so the merge block still runs,
-            // and keep `source` so the log line remains meaningful.
-            const filteredHit: any = {
-              found: true,
-              set: enrichment.hit.set ?? null,
-              collection: enrichment.hit.collection ?? null,
-            };
-            updatePendingScan(voiceScanId, {
-              voiceCardDbResult: { hit: filteredHit, source: enrichment.source } as any,
-            });
-            console.log(
-              `[voice-preliminary-carddb-${voiceScanId}] hit (${enrichment.source}) — ` +
-                `SCP authoritative, forwarding set="${filteredHit.set || ''}" collection="${filteredHit.collection || ''}" only. ` +
-                `Took ${Date.now() - cardDbStart}ms.`,
-            );
-          } else {
-            updatePendingScan(voiceScanId, { voiceCardDbResult: enrichment ?? null });
-            console.log(
-              `[voice-preliminary-carddb-${voiceScanId}] ${enrichment ? `hit (${enrichment.source})` : 'miss'}` +
-                ` took ${Date.now() - cardDbStart}ms` +
-                (scpHit ? ' (SCP hit but CardDB miss — set/collection unchanged)' : ' (SCP missed, fell through to CardDB)'),
-            );
-          }
-        } catch (err: any) {
-          console.warn(
-            `[voice-preliminary-carddb-${voiceScanId}] threw unexpectedly:`,
-            err?.message || err,
-          );
-          updatePendingScan(voiceScanId, { voiceCardDbResult: null });
-        }
-      })();
+      // PR #162: SCP + CardDB grounding removed from the voice path. The
+      // picker is now Gemini-authoritative end-to-end and the server-side
+      // session entry no longer needs a speculative catalog hit. We still
+      // stash explicit nulls so the polling /voice-lookup/speculative-scp
+      // endpoint resolves immediately without waiting on a fire that never
+      // happens.
+      void specInput; // keep the value for future re-enable; reference silences unused-var linting
+      updatePendingScan(voiceScanId, { scpResult: null, voiceCardDbResult: null });
+      console.log(
+        `[voice-preliminary-${voiceScanId}] SCP/CardDB grounding disabled — picker uses Gemini authority.`,
+      );
 
       return res.status(200).json({ success: true });
     } catch (err: any) {
@@ -1839,42 +1787,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Gate: playerName + at least one of (brand | year | cardNumber).
       // Most flagship cards have brand on the back only, so `year` or
       // `cardNumber` on the front are the common triggers here.
-      const hasSpecGate =
-        !!frontResult.playerFirstName &&
-        !!frontResult.playerLastName &&
-        (!!frontResult.brand || !!frontResult.year || !!frontResult.cardNumber);
-      if (hasSpecGate) {
-        const userId = (req.user as any)?.id as number | undefined;
-        const specInput: ScpScanQueryInput = {
-          playerName: `${frontResult.playerFirstName} ${frontResult.playerLastName}`.trim(),
-          year: frontResult.year ?? null,
-          brand: frontResult.brand || null,
-          collection: frontResult.collection || null,
-          setName: (frontResult as any).set || null,
-          cardNumber: frontResult.cardNumber || null,
-          parallel: frontResult.foilType || frontResult.variant || null,
-        };
-        // Fire-and-forget. Never await — the preliminary response returns
-        // immediately so the client isn't blocked on SCP latency.
-        (async () => {
-          const specStart = Date.now();
-          try {
-            const specResult = await scpLookupCard(specInput, { userId: userId ?? null });
-            updatePendingScan(scanId, { scpResult: specResult });
-            console.log(
-              `[preliminary-scp-${scanId}] ${specResult.status}` +
-              (specResult.status === 'miss' ? ` (${specResult.reason})` : ` score=${specResult.match.matchScore}`) +
-              ` took ${Date.now() - specStart}ms`,
-            );
-          } catch (err: any) {
-            // Shouldn't happen — scpLookupCard is supposed to never throw —
-            // but belt-and-suspenders since this runs detached.
-            console.warn(`[preliminary-scp-${scanId}] threw unexpectedly:`, err?.message || err);
-          }
-        })();
-      } else {
-        console.log(`[preliminary-scp-${scanId}] skipped — insufficient front fields`);
-      }
+      // PR #162: speculative SCP lookup removed from the preliminary path.
+      // The picker is Gemini-authoritative now, so the catalog hint is
+      // unused downstream. Stash null so any cache poller resolves cleanly.
+      updatePendingScan(scanId, { scpResult: null });
+      console.log(`[preliminary-scp-${scanId}] disabled — picker uses Gemini authority.`);
 
       logPrelimTotal('ok');
       // Expose a minimal slice of the visual-foil hint in the response so

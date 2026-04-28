@@ -27,6 +27,7 @@
 
 import { google, type sheets_v4 } from 'googleapis';
 import { GoogleAuth } from 'google-auth-library';
+import { isCardDbLookupEnabled } from './featureFlags';
 
 const HEADERS = [
   'Timestamp',
@@ -267,7 +268,11 @@ async function appendRow(ctx: ScanContext, final: ScanLogFinal, indicators: stri
     final.geminiYear != null ? String(final.geminiYear) : '',
     final.geminiBrand ?? '',
     final.geminiPlayer ?? '',
-    final.legacyYear != null ? String(final.legacyYear) : '',
+    // PR #162: when CardDB lookup is gated off, the "legacy" pipeline never
+    // produced a year of its own — it just carried Gemini's value. Writing
+    // it would duplicate GeminiYear and mislead anyone reviewing the sheet.
+    // Keep the column for schema stability, but write empty.
+    isCardDbLookupEnabled() && final.legacyYear != null ? String(final.legacyYear) : '',
   ];
   await sheets.spreadsheets.values.append({
     spreadsheetId,

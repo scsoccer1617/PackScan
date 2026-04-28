@@ -32,6 +32,7 @@ import AddToSheetButton, {
 import ParallelPickerSheet, {
   type ParallelOption,
 } from "@/components/ParallelPickerSheet";
+import GeminiParallelPickerSheet from "@/components/GeminiParallelPickerSheet";
 import CollectionPickerSheet, {
   type CollectionCandidate,
 } from "@/components/CollectionPickerSheet";
@@ -101,6 +102,10 @@ export default function ScanResult() {
   // Picker + processing state is owned locally — it's only meaningful
   // while this page is mounted.
   const [showParallelPicker, setShowParallelPicker] = useState(false);
+  // Gemini-authority picker (PR #162). Opens whenever the analyze response
+  // includes a `_gemini` payload, regardless of whether Gemini emitted a
+  // parallel — the dealer can confirm Yes / No or freetext-type a name.
+  const [showGeminiPicker, setShowGeminiPicker] = useState(false);
   const [showParallelConfirm, setShowParallelConfirm] = useState(false);
   // Two-step "No" flow: when the user disagrees with the detected
   // colour we ask whether the card is a parallel at all, instead of
@@ -390,6 +395,18 @@ export default function ScanResult() {
     if (collAmbig && collCands && collCands.length > 1) {
       setCollectionCandidates(collCands);
       setShowCollectionPicker(true);
+      return;
+    }
+
+    // PR #162: Gemini-authority picker shortcut. When the analyze response
+    // carried a `_gemini` payload (the VLM ran), trust its parallel reading
+    // and route the dealer through the two-step Gemini picker instead of
+    // the legacy SCP/variationsDB ladder. The picker handles both the
+    // "Gemini emitted a parallel" and "Gemini said base / nothing" cases.
+    const geminiPayload = (data as any)._gemini;
+    if (geminiPayload && !parallelDecidedRef.current) {
+      setIsCheckingParallels(false);
+      setShowGeminiPicker(true);
       return;
     }
 
@@ -795,6 +812,23 @@ export default function ScanResult() {
     flow.setCardData(next);
   };
 
+  // PR #162: Gemini picker confirmation handler. The dealer either accepted
+  // Gemini's parallel ("Yes"), typed a freetext value, or left it blank for
+  // base. Empty string ⇒ base card. Persist onto cardData.foilType + variant
+  // and flip to pricing.
+  const handleGeminiPickerConfirm = (parallel: string) => {
+    if (!cardData) return;
+    parallelDecidedRef.current = true;
+    setShowGeminiPicker(false);
+    const updated: Partial<CardFormValues> = {
+      ...cardData,
+      foilType: parallel,
+      variant: parallel,
+    };
+    flow.setCardData(updated);
+    setShowPriceResults(true);
+  };
+
   const handleParallelConfirm = (foilType: string, serialNumber?: string) => {
     if (!cardData) return;
     // The user explicitly picked this parallel in the sheet — treat their
@@ -1127,7 +1161,28 @@ export default function ScanResult() {
         </div>
       )}
 
+      {/* PR #162 debug overlay: `?debug=1` reveals the raw Gemini JSON the
+          server emitted, so we can sanity-check Gemini's parallel/year/brand
+          reading against what's on the card without diffing the scan log. */}
+      <GeminiDebugPanel cardData={cardData} />
+
       {/* Picker sheets — controlled here, triggered by post-scan flow */}
+      <GeminiParallelPickerSheet
+        open={showGeminiPicker}
+        geminiParallel={
+          (((cardData as any)._gemini?.parallel?.name as string | null | undefined) ?? null)
+        }
+        cardDescription={cardDescription}
+        queryParts={{
+          year: cardData.year ?? null,
+          brand: cardData.brand ?? null,
+          set: (cardData.set as string | undefined) ?? cardData.collection ?? null,
+          cardNumber: cardData.cardNumber ?? null,
+          player: playerName(cardData) || null,
+          parallel: cardData.foilType ?? null,
+        }}
+        onConfirm={handleGeminiPickerConfirm}
+      />
       <ParallelPickerSheet
         open={showParallelPicker}
         detectedLabel={detectedKeyword}
@@ -1690,6 +1745,37 @@ function GradeTabEmptyState() {
     >
       No grade returned for this scan. Try re-scanning with a clear front
       image.
+    </div>
+  );
+}
+
+/* -------------------- Gemini debug viewer (?debug=1) -------------------- */
+
+// Renders a collapsible panel showing the raw Gemini VLM JSON for the
+// current scan when the URL has `?debug=1`. Off by default so production
+// dealers never see it. Used to verify Gemini's emitted year/brand/
+// parallel against what landed on the saved card.
+function GeminiDebugPanel({ cardData }: { cardData: Partial<CardFormValues> }) {
+  const [open, setOpen] = useState(false);
+  const debugEnabled =
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("debug") === "1";
+  if (!debugEnabled) return null;
+  const gemini = (cardData as any)._gemini ?? null;
+  return (
+    <div className="px-4 pt-3" data-testid="gemini-debug-panel">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="text-xs text-slate-500 underline"
+        data-testid="gemini-debug-toggle"
+      >
+        {open ? "Hide" : "Show"} raw Gemini JSON
+      </button>
+      {open && (
+        <pre className="mt-2 max-h-80 overflow-auto rounded-lg bg-slate-50 p-3 text-[11px] leading-snug text-slate-700">
+          {gemini ? JSON.stringify(gemini, null, 2) : "(no Gemini payload on this scan)"}
+        </pre>
+      )}
     </div>
   );
 }
