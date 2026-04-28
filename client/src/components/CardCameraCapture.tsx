@@ -437,26 +437,50 @@ export default function CardCameraCapture({
         {/* Faint 2.5:3.5 aiming guide. This also defines the crop region
             that the shutter will capture — `guideRef` is read at capture
             time to compute the source-pixel rect. `pointer-events-none`
-            so tap-to-focus still works anywhere in the viewfinder. */}
+            so tap-to-focus still works anywhere in the viewfinder.
+            PR #163: a ~70% black overlay dims everything outside the guide
+            so the user's eye is pulled to the card region. The dim is
+            implemented as four panels flanking a centered transparent
+            cutout sized identically to the guide — same min/calc formula
+            on both — so the cutout tracks the guide on any viewport. */}
         {!inPreview && (
-          <div className="absolute inset-0 z-10 pointer-events-none flex items-center justify-center">
-            <div
-              ref={guideRef}
-              className="relative"
-              style={{
-                width: 'min(72%, calc(60vh * 2.5 / 3.5))',
-                aspectRatio: `${GUIDE_ASPECT}`,
-              }}
-            >
-              {/* Soft full outline — low-opacity so it reads as a guide,
-                  not a frame. */}
-              <div className="absolute inset-0 rounded-md border border-white/35" />
-              {/* Corner ticks — brighter at the corners so the aiming zone
-                  registers at a glance even against busy backgrounds. */}
-              <div className="absolute -top-px -left-px w-5 h-5 border-t-2 border-l-2 border-white/80 rounded-tl-md" />
-              <div className="absolute -top-px -right-px w-5 h-5 border-t-2 border-r-2 border-white/80 rounded-tr-md" />
-              <div className="absolute -bottom-px -left-px w-5 h-5 border-b-2 border-l-2 border-white/80 rounded-bl-md" />
-              <div className="absolute -bottom-px -right-px w-5 h-5 border-b-2 border-r-2 border-white/80 rounded-br-md" />
+          <div className="absolute inset-0 z-10 pointer-events-none">
+            <div className="absolute inset-0 grid place-items-center">
+              <div
+                aria-hidden
+                className="relative"
+                style={{
+                  width: 'min(72%, calc(60vh * 2.5 / 3.5))',
+                  aspectRatio: `${GUIDE_ASPECT}`,
+                  // Massive box-shadow paints the dim everywhere the
+                  // element doesn't cover. spread is large enough to
+                  // reach past any reasonable viewport without us having
+                  // to layout four separate panel divs and keep them in
+                  // sync with the guide on resize.
+                  boxShadow: '0 0 0 9999px rgba(0, 0, 0, 0.7)',
+                  borderRadius: '0.375rem',
+                }}
+              />
+            </div>
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div
+                ref={guideRef}
+                className="relative"
+                style={{
+                  width: 'min(72%, calc(60vh * 2.5 / 3.5))',
+                  aspectRatio: `${GUIDE_ASPECT}`,
+                }}
+              >
+                {/* Soft full outline — low-opacity so it reads as a guide,
+                    not a frame. */}
+                <div className="absolute inset-0 rounded-md border border-white/35" />
+                {/* Corner ticks — brighter at the corners so the aiming zone
+                    registers at a glance even against busy backgrounds. */}
+                <div className="absolute -top-px -left-px w-5 h-5 border-t-2 border-l-2 border-white/80 rounded-tl-md" />
+                <div className="absolute -top-px -right-px w-5 h-5 border-t-2 border-r-2 border-white/80 rounded-tr-md" />
+                <div className="absolute -bottom-px -left-px w-5 h-5 border-b-2 border-l-2 border-white/80 rounded-bl-md" />
+                <div className="absolute -bottom-px -right-px w-5 h-5 border-b-2 border-r-2 border-white/80 rounded-br-md" />
+              </div>
             </div>
           </div>
         )}
