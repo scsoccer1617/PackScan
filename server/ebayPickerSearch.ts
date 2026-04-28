@@ -28,6 +28,9 @@ export interface PickerListing {
   url: string;
   imageUrl: string;
   condition: string;
+  /** Per-listing relevance score (PR #178). Diagnostic only — surfaced in
+   *  the response so callers can show / log the ranking decision. */
+  _relevanceScore?: number;
 }
 
 export interface PickerSearchResponse {
@@ -46,29 +49,25 @@ const BROWSE_SEARCH_URL = 'https://api.ebay.com/buy/browse/v1/item_summary/searc
 // supports non-sports cards.
 const SPORTS_CARDS_CATEGORY = '261328';
 
-// Parallel/insert keywords to exclude from base-card eBay searches. When
-// the picker captured no parallel, the identity query (year + brand + #
-// + player) matches the base AND every parallel — pulling parallel
-// listings into the average and inflating estimated value. These keywords
-// are eBay-tokenized as `-"keyword"` exclusions and re-checked client-
-// side via word-boundary regex.
-//
-// Two collision modes the list intentionally avoids:
-//   1. Set names containing exclusion keywords ("Topps Chrome",
-//      "Bowman Chrome", "Panini Prizm"). Chrome is NOT in the list — it's
-//      a default finish for whole product lines. Smart-skip below
-//      additionally drops any listed keyword that's already a substring
-//      of the query (e.g. base "Topps Chrome" scan won't exclude Chrome).
-//   2. Team/player names with color words (Red Sox, Blackhawks, Blue
-//      Jays, Reds). Generic colors Red/Blue/Black/Green/Orange/Yellow/
-//      Purple are intentionally absent. Pink/Teal/Bronze/Gold/Silver are
-//      kept — those are rare in team names and very common as parallel
-//      qualifiers.
-const PARALLEL_EXCLUSION_KEYWORDS = [
-  // Specific colored parallels (Pink/Teal/Bronze rarely in team names;
-  // Gold/Silver are almost always parallel qualifiers)
-  'Pink', 'Teal', 'Bronze', 'Gold', 'Silver',
-  // Finishes (Chrome deliberately omitted — set-name collision)
+// Number of candidates pulled from eBay before scoring + top-5 cap. Wider
+// pool gives the ranker a real choice; the API hard caps at 200.
+const CANDIDATE_POOL_SIZE = 25;
+const TOP_N = 5;
+
+// Parallel/insert keywords used to penalize titles that introduce
+// finishes the scanned card didn't have. PR #178 replaced the old
+// `-"keyword"` server-side exclusions with this scoring approach because
+// negative-keyword filtering was both too aggressive (zeroed out base
+// "Topps Chrome" results) and too loose (Purple parallels still slipped
+// through for Jokic #101). Generic colors stay out of the list — Red Sox,
+// Blue Jays, Reds etc would otherwise penalize legitimate base hits.
+const PARALLEL_KEYWORDS = [
+  // Specific colored parallels (rare in team names; common as parallel
+  // qualifiers). Purple included now — base scans no longer get zeroed
+  // out because this is a soft penalty, not a hard exclusion.
+  'Pink', 'Teal', 'Bronze', 'Gold', 'Silver', 'Purple',
+  // Finishes (Chrome deliberately omitted — set-name collision with
+  // "Topps Chrome" / "Bowman Chrome" product lines)
   'Refractor', 'Prizm', 'Diamante', 'Holo', 'Holographic', 'Mojo', 'Wave',
   'Shimmer', 'Crackle', 'Foilboard', 'Rainbow',
   // Special parallels
@@ -77,38 +76,137 @@ const PARALLEL_EXCLUSION_KEYWORDS = [
   'Negative', 'Inverted',
   // Premium/numbered
   'Auto', 'Autograph', 'Patch', 'Relic', 'Jersey', 'Numbered',
-  // Print runs (eBay tokenizes -/150 as exclusion)
+  // Print runs (eBay tokenizes /150 as standalone)
   '/150', '/99', '/75', '/50', '/25', '/10', '/5', '/1',
-  // Black Friday / holiday / Fanatics inserts. `Foil` is NOT a standalone
-  // entry — too many base titles say "foil-stamped" / "gold foil logo".
-  // `Logo Foil` is the multi-word form that targets Fanatics Exclusive
-  // Logo Foil parallels surfaced in user testing.
+  // Black Friday / holiday / Fanatics inserts
   'Blackout', 'Friday Exclusive', 'Fanatics Exclusive', 'Logo Foil',
 ];
+
+const PARALLEL_PENALTY = -15;
+const SCORE_CARD_NUMBER = 10;
+const SCORE_LAST_NAME = 5;
+const SCORE_FIRST_NAME = 3;
+const SCORE_BRAND = 5;
+const SCORE_SET = 5;
+const SCORE_YEAR = 3;
+const SCORE_SCANNED_PARALLEL = 8;
 
 function escapeRegex(input: string): string {
   return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 /**
- * A scanned card is "base" when the picker captured no parallel — either
- * an empty string, null/undefined, or a known sentinel left over from the
- * pre-PR #168 normalization layer (defense in depth).
+ * True when the keyword appears in `text` as a whole word
+ * (case-insensitive). For tokens that contain regex metacharacters like
+ * `/150` we rely on character-class boundaries — \b doesn't match between
+ * `/` and a digit, so we fall back to a substring check.
  */
-function isBaseCard(parallel?: string | null): boolean {
-  if (parallel == null) return true;
-  const normalized = parallel.trim().toLowerCase();
-  if (!normalized) return true;
-  const baseSentinels = new Set([
-    'none detected',
-    'none',
-    'base',
-    'base set',
-    'n/a',
-    'na',
-    'no parallel',
-  ]);
-  return baseSentinels.has(normalized);
+function titleContains(text: string, keyword: string): boolean {
+  if (!keyword) return false;
+  const lower = text.toLowerCase();
+  const kwLower = keyword.toLowerCase();
+  // Print-run tokens (`/150`) and other punctuation-led keywords don't
+  // play nice with \b. Substring is precise enough — `/150` won't appear
+  // inside an unrelated word.
+  if (/^[^a-z0-9]/i.test(keyword) || /[^a-z0-9]$/i.test(keyword)) {
+    return lower.includes(kwLower);
+  }
+  const re = new RegExp(`\\b${escapeRegex(kwLower)}\\b`, 'i');
+  return re.test(text);
+}
+
+interface ScoreContext {
+  cardNumber?: string | null;
+  playerFirstName?: string | null;
+  playerLastName?: string | null;
+  brand?: string | null;
+  set?: string | null;
+  year?: number | string | null;
+  scannedParallel?: string | null;
+}
+
+interface ScoreBreakdown {
+  score: number;
+  parts: string[];
+}
+
+function scoreTitle(title: string, ctx: ScoreContext): ScoreBreakdown {
+  let score = 0;
+  const parts: string[] = [];
+
+  const cardNum = (ctx.cardNumber || '').toString().trim().replace(/^#/, '');
+  if (cardNum && titleContains(title, cardNum)) {
+    score += SCORE_CARD_NUMBER;
+    parts.push(`+${SCORE_CARD_NUMBER} card#`);
+  }
+
+  const lastName = (ctx.playerLastName || '').trim();
+  if (lastName && titleContains(title, lastName)) {
+    score += SCORE_LAST_NAME;
+    parts.push(`+${SCORE_LAST_NAME} lastName`);
+  }
+
+  const firstName = (ctx.playerFirstName || '').trim();
+  if (firstName && titleContains(title, firstName)) {
+    score += SCORE_FIRST_NAME;
+    parts.push(`+${SCORE_FIRST_NAME} firstName`);
+  }
+
+  const brand = (ctx.brand || '').trim();
+  if (brand && titleContains(title, brand)) {
+    score += SCORE_BRAND;
+    parts.push(`+${SCORE_BRAND} brand`);
+  }
+
+  const setName = (ctx.set || '').trim();
+  if (setName && titleContains(title, setName)) {
+    score += SCORE_SET;
+    parts.push(`+${SCORE_SET} set`);
+  }
+
+  const yearStr = ctx.year != null ? String(ctx.year).trim() : '';
+  if (yearStr && titleContains(title, yearStr)) {
+    score += SCORE_YEAR;
+    parts.push(`+${SCORE_YEAR} year`);
+  }
+
+  // Treat the scanned parallel as a positive signal — when the user
+  // confirmed "Refractor", a Refractor listing should rank above a base.
+  // Using the same word-list we penalize against keeps the model symmetric.
+  const scannedParallelLower = (ctx.scannedParallel || '').trim().toLowerCase();
+  const scannedTokens = new Set<string>();
+  if (scannedParallelLower) {
+    for (const kw of PARALLEL_KEYWORDS) {
+      if (titleContains(scannedParallelLower, kw)) {
+        scannedTokens.add(kw.toLowerCase());
+      }
+    }
+    // If the scanned parallel didn't match any of our known keywords
+    // (e.g. "Pink Polka Dot"), still credit a title that contains the
+    // scanned phrase verbatim.
+    if (titleContains(title, scannedParallelLower)) {
+      score += SCORE_SCANNED_PARALLEL;
+      parts.push(`+${SCORE_SCANNED_PARALLEL} scannedParallel`);
+    }
+  }
+
+  // Penalize each parallel keyword that appears in the title but is NOT
+  // part of the scanned parallel. This is the core of the relevance fix
+  // — a Purple Refractor listing matched against a base scan loses 30
+  // points and falls off the top-5 even though no `-keyword` was sent.
+  let unmatched = 0;
+  for (const kw of PARALLEL_KEYWORDS) {
+    if (scannedTokens.has(kw.toLowerCase())) continue;
+    if (titleContains(title, kw)) {
+      score += PARALLEL_PENALTY;
+      unmatched += 1;
+    }
+  }
+  if (unmatched > 0) {
+    parts.push(`${PARALLEL_PENALTY * unmatched} parallel×${unmatched}`);
+  }
+
+  return { score, parts };
 }
 
 function mapItem(item: any): PickerListing {
@@ -158,61 +256,44 @@ export function buildPickerQuery(parts: {
 }
 
 export interface PickerSearchOptions {
+  /** Max listings returned to the caller. Capped at TOP_N (5) regardless
+   *  of caller — the relevance ranker is the gate, not the eBay limit. */
   limit?: number;
   /** Card number to require in result titles (case-insensitive). When
    *  present, listings whose titles don't contain this exact substring
-   *  are dropped from `active`. Strip leading `#` before passing. */
+   *  are dropped before scoring. Strip leading `#` before passing. */
   requireCardNumber?: string | null;
   /** Player last name to require in result titles (case-insensitive).
    *  Listings missing the surname are dropped — eBay's keyword search is
    *  fuzzy and lets through "Drake (something else)" or "Drake Maye" when
    *  the scanned card was Drake Powell. */
   requirePlayerLastName?: string | null;
-  /** The parallel name the picker captured (or empty for base). Used to
-   *  decide whether to apply parallel-keyword exclusions in the eBay
-   *  query. When this is empty/null/sentinel, the card is treated as
-   *  base and parallel listings are filtered out. */
+  /** The parallel name the picker captured (or empty for base). Drives
+   *  the ranker: parallel keywords NOT in this string get penalized in
+   *  candidate titles, while keywords that ARE in it become positive
+   *  signals. Pass null/empty for base cards. */
   scannedParallel?: string | null;
+  /** Brand for relevance scoring (e.g. "Topps", "Panini"). +5 when
+   *  matched in candidate title. */
+  brand?: string | null;
+  /** Set for relevance scoring (e.g. "Series One", "Prizm"). +5 when
+   *  matched in candidate title. */
+  set?: string | null;
+  /** Year for relevance scoring. +3 when matched in candidate title. */
+  year?: number | string | null;
+  /** Player first name for relevance scoring. +3 when matched in
+   *  candidate title (last name is +5 and also acts as a hard filter). */
+  playerFirstName?: string | null;
 }
 
 export async function pickerSearch(
   rawQuery: string,
   opts?: PickerSearchOptions,
 ): Promise<PickerSearchResponse> {
-  const limit = Math.max(1, Math.min(opts?.limit ?? 10, 50));
-  let query = (rawQuery || '').replace(/\s{2,}/g, ' ').trim();
+  const requestedLimit = Math.max(1, Math.min(opts?.limit ?? TOP_N, TOP_N));
+  const query = (rawQuery || '').replace(/\s{2,}/g, ' ').trim();
   if (!query) {
     return { query: '', active: [], sold: [], soldAvailable: false };
-  }
-
-  // When the scanned card is base, append eBay negative-keyword filters
-  // so listings with parallel/insert keywords are excluded server-side.
-  // Necessary because card identity alone (year + brand + # + player)
-  // matches base AND every parallel of that card — see PR body for the
-  // Jokic #101 example where 4/5 returned listings were parallels.
-  //
-  // Smart skip: filter out any keyword already present in the query
-  // (e.g. base "Topps Chrome" scan has "Chrome" in the query — excluding
-  // it would zero-out results). The same `safeExclusions` array drives
-  // both the query exclusion and the post-filter regex below.
-  const isBase = isBaseCard(opts?.scannedParallel);
-  let safeExclusions: string[] = [];
-  if (isBase) {
-    const queryLower = query.toLowerCase();
-    safeExclusions = PARALLEL_EXCLUSION_KEYWORDS.filter((kw) => {
-      const pattern = new RegExp(`\\b${escapeRegex(kw)}\\b`, 'i');
-      return !pattern.test(queryLower);
-    });
-    if (safeExclusions.length > 0) {
-      const exclusions = safeExclusions.map((kw) => `-"${kw}"`).join(' ');
-      query = `${query} ${exclusions}`;
-      const skipped = PARALLEL_EXCLUSION_KEYWORDS.length - safeExclusions.length;
-      console.log(
-        `[pickerSearch] base-card detected — appended ${safeExclusions.length}/${PARALLEL_EXCLUSION_KEYWORDS.length} parallel exclusions (skipped: ${skipped} found in query)`,
-      );
-    } else {
-      console.log('[pickerSearch] base-card detected but all exclusions overlap with query — skipping');
-    }
   }
 
   let active: PickerListing[] = [];
@@ -222,7 +303,10 @@ export async function pickerSearch(
       params: {
         q: query,
         category_ids: SPORTS_CARDS_CATEGORY,
-        limit,
+        // Pull a wider candidate pool so the ranker has something to
+        // choose from. eBay's relevance/best-match still drives initial
+        // recall; we just rerank locally.
+        limit: CANDIDATE_POOL_SIZE,
         // No sort param → eBay defaults to best-match (relevance).
       },
       headers: {
@@ -251,22 +335,40 @@ export async function pickerSearch(
       console.log(`[pickerSearch] precision-filter: ${mapped.length}/${before} kept (cardNum="${cardNum}", lastName="${lastName}")`);
     }
 
-    // Defense-in-depth: even with `-keyword` server-side exclusions,
-    // listings that put parallel keywords in non-title fields can slip
-    // through. For base cards, also drop any title containing a parallel
-    // keyword via word-boundary regex. Uses the same smart-skipped
-    // `safeExclusions` array so a base "Topps Chrome" scan doesn't drop
-    // every Chrome listing.
-    if (isBase && mapped.length > 0 && safeExclusions.length > 0) {
-      const beforeBase = mapped.length;
-      const exclusionRegex = new RegExp(
-        '\\b(' + safeExclusions.map(escapeRegex).join('|') + ')\\b',
-        'i',
-      );
-      mapped = mapped.filter((item) => !exclusionRegex.test(item.title));
-      console.log(`[pickerSearch] base-card title-filter: ${mapped.length}/${beforeBase} kept`);
+    // Score every surviving candidate, then sort by score desc, price asc.
+    const scoreCtx: ScoreContext = {
+      cardNumber: opts?.requireCardNumber ?? null,
+      playerFirstName: opts?.playerFirstName ?? null,
+      playerLastName: opts?.requirePlayerLastName ?? null,
+      brand: opts?.brand ?? null,
+      set: opts?.set ?? null,
+      year: opts?.year ?? null,
+      scannedParallel: opts?.scannedParallel ?? null,
+    };
+    type Scored = { listing: PickerListing; score: number; parts: string[] };
+    const scored: Scored[] = mapped.map((listing) => {
+      const breakdown = scoreTitle(listing.title, scoreCtx);
+      return { listing, score: breakdown.score, parts: breakdown.parts };
+    });
+    scored.sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return (a.listing.price || 0) - (b.listing.price || 0);
+    });
+
+    const top = scored.slice(0, requestedLimit);
+    if (top.length > 0) {
+      console.log(`[pickerSearch] ranked top ${top.length}/${scored.length} for "${query}":`);
+      top.forEach((s, idx) => {
+        const breakdown = s.parts.length > 0 ? s.parts.join(' ') : '(no signals)';
+        console.log(
+          `  ${idx + 1}. score=${s.score} $${s.listing.price.toFixed(2)} | ${s.listing.title}\n     [${breakdown}]`,
+        );
+      });
+    } else {
+      console.log(`[pickerSearch] ranked top 0/0 for "${query}" — no candidates after precision filter`);
     }
-    active = mapped;
+
+    active = top.map((s) => ({ ...s.listing, _relevanceScore: s.score }));
     console.log(`[pickerSearch] active: ${active.length}/${rawItems.length} for "${query}"`);
   } catch (err: any) {
     console.warn('[pickerSearch] active search failed:', err?.response?.data || err?.message || err);

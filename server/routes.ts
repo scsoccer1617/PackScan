@@ -1401,11 +1401,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // the card-number gate to produce tight matches.
       const playerStr = typeof player === 'string' ? player : undefined;
       const lastName = playerStr ? playerStr.trim().split(/\s+/).pop() ?? null : null;
+      const playerFirstName = playerStr ? playerStr.trim().split(/\s+/)[0] ?? null : null;
       const result = await pickerSearch(query, {
         limit: limitNum,
         requireCardNumber: typeof cardNumber === 'string' ? cardNumber : undefined,
         requirePlayerLastName: lastName,
         scannedParallel: typeof parallel === 'string' ? parallel : undefined,
+        brand: typeof brand === 'string' ? brand : undefined,
+        set: typeof set === 'string' ? set : undefined,
+        year: typeof year === 'string' ? year : undefined,
+        playerFirstName,
       });
       // Trim the response to the active surface — `sold`/`soldAvailable`
       // are kept off the wire so clients don't accidentally render an
