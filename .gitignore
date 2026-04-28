@@ -4,3 +4,10 @@ dist
 server/public
 vite.config.ts.*
 *.tar.gz
+
+# Local card scans for VLM testing — never commit these
+test-images-tmp/
+
+# Local environment files
+.env
+.env.local
