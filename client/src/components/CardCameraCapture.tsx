@@ -518,12 +518,21 @@ export default function CardCameraCapture({
               <span className="text-xs mt-1">Library</span>
             </Button>
 
+            {/*
+              One-handed scanning ergonomics: the visible button stays 64×64,
+              but a transparent ::before pseudo-element extends the touch area
+              by 12px on every side (effective ~88×88 tap region). Layout is
+              unaffected because ::before is absolutely positioned. Kept under
+              the Library button's natural spacing — `justify-around` on the
+              parent gives ample clearance at phone widths so the expanded
+              region doesn't overlap Library or the "Tap to capture" hint.
+            */}
             <button
               type="button"
               onClick={captureFrame}
               disabled={!!error || starting}
               aria-label="Capture"
-              className="relative h-16 w-16 rounded-full bg-white border-4 border-white/40 active:scale-95 transition-transform disabled:opacity-40"
+              className="relative h-16 w-16 rounded-full bg-white border-4 border-white/40 active:scale-95 transition-transform disabled:opacity-40 before:content-[''] before:absolute before:-inset-3 before:rounded-full"
             >
               <span className="absolute inset-1 rounded-full bg-white" />
             </button>
