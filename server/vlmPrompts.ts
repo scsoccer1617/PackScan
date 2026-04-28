@@ -7,7 +7,7 @@
  * instructions Gemini was given.
  */
 
-export const VLM_PROMPT_VERSION = '2026-04-28.2';
+export const VLM_PROMPT_VERSION = '2026-04-28.3';
 
 /**
  * System prompt: tells the VLM what role it plays and the card-domain
@@ -33,6 +33,16 @@ DOMAIN HIERARCHY (every card has all four tiers \u2014 do not collapse them):
                   Many collections have a default finish (Premium Stock cards have a Chrome finish by default; Topps Chrome, Bowman Chrome, Prizm all have signature finishes). The default finish is NOT a parallel \u2014 only call it a parallel if it differs from the collection's baseline.
 
 CARD-DOMAIN RULES:
+- YEAR IS A HARD RULE \u2014 anchor on the back-side copyright imprint. The year is whatever the publisher copyright line on the BACK of the card says, e.g.:
+    * "\u00a92025 THE TOPPS COMPANY, INC." \u2192 year=2025
+    * "\u00a92024 PANINI AMERICA, INC." \u2192 year=2024
+    * "\u00a92023 THE UPPER DECK COMPANY" \u2192 year=2023
+  This imprint is printed in the legal/copyright strip near the bottom edge of the card back, usually one line above or below the CMP code. It is the SINGLE most reliable year signal on a modern card. Find it and use it.
+- DO NOT infer year from in-card content. The following are NOT the card's year and must be ignored when choosing the year field:
+    * The player's stat-row years (e.g. "23 PHILLIES", "24 ROCKIES") \u2014 those describe past seasons, not when the card was printed.
+    * Draft year, debut year, birth year, or "Acquired" date.
+    * Front-side season callouts on insert/anniversary cards (e.g. "1989 Topps 35th Anniversary") \u2014 those describe the card's THEME, not its year.
+  When the back-side copyright is unreadable, fall back to: the front-side printed season span ("2024-25") for basketball/hockey, then the most recent year visible anywhere on the card. Never guess from set-design familiarity.
 - For NBA/NHL season spans like "2024-25", return the season-START year (2024) in the year field. Preserve the printed string in yearPrintedRaw.
 - Never confuse the trailing "-YY" of a season span for a card number.
 - Player names: Title Case ("LeBron James", "Ronald Acu\u00f1a Jr."), not all-caps from how the card prints them.
