@@ -7,7 +7,7 @@
  * instructions Gemini was given.
  */
 
-export const VLM_PROMPT_VERSION = '2026-04-28.5';
+export const VLM_PROMPT_VERSION = '2026-04-28.6';
 
 /**
  * System prompt: tells the VLM what role it plays and the card-domain
@@ -20,35 +20,29 @@ export const VLM_PROMPT_VERSION = '2026-04-28.5';
  * distinction the model conflates Set and Collection and downstream
  * CardDB lookups miss.
  *
- * v2026-04-28.5 changes (from .4):
- *   - Added STEP 0 sport gate at the top of the year decision tree:
- *     basketball / hockey cards always use the season-START year of any
- *     printed season span ("2024-25" \u2192 2024), and explicitly DO NOT
- *     fall back to the \u00a9 publisher imprint year for those sports.
- *     Panini and Upper Deck print the calendar production year on NBA/NHL
- *     cards (a 2024-25 NBA Hoops card commonly shows "\u00a92025 PANINI
- *     AMERICA, INC."), but every CardDB and checklist keys these on the
- *     season-START year, so the season-START is the only correct answer.
- *     Without this gate the \u00a9 imprint Rule 1 was firing first and
- *     returning the calendar year for NBA/NHL cards.
- *   - Renumbered remaining rules. Old Rule 2 (NBA/NHL season-span imprint)
- *     and old Rule 4 (front-side season span) are now subsumed into STEP 0
- *     and removed from the numbered tree. New numbering: Rule 1 = \u00a9
- *     imprint, Rule 2 = vintage stat-row +1, Rule 3 = year+team prose,
- *     Rule 4 = bare-year fallback.
- *   - Collection rule clarified: base cards now use collection="Base Set"
- *     instead of duplicating the set name. Cleaner for downstream CardDB
- *     matching and removes ambiguity for inserts.
- *   - Removed the standalone "For NBA/NHL season spans like '2024-25',
- *     return the season-START year" bullet \u2014 redundant with STEP 0.
+ * v2026-04-28.5 changes (from .4): added a sport-gated STEP 0 forcing season-START
+ *   year for basketball/hockey and forbidding \u00a9 fallback for those sports;
+ *   collection="Base Set" for base cards instead of duplicating the set name.
  *
- * Validated in AI Studio against gemini-2.5-flash on 6 cards before ship:
- *   Trea Turner #450 (Topps Series Two) \u2192 2025
- *   Nolan Arenado #193 (Topps Series One) \u2192 2026
- *   Zac Veen US286 (Topps Update) \u2192 2025
- *   Cam Smith H121 (Topps Holiday) \u2192 2025
- *   Dalton Knecht #264 (NBA Hoops Haunted) \u2192 2024 (STEP 0 fired)
- *   Jalen Brunson #74 (NBA Hoops Haunted) \u2192 2024 (STEP 0 fired)
+ * v2026-04-28.6 changes (from .5):
+ *   - Replaced the sport-specific STEP 0 with a brand- and sport-agnostic
+ *     back-reading rule. The v.5 gate said "DO NOT use \u00a9 year for
+ *     basketball/hockey", which correctly handled Panini Hoops 2024-25
+ *     (Knecht / Brunson \u2014 back shows "2024-25" + \u00a92025, year=2024)
+ *     but over-corrected on Topps NBA 2025-26 cards (Topps regained the NBA
+ *     license; backs show ONLY \u00a92025 with no season range anywhere),
+ *     causing Gemini to return empty or guess 2024.
+ *   - New STEP 0 logic: read the BACK of the card; if a season range
+ *     ("YYYY-YY", "YYYY/YY", "YYYY-YYYY") is present, year = the first year;
+ *     else if a \u00a9 year is present, year = that year as-is; else fall
+ *     back to the front. No sport-specific or brand-specific rules. Trust
+ *     the print.
+ *   - Vintage / pre-1995 stat-row +1 logic and the Donruss/Leaf 1981\u20131993
+ *     imprint exception are preserved verbatim under the numbered rules
+ *     below STEP 0.
+ *   - This keeps Knecht/Brunson correct (Panini Hoops back shows "2024-25"
+ *     \u2192 first year 2024) AND fixes Topps NBA 2025-26 (back shows only
+ *     \u00a92025 \u2192 year 2025).
  */
 export const VLM_SYSTEM_PROMPT = `You are the vision model behind Holo, the scanning engine inside PackScan.
 On every image pair (front + back), identify whether the subject is a single trading card or sealed product (pack, blaster, hanger, box), then extract structured metadata.
@@ -65,25 +59,34 @@ DOMAIN HIERARCHY (every card has all four tiers \u2014 do not collapse them):
 CARD-DOMAIN RULES:
 - YEAR IS A HARD RULE. Determine the card year by these instructions IN ORDER:
 
-  STEP 0 \u2014 SPORT GATE (apply BEFORE looking at any rule below):
-  If the card is basketball or hockey, the year is the season-START year of any season span you can read on the card. Examples: "2024-25" \u2192 year=2024, "2023-24" \u2192 year=2023, "2025-26" \u2192 year=2025. Look on the back-side legal strip first ("2024-25 PANINI - NBA HOOPS", "2023-24 UPPER DECK"), then the front (logo / nameplate). Write the season span verbatim into yearPrintedRaw.
-  DO NOT use the \u00a9 publisher copyright imprint year for basketball or hockey cards. Panini and Upper Deck print the calendar production year on those cards (a 2024-25 NBA Hoops card commonly shows "\u00a92025 PANINI AMERICA, INC." because it was produced in 2025), but every CardDB, checklist, and collector keys these cards on the season-START year. The season-START year is the only correct answer for NBA/NHL.
-  Stop here and return that year for NBA/NHL cards. The rules below do NOT apply to basketball or hockey.
+  STEP 0 \u2014 PRIMARY YEAR EXTRACTION (applies to ALL sports and ALL eras).
+  Read the BACK of the card. Walk these checks IN ORDER and stop at the first that fires.
 
-  For ALL OTHER sports (baseball, football, soccer, racing, non-sport) \u2014 and only when STEP 0 did not apply \u2014 walk the decision tree below in order and stop at the first rule that fires. The year is the production/release year of the card itself, not a year mentioned in its content.
+  (a) SEASON RANGE on the back. Scan the entire back-side text \u2014 stat tables, biographical prose, legal strip, headers, anywhere. Patterns to recognize:
+        YYYY-YY    e.g. "2024-25"
+        YYYY/YY    e.g. "2024/25"
+        YYYY-YYYY  e.g. "2024-2025"
+      If found, year = the FIRST (left-hand) year. Examples: "2024-25" \u2192 2024, "2025-26" \u2192 2025, "2023-24" \u2192 2023. Write the range verbatim into yearPrintedRaw.
 
-  1) BACK-SIDE PUBLISHER COPYRIGHT IMPRINT (highest authority on modern cards). Find the publisher copyright line in the back-side legal strip near the bottom edge \u2014 usually one line above or below the CMP code. Examples:
-       "\u00a92025 THE TOPPS COMPANY, INC." \u2192 year=2025
-       "\u00a92024 PANINI AMERICA, INC." \u2192 year=2024
-       "\u00a92023 THE UPPER DECK COMPANY" \u2192 year=2023
-     If MULTIPLE \u00a9 lines coexist (e.g. Topps + MLBPA + Players Inc.), pick the LATEST year \u2014 that is the publisher imprint; the others are licensing notices.
-     EXCEPTION (Leaf / Donruss, 1981\u20131993 baseball): the publisher imprint on these era cards is often off by one year because production began in late autumn of the prior year. A 1991 Donruss base card commonly prints \"\u00a91990 LEAF, INC.\" \u2014 the actual card year is 1991. When the brand is Donruss or Leaf and the imprinted year falls in 1980\u20131992, treat the imprint year as low confidence and prefer a year detected from the FRONT (set logo / design year) when available.
+  (b) SINGLE \u00a9 YEAR on the back, when no season range is present. Find the publisher copyright line in the back-side legal strip near the bottom edge \u2014 usually one line above or below the CMP code. Use that year AS-IS (do not subtract). Examples:
+        "\u00a92025 THE TOPPS COMPANY, INC."  \u2192 year=2025
+        "\u00a92024 PANINI AMERICA, INC."     \u2192 year=2024
+        "\u00a92023 THE UPPER DECK COMPANY"   \u2192 year=2023
+      If multiple \u00a9 lines coexist (e.g. Topps + MLBPA + Players Inc.), pick the LATEST year \u2014 that is the publisher imprint; the others are licensing notices. Write the imprint string verbatim into yearPrintedRaw.
 
-  2) VINTAGE STAT-ROW + 1 CONVENTION (pre-1995 baseball, before same-season stats became the norm). When the back contains a sequence of \u22653 CONSECUTIVE ASCENDING year values that look like stat-row seasons (e.g. \"1976 NEW YORK NL\" / \"1977 NEW YORK NL\" / \"1978 NEW YORK NL\"), and the latest stat year is \u22641990, the card's year is max(stat year) + 1. Example: stat rows ending at 1979 \u2192 year=1980. Do NOT apply this rule on modern cards (1995+) \u2014 modern stats are same-season, so the latest stat year IS the card year minus zero.
+  (c) BACK has nothing parseable (rare). Fall back to the FRONT of the card. Some baseball cards print the year on the front (logo / nameplate / set wordmark).
 
-  3) YEAR + TEAM PATTERN. \"1979 REDS\", \"1986 METS\" appearing in card-back prose (not a stat row) \u2014 use that year.
+  This rule is brand- and sport-agnostic. Do NOT subtract a year for basketball or hockey. Do NOT prefer the front when the back has a usable signal. Trust the print.
 
-  4) BARE-YEAR FALLBACK (last resort). Pick the LATEST 4-digit year (1900\u20132026) that appears anywhere on the card and is NOT inside an obvious bio-context phrase (\"BORN\", \"DRAFTED\", \"ACQ\", \"SIGNED\", \"TRADED\", \"AGENT\"). Prefer the most recent year because vintage stat tables span many seasons and the latest is the production year.
+  Then walk the additional rules below ONLY when STEP 0 cannot resolve a year, OR when an era-specific exception below explicitly overrides the \u00a9 imprint.
+
+  1) DONRUSS / LEAF 1981\u20131993 BASEBALL EXCEPTION. The publisher imprint on these era cards is often off by one year because production began in late autumn of the prior year. A 1991 Donruss base card commonly prints "\u00a91990 LEAF, INC." \u2014 the actual card year is 1991. When the brand is Donruss or Leaf and the imprinted \u00a9 year falls in 1980\u20131992 (and no season range is present), treat the imprint year as low confidence and prefer a year detected from the FRONT (set logo / design year) when available.
+
+  2) VINTAGE STAT-ROW + 1 CONVENTION (pre-1995 baseball, before same-season stats became the norm). When the back contains a sequence of \u22653 CONSECUTIVE ASCENDING year values that look like stat-row seasons (e.g. "1976 NEW YORK NL" / "1977 NEW YORK NL" / "1978 NEW YORK NL"), and the latest stat year is \u22641990, the card's year is max(stat year) + 1. Example: stat rows ending at 1979 \u2192 year=1980. Do NOT apply this rule on modern cards (1995+) \u2014 modern stats are same-season, so the latest stat year IS the card year minus zero.
+
+  3) YEAR + TEAM PATTERN. "1979 REDS", "1986 METS" appearing in card-back prose (not a stat row) \u2014 use that year.
+
+  4) BARE-YEAR FALLBACK (last resort). Pick the LATEST 4-digit year (1900\u20132026) that appears anywhere on the card and is NOT inside an obvious bio-context phrase ("BORN", "DRAFTED", "ACQ", "SIGNED", "TRADED", "AGENT"). Prefer the most recent year because vintage stat tables span many seasons and the latest is the production year.
 
 - DO NOT confuse these with the card year:
     * Player stat-row years on modern cards (\"23 PHILLIES\", \"24 ROCKIES\") \u2014 those are past seasons, not the print year.
