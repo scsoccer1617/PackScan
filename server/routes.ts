@@ -1367,52 +1367,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return res.status(200).json({ parallels: [], filterFellBack: false, query: '' });
   });
 
-  // ───────── Picker eBay Browse search (PR #162) ─────────
-  // Live eBay search powering the Gemini-authority picker. Accepts either
-  // a free-text query or a structured `parts` object — the latter lets the
-  // client send the Gemini-emitted fields and have the server build the
-  // canonical query string. Always returns 200; on credential / network
-  // failure the active list comes back empty rather than blocking the UI.
-  const pickerEbaySearchSchema = z.object({
-    query: z.string().trim().min(1).max(200).optional(),
-    parts: z
-      .object({
-        year: z.union([z.number(), z.string()]).nullable().optional(),
-        brand: z.string().nullable().optional(),
-        set: z.string().nullable().optional(),
-        cardNumber: z.string().nullable().optional(),
-        player: z.string().nullable().optional(),
-        parallel: z.string().nullable().optional(),
-      })
-      .optional(),
-    limit: z.number().int().positive().max(50).optional(),
-  });
-
-  app.post(`${apiPrefix}/picker/ebay-search`, async (req: Request, res: Response) => {
-    const parsed = pickerEbaySearchSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return res.status(400).json({
-        query: '',
-        active: [],
-        sold: [],
-        soldAvailable: false,
-        error: parsed.error.issues.map((i) => i.message).join('; '),
-      });
-    }
-    try {
-      const { pickerSearch, buildPickerQuery } = await import('./ebayPickerSearch');
-      const queryString =
-        parsed.data.query?.trim() ||
-        (parsed.data.parts ? buildPickerQuery(parsed.data.parts) : '');
-      const result = await pickerSearch(queryString, { limit: parsed.data.limit });
-      return res.status(200).json(result);
-    } catch (err: any) {
-      console.error('[picker/ebay-search] unexpected throw:', err?.message || err);
-      return res
-        .status(200)
-        .json({ query: '', active: [], sold: [], soldAvailable: false });
-    }
-  });
+  // ───────── Picker eBay Browse search (DORMANT — PR #163) ─────────
+  // The /api/picker/ebay-search endpoint and its server/ebayPickerSearch.ts
+  // module are intentionally not mounted. PR #163 removed the eBay listings
+  // step from the Gemini-authority picker after user testing — the picker
+  // now closes on Yes/No without showing listings. The eBay Browse client
+  // module is preserved on disk so a future revert (or a different surface)
+  // can revive the listings UI without re-implementing the search path.
+  // Same dormant-code pattern PR #162 used for the legacy CardDB lookup.
 
   // ── Voice Lookup: transcribe + extract structured card fields ─────────────
   // Public endpoint — user speaks a card ("2025 Topps Series One Nolan
