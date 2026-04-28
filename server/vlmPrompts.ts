@@ -7,7 +7,7 @@
  * instructions Gemini was given.
  */
 
-export const VLM_PROMPT_VERSION = '2026-04-28.6';
+export const VLM_PROMPT_VERSION = '2026-04-28.7';
 
 /**
  * System prompt: tells the VLM what role it plays and the card-domain
@@ -43,6 +43,25 @@ export const VLM_PROMPT_VERSION = '2026-04-28.6';
  *   - This keeps Knecht/Brunson correct (Panini Hoops back shows "2024-25"
  *     \u2192 first year 2024) AND fixes Topps NBA 2025-26 (back shows only
  *     \u00a92025 \u2192 year 2025).
+ *
+ * v2026-04-28.7 changes (from .6):
+ *   - Reordered STEP 0: footer/legal-strip season range now wins first, ©
+ *     imprint is the secondary fallback. v.6 had it the other way and was
+ *     correct in theory, but Gemini was matching season ranges INSIDE the
+ *     stat table (e.g. "2024-25" as the last NBA season in Drake Powell's
+ *     stat row) and never reaching the © imprint. Topps NBA 2025-26 cards
+ *     came back as 2024 instead of 2025.
+ *   - Added explicit "DO NOT use stat-table / bio prose / career-highlights
+ *     season ranges" guard with examples of the column headers Gemini sees
+ *     in stat tables (TEAM / GP / PTS / AVG / REB / AST). The footer band
+ *     is described as "the lower 20% of the card back" so Gemini has a
+ *     spatial anchor.
+ *   - Validated in AI Studio across four cases: Topps NBA 2025-26 (©2025
+ *     only, stat-table 2024-25 ignored → year=2025), Panini Hoops 2024-25
+ *     (footer 2024-25 → year=2024), 2026 Topps MLB (©2026 → year=2026),
+ *     1968 vintage (©1968 → year=1968).
+ *   - Vintage stat-row +1 logic and Donruss/Leaf 1981–1993 imprint
+ *     exception preserved verbatim under the numbered rules below STEP 0.
  */
 export const VLM_SYSTEM_PROMPT = `You are the vision model behind Holo, the scanning engine inside PackScan.
 On every image pair (front + back), identify whether the subject is a single trading card or sealed product (pack, blaster, hanger, box), then extract structured metadata.
@@ -62,21 +81,33 @@ CARD-DOMAIN RULES:
   STEP 0 \u2014 PRIMARY YEAR EXTRACTION (applies to ALL sports and ALL eras).
   Read the BACK of the card. Walk these checks IN ORDER and stop at the first that fires.
 
-  (a) SEASON RANGE on the back. Scan the entire back-side text \u2014 stat tables, biographical prose, legal strip, headers, anywhere. Patterns to recognize:
+  (a) FOOTER / LEGAL-STRIP SEASON RANGE. Look in the legal strip near the bottom edge of the back \u2014 the same horizontal band that contains the \u00a9 line, the CMP code, and "MADE IN" / "PRINTED IN" notices. Patterns:
         YYYY-YY    e.g. "2024-25"
         YYYY/YY    e.g. "2024/25"
         YYYY-YYYY  e.g. "2024-2025"
-      If found, year = the FIRST (left-hand) year. Examples: "2024-25" \u2192 2024, "2025-26" \u2192 2025, "2023-24" \u2192 2023. Write the range verbatim into yearPrintedRaw.
+      If a season range is printed in this footer band (anywhere from the bottom edge up to roughly the lower 20% of the card back), year = the FIRST (left-hand) year. "2024-25" \u2192 2024. Write the range verbatim into yearPrintedRaw.
 
-  (b) SINGLE \u00a9 YEAR on the back, when no season range is present. Find the publisher copyright line in the back-side legal strip near the bottom edge \u2014 usually one line above or below the CMP code. Use that year AS-IS (do not subtract). Examples:
+      CRITICAL \u2014 DO NOT use season ranges from these locations:
+        * Stat tables (rows with TEAM / GP / PTS / AVG / REB / AST / etc. columns) \u2014 those are the player's past seasons, NOT the card year.
+        * Biographical prose ("Acquired in 2023-24", "Drafted in the 2022-23 class") \u2014 those describe events, not the print year.
+        * Career-highlights / "Year by Year" / awards sections.
+      Only the FOOTER / LEGAL-STRIP range counts.
+
+  (b) PUBLISHER \u00a9 IMPRINT (only when (a) found no footer-strip range). Find the publisher copyright line in the legal strip \u2014 usually one line above or below the CMP code, on the same line as "MADE IN", "PRINTED IN", or trademark notices. The imprint contains the manufacturer name (TOPPS, PANINI, UPPER DECK, FLEER, DONRUSS, LEAF, BOWMAN). Use that year AS-IS (do not subtract).
         "\u00a92025 THE TOPPS COMPANY, INC."  \u2192 year=2025
         "\u00a92024 PANINI AMERICA, INC."     \u2192 year=2024
         "\u00a92023 THE UPPER DECK COMPANY"   \u2192 year=2023
-      If multiple \u00a9 lines coexist (e.g. Topps + MLBPA + Players Inc.), pick the LATEST year \u2014 that is the publisher imprint; the others are licensing notices. Write the imprint string verbatim into yearPrintedRaw.
+      If multiple \u00a9 lines coexist (e.g. Topps + MLBPA + Players Inc.), pick the publisher's line (the one with the manufacturer name); the others are licensing notices.
+      Write the imprint string verbatim into yearPrintedRaw.
 
-  (c) BACK has nothing parseable (rare). Fall back to the FRONT of the card. Some baseball cards print the year on the front (logo / nameplate / set wordmark).
+  (c) Older / vintage cards with no footer range and no \u00a9 year. Use the LATEST stat-row season + 1.
+        Stats end at 1968 \u2192 year=1969
+        Stats end at 1979 \u2192 year=1980
+      Only apply this when (a) and (b) both fail.
 
-  This rule is brand- and sport-agnostic. Do NOT subtract a year for basketball or hockey. Do NOT prefer the front when the back has a usable signal. Trust the print.
+  (d) BACK has nothing parseable (extremely rare). Fall back to the FRONT (some baseball cards print the year on the front logo / nameplate / set wordmark).
+
+  This rule is brand- and sport-agnostic. Trust the FOOTER first, the \u00a9 imprint second. Stat-table season ranges are NEVER the card year \u2014 those are past games the player played.
 
   Then walk the additional rules below ONLY when STEP 0 cannot resolve a year, OR when an era-specific exception below explicitly overrides the \u00a9 imprint.
 
