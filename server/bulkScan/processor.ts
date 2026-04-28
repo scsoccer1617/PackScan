@@ -39,8 +39,10 @@ import { pairPages, type ScanPage, type PairedScan } from './pairing';
 import { evaluateConfidence, isCardDbCorroboration } from './confidenceGate';
 import { normalizeImageOrientation } from '../dualSideOCR';
 import { lookupCard as cardDbLookup } from '../cardDatabaseService';
+import { isCardDbLookupEnabled } from '../featureFlags';
 import { appendCardRow } from '../googleSheets';
-import { searchCardValues, getEbaySearchUrl } from '../ebayService';
+import { getEbaySearchUrl } from '../ebayService';
+import { pickerSearch, buildPickerQuery } from '../ebayPickerSearch';
 import { getScanQuota, incrementScanCount } from '../scanQuota';
 import { logUserScan, type ScanFieldValues } from '../userScans';
 
@@ -463,12 +465,17 @@ async function processItem(batch: ScanBatch, item: ScanBatchItem): Promise<'auto
   // dualSideOCR's orchestration (OCR batch, per-side analyzers, SCP-first,
   // CardDB enrichment, foil detection) without duplicating any of it.
   const { handleDualSideCardAnalysis } = await import('../dualSideOCR');
+  // Deterministic scanId so bulk scan rows in the scan-log Sheet are
+  // distinguishable from single-card "no session" rows. Without this the
+  // analyzer falls back to `noscan-${Date.now()}` and bulk rows blend in
+  // with abandoned single-card sessions. Greppable by `bulk-` prefix.
+  const scanId = `bulk-${batch.id}-${item.id}`;
   const mockReq: any = {
     files: {
       frontImage: [buildMockFile(exifFront, item.frontFileName || 'front.jpg')],
       backImage: [buildMockFile(exifBack, item.backFileName || 'back.jpg')],
     },
-    body: {},
+    body: { scanId },
     query: {},
   };
 
@@ -500,37 +507,45 @@ async function processItem(batch: ScanBatch, item: ScanBatchItem): Promise<'auto
   };
 
   // CardDB corroboration: independent lookup on the analyzer's output so
-  // we can feed it into the confidence gate. `cardDbLookup` runs fast
-  // against the local DB and is idempotent; running it here twice per
-  // scan (once inside the analyzer, once here) is fine.
+  // we can feed it into the confidence gate. Gated by CARDDB_LOOKUP_ENABLED
+  // (PR #162) — when off, Gemini VLM is authoritative and we treat the
+  // missing CardDB signal as neutral (cardDbAvailable=false), not as
+  // "actively not corroborated."
+  const cardDbAvailable = isCardDbLookupEnabled();
   let cardDbCorroborated = false;
-  try {
-    if (analysis.brand && analysis.year && analysis.cardNumber) {
-      const dbRes = await cardDbLookup({
-        brand: String(analysis.brand),
-        year: Number(analysis.year),
-        cardNumber: String(analysis.cardNumber),
-        collection: analysis.collection || undefined,
-        serialNumber: analysis.serialNumber || undefined,
-        playerLastName: analysis.playerLastName || undefined,
-      });
-      if (dbRes.found) {
-        cardDbCorroborated = isCardDbCorroboration(analysis, {
-          year: dbRes.year ?? null,
-          cardNumberRaw: dbRes.cardNumber ?? null,
+  if (!cardDbAvailable) {
+    console.log(
+      `[BulkScan][CardDB] Lookup disabled by CARDDB_LOOKUP_ENABLED flag — Gemini VLM is authoritative for this scan.`,
+    );
+  } else {
+    try {
+      if (analysis.brand && analysis.year && analysis.cardNumber) {
+        const dbRes = await cardDbLookup({
+          brand: String(analysis.brand),
+          year: Number(analysis.year),
+          cardNumber: String(analysis.cardNumber),
+          collection: analysis.collection || undefined,
+          serialNumber: analysis.serialNumber || undefined,
+          playerLastName: analysis.playerLastName || undefined,
         });
+        if (dbRes.found) {
+          cardDbCorroborated = isCardDbCorroboration(analysis, {
+            year: dbRes.year ?? null,
+            cardNumberRaw: dbRes.cardNumber ?? null,
+          });
+        }
       }
+    } catch (err: any) {
+      console.warn(`[bulkScan] CardDB corroboration lookup failed for item ${item.id}: ${err?.message}`);
     }
-  } catch (err: any) {
-    console.warn(`[bulkScan] CardDB corroboration lookup failed for item ${item.id}: ${err?.message}`);
   }
 
-  // eBay value lookup. The analyzer leaves estimatedValue at 0 by default —
-  // the regular /add-card flow does this lookup separately after OCR
-  // (server/routes.ts, the searchCardValues call). Without this step the
-  // bulk-scan pipeline writes 0 into the sheet's Avg. Price column for
-  // every card. Same guard as the /add-card flow: only run when we have
-  // enough identifying info to make a meaningful query.
+  // eBay value lookup via PR #165's pickerSearch — the same engine that
+  // backs /api/ebay/comps and powers single-card's result-screen Price tab
+  // and persistent "Avg" hero. Keyed off Gemini's normalized `parallel`
+  // value (null when Gemini detected no parallel post-PR #168). Active
+  // listings only — Browse API doesn't expose Sold under our current
+  // eBay scope. Header label "Avg" matches single-card.
   if (
     analysis.playerFirstName &&
     analysis.playerLastName &&
@@ -539,24 +554,24 @@ async function processItem(batch: ScanBatch, item: ScanBatchItem): Promise<'auto
   ) {
     try {
       const playerName = `${analysis.playerFirstName} ${analysis.playerLastName}`;
-      const ebayData = await searchCardValues(
-        playerName,
-        analysis.cardNumber || '',
-        analysis.brand,
-        analysis.year,
-        analysis.collection || '',
-        analysis.condition || '',
-        analysis.isNumbered || false,
-        analysis.foilType || undefined,
-        analysis.serialNumber || undefined,
-        analysis.variant || undefined,
-        analysis.isAutographed || false,
-        undefined,
-        analysis.set || undefined,
-      );
-      const averageValue = ebayData.averageValue || 0;
+      const query = buildPickerQuery({
+        year: analysis.year,
+        brand: analysis.brand,
+        set: analysis.set || analysis.collection || null,
+        cardNumber: analysis.cardNumber || null,
+        player: playerName,
+        parallel: analysis.variant || null,
+      });
+      const result = await pickerSearch(query, { limit: 10 });
+      const active = result.active || [];
+      const averageValue = active.length > 0
+        ? active.reduce((sum, l) => sum + (l.price || 0), 0) / active.length
+        : 0;
       analysis.estimatedValue = averageValue;
-      analysis.ebayResults = ebayData.results || [];
+      analysis.ebayResults = active;
+      // Keep the human-clickable search URL pointed at the same query so
+      // dealers can drill in from the Sheet. getEbaySearchUrl predates the
+      // picker engine but still produces a valid eBay search URL.
       analysis.ebaySearchUrl = getEbaySearchUrl(
         playerName,
         analysis.cardNumber || '',
@@ -573,17 +588,17 @@ async function processItem(batch: ScanBatch, item: ScanBatchItem): Promise<'auto
         analysis.isAutographed || false,
       );
       console.log(
-        `[bulkScan] eBay lookup item ${item.id}: ${(ebayData.results || []).length} results, avg=$${averageValue.toFixed(2)}`,
+        `[bulkScan] eBay comps item ${item.id}: ${active.length} active results, avg=$${averageValue.toFixed(2)} for "${query}"`,
       );
     } catch (err: any) {
-      console.warn(`[bulkScan] eBay lookup failed for item ${item.id}: ${err?.message}`);
+      console.warn(`[bulkScan] eBay comps lookup failed for item ${item.id}: ${err?.message}`);
       // Leave estimatedValue at whatever the analyzer set (typically 0). We
       // still let the row save — a missing price is recoverable; a missing
       // card row is not.
     }
   } else {
     console.log(
-      `[bulkScan] eBay lookup skipped item ${item.id}: insufficient card data (player=${!!analysis.playerFirstName}/${!!analysis.playerLastName} brand=${!!analysis.brand} year=${!!analysis.year})`,
+      `[bulkScan] eBay comps skipped item ${item.id}: insufficient card data (player=${!!analysis.playerFirstName}/${!!analysis.playerLastName} brand=${!!analysis.brand} year=${!!analysis.year})`,
     );
   }
 
@@ -592,6 +607,7 @@ async function processItem(batch: ScanBatch, item: ScanBatchItem): Promise<'auto
   const gate = evaluateConfidence({
     analysis,
     pairingWarnings: priorWarnings,
+    cardDbAvailable,
     cardDbCorroborated,
   });
 
