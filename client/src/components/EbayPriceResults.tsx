@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { ExternalLink, TrendingUp, Pencil, RotateCcw, ThumbsUp, ThumbsDown, Check, ScanText } from "lucide-react";
 import { CardFormValues } from "@shared/schema";
 import { apiRequest } from "@/lib/queryClient";
-import { formatSeasonYear, parseSeasonYearInput, isSeasonSport } from "@/lib/seasonYear";
+import { displayYear, formatSeasonYear, parseSeasonYearInput, isSeasonSport } from "@/lib/seasonYear";
 import VariantCombobox from "@/components/VariantCombobox";
 import FoilTypeSelect from "@/components/FoilTypeSelect";
 import AddToSheetButton from "@/components/AddToSheetButton";
@@ -508,7 +508,7 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
                 </div>
                 <div className="text-base">
                   <span className="font-semibold text-slate-800">Year: </span>
-                  <span className="text-slate-700">{formatSeasonYear(cardData.year, cardData.sport) || 'Not detected'}</span>
+                  <span className="text-slate-700">{displayYear(cardData.year, cardData.sport, cardData.yearPrintedRaw) || 'Not detected'}</span>
                 </div>
                 <div className="text-base">
                   <span className="font-semibold text-slate-800">Brand: </span>

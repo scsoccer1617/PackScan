@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { formatCurrency } from "@/lib/utils";
-import { formatSeasonYear } from "@/lib/seasonYear";
+import { displayYear } from "@/lib/seasonYear";
 import EditCardModal from "./EditCardModal";
 
 interface CardItemProps {
@@ -247,7 +247,7 @@ export default function CardItem({ card, quantity, onDelete }: CardItemProps) {
       <div className="p-3">
         <h3 className="font-medium text-sm">{card.playerFirstName} {card.playerLastName}</h3>
         <p className="text-xs text-slate-500">
-          {formatSeasonYear(card.year, getSportName()) ?? card.year} {getBrandName()} {typeof card.collection === 'string' ? card.collection : ''}
+          {displayYear(card.year, getSportName(), (card as any).yearPrintedRaw) ?? card.year} {getBrandName()} {typeof card.collection === 'string' ? card.collection : ''}
         </p>
         <div className="flex justify-between items-center mt-2">
           <span className="text-xs font-medium text-secondary-600">

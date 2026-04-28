@@ -71,3 +71,36 @@ export function parseSeasonYearInput(input: string): number | null {
 export function isSeasonSport(sport?: string | null): boolean {
   return !!sport && SEASON_SPORTS.has(sport);
 }
+
+/**
+ * Render the year for display, preferring Gemini's verbatim print over the
+ * stored integer. This matches what's actually printed on the card:
+ *   - Footer "2024-25" → display "2024-25"
+ *   - "©2025 THE TOPPS COMPANY" → display "2025"
+ *   - Missing yearPrintedRaw → fall back to formatSeasonYear(year, sport)
+ *
+ * `year` is still the single source of truth for backend logic (eBay
+ * search, Sheet writes, CardDB lookups). Only display changes.
+ */
+export function displayYear(
+  year: number | string | null | undefined,
+  sport?: string | null,
+  yearPrintedRaw?: string | null
+): string | null {
+  if (yearPrintedRaw && typeof yearPrintedRaw === 'string') {
+    const trimmed = yearPrintedRaw.trim();
+    // Try to extract a season range first (YYYY-YY, YYYY/YY, YYYY-YYYY).
+    const rangeMatch = trimmed.match(/(\d{4})\s*[-/]\s*(\d{2,4})/);
+    if (rangeMatch) {
+      const first = rangeMatch[1];
+      const secondRaw = rangeMatch[2];
+      const second2 =
+        secondRaw.length === 4 ? secondRaw.slice(2) : secondRaw.padStart(2, '0');
+      return `${first}-${second2}`;
+    }
+    // Otherwise look for a single 4-digit year inside the string.
+    const yearMatch = trimmed.match(/(19|20)\d{2}/);
+    if (yearMatch) return yearMatch[0];
+  }
+  return formatSeasonYear(year, sport);
+}

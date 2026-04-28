@@ -222,6 +222,14 @@ export const cardSchema = z.object({
   cmpNumber: z.string().optional(),
   set: z.string().optional(),
   team: z.string().optional(),
+  // Verbatim year string Gemini read off the back of the card ("2024-25"
+  // footer range, or "©2025 THE TOPPS COMPANY"). The integer `year` field
+  // above remains the single source of truth for backend logic (CardDB
+  // lookups, eBay search, Sheet writes); this field exists purely so the
+  // UI can render what's actually printed on the card without the
+  // basketball/hockey "-YY" suffix being appended to single-year ©
+  // imprints. Not persisted to long-term storage.
+  yearPrintedRaw: z.string().optional().nullable(),
   _engine: z.literal('ocr').optional(),
   // Optional scan-tracking payload. When present, the server logs a row to
   // user_scans alongside the cards insert. Lets us record the original

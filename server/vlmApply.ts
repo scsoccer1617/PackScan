@@ -90,6 +90,17 @@ export function applyGeminiToCombined(
     combined.year = gemini.year;
   }
 
+  // ── yearPrintedRaw (verbatim year string for UI display) ───────────────
+  // The integer `year` above is the source of truth for backend logic
+  // (CardDB lookups, eBay search, Sheet writes). This raw string lets the
+  // UI render what's actually printed on the card, so we don't slap "-YY"
+  // onto a single-year © imprint for basketball/hockey cards.
+  if (typeof gemini.yearPrintedRaw === 'string' && gemini.yearPrintedRaw.trim()) {
+    combined.yearPrintedRaw = gemini.yearPrintedRaw.trim();
+  } else {
+    combined.yearPrintedRaw = null;
+  }
+
   // ── Brand / Set / Collection / CardNumber ──────────────────────────────
   if (typeof gemini.brand === 'string' && gemini.brand.trim()) {
     combined.brand = gemini.brand.trim();
