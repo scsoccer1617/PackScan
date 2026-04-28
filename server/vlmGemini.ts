@@ -1,0 +1,143 @@
+/**
+ * Gemini VLM integration for the Holo scanning engine.
+ *
+ * Provides an independent visual reading of a card (front + back) that the
+ * agreement-scorer can compare against the existing OCR pipeline. When the
+ * two label sources agree, we have a high-confidence training-data row;
+ * when they disagree, the card goes to the human review queue.
+ *
+ * Uses @google/genai (the current Google Gen AI SDK; the older
+ * @google/generative-ai package is deprecated). Auth via process.env.GEMINI_API_KEY.
+ */
+
+import { GoogleGenAI } from '@google/genai';
+import * as fs from 'fs/promises';
+import * as path from 'path';
+import { VLM_FULL_PROMPT, VLM_PROMPT_VERSION } from './vlmPrompts';
+
+let cachedClient: GoogleGenAI | null = null;
+
+function getClient(): GoogleGenAI {
+  if (cachedClient) return cachedClient;
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error('GEMINI_API_KEY is not set. Add it to Replit Secrets or your environment.');
+  }
+  cachedClient = new GoogleGenAI({ apiKey });
+  return cachedClient;
+}
+
+function mimeFromPath(p: string): string {
+  const ext = path.extname(p).toLowerCase();
+  if (ext === '.png') return 'image/png';
+  if (ext === '.webp') return 'image/webp';
+  if (ext === '.heic' || ext === '.heif') return 'image/heic';
+  // default: jpeg
+  return 'image/jpeg';
+}
+
+export interface GeminiCardResult {
+  subjectType?: string | null;
+  sport?: string | null;
+  player?: string | null;
+  year?: number | null;
+  yearPrintedRaw?: string | null;
+  brand?: string | null;
+  set?: string | null;
+  cardNumber?: string | null;
+  parallel?: {
+    name?: string | null;
+    isFoil?: boolean;
+    isRefractor?: boolean;
+    borderTint?: string | null;
+    saturation?: string | null;
+  } | null;
+  isAutograph?: boolean;
+  isRelic?: boolean;
+  isRookie?: boolean;
+  printRun?: number | string | null;
+  team?: string | null;
+  position?: string | null;
+  confidence?: Record<string, number | null>;
+  notes?: string | null;
+}
+
+export interface AnalyzeOptions {
+  /** Override the default Gemini model. Defaults to gemini-2.5-flash for cost/speed. */
+  model?: string;
+  /** Override the prompt. Defaults to the versioned VLM_FULL_PROMPT. */
+  prompt?: string;
+  /** Override the result-template fragment (already included in VLM_FULL_PROMPT). */
+  resultTemplate?: string;
+}
+
+/**
+ * Analyse a trading card image pair (front + back) with Gemini.
+ *
+ * Returns the parsed JSON metadata Gemini extracted, or throws on
+ * network / auth / parse errors. Use a try/catch at the call site —
+ * batch runners should mark the card as "errored" and continue.
+ */
+export async function analyzeCardWithGemini(
+  frontPath: string,
+  backPath: string,
+  promptOrSystem?: string,
+  resultTemplate?: string,
+  opts: AnalyzeOptions = {}
+): Promise<GeminiCardResult> {
+  const client = getClient();
+  const model = opts.model || 'gemini-2.5-flash';
+
+  // Build the prompt. Backwards-compatible: callers can pass (prompt,
+  // template) as positional args (older shape) OR rely on VLM_FULL_PROMPT.
+  let fullPrompt: string;
+  if (promptOrSystem && resultTemplate) {
+    fullPrompt = `${promptOrSystem}\n\nReturn JSON matching this template:\n${resultTemplate}`;
+  } else if (promptOrSystem) {
+    fullPrompt = promptOrSystem;
+  } else {
+    fullPrompt = VLM_FULL_PROMPT;
+  }
+
+  const [front, back] = await Promise.all([
+    fs.readFile(frontPath),
+    fs.readFile(backPath),
+  ]);
+
+  const response = await client.models.generateContent({
+    model,
+    contents: [
+      {
+        role: 'user',
+        parts: [
+          { text: fullPrompt },
+          { inlineData: { data: front.toString('base64'), mimeType: mimeFromPath(frontPath) } },
+          { inlineData: { data: back.toString('base64'), mimeType: mimeFromPath(backPath) } },
+        ],
+      },
+    ],
+    config: { responseMimeType: 'application/json' },
+  });
+
+  const text = response.text ?? '';
+  if (!text.trim()) {
+    throw new Error('Gemini returned empty response');
+  }
+
+  // Strip markdown fences if the model wrapped its JSON despite the
+  // response-mime-type hint (rare but happens on edge prompts).
+  const cleaned = text
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```\s*$/i, '')
+    .trim();
+
+  try {
+    return JSON.parse(cleaned) as GeminiCardResult;
+  } catch (err: any) {
+    throw new Error(
+      `Gemini JSON parse error: ${err.message}. First 200 chars: ${cleaned.slice(0, 200)}`
+    );
+  }
+}
+
+export const VLM_INFO = { promptVersion: VLM_PROMPT_VERSION };
