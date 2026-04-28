@@ -58,6 +58,14 @@ const HEADERS = [
   'GeminiBrand',
   'GeminiPlayer',
   'LegacyYear',
+  // PR #166: raw Gemini parallel + set values, so parallel/set regressions
+  // (e.g. "Holiday H121 picker shows None detected") are debuggable from
+  // the sheet without re-instrumenting the analyze path. Appended at the
+  // end rather than inserted after GeminiPlayer because ensureHeadersOnce()
+  // only extends the trailing labels — inserting mid-array would shift the
+  // existing sheet's column meanings.
+  'GeminiParallel',
+  'GeminiSet',
 ];
 
 // Truncate large free-text fields so the Sheet stays readable. Cells
@@ -193,6 +201,10 @@ export interface ScanLogFinal {
   // overrode it, or whether legacy was wrong and Gemini either fixed
   // it or didn't run.
   legacyYear?: number | string | null;
+  // PR #166: raw Gemini values for parallel + set so we can verify what
+  // Gemini actually returned vs what surfaced in the picker / overlay.
+  geminiParallel?: string | null;
+  geminiSet?: string | null;
 }
 
 export interface ScanLog {
@@ -273,6 +285,9 @@ async function appendRow(ctx: ScanContext, final: ScanLogFinal, indicators: stri
     // it would duplicate GeminiYear and mislead anyone reviewing the sheet.
     // Keep the column for schema stability, but write empty.
     isCardDbLookupEnabled() && final.legacyYear != null ? String(final.legacyYear) : '',
+    // PR #166: raw Gemini parallel + set
+    final.geminiParallel ?? '',
+    final.geminiSet ?? '',
   ];
   await sheets.spreadsheets.values.append({
     spreadsheetId,
