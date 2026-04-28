@@ -32,15 +32,18 @@ export function formatSeasonYear(
 
 /**
  * Parse a user-entered year string back to the integer year stored in the
- * DB. Accepts "2021" or "2021-22" (or "2021-2022"). Returns null if invalid.
+ * DB. Accepts "2021", "2021-22", "2021-2022", "2021/22", or "2021/2022".
+ * Always returns the START year (the integer the DB stores). Returns null
+ * if the input is unparseable or the season range doesn't span exactly one
+ * year (so "2021-23" is rejected as a typo).
  *
- * Validates that the second half of a season label is exactly one year after
- * the first (so "2021-23" is rejected as a typo).
+ * The `/` separator is accepted because users sometimes type the season
+ * the way it's printed on the back of newer cards ("2024/25").
  */
 export function parseSeasonYearInput(input: string): number | null {
   const trimmed = (input ?? '').trim();
   if (!trimmed) return null;
-  const seasonMatch = trimmed.match(/^(\d{4})\s*-\s*(\d{2,4})$/);
+  const seasonMatch = trimmed.match(/^(\d{4})\s*[-/]\s*(\d{2,4})$/);
   if (seasonMatch) {
     const first = parseInt(seasonMatch[1], 10);
     let second = parseInt(seasonMatch[2], 10);
