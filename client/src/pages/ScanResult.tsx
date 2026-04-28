@@ -14,7 +14,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { useScanFlow } from "@/hooks/use-scan-flow";
-import { formatSeasonYear } from "@/lib/seasonYear";
+import { formatSeasonYear, isSeasonSport, parseSeasonYearInput } from "@/lib/seasonYear";
 import { useToast } from "@/hooks/use-toast";
 import { usePreferences } from "@/hooks/use-preferences";
 import { Switch } from "@/components/ui/switch";
@@ -1413,7 +1413,15 @@ function DetailsTab({
   // ground truth (e.g. after a parallel picker update).
   const [draft, setDraft] = useState<Partial<CardFormValues>>(cardData);
   useEffect(() => {
-    if (editing) setDraft(cardData);
+    if (editing) {
+      // Seed the year input with the same season label the rest of the
+      // UI shows ("2024-25" for basketball/hockey, "2024" for baseball).
+      // Storing the seeded string on draft means the controlled input
+      // doesn't fight the user's typing — once they edit, the raw text
+      // flows through verbatim and saveEdits parses it on Save.
+      const seededYear = formatSeasonYear(cardData.year, cardData.sport) ?? cardData.year;
+      setDraft({ ...cardData, year: seededYear as any });
+    }
   }, [editing, cardData]);
 
   const rows: [string, string][] = [
@@ -1438,13 +1446,16 @@ function DetailsTab({
   ];
 
   const saveEdits = () => {
-    // Coerce year back to a number (the input binds to a string value).
-    const yearNum = draft.year != null && String(draft.year).length > 0
-      ? Number(draft.year)
-      : undefined;
+    // Year is bound to a string in the inline editor so the user can type
+    // either "2024", "2024-25", "2024/25", or "2024-2025". parseSeasonYearInput
+    // gives us the integer start year the DB stores; if the input is
+    // unparseable (typo, blank), keep the value already on the card so we
+    // never silently drift to NaN or end-year+1.
+    const rawYear = draft.year != null ? String(draft.year) : '';
+    const parsedYear = rawYear ? parseSeasonYearInput(rawYear) : null;
     const patch: Partial<CardFormValues> = {
       ...draft,
-      year: Number.isFinite(yearNum as number) ? (yearNum as number) : cardData.year,
+      year: parsedYear ?? cardData.year,
     };
     onSaveCardInfo(patch);
     setEditing(false);
@@ -1569,11 +1580,17 @@ function DetailsTab({
               testId="edit-player-last"
             />
             <div className="grid grid-cols-2 gap-3">
+              {/* Year edit field accepts YYYY, YYYY-YY, YYYY/YY, or
+                  YYYY-YYYY — saveEdits parses any of those back to the
+                  integer start year the DB stores. The seeded value
+                  already matches the display label ("2024-25" for
+                  basketball/hockey) so the round-trip is lossless. */}
               <EditField
                 label="Year"
                 value={draft.year != null ? String(draft.year) : ""}
                 onChange={(v) => setDraft((d) => ({ ...d, year: v as any }))}
-                inputMode="numeric"
+                inputMode={isSeasonSport(draft.sport) ? "text" : "numeric"}
+                placeholder={isSeasonSport(draft.sport) ? "e.g. 2024-25" : "e.g. 2024"}
                 testId="edit-year"
               />
               <EditField
