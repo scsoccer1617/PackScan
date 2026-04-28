@@ -737,6 +737,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         scpMatchedTitle: tracking?.scpMatchedTitle ?? null,
         cardDbCorroborated: tracking?.cardDbCorroborated ?? null,
         analyzerVersion: tracking?.analyzerVersion ?? null,
+        // Forward the detected blob the client tracked at scan-result
+        // render time. updateUserScan never overwrites an existing
+        // snapshot, so this only matters on the fresh-insert fallback
+        // path; the analyze step writes the authoritative payload.
+        geminiSnapshot: tracking?.detected ?? null,
         // 👍 means "no edits regardless of any string-coercion noise"
         fieldsChangedOverride: tracking?.userAction === 'confirmed' ? [] : undefined,
       };
@@ -3652,7 +3657,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .where(eq(schema.userScans.id, id))
         .limit(1);
       if (rows.length === 0) return res.status(404).json({ error: 'not_found' });
-      return res.json({ scan: { ...rows[0].scan, userEmail: rows[0].userEmail } });
+      // Parse the persisted Gemini snapshot string into an object so the
+      // admin client doesn't have to re-parse it. Falls back to null on
+      // legacy rows or malformed JSON — the modal's per-field fallback
+      // path uses the existing `detectedX` columns when this is null.
+      const rawSnapshot = (rows[0].scan as any).geminiSnapshot as string | null | undefined;
+      let parsedGeminiSnapshot: any = null;
+      if (typeof rawSnapshot === 'string' && rawSnapshot.trim()) {
+        try { parsedGeminiSnapshot = JSON.parse(rawSnapshot); }
+        catch { parsedGeminiSnapshot = null; }
+      }
+      return res.json({
+        scan: {
+          ...rows[0].scan,
+          userEmail: rows[0].userEmail,
+          geminiSnapshot: parsedGeminiSnapshot,
+        },
+      });
     } catch (err: any) {
       console.error(`[admin] get scan ${id} failed:`, err);
       return res.status(500).json({ error: 'Failed to load scan' });

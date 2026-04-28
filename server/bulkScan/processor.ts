@@ -662,6 +662,10 @@ async function processItem(batch: ScanBatch, item: ScanBatchItem): Promise<'auto
         scpMatchedTitle: null,
         cardDbCorroborated,
         analyzerVersion: 'bulk_scan_auto_save',
+        // Auto-save path: the analyzer payload IS the final value (no
+        // dealer edit possible here), so the snapshot equals the saved
+        // row. Stored anyway so /admin/scans renders consistently.
+        geminiSnapshot: analysis,
         fieldsChangedOverride: [],
       }).catch(() => {});
 

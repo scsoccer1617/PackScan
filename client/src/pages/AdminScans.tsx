@@ -52,8 +52,6 @@ interface ScanListRow {
   finalTeam: string | null;
   finalCmpNumber: string | null;
   frontImage: string | null;
-  scpScore: string | null;
-  cardDbCorroborated: boolean | null;
 }
 
 interface ScanListResponse {
@@ -89,8 +87,14 @@ interface ScanDetailRow extends ScanListRow {
   finalIsNumbered: boolean | null;
   finalIsFoil: boolean | null;
   backImage: string | null;
-  scpMatchedTitle: string | null;
   analyzerVersion: string | null;
+  /**
+   * Parsed Gemini analyzer payload at scan time. Source of truth for the
+   * DETECTED column — the modal expands its keys into the existing
+   * field-by-field rows. `null` for legacy rows that pre-date the
+   * snapshot column; the per-field detectedX columns are the fallback.
+   */
+  geminiSnapshot: Record<string, unknown> | null;
 }
 
 const actionLabel: Record<UserAction, string> = {
@@ -228,8 +232,6 @@ export default function AdminScans() {
                   <th className="text-left px-3 py-2 font-medium">Action</th>
                   <th className="text-left px-3 py-2 font-medium">Card</th>
                   <th className="text-left px-3 py-2 font-medium">Edited</th>
-                  <th className="text-right px-3 py-2 font-medium">SCP</th>
-                  <th className="text-right px-3 py-2 font-medium">CardDB</th>
                 </tr>
               </thead>
               <tbody>
@@ -314,18 +316,6 @@ function ScanRow({ scan, onOpen }: ScanRowProps) {
           </Badge>
         ) : (
           <span className="text-[12px] text-slate-400">—</span>
-        )}
-      </td>
-      <td className="px-3 py-2.5 text-right tabular-nums text-slate-600">
-        {scan.scpScore ? Number(scan.scpScore).toFixed(0) : "—"}
-      </td>
-      <td className="px-3 py-2.5 text-right">
-        {scan.cardDbCorroborated === true ? (
-          <span className="text-green-700 text-[12px]">✓</span>
-        ) : scan.cardDbCorroborated === false ? (
-          <span className="text-slate-400 text-[12px]">·</span>
-        ) : (
-          <span className="text-slate-300 text-[12px]">—</span>
         )}
       </td>
     </tr>
@@ -418,26 +408,64 @@ function ScanDetail({ id, onClose }: ScanDetailProps) {
 }
 
 function ScanDetailBody({ scan }: { scan: ScanDetailRow }) {
-  const changed = new Set(scan.fieldsChanged || []);
+  // The DETECTED column reads from `geminiSnapshot` (the original analyzer
+  // payload, never mutated by edits) when present, falling back to the
+  // per-field detectedX columns for legacy rows that pre-date the snapshot.
+  // The snapshot's keys mirror Gemini's emitted fields; some are aliases
+  // (variation ↔ variant, isRookieCard ↔ isRookie) so we coalesce them.
+  const snap = (scan.geminiSnapshot ?? null) as Record<string, unknown> | null;
+  const fromSnap = (...keys: string[]): unknown => {
+    if (!snap) return undefined;
+    for (const k of keys) {
+      const v = snap[k];
+      if (v !== undefined) return v;
+    }
+    return undefined;
+  };
+  const detectedFor = (snapKeys: string[], fallback: unknown): unknown => {
+    const v = fromSnap(...snapKeys);
+    return v !== undefined ? v : fallback;
+  };
+
   const rows: { key: string; label: string; detected: unknown; final: unknown }[] = [
-    { key: "sport", label: "Sport", detected: scan.detectedSport, final: scan.finalSport },
-    { key: "playerFirstName", label: "First name", detected: scan.detectedPlayerFirstName, final: scan.finalPlayerFirstName },
-    { key: "playerLastName", label: "Last name", detected: scan.detectedPlayerLastName, final: scan.finalPlayerLastName },
-    { key: "brand", label: "Brand", detected: scan.detectedBrand, final: scan.finalBrand },
-    { key: "collection", label: "Collection", detected: scan.detectedCollection, final: scan.finalCollection },
-    { key: "set", label: "Set", detected: scan.detectedSet, final: scan.finalSet },
-    { key: "cardNumber", label: "Card #", detected: scan.detectedCardNumber, final: scan.finalCardNumber },
-    { key: "year", label: "Year", detected: scan.detectedYear, final: scan.finalYear },
-    { key: "variant", label: "Variant", detected: scan.detectedVariant, final: scan.finalVariant },
-    { key: "team", label: "Team", detected: scan.detectedTeam, final: scan.finalTeam },
-    { key: "cmpNumber", label: "CMP", detected: scan.detectedCmpNumber, final: scan.finalCmpNumber },
-    { key: "serialNumber", label: "Serial", detected: scan.detectedSerialNumber, final: scan.finalSerialNumber },
-    { key: "foilType", label: "Foil type", detected: scan.detectedFoilType, final: scan.finalFoilType },
-    { key: "isRookie", label: "Rookie", detected: scan.detectedIsRookie, final: scan.finalIsRookie },
-    { key: "isAuto", label: "Auto", detected: scan.detectedIsAuto, final: scan.finalIsAuto },
-    { key: "isNumbered", label: "Numbered", detected: scan.detectedIsNumbered, final: scan.finalIsNumbered },
-    { key: "isFoil", label: "Foil", detected: scan.detectedIsFoil, final: scan.finalIsFoil },
+    { key: "sport", label: "Sport", detected: detectedFor(["sport"], scan.detectedSport), final: scan.finalSport },
+    { key: "playerFirstName", label: "First name", detected: detectedFor(["playerFirstName"], scan.detectedPlayerFirstName), final: scan.finalPlayerFirstName },
+    { key: "playerLastName", label: "Last name", detected: detectedFor(["playerLastName"], scan.detectedPlayerLastName), final: scan.finalPlayerLastName },
+    { key: "brand", label: "Brand", detected: detectedFor(["brand"], scan.detectedBrand), final: scan.finalBrand },
+    { key: "collection", label: "Collection", detected: detectedFor(["collection"], scan.detectedCollection), final: scan.finalCollection },
+    { key: "set", label: "Set", detected: detectedFor(["set"], scan.detectedSet), final: scan.finalSet },
+    { key: "cardNumber", label: "Card #", detected: detectedFor(["cardNumber"], scan.detectedCardNumber), final: scan.finalCardNumber },
+    { key: "year", label: "Year", detected: detectedFor(["year"], scan.detectedYear), final: scan.finalYear },
+    { key: "variant", label: "Variant", detected: detectedFor(["variant", "variation"], scan.detectedVariant), final: scan.finalVariant },
+    { key: "team", label: "Team", detected: detectedFor(["team"], scan.detectedTeam), final: scan.finalTeam },
+    { key: "cmpNumber", label: "CMP", detected: detectedFor(["cmpNumber"], scan.detectedCmpNumber), final: scan.finalCmpNumber },
+    { key: "serialNumber", label: "Serial", detected: detectedFor(["serialNumber"], scan.detectedSerialNumber), final: scan.finalSerialNumber },
+    { key: "foilType", label: "Foil type", detected: detectedFor(["foilType"], scan.detectedFoilType), final: scan.finalFoilType },
+    { key: "isRookie", label: "Rookie", detected: detectedFor(["isRookie", "isRookieCard"], scan.detectedIsRookie), final: scan.finalIsRookie },
+    { key: "isAuto", label: "Auto", detected: detectedFor(["isAuto", "isAutographed"], scan.detectedIsAuto), final: scan.finalIsAuto },
+    { key: "isNumbered", label: "Numbered", detected: detectedFor(["isNumbered"], scan.detectedIsNumbered), final: scan.finalIsNumbered },
+    { key: "isFoil", label: "Foil", detected: detectedFor(["isFoil"], scan.detectedIsFoil), final: scan.finalIsFoil },
   ];
+
+  // Recompute "edited" off the rendered detected/final pair so the count
+  // tracks what the admin actually sees in the table (and not the stale
+  // server-side fieldsChanged which compared per-field detectedX columns
+  // that may differ from what's in the snapshot). Normalizes case and
+  // whitespace; treats null/undefined/empty-string as equal.
+  const norm = (v: unknown): string | null => {
+    if (v === null || v === undefined) return null;
+    if (typeof v === "string") {
+      const t = v.trim().toLowerCase();
+      return t === "" ? null : t;
+    }
+    if (typeof v === "boolean") return v ? "true" : "false";
+    if (typeof v === "number") return String(v);
+    return JSON.stringify(v);
+  };
+  const changed = new Set(
+    rows.filter((r) => norm(r.detected) !== norm(r.final)).map((r) => r.key),
+  );
+  const editedCount = changed.size;
 
   return (
     <>
@@ -452,21 +480,12 @@ function ScanDetailBody({ scan }: { scan: ScanDetailRow }) {
         <div>
           <span className="text-slate-500">Action: </span>
           <span className="text-ink">{actionLabel[scan.userAction]}</span>
-          <span className="text-slate-400"> · {scan.fieldsChanged.length} edited</span>
+          <span className="text-slate-400"> · {editedCount} edited</span>
         </div>
         <div>
           <span className="text-slate-500">Scanned: </span>
           <span className="text-ink">{new Date(scan.scannedAt).toLocaleString()}</span>
         </div>
-        {scan.scpMatchedTitle && (
-          <div className="truncate">
-            <span className="text-slate-500">SCP: </span>
-            <span className="text-ink">{scan.scpMatchedTitle}</span>
-            {scan.scpScore && (
-              <span className="text-slate-400"> · {Number(scan.scpScore).toFixed(0)}</span>
-            )}
-          </div>
-        )}
         {scan.analyzerVersion && (
           <div>
             <span className="text-slate-500">Analyzer: </span>

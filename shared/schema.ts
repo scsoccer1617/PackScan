@@ -697,6 +697,11 @@ export const userScans = pgTable("user_scans", {
   scpMatchedTitle: text("scp_matched_title"),
   cardDbCorroborated: boolean("card_db_corroborated"),
   analyzerVersion: text("analyzer_version"),
+  // Stringified JSON of the full Gemini analyzer payload at scan time.
+  // Persisted on the initial insert and intentionally NEVER mutated by
+  // subsequent edits/updates so the admin DETECTED column always reflects
+  // the original model output (even after the user edits and re-saves).
+  geminiSnapshot: text("gemini_snapshot"),
 }, (table) => [
   index("user_scans_user_idx").on(table.userId),
   index("user_scans_scanned_at_idx").on(table.scannedAt),
