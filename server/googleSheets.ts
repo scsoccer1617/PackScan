@@ -384,7 +384,7 @@ function parsePlayerName(raw: string): { first: string; last: string } {
  * rows that are entirely empty so the caller can filter them out.
  */
 function parseSheetRow(
-  values: string[],
+  values: unknown[],
   rowIndex: number,
   sheetId: string,
 ): SheetCardRow | null {
@@ -393,7 +393,15 @@ function parseSheetRow(
   //   7 Set, 8 Collection, 9 Parallel, 10 Serial #, 11 Variant,
   //   12 Rookie, 13 Auto, 14 Numbered,
   //   15 Avg eBay price, 16 Front link, 17 Back link, 18 eBay search URL.
-  const get = (i: number) => (values[i] ?? '').toString().trim();
+  // With valueRenderOption=UNFORMATTED_VALUE the API returns native types
+  // (numbers stay numbers, booleans stay booleans), so coerce to string at
+  // the column boundary for the columns that expect text.
+  const get = (i: number) => {
+    const v = values[i];
+    if (v == null) return '';
+    return String(v).trim();
+  };
+  const getRaw = (i: number) => values[i];
   const player = get(2);
   const sport = get(1);
   const brand = get(4);
@@ -401,15 +409,30 @@ function parseSheetRow(
   // blank — protects against header-only rows and stray whitespace.
   if (!player && !sport && !brand && !get(5)) return null;
   const { first, last } = parsePlayerName(player);
-  // "Date scanned" is ISO yyyy-mm-dd; hydrate to a full ISO string so the
-  // client's `new Date(createdAt)` parse behaves.
-  const dateStr = get(0);
+  // "Date scanned" arrives as either an ISO yyyy-mm-dd string (when the
+  // cell was written with valueInputOption=RAW) OR a Sheets serial number
+  // (when USER_ENTERED let Sheets auto-parse it as a date — the legacy
+  // path). Handle both so existing user sheets continue to read.
+  const dateRaw = getRaw(0);
   let createdAt: string | null = null;
-  if (dateStr) {
-    const dt = new Date(`${dateStr}T00:00:00`);
-    createdAt = isNaN(dt.getTime()) ? null : dt.toISOString();
+  if (typeof dateRaw === 'number' && Number.isFinite(dateRaw)) {
+    // Sheets serial: days since 1899-12-30.
+    const ms = (dateRaw - 25569) * 86400 * 1000;
+    const dt = new Date(ms);
+    if (!isNaN(dt.getTime())) createdAt = dt.toISOString();
+  } else {
+    const dateStr = get(0);
+    if (dateStr) {
+      const dt = new Date(`${dateStr}T00:00:00`);
+      createdAt = isNaN(dt.getTime()) ? null : dt.toISOString();
+    }
   }
-  const priceRaw = get(15);
+  // Strip a leading "$" (and stray commas) defensively. With
+  // valueRenderOption=UNFORMATTED_VALUE the price comes back as a raw
+  // number for cells that were written numerically, but legacy rows
+  // written as "$1.61" strings still need to parse. parseFloat handles
+  // both "1.61" and "1.61" after the strip.
+  const priceRaw = get(15).replace(/^\$/, '').replace(/,/g, '');
   const estimatedValue = priceRaw && !isNaN(Number(priceRaw)) ? Number(priceRaw).toFixed(2) : null;
   return {
     id: `${sheetId}-${rowIndex}`,
@@ -489,6 +512,12 @@ export async function getActiveSheetRows(userId: number): Promise<SheetCardRow[]
       spreadsheetId: active.googleSheetId,
       range: `A:${String.fromCharCode(65 + SHEET_HEADERS.length - 1)}`,
       majorDimension: 'ROWS',
+      // UNFORMATTED_VALUE returns the raw cell value (number stays a
+      // number) instead of the display string. Without this, the
+      // currency-formatted price column comes back as "$1.61" — which
+      // Number() parses to NaN and breaks Collection Value, card
+      // prices, and Most Valuable Card across every read site.
+      valueRenderOption: 'UNFORMATTED_VALUE',
     });
     const values = got.data.values || [];
     // Skip row 0 (header). Row index in the sheet is 1-based; we pass the
