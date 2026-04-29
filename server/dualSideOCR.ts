@@ -39,7 +39,13 @@ interface EmbeddedCompsPayload {
   active: PickerListing[];
 }
 
-function extractIdentityForEbay(combined: any): EbayQueryIdentity | null {
+// Exported so the bulk-scan worker (server/bulkScan/processor.ts) can build
+// its picker query from the *same* identity tuple single-scan uses. Pre-PR
+// #189 bulk had its own bespoke fallback chain (`set || collection || null`)
+// that surfaced "Base Set" verbatim and duplicated brand-as-set names like
+// "Topps Topps Base Set" in the stored eBay URL. Single-scan never had
+// those bugs because it always read `set` only.
+export function extractIdentityForEbay(combined: any): EbayQueryIdentity | null {
   const playerFirst = (combined?.playerFirstName ?? '').toString().trim();
   const playerLast = (combined?.playerLastName ?? '').toString().trim();
   const player = [playerFirst, playerLast].filter(Boolean).join(' ').trim();

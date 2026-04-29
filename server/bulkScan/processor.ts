@@ -38,7 +38,7 @@ import { detectOrientation } from './orientation';
 import { pairPages, type ScanPage, type PairedScan } from './pairing';
 import { evaluateConfidence, isCardDbCorroboration } from './confidenceGate';
 import { BatchTimingsRecorder } from './timingsRecorder';
-import { normalizeImageOrientation } from '../dualSideOCR';
+import { normalizeImageOrientation, extractIdentityForEbay } from '../dualSideOCR';
 import { lookupCard as cardDbLookup } from '../cardDatabaseService';
 import { isCardDbLookupEnabled } from '../featureFlags';
 import { appendCardRow } from '../googleSheets';
@@ -704,40 +704,44 @@ async function processItem(
     }
   }
 
-  // eBay value lookup via PR #165's pickerSearch — the same engine that
-  // backs /api/ebay/comps and powers single-card's result-screen Price tab
-  // and persistent "Avg" hero. Keyed off Gemini's normalized `parallel`
-  // value (null when Gemini detected no parallel post-PR #168). Active
-  // listings only — Browse API doesn't expose Sold under our current
-  // eBay scope. Header label "Avg" matches single-card.
-  if (
-    analysis.playerFirstName &&
-    analysis.playerLastName &&
-    analysis.brand &&
-    analysis.year
-  ) {
+  // eBay value lookup. Build the identity tuple via the SAME helper
+  // single-scan's analyze handler uses (`extractIdentityForEbay` in
+  // server/dualSideOCR.ts) so bulk and single-scan hit `pickerSearch`
+  // with byte-identical queries for the same card. Pre-PR #189 bulk had
+  // its own argument shape that:
+  //   • fell back to `analysis.collection` when `set` was empty, which
+  //     surfaced "Base Set" verbatim in the query (sellers don't title
+  //     cards that way) and pulled $0 returns for common late-80s base
+  //     cards (LaRussa #344, Wathan #534, Sundberg #516, Knudson #61,
+  //     Lombardi #283, Bernazard #122, Rodgers #504);
+  //   • duplicated the brand when set was also "Topps", producing
+  //     "1988 Topps Topps Base Set" in the stored eBay URL.
+  // Single-scan never hit either bug because it reads `combined.set`
+  // only. Routing through the same helper guarantees parity going
+  // forward.
+  const ebayIdentity = extractIdentityForEbay(analysis);
+  if (ebayIdentity) {
     const tEbay = Date.now();
     try {
-      const playerName = `${analysis.playerFirstName} ${analysis.playerLastName}`;
+      const lastName = ebayIdentity.player.split(/\s+/).pop() ?? null;
+      const firstName = ebayIdentity.player.split(/\s+/)[0] ?? null;
       const query = buildPickerQuery({
-        year: analysis.year,
-        brand: analysis.brand,
-        set: analysis.set || analysis.collection || null,
-        cardNumber: analysis.cardNumber || null,
-        player: playerName,
-        parallel: analysis.variant || null,
+        year: ebayIdentity.year,
+        brand: ebayIdentity.brand,
+        set: ebayIdentity.set,
+        cardNumber: ebayIdentity.cardNumber,
+        player: ebayIdentity.player,
+        parallel: ebayIdentity.parallel,
       });
       const result = await pickerSearch(query, {
         limit: 5,
-        requireCardNumber: analysis.cardNumber || null,
-        requirePlayerLastName: analysis.playerLastName || null,
-        // Match buildPickerQuery's parallel source above so the relevance
-        // ranker scores against the same parallel that drove the query.
-        scannedParallel: analysis.variant || analysis.foilType || null,
-        brand: analysis.brand,
-        set: analysis.set || analysis.collection || null,
-        year: analysis.year,
-        playerFirstName: analysis.playerFirstName,
+        requireCardNumber: ebayIdentity.cardNumber,
+        requirePlayerLastName: lastName,
+        scannedParallel: ebayIdentity.parallel || null,
+        brand: ebayIdentity.brand,
+        set: ebayIdentity.set || null,
+        year: ebayIdentity.year,
+        playerFirstName: firstName,
       });
       const active = result.active || [];
       const averageValue = active.length > 0
@@ -745,16 +749,8 @@ async function processItem(
         : 0;
       analysis.estimatedValue = averageValue;
       analysis.ebayResults = active;
-      // Outbound "View on eBay" link. Use the SAME picker query string that
-      // produced `active` above — single-scan's analyze response embeds it
-      // as `data.compsQuery` / drives the same UI link. The legacy
-      // `getEbaySearchUrl` helper layered a stale `-autograph -signed
-      // -parallel -refractor …` exclusion list on top of the query
-      // (pre-PR-178 behavior), so the URL stored on a bulk row diverged
-      // from the listings the price was averaged over and surfaced
-      // autograph titles when the user clicked through. Picker-query
-      // parity guarantees the URL the dealer opens shows the same slice
-      // of listings the average was computed from.
+      // Outbound "View on eBay" link uses the SAME picker query that
+      // produced `active` (matches single-scan's `data.compsQuery`).
       analysis.ebaySearchUrl = `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(query)}&_sacat=213&_sop=10`;
       console.log(
         `[bulkScan] eBay comps item ${item.id}: ${active.length} active results, avg=$${averageValue.toFixed(2)} for "${query}"`,
@@ -770,7 +766,7 @@ async function processItem(
     }
   } else {
     console.log(
-      `[bulkScan] eBay comps skipped item ${item.id}: insufficient card data (player=${!!analysis.playerFirstName}/${!!analysis.playerLastName} brand=${!!analysis.brand} year=${!!analysis.year})`,
+      `[bulkScan] eBay comps skipped item ${item.id}: insufficient card data (player=${!!analysis.playerFirstName}/${!!analysis.playerLastName} brand=${!!analysis.brand} cardNumber=${!!analysis.cardNumber} year=${!!analysis.year})`,
     );
   }
 
