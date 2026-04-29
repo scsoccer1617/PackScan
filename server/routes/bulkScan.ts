@@ -113,7 +113,22 @@ export function registerBulkScanRoutes(app: Express): void {
       .from(scanBatchItems)
       .where(eq(scanBatchItems.batchId, batchId))
       .orderBy(scanBatchItems.position);
-    return res.json({ batch, items });
+    // pairCount: prefer the live count from scan_batch_items (one row per
+    // pair, populated as Phase 1 streams). Fall back to fileCount/2 before
+    // any pairs have been planned, since the worker writes scan_batches
+    // first and only inserts items as discoverAndPlanItems progresses.
+    const pairCount = items.length > 0
+      ? items.length
+      : Math.max(0, Math.floor((batch.fileCount ?? 0) / 2));
+    // phase1Done: true once the recorder marks Phase 1 complete OR (as a
+    // safety net for batches that finished pre-PR #186 with no timings)
+    // once the batch itself has reached a terminal state.
+    const timings = (batch.timings ?? null) as { phase1CompletedAt?: number | null } | null;
+    const phase1Done =
+      !!(timings && timings.phase1CompletedAt) ||
+      batch.status === 'completed' ||
+      batch.status === 'failed';
+    return res.json({ batch, items, pairCount, phase1Done });
   });
 
   // ── Delete a batch ──────────────────────────────────────────────────────
