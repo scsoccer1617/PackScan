@@ -220,6 +220,35 @@ function mapItem(item: any): PickerListing {
   };
 }
 
+// Generic placeholder set names that Gemini may emit for vintage base cards
+// — these never appear in eBay listing titles and only add noise to search.
+const GENERIC_SET_NAMES = new Set(['base set', 'base', 'base cards']);
+
+/**
+ * Normalize the `set` field for the picker query. Drops generic placeholders
+ * ("Base Set"), strips redundant brand/year-brand prefixes, and returns ''
+ * when nothing useful remains. Mirrors the logic that the older
+ * getEbaySearchUrl path in ebayService.ts has via GENERIC_COLLECTION_NAMES +
+ * normalizeSetForSearch, plus an extra rule for Gemini's "1987 Topps" pattern
+ * on vintage Topps base cards.
+ */
+function normalizeSet(set: string, brand: string): string {
+  let s = (set || '').trim();
+  if (!s) return '';
+  if (GENERIC_SET_NAMES.has(s.toLowerCase())) return '';
+  const b = (brand || '').trim();
+  if (b && s.toLowerCase().startsWith(b.toLowerCase())) {
+    s = s.slice(b.length).trim();
+  }
+  if (b) {
+    const escaped = b.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const yearBrandRe = new RegExp(`^\\d{4}\\s+${escaped}\\b`, 'i');
+    s = s.replace(yearBrandRe, '').trim();
+  }
+  if (!s || s.toLowerCase() === b.toLowerCase()) return '';
+  return s;
+}
+
 /**
  * Build a picker search query from final-form fields. Skips empty parts so
  * the query stays compact ("2025 Topps Series One #193 Nolan Arenado Pink
@@ -238,7 +267,10 @@ export function buildPickerQuery(parts: {
     segments.push(String(parts.year).trim());
   }
   if (parts.brand && parts.brand.trim()) segments.push(parts.brand.trim());
-  if (parts.set && parts.set.trim()) segments.push(parts.set.trim());
+  const normalizedSet = parts.set
+    ? normalizeSet(String(parts.set), String(parts.brand || ''))
+    : '';
+  if (normalizedSet) segments.push(normalizedSet);
   if (parts.cardNumber && String(parts.cardNumber).trim()) {
     // Strip leading # if present, then quote so eBay treats it as a
     // required phrase. Card numbers like "80BK-68" or "8B-28" are sparse
