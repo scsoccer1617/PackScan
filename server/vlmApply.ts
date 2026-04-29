@@ -173,5 +173,15 @@ export function applyGeminiToCombined(
     combined.isNumbered = true;
   }
 
+  // ── Subset descriptor (Team Leaders, Record Breaker, Manager, etc.) ────
+  // Not part of the persisted CardFormValues schema today, so we stash it
+  // on the combined result via an `_geminiSubset` side-channel that
+  // extractIdentityForEbay reads when building the eBay query. Null for
+  // standard individual-player cards — leaving the field absent preserves
+  // pre-PR query shape exactly (subset === null branch is a no-op).
+  if (typeof gemini.subset === 'string' && gemini.subset.trim()) {
+    (combined as any)._geminiSubset = gemini.subset.trim();
+  }
+
   return combined;
 }

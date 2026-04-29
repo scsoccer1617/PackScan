@@ -77,6 +77,12 @@ export interface GeminiCardResult {
    *  upstream signal it had. Optional so older deployments returning the
    *  field absent still typecheck. */
   frontImageIndex?: 0 | 1 | null;
+  /** Subset descriptor for cards that don't depict a single player (Team
+   *  Leaders, Record Breakers, All-Star, Manager, etc.). Used by the eBay
+   *  query builder to substitute the subset name for the player name when
+   *  present, since real listings for these cards rarely include the
+   *  pictured player. Null for standard individual-player cards. */
+  subset?: string | null;
   notes?: string | null;
 }
 

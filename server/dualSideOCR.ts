@@ -48,13 +48,29 @@ interface EmbeddedCompsPayload {
 export function extractIdentityForEbay(combined: any): EbayQueryIdentity | null {
   const playerFirst = (combined?.playerFirstName ?? '').toString().trim();
   const playerLast = (combined?.playerLastName ?? '').toString().trim();
-  const player = [playerFirst, playerLast].filter(Boolean).join(' ').trim();
+  const playerName = [playerFirst, playerLast].filter(Boolean).join(' ').trim();
   const cardNumber = (combined?.cardNumber ?? '').toString().trim();
   const yearRaw = combined?.year;
   const brand = (combined?.brand ?? '').toString().trim();
-  if (!player || !cardNumber || yearRaw == null || yearRaw === '' || !brand) {
+  // Subset descriptor (Team Leaders, Record Breaker, Manager, etc.) plumbed
+  // by applyGeminiToCombined via the `_geminiSubset` side-channel. When
+  // present, real eBay listings for these cards are titled with the subset
+  // descriptor (e.g. "1988 Topps Reds Leaders 81") and rarely include the
+  // pictured player's name — so the query uses the subset name in the
+  // quoted slot instead of the player. When absent (subset === null), the
+  // identity tuple is byte-identical to PR #189 behavior.
+  const subset = (combined?._geminiSubset ?? '').toString().trim();
+  // Identity gate: a subset card may legitimately have no parseable player
+  // name (e.g. multi-player batting leaders), so accept the row when EITHER
+  // player or subset is present. Standard cards still require player.
+  if ((!playerName && !subset) || !cardNumber || yearRaw == null || yearRaw === '' || !brand) {
     return null;
   }
+  // When subset is present, substitute it for the quoted player slot in the
+  // eBay query. The player name is dropped from the search string because
+  // listings for "1988 Topps #81 Reds Leaders" don't typically include
+  // "Eric Davis" in the title.
+  const player = subset || playerName;
   return {
     player,
     cardNumber,
