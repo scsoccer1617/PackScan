@@ -5,7 +5,6 @@ import {
   Filter as FilterIcon,
   LayoutGrid,
   List as ListIcon,
-  Mic,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { displayYear } from "@/lib/seasonYear";
@@ -324,10 +323,6 @@ function CollectionGridTile({
   const tone = typeof grade === "number" ? gradeTone(grade) : null;
   const value = estValue(card);
   const front = card.frontImage || undefined;
-  // Voice-added cards never have a front OR back image stored. We detect
-  // them by the absence of both (rather than reading a schema flag that
-  // doesn't exist) and show a friendlier mic-icon placeholder.
-  const isVoiceAdded = !card.frontImage && !card.backImage;
 
   return (
     <button
@@ -347,14 +342,6 @@ function CollectionGridTile({
               (e.currentTarget as HTMLImageElement).style.display = "none";
             }}
           />
-        ) : isVoiceAdded ? (
-          <div
-            className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 text-muted-foreground"
-            data-testid={`voice-fallback-${card.id}`}
-          >
-            <Mic className="w-5 h-5" strokeWidth={1.75} />
-            <span className="text-[11px] font-medium">Added by voice</span>
-          </div>
         ) : (
           <div className="absolute inset-0 flex items-center justify-center text-muted-foreground text-xs">
             No image
@@ -401,7 +388,6 @@ function CollectionListRow({
   const tone = typeof grade === "number" ? gradeTone(grade) : null;
   const value = estValue(card);
   const front = card.frontImage || undefined;
-  const isVoiceAdded = !card.frontImage && !card.backImage;
 
   return (
     <button
@@ -420,14 +406,6 @@ function CollectionListRow({
             (e.currentTarget as HTMLImageElement).style.visibility = "hidden";
           }}
         />
-      ) : isVoiceAdded ? (
-        <div
-          className="w-12 h-16 rounded-md border border-card-border bg-muted flex items-center justify-center text-muted-foreground"
-          data-testid={`voice-fallback-row-${card.id}`}
-          aria-label="Added by voice"
-        >
-          <Mic className="w-4 h-4" strokeWidth={1.75} />
-        </div>
       ) : (
         <div className="w-12 h-16 rounded-md border border-card-border bg-muted" aria-hidden />
       )}
