@@ -133,7 +133,16 @@ CARD-DOMAIN RULES:
 - Return ONLY valid JSON matching the provided template. No prose, no markdown fences.
 
 ADDITIONAL FIELD — frontImageIndex:
-- "frontImageIndex": 0 or 1 — the index of the input image that is the FRONT of the card (the side with the player photograph and team logo, NOT the side with statistics, copyright, or card number text). Image 0 is the first image provided, Image 1 is the second. This field is REQUIRED whenever both images are visible. Use 0 when the first image is the front, 1 when the second image is the front. Return null only if neither image clearly shows a card front.`;
+- "frontImageIndex": 0 or 1 — the index of the input image that is the FRONT of the card (the side with the player photograph and team logo, NOT the side with statistics, copyright, or card number text). Image 0 is the first image provided, Image 1 is the second. This field is REQUIRED whenever both images are visible. Use 0 when the first image is the front, 1 when the second image is the front. Return null only if neither image clearly shows a card front.
+
+ADDITIONAL FIELD — subset:
+- "subset": string or null — if this card is a SUBSET card (a card that does NOT depict a single player as its primary subject), return the subset descriptor exactly as it appears on the card. Examples:
+  * Team leader cards (e.g., "Reds Leaders", "Yankees Leaders") → return "Reds Leaders" / "Yankees Leaders"
+  * Record-breaker cards (e.g., "Record Breaker") → return "Record Breaker"
+  * Manager cards → return the manager's role descriptor (e.g., "Manager")
+  * All-Star / All-Rookie subsets → return the subset name (e.g., "All-Star")
+  * League leaders, multi-player cards, season highlights — return the descriptor on the card
+  Return null for standard individual-player cards. The subset string should be exactly as printed on the card front, suitable for use in an eBay search.`;
 
 /**
  * Result template: shown to the model alongside the system prompt so it
@@ -181,6 +190,7 @@ export const VLM_RESULT_TEMPLATE = `{
     "parallel": null
   },
   "frontImageIndex": null,
+  "subset": null,
   "notes": null
 }`;
 
