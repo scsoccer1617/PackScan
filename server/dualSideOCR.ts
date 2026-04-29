@@ -15,6 +15,49 @@ import { startScanLog } from './scanLogger';
 import { analyzeCardBuffersWithGemini, type GeminiCardResult, VLM_INFO } from './vlmGemini';
 import { applyGeminiToCombined } from './vlmApply';
 import { isCardDbLookupEnabled } from './featureFlags';
+import { pickerSearch, buildPickerQuery, type PickerListing } from './ebayPickerSearch';
+
+// BR-2: identity tuple for the parallel eBay comps query. Built off the
+// post-overlay combinedResult (Gemini-authoritative when present, OCR
+// fallback otherwise). Returns null when any required field is missing
+// — server skips eBay entirely and lets the client's mount-time fetch
+// fall through. No partial / coarse queries.
+interface EbayQueryIdentity {
+  player: string;
+  cardNumber: string;
+  year: number | string;
+  brand: string;
+  set: string;
+  parallel: string;
+}
+
+// Embedded comps shape carried in the analyze response under data.comps.
+// Mirrors the trimmed surface /api/ebay/comps returns so EbayActiveComps
+// can consume either source without a fork.
+interface EmbeddedCompsPayload {
+  query: string;
+  active: PickerListing[];
+}
+
+function extractIdentityForEbay(combined: any): EbayQueryIdentity | null {
+  const playerFirst = (combined?.playerFirstName ?? '').toString().trim();
+  const playerLast = (combined?.playerLastName ?? '').toString().trim();
+  const player = [playerFirst, playerLast].filter(Boolean).join(' ').trim();
+  const cardNumber = (combined?.cardNumber ?? '').toString().trim();
+  const yearRaw = combined?.year;
+  const brand = (combined?.brand ?? '').toString().trim();
+  if (!player || !cardNumber || yearRaw == null || yearRaw === '' || !brand) {
+    return null;
+  }
+  return {
+    player,
+    cardNumber,
+    year: typeof yearRaw === 'number' ? yearRaw : String(yearRaw),
+    brand,
+    set: (combined?.set ?? '').toString().trim(),
+    parallel: (combined?.foilType ?? combined?.variant ?? '').toString().trim(),
+  };
+}
 
 // Internal year-confidence flags attached to per-side and combined OCR
 // results so the dual-side combiner and downstream lookup loop can reason
@@ -557,6 +600,70 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
       }
     }
 
+    // ── BR-2: kick off eBay comps in parallel with the rest of the
+    // analyze finalisation (ensureRequiredFields, audit logging, scanLogger
+    // flush). Today the client fires this AFTER mounting /result and
+    // running parallel disambiguation — pure wasted parallelism. Start it
+    // here as soon as Gemini has produced an identity tuple
+    // (player, cardNumber, year, brand). The promise is awaited at the
+    // bottom right before res.json so it overlaps everything else.
+    //
+    // Best-effort: a 1500ms timeout caps tail latency. If eBay is slow or
+    // errors, the response ships without comps and the client falls back
+    // to its existing mount-time fetch via EbayActiveComps.
+    console.time('analyze-ebay-parallel');
+    const ebayIdentity = extractIdentityForEbay(combinedResult);
+    const ebayPromise: Promise<EmbeddedCompsPayload | null> = ebayIdentity
+      ? (async () => {
+          try {
+            const query = buildPickerQuery({
+              year: ebayIdentity.year,
+              brand: ebayIdentity.brand,
+              set: ebayIdentity.set,
+              cardNumber: ebayIdentity.cardNumber,
+              player: ebayIdentity.player,
+              parallel: ebayIdentity.parallel,
+            });
+            const lastName = ebayIdentity.player.split(/\s+/).pop() ?? null;
+            const firstName = ebayIdentity.player.split(/\s+/)[0] ?? null;
+            const result = await Promise.race([
+              pickerSearch(query, {
+                limit: 5,
+                requireCardNumber: ebayIdentity.cardNumber,
+                requirePlayerLastName: lastName,
+                scannedParallel: ebayIdentity.parallel || null,
+                brand: ebayIdentity.brand,
+                set: ebayIdentity.set || null,
+                year: ebayIdentity.year,
+                playerFirstName: firstName,
+              }),
+              new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500)),
+            ]);
+            if (!result) {
+              console.warn('[analyze-ebay-parallel] timed out at 1500ms — client will fall back');
+              return null;
+            }
+            return {
+              query: result.query,
+              active: result.active,
+            };
+          } catch (err: any) {
+            console.warn('[analyze-ebay-parallel] failed (non-fatal):', err?.message || err);
+            return null;
+          }
+        })()
+      : Promise.resolve(null);
+    const ebayQuerySnapshot = ebayIdentity
+      ? {
+          year: ebayIdentity.year,
+          brand: ebayIdentity.brand,
+          set: ebayIdentity.set,
+          cardNumber: ebayIdentity.cardNumber,
+          player: ebayIdentity.player,
+          parallel: ebayIdentity.parallel,
+        }
+      : null;
+
     // Make sure we have all required fields with defaults if needed
     combinedResult._engine = combinedResult._engine ?? 'ocr';
     const finalResult = ensureRequiredFields(combinedResult);
@@ -748,9 +855,28 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
       console.warn('[scanLogger] flush failed (non-fatal):', logErr);
     }
 
+    // BR-2: await the in-flight eBay promise. By the time we get here,
+    // ensureRequiredFields + the user_scans audit insert dispatch + the
+    // scanLogger flush have all run alongside it, so usually this resolves
+    // immediately. Worst case it's been racing for the full 1500ms cap.
+    const embeddedComps = await ebayPromise;
+    console.timeEnd('analyze-ebay-parallel');
+
     return res.json({
       success: true,
-      data: finalResult,
+      data: {
+        ...finalResult,
+        // Top 5 active listings keyed off Gemini's identity tuple. Same
+        // shape as /api/ebay/comps — `EbayActiveComps` consumes this on
+        // first render and skips its mount-time fetch. Null when identity
+        // was incomplete or the call timed out / errored — client falls
+        // back to its existing mount-time fetch in that case.
+        comps: embeddedComps,
+        // The exact query parts the server hashed eBay against. Client
+        // compares this to the live `cardData` (post any picker/edit
+        // changes) and refetches via React Query when they diverge.
+        compsQuery: ebayQuerySnapshot,
+      },
       // Audit row id — client should send this back as _scanTracking._userScanId
       // on the subsequent save call so we can UPDATE the analyzed_no_save row
       // instead of inserting a duplicate. Post-QW-1 this is the
