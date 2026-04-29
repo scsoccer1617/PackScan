@@ -666,6 +666,60 @@ async function processItem(
     timings.recordPairUpdate(pairKey, { geminiMs: Date.now() - tGemini });
   }
 
+  // ── Front/back auto-swap (PR fix/front-back-auto-swap) ───────────────────
+  // The pair classifier emits `unknown` or `classifier_same_side_*` when it
+  // can't tell front from back from the OCR text alone. Telemetry on batch 8
+  // showed ~23% of pages classified `unknown`; pairing then falls back to
+  // file-order (odd→back, even→front) which is wrong ~50% of the time. The
+  // result was 6–7 cards per ~50-card batch with the persisted
+  // frontFileId/backFileId reversed (e.g. Steve Balboni 1988 Topps #638
+  // displaying his stat-line back as the FRONT).
+  //
+  // Fix: Gemini already sees both images and returns `frontImageIndex` in
+  // its dual-side response. When the pair classifier was uncertain AND
+  // Gemini returned a usable index, defer to Gemini and swap the persisted
+  // file IDs so the canonical front is what the dealer / collection grid
+  // sees. We never override a confident classifier verdict — the 77% of
+  // pairs that work today must not regress.
+  const priorReasons = asStringArray(item.reviewReasons);
+  const classifierWasUncertain =
+    priorReasons.includes('classifier_unknown') ||
+    priorReasons.some((r) => r.startsWith('classifier_same_side_'));
+  const gemini = (analysis as any)?._gemini;
+  const geminiFrontIdx: 0 | 1 | null =
+    gemini && (gemini.frontImageIndex === 0 || gemini.frontImageIndex === 1)
+      ? gemini.frontImageIndex
+      : null;
+  let resolvedFrontFileId = item.frontFileId;
+  let resolvedBackFileId = item.backFileId;
+  let resolvedFrontFileName = item.frontFileName;
+  let resolvedBackFileName = item.backFileName;
+  let resolvedReasons: string[] = priorReasons;
+  let swapApplied = false;
+  if (classifierWasUncertain && geminiFrontIdx === 1) {
+    // The mock-request to handleDualSideCardAnalysis passed exifFront
+    // (built from item.frontFileId) as the FIRST image, so frontImageIndex
+    // refers to that ordering. Index 1 → the file we labelled `frontFileId`
+    // is actually the back; swap.
+    console.log(
+      `[bulkScan] item ${item.id}: front/back swap from Gemini frontImageIndex=1 (priorReasons=${priorReasons.join(',') || 'none'})`,
+    );
+    resolvedFrontFileId = item.backFileId;
+    resolvedBackFileId = item.frontFileId;
+    resolvedFrontFileName = item.backFileName;
+    resolvedBackFileName = item.frontFileName;
+    swapApplied = true;
+  }
+  // Drop the classifier-uncertainty review reasons when Gemini gave us a
+  // confident frontImageIndex — the pair is now resolvable post-Gemini and
+  // no longer needs human review for that reason. (Other review reasons,
+  // like card_number_low_confidence, are unaffected.)
+  if (classifierWasUncertain && geminiFrontIdx !== null) {
+    resolvedReasons = priorReasons.filter(
+      (r) => r !== 'classifier_unknown' && !r.startsWith('classifier_same_side_'),
+    );
+  }
+
   // CardDB corroboration: independent lookup on the analyzer's output so
   // we can feed it into the confidence gate. Gated by CARDDB_LOOKUP_ENABLED
   // (PR #162) — when off, Gemini VLM is authoritative and we treat the
@@ -771,10 +825,12 @@ async function processItem(
   }
 
   // Pairing warnings already live on the item row from discoverAndPlanItems.
-  const priorWarnings = asStringArray(item.reviewReasons);
+  // Use `resolvedReasons` (not `item.reviewReasons`) so the confidence gate
+  // sees the post-Gemini state — `classifier_unknown` is dropped above when
+  // Gemini's `frontImageIndex` resolved the pair.
   const gate = evaluateConfidence({
     analysis,
-    pairingWarnings: priorWarnings,
+    pairingWarnings: resolvedReasons,
     cardDbAvailable,
     cardDbCorroborated,
   });
@@ -851,6 +907,12 @@ async function processItem(
         reviewReasons: [...reviewReasons, `sheet_append_failed:${err?.message || 'unknown'}`],
         errorMessage: err?.message || String(err),
         processedAt: new Date(),
+        ...(swapApplied ? {
+          frontFileId: resolvedFrontFileId,
+          backFileId: resolvedBackFileId,
+          frontFileName: resolvedFrontFileName,
+          backFileName: resolvedBackFileName,
+        } : {}),
       }).where(eq(scanBatchItems.id, item.id));
       return 'review';
     }
@@ -860,17 +922,32 @@ async function processItem(
       analysisResult: analysis,
       reviewReasons: null,
       processedAt: new Date(),
+      ...(swapApplied ? {
+        frontFileId: resolvedFrontFileId,
+        backFileId: resolvedBackFileId,
+        frontFileName: resolvedFrontFileName,
+        backFileName: resolvedBackFileName,
+      } : {}),
     }).where(eq(scanBatchItems.id, item.id));
     return 'auto_save';
   }
 
   // Review path (covers dry-run too — we never write to Sheets in dry-run).
+  // When the front/back swap fired (classifier was uncertain + Gemini
+  // returned a confident frontImageIndex), persist the resolved file IDs
+  // to the row so the review UI / collection grid shows the correct front.
   await db.update(scanBatchItems).set({
     status: 'review',
     confidenceScore: gate.confidenceScore.toString(),
     analysisResult: analysis,
     reviewReasons,
     processedAt: new Date(),
+    ...(swapApplied ? {
+      frontFileId: resolvedFrontFileId,
+      backFileId: resolvedBackFileId,
+      frontFileName: resolvedFrontFileName,
+      backFileName: resolvedBackFileName,
+    } : {}),
   }).where(eq(scanBatchItems.id, item.id));
   return 'review';
 }
