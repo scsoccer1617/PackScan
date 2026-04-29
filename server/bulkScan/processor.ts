@@ -397,7 +397,9 @@ async function discoverAndPlanItems(
   onItemReady?: (item: ScanBatchItem) => void,
 ): Promise<ScanBatchItem[]> {
   if (!batch.sourceFolderId) throw new Error('Batch has no source folder');
+  const tList = Date.now();
   const rawFiles = await listInboxImages(batch.userId, batch.sourceFolderId);
+  console.log(`[bulkScan] batch ${batch.id}: listInboxImages → ${rawFiles.length} file(s) in ${Date.now() - tList}ms`);
 
   // Dedup against any Drive file this user has already seen in a prior
   // batch. The processor moves successful pairs to the processed folder,
@@ -439,9 +441,15 @@ async function discoverAndPlanItems(
   // Phase 1 loop to finish.
   const pages: (ScanPage<DriveImageFile> | undefined)[] = new Array(files.length);
   const inserted: ScanBatchItem[] = [];
-  // The pair-emission step (pairPages + DB insert) reads `pages` and
-  // mutates `inserted` — serialize it so two siblings of the same pair
-  // can't both try to insert the row, and so insertion order is stable.
+  // Tracks which pair indices (keyed by leftIdx) have already been emitted
+  // so we can't accidentally insert the same pair row twice. Without this,
+  // two completing siblings can race the slot writes (which happen outside
+  // the mutex): sibling A enters the mutex, sees both slots filled because
+  // sibling B's slot write landed before A acquired the lock, emits; then
+  // sibling B enters the mutex, also sees both filled, and emits again —
+  // producing duplicate scan_batch_items rows that flow through Phase 2
+  // twice. Reserve-then-emit under the lock makes emission idempotent.
+  const emittedPairs = new Set<number>();
   let pairMutex: Promise<void> = Promise.resolve();
   const withPairLock = async <T>(fn: () => Promise<T> | T): Promise<T> => {
     const prev = pairMutex;
@@ -462,11 +470,16 @@ async function discoverAndPlanItems(
     // be out of range, meaning a trailing-orphan).
     const leftIdx = forPosition % 2 === 1 ? forPosition - 1 : forPosition - 2;
     const rightIdx = leftIdx + 1;
+    if (emittedPairs.has(leftIdx)) return;
     const left = pages[leftIdx];
     const rightInRange = rightIdx < files.length;
     const right = rightInRange ? pages[rightIdx] : null;
     if (!left) return;
     if (rightInRange && !right) return;
+
+    // Reserve before any await so a concurrent sibling can't slip past
+    // the `has` check above while we're still inside the mutex turn.
+    emittedPairs.add(leftIdx);
 
     const pageList: ScanPage<DriveImageFile>[] = right ? [left, right] : [left];
     const [pair] = pairPages(pageList);
@@ -484,7 +497,25 @@ async function discoverAndPlanItems(
     onItemReady?.(row);
   }
 
-  const phase1Queue = new (PQueue as any)({ concurrency: 4 });
+  // Phase 1 is dominated by I/O — Drive download + Vision OCR — so it
+  // tolerates more concurrency than Phase 2 (which spends real CPU/quota
+  // on Gemini + eBay + Sheets). 8 keeps us well under Vision's 1800/min
+  // and Drive's per-user limits while halving the ramp-up time before the
+  // first complete pair lands. With the previous concurrency=4 the first
+  // pair couldn't fire until 4 cold-TLS Drive downloads + 4 Vision probes
+  // had each finished a full round-trip; that floor showed up as ~45 s
+  // time-to-first-pair on an 82-file dealer batch.
+  const phase1Queue = new (PQueue as any)({ concurrency: 8 });
+  const t0 = Date.now();
+  let firstEmitLogged = false;
+  const originalOnItemReady = onItemReady;
+  onItemReady = (row) => {
+    if (!firstEmitLogged) {
+      firstEmitLogged = true;
+      console.log(`[bulkScan] batch ${batch.id}: first pair ready in ${Date.now() - t0}ms`);
+    }
+    originalOnItemReady?.(row);
+  };
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
     const position = i + 1;

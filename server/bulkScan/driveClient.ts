@@ -21,8 +21,29 @@ import { google, drive_v3 } from 'googleapis';
 import { OAuth2Client } from 'google-auth-library';
 import { eq } from 'drizzle-orm';
 import { Readable } from 'stream';
+import { Agent as HttpsAgent } from 'https';
 import { db } from '@db';
 import { users, type User } from '@shared/schema';
+
+// Shared HTTPS agent with keep-alive enabled. Drive lives behind
+// www.googleapis.com which terminates TLS per connection, and a 4-wide
+// (now 8-wide) Phase 1 PQueue used to pay a fresh handshake on every
+// `downloadFile` call — visible as multi-second cold-start latency on the
+// first file of a batch. One process-wide pooled agent lets every Drive
+// call (list / download / move / fetchThumbnail / getFolderName) reuse
+// existing sockets, so subsequent requests skip the TLS round-trip and
+// the first batch's startup floor drops from ~45s into the single-digit
+// seconds.
+const driveKeepAliveAgent = new HttpsAgent({
+  keepAlive: true,
+  // Default keepAliveMsecs is 1000; bump so a paused worker's socket
+  // stays warm long enough for the next pair download to grab it.
+  keepAliveMsecs: 30_000,
+  // googleapis runs Drive list + download + move concurrently and we
+  // hold up to 8 Phase 1 + 4 Phase 2 = 12 in flight at peak.
+  maxSockets: 32,
+  maxFreeSockets: 16,
+});
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_OAUTH_CLIENT_ID;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
@@ -65,6 +86,18 @@ async function getOAuthClient(userId: number): Promise<{ oauth: OAuth2Client; us
 }
 
 function driveFor(oauth: OAuth2Client): drive_v3.Drive {
+  // Wire the keep-alive agent into the OAuth client's gaxios transporter
+  // so every Drive request issued through this client (list / download /
+  // move / get) reuses the warm socket pool. We re-set on every call
+  // because google-auth-library overwrites `transporter.defaults` during
+  // refresh; setting once at construction is not durable.
+  const transporter: any = (oauth as any).transporter;
+  if (transporter) {
+    transporter.defaults = {
+      ...(transporter.defaults || {}),
+      agent: driveKeepAliveAgent,
+    };
+  }
   return google.drive({ version: 'v3', auth: oauth });
 }
 
