@@ -45,6 +45,10 @@ import { getEbaySearchUrl } from '../ebayService';
 import { pickerSearch, buildPickerQuery } from '../ebayPickerSearch';
 import { getScanQuota, incrementScanCount } from '../scanQuota';
 import { logUserScan, type ScanFieldValues } from '../userScans';
+// p-queue is ESM-only; pull it via a typed `as any` to keep typecheck quiet
+// without changing tsconfig module resolution.
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+import PQueue from 'p-queue';
 
 /**
  * Project the analyzer's loose `analysis` blob down to the ScanFieldValues
@@ -240,61 +244,104 @@ export async function runBatch(batchId: number): Promise<void> {
     const initialQuota = await getScanQuota(batch.userId);
     let remaining = initialQuota.limit > 0 ? initialQuota.remaining : Number.POSITIVE_INFINITY;
     let quotaHit = false;
+
+    // C3: Process pending items 4-wide via PQueue. processItem is dominated
+    // by I/O (Drive download, Google Vision, Gemini Flash, SCP, CardDB,
+    // eBay Browse, Sheets append, Drive move) so concurrency is the right
+    // lever — quota headroom on each upstream API was verified before
+    // settling on 4. Already-terminal items (auto_saved/review/skipped/
+    // failed from a prior run) just rebuild counters and don't queue.
+    //
+    // Counter writes must be atomic: `processed`, `reviews`, and
+    // `remaining` are read-modify-write under concurrency, and the
+    // `scanBatches` UPDATE must reflect a consistent snapshot. A simple
+    // Promise-chained mutex serializes those critical sections without
+    // pulling a second dep.
+    let counterMutex: Promise<void> = Promise.resolve();
+    const withCounterLock = async <T>(fn: () => Promise<T> | T): Promise<T> => {
+      const prev = counterMutex;
+      let release!: () => void;
+      counterMutex = new Promise<void>((res) => { release = res; });
+      try {
+        await prev;
+        return await fn();
+      } finally {
+        release();
+      }
+    };
+    const flushCounters = () =>
+      db
+        .update(scanBatches)
+        .set({ processedCount: processed, reviewQueueCount: reviews })
+        .where(eq(scanBatches.id, batchId));
+
+    const pendingItems: ScanBatchItem[] = [];
     for (const item of items) {
       if (item.status === 'auto_saved' || item.status === 'review' || item.status === 'skipped' || item.status === 'failed') {
-        // Already handled — skip. Counters get rebuilt below.
         if (item.status === 'review') reviews++;
         if (item.status === 'auto_saved' || item.status === 'review' || item.status === 'skipped') processed++;
         continue;
       }
-      // Quota check before doing any work for this item. Once we hit zero
-      // we mark every remaining pending item as skipped with reason
-      // 'quota_exhausted' so the UI can render a clear "X of Y skipped —
-      // upgrade to continue" banner instead of failing items individually.
-      if (remaining <= 0) {
-        quotaHit = true;
-        await db
-          .update(scanBatchItems)
-          .set({
-            status: 'skipped',
-            reviewReasons: [...(asStringArray(item.reviewReasons)), 'quota_exhausted'],
-            processedAt: new Date(),
-          })
-          .where(eq(scanBatchItems.id, item.id));
-        processed++;
-        await db
-          .update(scanBatches)
-          .set({ processedCount: processed, reviewQueueCount: reviews })
-          .where(eq(scanBatches.id, batchId));
-        continue;
-      }
-      try {
-        const outcome = await processItem(batch, item);
-        if (outcome === 'review') reviews++;
-        processed++;
-        // Increment quota only after a real processItem run — the early-skip
-        // branch above does not touch the user's count.
-        await incrementScanCount(batch.userId);
-        if (Number.isFinite(remaining)) remaining = Math.max(0, remaining - 1);
-      } catch (err: any) {
-        console.error(`[bulkScan] processItem(${item.id}) failed:`, err);
-        await db
-          .update(scanBatchItems)
-          .set({
-            status: 'failed',
-            errorMessage: err?.message || String(err),
-            processedAt: new Date(),
-          })
-          .where(eq(scanBatchItems.id, item.id));
-        processed++;
-        // Failures don't count against quota — the user didn't get a card.
-      }
-      // Update running counters so the UI can poll progress.
-      await db
-        .update(scanBatches)
-        .set({ processedCount: processed, reviewQueueCount: reviews })
-        .where(eq(scanBatches.id, batchId));
+      pendingItems.push(item);
     }
+
+    const queue = new (PQueue as any)({ concurrency: 4 });
+    for (const item of pendingItems) {
+      queue.add(async () => {
+        // Quota check is taken under the lock so we don't over-issue past
+        // the user's remaining budget when 4 items race each other.
+        const decision = await withCounterLock(() => {
+          if (remaining <= 0) {
+            quotaHit = true;
+            return 'skip' as const;
+          }
+          if (Number.isFinite(remaining)) remaining = Math.max(0, remaining - 1);
+          return 'go' as const;
+        });
+        if (decision === 'skip') {
+          await db
+            .update(scanBatchItems)
+            .set({
+              status: 'skipped',
+              reviewReasons: [...(asStringArray(item.reviewReasons)), 'quota_exhausted'],
+              processedAt: new Date(),
+            })
+            .where(eq(scanBatchItems.id, item.id));
+          await withCounterLock(async () => {
+            processed++;
+            await flushCounters();
+          });
+          return;
+        }
+        try {
+          const outcome = await processItem(batch, item);
+          await incrementScanCount(batch.userId);
+          await withCounterLock(async () => {
+            if (outcome === 'review') reviews++;
+            processed++;
+            await flushCounters();
+          });
+        } catch (err: any) {
+          console.error(`[bulkScan] processItem(${item.id}) failed:`, err);
+          await db
+            .update(scanBatchItems)
+            .set({
+              status: 'failed',
+              errorMessage: err?.message || String(err),
+              processedAt: new Date(),
+            })
+            .where(eq(scanBatchItems.id, item.id));
+          await withCounterLock(async () => {
+            processed++;
+            // Failure didn't bill the user — refund the speculative
+            // `remaining` decrement we issued before processItem ran.
+            if (Number.isFinite(remaining)) remaining += 1;
+            await flushCounters();
+          });
+        }
+      });
+    }
+    await queue.onIdle();
     if (quotaHit) {
       console.log(`[bulkScan] Batch ${batchId} reached scan quota for user ${batch.userId}; remaining items marked skipped.`);
     }
@@ -437,29 +484,6 @@ async function processItem(batch: ScanBatch, item: ScanBatchItem): Promise<'auto
   const exifBack = await normalizeImageOrientation(rawBack, `batch${batch.id}#${item.position}/back`);
   const exifFront = await normalizeImageOrientation(rawFront, `batch${batch.id}#${item.position}/front`);
 
-  // Probe back-side orientation (front is assumed right-side-up from the
-  // duplex scanner; a future PR can probe the front too at 1× cost).
-  //
-  // *** Diagnostic-only as of fix/bulk-scan-back-rotation. ***
-  // We previously physically rotated the back buffer based on this
-  // probe before handing it to the analyzer. That broke OCR on cards
-  // where both 0° and 180° read similarly well to Google Vision but the
-  // analyzer's downstream heuristics are orientation-sensitive (e.g.
-  // 1987 Topps Joel Davis #299: rotated 180°, the analyzer pulled the
-  // player name from a trivia paragraph ("Cliff Chambers... Bert
-  // Blyleven") and the card # "25" from "Topps card was #25" instead of
-  // the actual "299" in the corner). Single-Scan never pre-rotated and
-  // worked correctly, so we now match that behavior: feed the
-  // EXIF-normalized back to the analyzer as-is. The probe still runs so
-  // we can spot-check whether a future scanner produces backs the
-  // analyzer can't read at the buffer's native orientation — in which
-  // case we'd reintroduce a *narrow* rotation rule (much higher
-  // confidence threshold than the +5 / 1.5× rule we used to apply).
-  //
-  // Scanner-agnostic: the pipeline only assumes multi-page JPEG/PDF output
-  // dropped into a Drive folder — any duplex ADF produces this shape.
-  const orient = await detectOrientation(exifBack, `batch${batch.id}#${item.position}/back`);
-
   // Invoke the existing dual-side analyzer via its exported handler. This
   // is the same mock-request pattern routes.ts:2045 uses — we reuse all of
   // dualSideOCR's orchestration (OCR batch, per-side analyzers, SCP-first,
@@ -491,20 +515,6 @@ async function processItem(batch: ScanBatch, item: ScanBatchItem): Promise<'auto
     };
     handleDualSideCardAnalysis(mockReq, mockRes).catch(reject);
   });
-
-  // Stamp the (diagnostic-only) probe decision onto analysisResult so
-  // the inbox-diagnostic UI can surface what the orientation probe
-  // would have done. If we ever see misclassifications correlate with
-  // probeRotation=180 we know to revisit the rule, and conversely if
-  // we see a card whose OCR is empty/garbage and the probe says 180°
-  // would have helped, that's a signal to reintroduce a narrow flip.
-  (analysis as Record<string, any>)._backRotationProbe = {
-    rotationNeeded: orient.rotationNeeded,
-    confidence: orient.confidence,
-    originalWords: orient.debug.originalWords,
-    rotatedWords: orient.debug.rotatedWords,
-    applied: false,
-  };
 
   // CardDB corroboration: independent lookup on the analyzer's output so
   // we can feed it into the confidence gate. Gated by CARDDB_LOOKUP_ENABLED

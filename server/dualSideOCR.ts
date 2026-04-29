@@ -578,6 +578,27 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
           team: (combinedResult as any).team ?? null,
         };
         applyGeminiToCombined(combinedResult, geminiResult);
+        // C1: clear the legacy `_cardNumberLowConfidence` flag once Gemini's
+        // overlay has supplied a non-empty cardNumber. The flag is set inside
+        // `combineCardResults` (lines 2341 / 2974) on the OCR-only view of
+        // the card — both setters reflect legacy reasoning ("CardDB rejected
+        // OCR's card #" and "OCR produced no card # at all"). Gemini is the
+        // authoritative source post-PR #161/#162, and `applyGeminiToCombined`
+        // overwrites `combined.cardNumber` from Gemini above; without this
+        // reset the legacy flag stays sticky and the UI shows
+        // "Low confidence — please verify" + the prompt modal on cards whose
+        // displayed cardNumber is in fact correct (e.g. dense vintage Topps
+        // backs where Gemini reads the corner # cleanly but legacy Vision
+        // OCR misses it). Bulk's confidenceGate then routes those pairs to
+        // review for `card_number_low_confidence` — the dominant
+        // false-positive in the review queue per the bulk-import audit.
+        // Genuine no-cardNumber cases are preserved: when Gemini also failed
+        // to read it, the post-overlay value is empty and the flag stays.
+        const finalCardNumber = String((combinedResult as any).cardNumber ?? '').trim();
+        if (finalCardNumber.length > 0 && (combinedResult as any)._cardNumberLowConfidence) {
+          (combinedResult as any)._cardNumberLowConfidence = false;
+          console.log(`[vlm-gemini] cleared stale _cardNumberLowConfidence — Gemini supplied cardNumber "${finalCardNumber}".`);
+        }
         (combinedResult as any)._legacyCombined = legacySnapshot;
         (combinedResult as any)._gemini = geminiResult;
         (combinedResult as any)._geminiPromptVersion = VLM_INFO.promptVersion;
