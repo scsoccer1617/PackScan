@@ -134,6 +134,10 @@ export default function Scan() {
 
   // Ref so minting a new scanId on each front capture doesn't re-render.
   const scanIdRef = useRef<string | null>(null);
+  // QW-1: client-minted UUID for the user_scans audit row. Sent in the
+  // analyze multipart so the server can fire-and-forget the insert
+  // without blocking the response on a `RETURNING id` round-trip.
+  const userScanIdRef = useRef<string | null>(null);
 
   const ready = !!backImage;
 
@@ -249,6 +253,11 @@ export default function Scan() {
       formData.append("backImage", backBlob, "back.jpg");
       if (frontBlob) formData.append("frontImage", frontBlob, "front.jpg");
       if (scanIdRef.current) formData.append("scanId", scanIdRef.current);
+      // Mint (or reuse) a client UUID for the audit row. Letting the
+      // client own the id means the server can fire-and-forget the
+      // user_scans INSERT and we still know how to update it on save.
+      if (!userScanIdRef.current) userScanIdRef.current = mintScanId();
+      formData.append("userScanId", userScanIdRef.current);
 
       timing.requestSentAt = performance.now();
       console.log(
@@ -292,8 +301,19 @@ export default function Scan() {
         throw new Error(result.message || "Analysis failed");
       }
 
+      // Prefer the server's echo (covers older clients that didn't send a
+      // userScanId), but fall back to the client-minted ref so the save
+      // path can still promote the analyzed_no_save row even if the server
+      // omits the field. Accept either int (legacy) or string (post-QW-1).
+      const echoedScanId = result._userScanId;
+      const resolvedUserScanId: number | string | null =
+        typeof echoedScanId === 'number' || (typeof echoedScanId === 'string' && echoedScanId.length > 0)
+          ? echoedScanId
+          : userScanIdRef.current;
+
       reset();
       scanIdRef.current = null;
+      userScanIdRef.current = null;
       setAll({
         frontImage,
         backImage,
@@ -301,7 +321,7 @@ export default function Scan() {
         holoGrade: (result.data.holo as HoloGrade) ?? null,
         // Audit-row id from analyze; threaded into _scanTracking._userScanId
         // on save so the row is promoted in place rather than duplicated.
-        userScanId: typeof result._userScanId === 'number' ? result._userScanId : null,
+        userScanId: resolvedUserScanId,
       });
       // Recent Scans (Home), Collection, and Stats all read from
       // /api/scan-grades. The shared queryClient uses staleTime: Infinity,

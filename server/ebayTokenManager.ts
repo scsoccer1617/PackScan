@@ -1,4 +1,4 @@
-import axios from 'axios';
+import { sharedHttpClient } from './httpClient';
 
 const EBAY_OAUTH_URL = 'https://api.ebay.com/identity/v1/oauth2/token';
 const SCOPE = 'https://api.ebay.com/oauth/api_scope';
@@ -28,7 +28,7 @@ export async function getEbayAccessToken(): Promise<string> {
 
   try {
     console.log('Requesting new eBay OAuth token via Client Credentials flow...');
-    const response = await axios.post(
+    const response = await sharedHttpClient.post(
       EBAY_OAUTH_URL,
       `grant_type=client_credentials&scope=${encodeURIComponent(SCOPE)}`,
       {

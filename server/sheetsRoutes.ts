@@ -129,7 +129,7 @@ export function registerSheetRoutes(app: Express) {
     // Audit-row id from the analyze response. When present we UPDATE the
     // analyzed_no_save row in user_scans instead of inserting a new one,
     // so a single scan produces a single ledger row.
-    _userScanId: z.number().int().positive().optional().nullable(),
+    _userScanId: z.union([z.number().int().positive(), z.string().min(1)]).optional().nullable(),
   });
 
   const appendSchema = z.object({
@@ -295,8 +295,10 @@ export function registerSheetRoutes(app: Express) {
       // failed at analyze time, or the analyzed_no_save row was somehow
       // pruned). Either way we end up with one row representing the save.
       const userScanId = (tracking as any)?._userScanId;
-      if (typeof userScanId === 'number' && userScanId > 0) {
-        updateUserScan(userScanId, logParams).then((updated) => {
+      const hasNumericRef = typeof userScanId === 'number' && userScanId > 0;
+      const hasStringRef = typeof userScanId === 'string' && userScanId.length > 0;
+      if (hasNumericRef || hasStringRef) {
+        updateUserScan(userScanId as number | string, logParams).then((updated) => {
           if (!updated) {
             // Stale id — row missing. Fall through to a clean insert so the
             // save still gets recorded.

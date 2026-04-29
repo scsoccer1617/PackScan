@@ -78,6 +78,14 @@ export interface LogUserScanParams {
    */
   geminiSnapshot?: unknown;
   /**
+   * Client-generated UUID minted at scan time. Persisted in the
+   * `client_scan_id` column so the analyze-path INSERT can run truly
+   * fire-and-forget (no `RETURNING id` await) and the save-path can
+   * promote the analyzed_no_save row by looking up this stable client
+   * handle instead of an int row id round-tripped through the response.
+   */
+  clientScanId?: string | null;
+  /**
    * Override the auto-computed diff. Use when the client tells us
    * authoritatively which fields it considers "changed" (e.g. when the user
    * pressed 👍 and we want to record fieldsChanged=[] regardless of any
@@ -200,6 +208,7 @@ export async function logUserScan(params: LogUserScanParams): Promise<number | u
         cardDbCorroborated: params.cardDbCorroborated ?? null,
         analyzerVersion: params.analyzerVersion ?? null,
         geminiSnapshot: serializeSnapshot(params.geminiSnapshot),
+        clientScanId: params.clientScanId ?? null,
       })
       .returning({ id: userScans.id });
 
@@ -211,17 +220,23 @@ export async function logUserScan(params: LogUserScanParams): Promise<number | u
 }
 
 /**
- * Update an existing user_scans row identified by `scanId`. Used to
+ * Update an existing user_scans row identified by `scanRef`. Used to
  * promote a row from 'analyzed_no_save' (logged at analyze time) to one
  * of the three save actions when the user actually saves the card.
  *
+ * `scanRef` accepts either a numeric row id (legacy clients that received
+ * the int PK in the analyze response) or a string client UUID
+ * (post-QW-1 clients that mint their own scan id and pass it through the
+ * multipart upload). The logger walls off the choice with a runtime
+ * `typeof` so call sites can stay agnostic.
+ *
  * Best-effort — returns true on success, false on any failure (logged but
  * never thrown). If the row doesn't exist (e.g. logging failed at
- * analyze time, or scanId is stale), the caller can fall back to a fresh
+ * analyze time, or scanRef is stale), the caller can fall back to a fresh
  * insert via logUserScan.
  */
 export async function updateUserScan(
-  scanId: number,
+  scanRef: number | string,
   params: Omit<LogUserScanParams, 'userId'> & { userId?: number | null },
 ): Promise<boolean> {
   try {
@@ -274,12 +289,16 @@ export async function updateUserScan(
         cardDbCorroborated: params.cardDbCorroborated ?? undefined,
         analyzerVersion: params.analyzerVersion ?? undefined,
       })
-      .where(eq(userScans.id, scanId))
+      .where(
+        typeof scanRef === 'number'
+          ? eq(userScans.id, scanRef)
+          : eq(userScans.clientScanId, scanRef),
+      )
       .returning({ id: userScans.id });
 
     return result.length > 0;
   } catch (err) {
-    console.error(`[user_scans] updateUserScan(scanId=${scanId}) failed:`, err);
+    console.error(`[user_scans] updateUserScan(scanRef=${scanRef}) failed:`, err);
     return false;
   }
 }

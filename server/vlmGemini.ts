@@ -140,20 +140,31 @@ export async function analyzeCardBuffersWithGemini(
   const frontMime = opts.frontMime || 'image/jpeg';
   const backMime = opts.backMime || 'image/jpeg';
 
-  const response = await client.models.generateContent({
-    model,
-    contents: [
-      {
-        role: 'user',
-        parts: [
-          { text: fullPrompt },
-          { inlineData: { data: frontBuffer.toString('base64'), mimeType: frontMime } },
-          { inlineData: { data: backBuffer.toString('base64'), mimeType: backMime } },
-        ],
-      },
-    ],
-    config: { responseMimeType: 'application/json' },
-  });
+  // QW-1 instrumentation: dedicated timer for the Gemini network call
+  // alone, separate from the broader 'gemini-vlm' timer that also covers
+  // prompt assembly + JSON parse. Lets us read the network slice in
+  // isolation when judging future quick wins (e.g. server-side downscale).
+  const networkLabel = `gemini-network[${Math.random().toString(36).slice(2, 8)}]`;
+  console.time(networkLabel);
+  let response;
+  try {
+    response = await client.models.generateContent({
+      model,
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            { text: fullPrompt },
+            { inlineData: { data: frontBuffer.toString('base64'), mimeType: frontMime } },
+            { inlineData: { data: backBuffer.toString('base64'), mimeType: backMime } },
+          ],
+        },
+      ],
+      config: { responseMimeType: 'application/json' },
+    });
+  } finally {
+    console.timeEnd(networkLabel);
+  }
 
   const text = response.text ?? '';
   if (!text.trim()) {

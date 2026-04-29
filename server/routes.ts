@@ -702,7 +702,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
             analyzerVersion?: string | null;
             // Audit-row id from the analyze response. When present we UPDATE
             // the analyzed_no_save row instead of inserting a duplicate.
-            _userScanId?: number | null;
+            // Pre-QW-1 clients sent a numeric int row id; post-QW-1 clients
+            // send the client-generated UUID string. updateUserScan accepts
+            // either at runtime via a typeof check.
+            _userScanId?: number | string | null;
           }
         | undefined;
       const finalValues: ScanFieldValues = {
@@ -745,10 +748,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // 👍 means "no edits regardless of any string-coercion noise"
         fieldsChangedOverride: tracking?.userAction === 'confirmed' ? [] : undefined,
       };
-      // Promote analyze-time row when client passes scanId; insert otherwise.
+      // Promote analyze-time row when client passes a scan id; insert
+      // otherwise. The id is a numeric row id (pre-QW-1) or a client UUID
+      // (post-QW-1) — both routes go through updateUserScan, which picks
+      // the right WHERE clause from the runtime type.
       const userScanId = tracking?._userScanId;
-      if (typeof userScanId === 'number' && userScanId > 0) {
-        updateUserScan(userScanId, logParams).then((updated) => {
+      const hasNumericRef = typeof userScanId === 'number' && userScanId > 0;
+      const hasStringRef = typeof userScanId === 'string' && userScanId.length > 0;
+      if (hasNumericRef || hasStringRef) {
+        updateUserScan(userScanId as number | string, logParams).then((updated) => {
           if (!updated) logUserScan(logParams).catch(() => {});
         }).catch(() => {});
       } else {

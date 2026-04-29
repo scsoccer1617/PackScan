@@ -53,7 +53,7 @@ export interface ScanTracking {
    * the save endpoint UPDATEs the analyzed_no_save row instead of inserting
    * a new one, so a single scan produces a single ledger row.
    */
-  _userScanId?: number;
+  _userScanId?: number | string;
 }
 
 interface AppendCardPayload {

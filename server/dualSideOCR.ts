@@ -257,6 +257,16 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
     const scanId: string | undefined = typeof (req.body as any)?.scanId === 'string'
       ? (req.body as any).scanId
       : undefined;
+    // QW-1: client-generated audit-row UUID. When present, the analyze-path
+    // logUserScan INSERT runs fire-and-forget (no `RETURNING id` await) and
+    // the save path identifies the row by this client handle instead of a
+    // round-tripped int row id. Falls back to a fresh insert on the save
+    // path when this is missing (older clients).
+    const clientUserScanId: string | undefined =
+      typeof (req.body as any)?.userScanId === 'string' &&
+      /^[a-zA-Z0-9_-]{8,64}$/.test((req.body as any).userScanId)
+        ? (req.body as any).userScanId
+        : undefined;
     let preliminaryEntry: import('./scanSession').PendingScanEntry | null = null;
     if (scanId) {
       const { waitForPendingScan } = await import('./scanSession');
@@ -567,7 +577,12 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
     //
     // Best-effort — logging failures must never block the analyze
     // response. logUserScan already swallows its own errors.
-    let userScanId: number | undefined;
+    // Audit-row id returned to the client. When the client minted a UUID
+    // and passed it through the multipart upload, we ship the same UUID
+    // back so the save path can promote the row in place. When it didn't
+    // (older clients), the response carries null — the save path falls
+    // through to a fresh insert in that case.
+    const responseUserScanId: string | null = clientUserScanId ?? null;
     try {
       const userId = (req.user as any)?.id as number | undefined;
       const detectedSnapshot: ScanFieldValues = {
@@ -593,7 +608,15 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
         isNumbered: (finalResult as any).isNumbered ?? null,
         isFoil: (finalResult as any).isFoil ?? null,
       };
-      userScanId = await logUserScan({
+      // QW-1: fire-and-forget. With a client-generated clientScanId the
+      // insert no longer needs to round-trip a `RETURNING id` to the
+      // response, so we skip the await. This shaves the Postgres insert
+      // (typically 30–200 ms; longer on cold Neon serverless cold-start)
+      // off every analyze response. Failures are logged but never block
+      // the user — the save path falls through to a fresh insert if the
+      // analyzed_no_save row never landed.
+      console.time('user-scans-insert-async');
+      logUserScan({
         userId: userId ?? null,
         cardId: null,
         userAction: 'analyzed_no_save',
@@ -607,9 +630,17 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
         // to detected when final is omitted, which means an unfinished
         // analyzed_no_save row reads cleanly in the admin ledger.
         analyzerVersion: 'analyze_card_dual_images',
-      });
+        clientScanId: clientUserScanId ?? null,
+      })
+        .then(() => {
+          console.timeEnd('user-scans-insert-async');
+        })
+        .catch((logErr) => {
+          console.timeEnd('user-scans-insert-async');
+          console.warn('[user_scans] analyze-time log failed (non-fatal):', logErr);
+        });
     } catch (logErr) {
-      console.warn('[user_scans] analyze-time log failed (non-fatal):', logErr);
+      console.warn('[user_scans] analyze-time log setup failed (non-fatal):', logErr);
     }
 
     // Append a scan-log row to the configured Sheet (no-op when the
@@ -722,8 +753,11 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
       data: finalResult,
       // Audit row id — client should send this back as _scanTracking._userScanId
       // on the subsequent save call so we can UPDATE the analyzed_no_save row
-      // instead of inserting a duplicate.
-      _userScanId: userScanId ?? null,
+      // instead of inserting a duplicate. Post-QW-1 this is the
+      // client-generated UUID (string); pre-QW-1 clients that never sent
+      // userScanId in the multipart will see null and fall through to a
+      // fresh insert on save.
+      _userScanId: responseUserScanId,
     });
     
   } catch (error: any) {
