@@ -58,7 +58,7 @@ async function createSheetWithHeader(
   const sheets = sheetsFor(oauth);
   const create = await sheets.spreadsheets.create({
     requestBody: { properties: { title } },
-    fields: 'spreadsheetId,properties.title',
+    fields: 'spreadsheetId,properties.title,sheets.properties.sheetId',
   });
   const spreadsheetId = create.data.spreadsheetId!;
   await sheets.spreadsheets.values.update({
@@ -69,7 +69,81 @@ async function createSheetWithHeader(
   });
   // Header is intentionally left unformatted (no bold, no freeze) per user
   // preference — they want a plain sheet they can style however they like.
+  const sheetId = create.data.sheets?.[0]?.properties?.sheetId ?? 0;
+  await applyPriceColumnCurrencyFormat(oauth, spreadsheetId, sheetId);
   return { spreadsheetId, title: create.data.properties?.title || title };
+}
+
+// Index of the "Average eBay price" column in SHEET_HEADERS — kept as a
+// derived constant so reordering SHEET_HEADERS automatically moves the
+// formatting target.
+const PRICE_COLUMN_INDEX = SHEET_HEADERS.indexOf('Average eBay price');
+
+// Apply a USD currency number format to the price column starting at row 2
+// (row index 1, skipping the header). Idempotent — calling it repeatedly on
+// the same sheet just re-asserts the same format. Best-effort: any failure
+// is logged and swallowed so a transient Sheets error never blocks a sync.
+async function applyPriceColumnCurrencyFormat(
+  oauth: OAuth2Client,
+  spreadsheetId: string,
+  sheetId: number,
+) {
+  if (PRICE_COLUMN_INDEX < 0) return;
+  const sheets = sheetsFor(oauth);
+  try {
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId,
+      requestBody: {
+        requests: [
+          {
+            repeatCell: {
+              range: {
+                sheetId,
+                startRowIndex: 1,
+                startColumnIndex: PRICE_COLUMN_INDEX,
+                endColumnIndex: PRICE_COLUMN_INDEX + 1,
+              },
+              cell: {
+                userEnteredFormat: {
+                  numberFormat: { type: 'CURRENCY', pattern: '"$"#,##0.00' },
+                },
+              },
+              fields: 'userEnteredFormat.numberFormat',
+            },
+          },
+        ],
+      },
+    });
+  } catch (err) {
+    console.error('[googleSheets] applyPriceColumnCurrencyFormat failed:', err);
+  }
+}
+
+// Resolve the gid (sheetId) of the first tab in a spreadsheet. Needed for
+// batchUpdate range requests because the userSheets row only stores the
+// spreadsheet id, not the per-tab numeric sheetId. Cached per spreadsheet
+// for the process lifetime — gid never changes for the first tab.
+const firstTabSheetIdCache = new Map<string, number>();
+async function getFirstTabSheetId(
+  oauth: OAuth2Client,
+  spreadsheetId: string,
+): Promise<number | null> {
+  const cached = firstTabSheetIdCache.get(spreadsheetId);
+  if (cached != null) return cached;
+  try {
+    const sheets = sheetsFor(oauth);
+    const meta = await sheets.spreadsheets.get({
+      spreadsheetId,
+      fields: 'sheets.properties.sheetId',
+    });
+    const id = meta.data.sheets?.[0]?.properties?.sheetId;
+    if (id == null) return null;
+    firstTabSheetIdCache.set(spreadsheetId, id);
+    return id;
+  } catch (err) {
+    console.error('[googleSheets] getFirstTabSheetId failed:', err);
+    return null;
+  }
 }
 
 // Idempotently ensure row 1 of an existing sheet matches SHEET_HEADERS. Run
@@ -210,11 +284,17 @@ function safeCellValue(value: string | null | undefined): string {
 
 export function buildRow(input: CardRowInput): (string | number)[] {
   const dateScanned = new Date().toISOString().slice(0, 10);
-  const price = input.averagePrice == null || input.averagePrice === ''
-    ? ''
-    : (typeof input.averagePrice === 'number'
-      ? input.averagePrice.toFixed(2)
-      : String(input.averagePrice));
+  // Write price as a raw number so Sheets keeps the numeric type and the
+  // column-level currency format ("$1.61") renders correctly. Strings like
+  // "1.61" would otherwise survive USER_ENTERED parsing but defeat sorting
+  // when mixed with edge cases. Falls back to '' for unknown / empty.
+  let price: string | number = '';
+  if (input.averagePrice != null && input.averagePrice !== '') {
+    const n = typeof input.averagePrice === 'number'
+      ? input.averagePrice
+      : Number(input.averagePrice);
+    price = Number.isFinite(n) ? n : '';
+  }
   // Order MUST match SHEET_HEADERS exactly.
   return [
     dateScanned,
@@ -487,6 +567,12 @@ export async function appendCardRow(
   const { oauth } = await getOAuthClient(userId);
   const sheets = sheetsFor(oauth);
   await syncHeaderRow(oauth, sheet.googleSheetId);
+  // Idempotent safety net so existing user sheets (created before this
+  // change) get the currency format retroactively on their next sync.
+  const firstTabId = await getFirstTabSheetId(oauth, sheet.googleSheetId);
+  if (firstTabId != null) {
+    await applyPriceColumnCurrencyFormat(oauth, sheet.googleSheetId, firstTabId);
+  }
   const row = buildRow(card);
   await sheets.spreadsheets.values.append({
     spreadsheetId: sheet.googleSheetId,
