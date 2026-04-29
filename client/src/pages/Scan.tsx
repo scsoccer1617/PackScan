@@ -322,6 +322,12 @@ export default function Scan() {
         // Audit-row id from analyze; threaded into _scanTracking._userScanId
         // on save so the row is promoted in place rather than duplicated.
         userScanId: resolvedUserScanId,
+        // BR-2: top-N active eBay listings the server fired in parallel with
+        // combineCardResults. Null when the server skipped (incomplete
+        // identity), timed out at 1500ms, or errored — EbayActiveComps then
+        // falls back to its mount-time fetch.
+        initialComps: result.data?.comps ?? null,
+        compsQuery: result.data?.compsQuery ?? null,
       });
       // Recent Scans (Home), Collection, and Stats all read from
       // /api/scan-grades. The shared queryClient uses staleTime: Infinity,

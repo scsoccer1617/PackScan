@@ -1329,6 +1329,13 @@ export default function ScanResult() {
             // graded-tier helpers indirectly.
             <EbayActiveComps
               cardData={cardData}
+              // BR-2: comps the analyze handler kicked off in parallel with
+              // combineCardResults. When present and the live query parts
+              // still match `compsQuery`, EbayActiveComps renders these on
+              // first paint with no network round-trip. On parallel pick /
+              // edit / mismatch / null, it falls back to the legacy fetch.
+              initialComps={flow.initialComps}
+              compsQuery={flow.compsQuery}
               onAverage={({ average, query }) =>
                 setPriceInfo({
                   averageValue: average,

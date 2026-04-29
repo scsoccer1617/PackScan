@@ -11,6 +11,25 @@
 import { createContext, useContext, useState, ReactNode, useCallback } from "react";
 import type { CardFormValues } from "@shared/schema";
 import type { HoloGrade } from "@/components/HoloGradeCard";
+import type { ActiveListing } from "@/components/EbayActiveComps";
+
+// BR-2: top-N active comps the analyze handler kicked off in parallel with
+// combineCardResults, plus the exact identity tuple the server hashed eBay
+// against. EbayActiveComps consumes `initialComps` on first render to skip
+// its mount-time fetch, and compares its live query parts against
+// `compsQuery` to know when a refetch is needed (e.g. parallel pick).
+export interface InitialCompsPayload {
+  query: string;
+  active: ActiveListing[];
+}
+export interface CompsQuerySnapshot {
+  year: number | string;
+  brand: string;
+  set: string;
+  cardNumber: string;
+  player: string;
+  parallel: string;
+}
 
 export interface ScanFlowState {
   frontImage: string;
@@ -25,6 +44,13 @@ export interface ScanFlowState {
    * write failed) — in which case the save falls back to a fresh insert.
    */
   userScanId: number | string | null;
+  /** BR-2: top-N active comps from analyze-time eBay parallel fire. Null
+   *  on identity-incomplete / timeout / error — client falls back to its
+   *  mount-time fetch. */
+  initialComps: InitialCompsPayload | null;
+  /** BR-2: exact query the server hashed eBay against. Compared against
+   *  live cardData query parts to decide whether to refetch. */
+  compsQuery: CompsQuerySnapshot | null;
 }
 
 const EMPTY: ScanFlowState = {
@@ -33,6 +59,8 @@ const EMPTY: ScanFlowState = {
   cardData: null,
   holoGrade: null,
   userScanId: null,
+  initialComps: null,
+  compsQuery: null,
 };
 
 interface ScanFlowContextValue extends ScanFlowState {

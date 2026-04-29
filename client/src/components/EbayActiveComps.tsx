@@ -44,6 +44,29 @@ interface EbayActiveCompsProps {
    * every successful (or empty) response.
    */
   onAverage?: (info: { average: number; query: string; count: number }) => void;
+  /**
+   * BR-2: when the analyze handler had time + identity to fire eBay in
+   * parallel with combineCardResults, the response carries the top-N
+   * listings here. We render them on first paint and skip the mount-time
+   * fetch entirely. Null = server skipped / timed out / errored — fall
+   * back to the legacy mount-time fetch.
+   */
+  initialComps?: { query: string; active: ActiveListing[] } | null;
+  /**
+   * BR-2: the exact query parts the server hashed eBay against. We compare
+   * this to the live `cardData`-derived parts on every render; if they
+   * diverge (e.g. user picked a different parallel, edited the card) we
+   * refetch /api/ebay/comps. If they match, the embedded comps are still
+   * valid and no fetch is needed.
+   */
+  compsQuery?: {
+    year: number | string;
+    brand: string;
+    set: string;
+    cardNumber: string;
+    player: string;
+    parallel: string;
+  } | null;
 }
 
 function buildQueryParts(cardData: Partial<CardFormValues>) {
@@ -69,17 +92,64 @@ function formatPrice(price: number, currency: string = "USD") {
   }).format(price);
 }
 
-export default function EbayActiveComps({ cardData, onAverage }: EbayActiveCompsProps) {
-  const [loading, setLoading] = useState(true);
-  const [listings, setListings] = useState<ActiveListing[]>([]);
-  const [query, setQuery] = useState("");
+// BR-2: stable string key for both the live cardData parts and the server's
+// embedded compsQuery. We use this to decide whether the embedded comps are
+// still authoritative (match → use them) or stale (mismatch → refetch).
+function partsKey(p: {
+  year: number | string;
+  brand: string;
+  set: string;
+  cardNumber: string;
+  player: string;
+  parallel: string;
+}) {
+  return [
+    p.year != null ? String(p.year) : "",
+    p.brand || "",
+    p.set || "",
+    p.cardNumber || "",
+    p.player || "",
+    p.parallel || "",
+  ].join("|");
+}
+
+export default function EbayActiveComps({
+  cardData,
+  onAverage,
+  initialComps,
+  compsQuery,
+}: EbayActiveCompsProps) {
+  const liveParts = buildQueryParts(cardData);
+  const liveKey = partsKey(liveParts);
+  const serverKey = compsQuery
+    ? partsKey({
+        year: compsQuery.year,
+        brand: compsQuery.brand,
+        set: compsQuery.set,
+        cardNumber: compsQuery.cardNumber,
+        player: compsQuery.player,
+        parallel: compsQuery.parallel,
+      })
+    : null;
+  // BR-2 fast-path: server already fired the same query; render and skip
+  // the mount-time fetch. Mismatch (or no embedded comps) → fall through
+  // to the legacy fetch.
+  const embeddedAuthoritative =
+    !!initialComps && serverKey !== null && serverKey === liveKey;
+
+  const [loading, setLoading] = useState(!embeddedAuthoritative);
+  const [listings, setListings] = useState<ActiveListing[]>(
+    embeddedAuthoritative && initialComps ? initialComps.active : [],
+  );
+  const [query, setQuery] = useState(
+    embeddedAuthoritative && initialComps ? initialComps.query : "",
+  );
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const parts = buildQueryParts(cardData);
     // Need at least year + brand or a player — otherwise the query is too
     // weak to be useful and we'd just spam eBay with junk.
-    const hasEnough = (parts.brand && parts.year) || parts.player;
+    const hasEnough = (liveParts.brand && liveParts.year) || liveParts.player;
     if (!hasEnough) {
       setLoading(false);
       setListings([]);
@@ -89,16 +159,36 @@ export default function EbayActiveComps({ cardData, onAverage }: EbayActiveComps
       return;
     }
 
+    // BR-2 fast-path: server already returned comps for the exact same
+    // identity tuple. Surface the average to the hero and skip the
+    // network round trip.
+    if (initialComps && serverKey !== null && serverKey === liveKey) {
+      const active = initialComps.active;
+      setListings(active);
+      setQuery(initialComps.query || "");
+      setError(null);
+      setLoading(false);
+      const avg = active.length
+        ? active.reduce((sum, i) => sum + (i.price || 0), 0) / active.length
+        : 0;
+      onAverage?.({
+        average: avg,
+        query: initialComps.query || "",
+        count: active.length,
+      });
+      return;
+    }
+
     let cancelled = false;
     setLoading(true);
     setError(null);
     const params = new URLSearchParams();
-    if (parts.year) params.set("year", parts.year);
-    if (parts.brand) params.set("brand", parts.brand);
-    if (parts.set) params.set("set", parts.set);
-    if (parts.cardNumber) params.set("cardNumber", parts.cardNumber);
-    if (parts.player) params.set("player", parts.player);
-    if (parts.parallel) params.set("parallel", parts.parallel);
+    if (liveParts.year) params.set("year", liveParts.year);
+    if (liveParts.brand) params.set("brand", liveParts.brand);
+    if (liveParts.set) params.set("set", liveParts.set);
+    if (liveParts.cardNumber) params.set("cardNumber", liveParts.cardNumber);
+    if (liveParts.player) params.set("player", liveParts.player);
+    if (liveParts.parallel) params.set("parallel", liveParts.parallel);
     params.set("limit", "10");
 
     fetch(`/api/ebay/comps?${params.toString()}`)
@@ -130,17 +220,10 @@ export default function EbayActiveComps({ cardData, onAverage }: EbayActiveComps
       cancelled = true;
     };
     // Re-fetch whenever any field that flows into the query changes —
-    // critically `foilType`, which is the picker's output.
+    // critically `foilType`, which is the picker's output. The liveKey
+    // dependency captures all of them in a single string.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    cardData.year,
-    cardData.brand,
-    (cardData as any).set,
-    cardData.cardNumber,
-    cardData.playerFirstName,
-    cardData.playerLastName,
-    cardData.foilType,
-  ]);
+  }, [liveKey, serverKey]);
 
   return (
     <Card>
