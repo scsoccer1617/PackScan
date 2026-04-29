@@ -68,6 +68,15 @@ export interface GeminiCardResult {
    *  ("High"/"Medium"/"Low") here; current prompt requires floats 0.0–1.0,
    *  but downstream code should still tolerate either shape. */
   confidence?: Record<string, number | string | null>;
+  /** Which of the two input images Gemini judged to be the FRONT of the card.
+   *  0 = first image passed to analyzeCardBuffersWithGemini (i.e. frontBuffer
+   *      slot in the API call) is the actual front.
+   *  1 = second image (backBuffer slot) is the actual front — i.e. the caller's
+   *      pair was reversed and the persisted front/back URLs should be swapped.
+   *  null/absent = Gemini could not decide; caller falls back to whatever
+   *  upstream signal it had. Optional so older deployments returning the
+   *  field absent still typecheck. */
+  frontImageIndex?: 0 | 1 | null;
   notes?: string | null;
 }
 

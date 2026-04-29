@@ -130,7 +130,10 @@ CARD-DOMAIN RULES:
 - printRun: when a card shows "X/YYY" (e.g. "291/299" or "0101/0399"), return the denominator as a number (299, 399). Set to null if not numbered.
 - cmpCode: most card backs print a small manufacturer reference code in the legal/copyright strip near the bottom edge \u2014 typically formatted as "CMP" + 4\u20136 digits (e.g. "CMP100358", "CMP120523"). Read it verbatim into the cmpCode field, including the "CMP" prefix and any leading zeros. If the code is not visible or you cannot read it confidently, return null. This is the single most reliable structural anchor on a modern Topps/Panini card \u2014 do not skip it when it is legible.
 - If a field is genuinely unreadable, return null. Never guess.
-- Return ONLY valid JSON matching the provided template. No prose, no markdown fences.`;
+- Return ONLY valid JSON matching the provided template. No prose, no markdown fences.
+
+ADDITIONAL FIELD — frontImageIndex:
+- "frontImageIndex": 0 or 1 — the index of the input image that is the FRONT of the card (the side with the player photograph and team logo, NOT the side with statistics, copyright, or card number text). Image 0 is the first image provided, Image 1 is the second. This field is REQUIRED whenever both images are visible. Use 0 when the first image is the front, 1 when the second image is the front. Return null only if neither image clearly shows a card front.`;
 
 /**
  * Result template: shown to the model alongside the system prompt so it
@@ -177,6 +180,7 @@ export const VLM_RESULT_TEMPLATE = `{
     "cmpCode": null,
     "parallel": null
   },
+  "frontImageIndex": null,
   "notes": null
 }`;
 
