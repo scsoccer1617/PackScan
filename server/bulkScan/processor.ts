@@ -38,11 +38,10 @@ import { detectOrientation } from './orientation';
 import { pairPages, type ScanPage, type PairedScan } from './pairing';
 import { evaluateConfidence, isCardDbCorroboration } from './confidenceGate';
 import { BatchTimingsRecorder } from './timingsRecorder';
-import { normalizeImageOrientation, extractIdentityForEbay } from '../dualSideOCR';
+import { normalizeImageOrientation } from '../dualSideOCR';
 import { lookupCard as cardDbLookup } from '../cardDatabaseService';
 import { isCardDbLookupEnabled } from '../featureFlags';
 import { appendCardRow } from '../googleSheets';
-import { pickerSearch, buildPickerQuery } from '../ebayPickerSearch';
 import { getScanQuota, incrementScanCount } from '../scanQuota';
 import { logUserScan, type ScanFieldValues } from '../userScans';
 // p-queue is ESM-only; pull it via a typed `as any` to keep typecheck quiet
@@ -645,7 +644,12 @@ async function processItem(
       frontImage: [buildMockFile(exifFront, item.frontFileName || 'front.jpg')],
       backImage: [buildMockFile(exifBack, item.backFileName || 'back.jpg')],
     },
-    body: { scanId },
+    // PR C5: `scanContext: 'bulk'` tells the analyze handler to skip the
+    // 1500ms cap on the embedded picker call. Bulk has no UI-blocking
+    // concern and used to run its own synchronous picker call after this —
+    // truncating at 1.5s would silently lose comps on the long tail
+    // (telemetry: max ~3.3s in batch 8).
+    body: { scanId, scanContext: 'bulk' },
     query: {},
   };
 
@@ -758,69 +762,53 @@ async function processItem(
     }
   }
 
-  // eBay value lookup. Build the identity tuple via the SAME helper
-  // single-scan's analyze handler uses (`extractIdentityForEbay` in
-  // server/dualSideOCR.ts) so bulk and single-scan hit `pickerSearch`
-  // with byte-identical queries for the same card. Pre-PR #189 bulk had
-  // its own argument shape that:
-  //   • fell back to `analysis.collection` when `set` was empty, which
-  //     surfaced "Base Set" verbatim in the query (sellers don't title
-  //     cards that way) and pulled $0 returns for common late-80s base
-  //     cards (LaRussa #344, Wathan #534, Sundberg #516, Knudson #61,
-  //     Lombardi #283, Bernazard #122, Rodgers #504);
-  //   • duplicated the brand when set was also "Topps", producing
-  //     "1988 Topps Topps Base Set" in the stored eBay URL.
-  // Single-scan never hit either bug because it reads `combined.set`
-  // only. Routing through the same helper guarantees parity going
-  // forward.
-  const ebayIdentity = extractIdentityForEbay(analysis);
-  if (ebayIdentity) {
-    const tEbay = Date.now();
-    try {
-      const lastName = ebayIdentity.player.split(/\s+/).pop() ?? null;
-      const firstName = ebayIdentity.player.split(/\s+/)[0] ?? null;
-      const query = buildPickerQuery({
-        year: ebayIdentity.year,
-        brand: ebayIdentity.brand,
-        set: ebayIdentity.set,
-        cardNumber: ebayIdentity.cardNumber,
-        player: ebayIdentity.player,
-        parallel: ebayIdentity.parallel,
-      });
-      const result = await pickerSearch(query, {
-        limit: 5,
-        requireCardNumber: ebayIdentity.cardNumber,
-        requirePlayerLastName: lastName,
-        scannedParallel: ebayIdentity.parallel || null,
-        brand: ebayIdentity.brand,
-        set: ebayIdentity.set || null,
-        year: ebayIdentity.year,
-        playerFirstName: firstName,
-      });
-      const active = result.active || [];
-      const averageValue = active.length > 0
-        ? active.reduce((sum, l) => sum + (l.price || 0), 0) / active.length
-        : 0;
-      analysis.estimatedValue = averageValue;
-      analysis.ebayResults = active;
-      // Outbound "View on eBay" link uses the SAME picker query that
-      // produced `active` (matches single-scan's `data.compsQuery`).
-      analysis.ebaySearchUrl = `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(query)}&_sacat=213&_sop=10`;
-      console.log(
-        `[bulkScan] eBay comps item ${item.id}: ${active.length} active results, avg=$${averageValue.toFixed(2)} for "${query}"`,
-      );
-    } catch (err: any) {
-      console.warn(`[bulkScan] eBay comps lookup failed for item ${item.id}: ${err?.message}`);
-      // Leave estimatedValue at whatever the analyzer set (typically 0). We
-      // still let the row save — a missing price is recoverable; a missing
-      // card row is not.
-    }
+  // PR C5: consume the analyze handler's embedded comps instead of running
+  // a duplicate `pickerSearch` here. Pre-C5 bulk fired its own picker call
+  // after Gemini and reconstructed the eBay URL from `buildPickerQuery`.
+  // PR #189 made those two queries byte-identical; PR C5 deletes the
+  // duplicate call entirely.
+  //
+  // The mockReq above passed `scanContext: 'bulk'`, which tells the
+  // analyze handler to skip its 1500ms timeout on the embedded picker
+  // call — bulk waits for the full result (telemetry: median ~510ms,
+  // max ~3.3s) since it has no UI-blocking constraint.
+  const embeddedComps = (analysis.comps && Array.isArray(analysis.comps.active))
+    ? analysis.comps as { query: string; active: Array<{ price?: number | null }> }
+    : null;
+  if (embeddedComps) {
+    const active = embeddedComps.active || [];
+    const averageValue = active.length > 0
+      ? active.reduce((sum, l) => sum + (Number(l.price) || 0), 0) / active.length
+      : 0;
+    analysis.estimatedValue = averageValue;
+    analysis.ebayResults = active;
+    // Outbound "View on eBay" link uses the SAME picker query the analyze
+    // handler hashed against (matches single-scan exactly).
+    analysis.ebaySearchUrl = `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(embeddedComps.query)}&_sacat=213&_sop=10`;
+    console.log(
+      `[bulkScan] eBay comps item ${item.id}: ${active.length} active results, avg=$${averageValue.toFixed(2)} for "${embeddedComps.query}" (embedded)`,
+    );
     if (pairKey && timings) {
-      timings.recordPairUpdate(pairKey, { ebayMs: Date.now() - tEbay });
+      // PR C5 ebayMs semantics: this is the analyze handler's
+      // `_embeddedCompsMs` — the wall-clock the picker call still owed AT
+      // THE END of analyze (after audit logging and scanLogger flush ran
+      // in parallel). Pre-C5 ebayMs was the full sequential picker
+      // duration AFTER Gemini returned. Post-C5 most of the picker time
+      // overlaps with audit/log work and is hidden inside geminiMs; this
+      // field captures only the trailing un-overlapped slice. Treat as a
+      // lower-bound — it is NOT directly comparable to pre-C5 batches.
+      const embeddedMs = typeof (analysis as any)._embeddedCompsMs === 'number'
+        ? (analysis as any)._embeddedCompsMs
+        : 0;
+      timings.recordPairUpdate(pairKey, { ebayMs: embeddedMs });
     }
   } else {
+    // Either Gemini didn't yield a usable identity (player + cardNumber +
+    // year + brand) or the embedded picker errored out non-fatally.
+    // Either way, no comps to persist — leave estimatedValue/ebayResults
+    // unset so the analyzer's defaults stand.
     console.log(
-      `[bulkScan] eBay comps skipped item ${item.id}: insufficient card data (player=${!!analysis.playerFirstName}/${!!analysis.playerLastName} brand=${!!analysis.brand} cardNumber=${!!analysis.cardNumber} year=${!!analysis.year})`,
+      `[bulkScan] eBay comps skipped item ${item.id}: no embedded comps (player=${!!analysis.playerFirstName}/${!!analysis.playerLastName} brand=${!!analysis.brand} cardNumber=${!!analysis.cardNumber} year=${!!analysis.year})`,
     );
   }
 
