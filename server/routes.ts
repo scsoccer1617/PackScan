@@ -3956,6 +3956,55 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // POST /api/admin/rebuild-ebay-urls — one-shot backfill that recomputes
+  // the eBay-URL column for every row in the user's active sheet using the
+  // fixed `getEbaySearchUrl`. Subset is NOT a sheet column, so backfill
+  // produces URLs without the subset hint — still correct (real player in
+  // the quoted slot, eBay returns listings). Body: `{ userId?, dryRun? }`.
+  // dryRun=true returns a 5-row before/after preview without writing.
+  app.post(`${apiPrefix}/admin/rebuild-ebay-urls`, requireAuth, requireAdminUser, async (req, res) => {
+    const dryRun = req.body?.dryRun === true;
+    const reqUserIdRaw = req.body?.userId;
+    const callerUserId = (req.user as any)?.id;
+    const targetUserId = typeof reqUserIdRaw === 'number' && Number.isFinite(reqUserIdRaw)
+      ? reqUserIdRaw
+      : callerUserId;
+    if (typeof targetUserId !== 'number' || !Number.isFinite(targetUserId)) {
+      return res.status(400).json({ error: 'invalid_user' });
+    }
+    try {
+      const { rebuildEbayUrlsForUser } = await import('./googleSheets');
+      const buildUrl = (row: any): string => {
+        const player = [row.playerFirstName, row.playerLastName].filter(Boolean).join(' ').trim();
+        const brandName = (row.brand && typeof row.brand === 'object') ? row.brand.name : (row.brand || '');
+        if (!brandName || !player) return '';
+        const yr = typeof row.year === 'number' ? row.year : 0;
+        return getEbaySearchUrl(
+          player,
+          row.cardNumber || '',
+          brandName,
+          yr,
+          row.collection || '',
+          '',
+          !!row.isNumbered,
+          row.foilType || '',
+          row.serialNumber || '',
+          row.variant || '',
+          row.set || '',
+          undefined,
+          !!row.isAutographed,
+          false,
+          '', // subset not stored in sheet — see helper docstring
+        );
+      };
+      const result = await rebuildEbayUrlsForUser(targetUserId, buildUrl, { dryRun });
+      return res.json({ dryRun, userId: targetUserId, ...result });
+    } catch (err: any) {
+      console.error('[admin] rebuild-ebay-urls failed:', err);
+      return res.status(500).json({ error: err?.message || 'rebuild_failed' });
+    }
+  });
+
   const httpServer = createServer(app);
   return httpServer;
 }

@@ -152,6 +152,7 @@ export function registerSheetRoutes(app: Express) {
       isAutographed: z.boolean().optional().nullable(),
       isNumbered: z.boolean().optional().nullable(),
       foilType: z.string().optional().nullable(),
+      subset: z.string().optional().nullable(),
       averagePrice: z.union([z.number(), z.string()]).optional().nullable(),
       frontImageUrl: z.string().optional().nullable(),
       backImageUrl: z.string().optional().nullable(),
@@ -195,16 +196,21 @@ export function registerSheetRoutes(app: Express) {
         if (/^https?:\/\//i.test(u)) return u;
         return baseUrl + (u.startsWith('/') ? u : '/' + u);
       };
-      // If no eBay URL provided, build one from the card data.
+      // Always rebuild the Sheet's eBay URL server-side from the canonical
+      // card fields. Do NOT prefer `c.ebaySearchUrl` from the client — the
+      // client-side picker URL substitutes subset for player (PR #193) and
+      // would poison the Sheet path with rows like
+      // `1987 Topps "604" "NL Leaders"` instead of the actual player.
       const yr = typeof c.year === 'number' ? c.year : (c.year ? parseInt(String(c.year), 10) || 0 : 0);
-      const ebayUrl = c.ebaySearchUrl || (c.brand ? getEbaySearchUrl(
+      const ebayUrl = c.brand ? getEbaySearchUrl(
         player, c.cardNumber || '', c.brand || '', yr, c.collection || '', '',
         !!c.isNumbered, c.foilType || '', c.serialNumber || '',
         (c as any).variant || '', c.set || '',
         undefined, // gradeKeyword — sheet link is always raw asking
         !!(c as any).isAutographed,
         false, // excludeGraded — keep sheet links broad; tile links are tier-specific
-      ) : '');
+        c.subset || '',
+      ) : (c.ebaySearchUrl || '');
       const frontStored = await persistDataUriIfNeeded(c.frontImageUrl, 'front');
       const backStored = await persistDataUriIfNeeded(c.backImageUrl, 'back');
       const result = await appendCardRow(userId, {

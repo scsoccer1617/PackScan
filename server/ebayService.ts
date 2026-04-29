@@ -1304,21 +1304,8 @@ export function getEbaySearchUrl(
   gradeKeyword?: string,
   isAutographed?: boolean,
   excludeGraded?: boolean,
+  subset?: string,
 ): string {
-  // Prefer the product Set name (e.g. "Holiday", "Series 1") over the generic
-  // Collection name (e.g. "Base Set") that eBay sellers never write in titles.
-  const rawCollection = collection || '';
-  const rawSet = set || '';
-  // Strip generic placeholder values from BOTH set and collection — see
-  // matching comment in searchCardValues above.
-  const searchSetName = rawSet && !GENERIC_COLLECTION_NAMES.has(rawSet.toLowerCase())
-    ? normalizeSetForSearch(rawSet, brand)
-    : '';
-  const collectionForSearch = !GENERIC_COLLECTION_NAMES.has(rawCollection.toLowerCase())
-    ? normalizeCollectionForSearch(rawCollection)
-    : '';
-  const searchProductLine = searchSetName || collectionForSearch;
-
   // When we're building the URL for a graded tier (e.g. "PSA 10"), use a
   // deliberately leaner keyword set. The eBay web UI treats every _nkw
   // token as an AND-match against the title, so appending card # + variant
@@ -1329,20 +1316,19 @@ export function getEbaySearchUrl(
   // or  2026 Topps Series 1 Arenado PSA 10
   // — the buyer's variant language almost never appears verbatim. Keep the
   // query to the fields that are reliably in slab titles: year + brand +
-  // product line + player + grade. Drop card #, variant, foil, and serial.
+  // player + grade. Drop card #, variant, foil, and serial.
   const isGradedTier = !!(gradeKeyword && gradeKeyword.trim());
 
+  // Identity portion: <year> <brand> "<cardNumber>" "<playerName>"
+  // [unquoted parallel] [unquoted subset]
+  // Quoting cardNumber + player keeps eBay's tokenizer from relaxing them
+  // (alphanumerics like H121, US300, two-word names). Subset is appended
+  // unquoted as a hint — see commit history / PR for the rationale.
   const parts: string[] = [];
   if (year > 0) parts.push(String(year));
   if (brand) parts.push(brand);
-  if (searchProductLine) parts.push(searchProductLine);
-  parts.push(playerName);
-  if (!isGradedTier && cardNumber) {
-    // Mirror of buildKeywords above — always prefix `#` so alphanumeric
-    // card numbers like H121 (Topps Holiday) or US## (Topps Update) get
-    // tokenized as a unit instead of relaxed by eBay's matcher.
-    parts.push(`#${cardNumber}`);
-  }
+  if (!isGradedTier && cardNumber) parts.push(`"${cardNumber}"`);
+  if (playerName && playerName.trim()) parts.push(`"${playerName.trim()}"`);
 
   let keywords = parts.filter(Boolean).join(' ');
 
@@ -1370,6 +1356,14 @@ export function getEbaySearchUrl(
       const foilSearchTerm = getFoilSearchTerm(foilType);
       keywords += ` ${foilSearchTerm || foilType}`;
     }
+
+    // Subset descriptor (e.g. "NL Leaders", "Record Breaker", "Team
+    // Leaders") appended as an unquoted hint after the parallel/foil
+    // token. Subset cards typically read "Fernando Valenzuela NL Leaders"
+    // in eBay titles — quoting "NL Leaders" would over-restrict.
+    if (subset && subset.trim()) {
+      keywords += ` ${subset.trim()}`;
+    }
   }
 
   // Grade filter (e.g. "PSA 10") for the graded-pricing breakdown’s tier
@@ -1386,7 +1380,7 @@ export function getEbaySearchUrl(
   // pulls in every parallel (Gold, Rainbow Foil, Refractor, …) because
   // those listings all contain the player + year + brand tokens too.
   const isBase = (!foilType || !foilType.trim()) && (!variant || !variant.trim());
-  const ownVariantBlob = `${variant || ''} ${foilType || ''} ${collection || ''} ${set || ''}`;
+  const ownVariantBlob = `${variant || ''} ${foilType || ''} ${collection || ''} ${set || ''} ${subset || ''}`;
   const isRelic = RELIC_DETECT_RE.test(ownVariantBlob);
   const negatives = buildCardSearchNegatives({
     isBase,
@@ -1411,6 +1405,7 @@ export function getEbaySearchUrl(
     foilType: foilType || null,
     set: set || null,
     collection: collection || null,
+    subset: subset || null,
     gradeKeyword: gradeKeyword || null,
     isAutographed: !!isAutographed,
     excludeGraded: !!excludeGraded,
