@@ -42,7 +42,6 @@ import { normalizeImageOrientation } from '../dualSideOCR';
 import { lookupCard as cardDbLookup } from '../cardDatabaseService';
 import { isCardDbLookupEnabled } from '../featureFlags';
 import { appendCardRow } from '../googleSheets';
-import { getEbaySearchUrl } from '../ebayService';
 import { pickerSearch, buildPickerQuery } from '../ebayPickerSearch';
 import { getScanQuota, incrementScanCount } from '../scanQuota';
 import { logUserScan, type ScanFieldValues } from '../userScans';
@@ -746,24 +745,17 @@ async function processItem(
         : 0;
       analysis.estimatedValue = averageValue;
       analysis.ebayResults = active;
-      // Keep the human-clickable search URL pointed at the same query so
-      // dealers can drill in from the Sheet. getEbaySearchUrl predates the
-      // picker engine but still produces a valid eBay search URL.
-      analysis.ebaySearchUrl = getEbaySearchUrl(
-        playerName,
-        analysis.cardNumber || '',
-        analysis.brand,
-        analysis.year,
-        analysis.collection || '',
-        analysis.condition || '',
-        analysis.isNumbered || false,
-        analysis.foilType || undefined,
-        analysis.serialNumber || undefined,
-        analysis.variant || undefined,
-        analysis.set || undefined,
-        undefined,
-        analysis.isAutographed || false,
-      );
+      // Outbound "View on eBay" link. Use the SAME picker query string that
+      // produced `active` above — single-scan's analyze response embeds it
+      // as `data.compsQuery` / drives the same UI link. The legacy
+      // `getEbaySearchUrl` helper layered a stale `-autograph -signed
+      // -parallel -refractor …` exclusion list on top of the query
+      // (pre-PR-178 behavior), so the URL stored on a bulk row diverged
+      // from the listings the price was averaged over and surfaced
+      // autograph titles when the user clicked through. Picker-query
+      // parity guarantees the URL the dealer opens shows the same slice
+      // of listings the average was computed from.
+      analysis.ebaySearchUrl = `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(query)}&_sacat=213&_sop=10`;
       console.log(
         `[bulkScan] eBay comps item ${item.id}: ${active.length} active results, avg=$${averageValue.toFixed(2)} for "${query}"`,
       );
