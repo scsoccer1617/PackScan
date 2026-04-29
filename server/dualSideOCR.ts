@@ -635,9 +635,21 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
     // (player, cardNumber, year, brand). The promise is awaited at the
     // bottom right before res.json so it overlaps everything else.
     //
-    // Best-effort: a 1500ms timeout caps tail latency. If eBay is slow or
-    // errors, the response ships without comps and the client falls back
-    // to its existing mount-time fetch via EbayActiveComps.
+    // Best-effort by default: a 1500ms timeout caps tail latency for
+    // single-scan UX (if eBay is slow, response ships without comps and the
+    // client falls back to its existing mount-time fetch via
+    // EbayActiveComps). The bulk worker passes `scanContext: 'bulk'` to
+    // disable the timeout — bulk has no UI-blocking concern, runs
+    // pickerSearch in parallel with up to 8 sibling pairs, and historically
+    // ran a *separate* synchronous picker call after analyze. PR C5 moved
+    // bulk onto these embedded comps to eliminate that duplicate call;
+    // keeping the 1500ms cap would silently truncate the long tail
+    // (telemetry shows ~3.3s max) and lose comps on slow lookups.
+    const scanContext: string | undefined =
+      typeof (req.body as any)?.scanContext === 'string'
+        ? (req.body as any).scanContext
+        : undefined;
+    const isBulkContext = scanContext === 'bulk';
     console.time('analyze-ebay-parallel');
     const ebayIdentity = extractIdentityForEbay(combinedResult);
     const ebayPromise: Promise<EmbeddedCompsPayload | null> = ebayIdentity
@@ -653,19 +665,22 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
             });
             const lastName = ebayIdentity.player.split(/\s+/).pop() ?? null;
             const firstName = ebayIdentity.player.split(/\s+/)[0] ?? null;
-            const result = await Promise.race([
-              pickerSearch(query, {
-                limit: 5,
-                requireCardNumber: ebayIdentity.cardNumber,
-                requirePlayerLastName: lastName,
-                scannedParallel: ebayIdentity.parallel || null,
-                brand: ebayIdentity.brand,
-                set: ebayIdentity.set || null,
-                year: ebayIdentity.year,
-                playerFirstName: firstName,
-              }),
-              new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500)),
-            ]);
+            const searchPromise = pickerSearch(query, {
+              limit: 5,
+              requireCardNumber: ebayIdentity.cardNumber,
+              requirePlayerLastName: lastName,
+              scannedParallel: ebayIdentity.parallel || null,
+              brand: ebayIdentity.brand,
+              set: ebayIdentity.set || null,
+              year: ebayIdentity.year,
+              playerFirstName: firstName,
+            });
+            const result = isBulkContext
+              ? await searchPromise
+              : await Promise.race([
+                  searchPromise,
+                  new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500)),
+                ]);
             if (!result) {
               console.warn('[analyze-ebay-parallel] timed out at 1500ms — client will fall back');
               return null;
@@ -885,8 +900,11 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
     // BR-2: await the in-flight eBay promise. By the time we get here,
     // ensureRequiredFields + the user_scans audit insert dispatch + the
     // scanLogger flush have all run alongside it, so usually this resolves
-    // immediately. Worst case it's been racing for the full 1500ms cap.
+    // immediately. Worst case it's been racing for the full 1500ms cap
+    // (single-scan) or the full pickerSearch duration (bulk context).
+    const embeddedCompsStart = Date.now();
     const embeddedComps = await ebayPromise;
+    const embeddedCompsMs = Date.now() - embeddedCompsStart;
     console.timeEnd('analyze-ebay-parallel');
 
     return res.json({
@@ -903,6 +921,14 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
         // compares this to the live `cardData` (post any picker/edit
         // changes) and refetches via React Query when they diverge.
         compsQuery: ebayQuerySnapshot,
+        // Wall-clock spent waiting for the embedded picker call after the
+        // rest of analyze finalisation kicked off. Used by the bulk worker
+        // (PR C5 — consumes embedded comps instead of running its own
+        // pickerSearch) to populate the existing `pairs[].ebayMs` timing
+        // field. Almost always < geminiMs because picker runs in parallel
+        // with audit logging; this exposes the trailing slice that didn't
+        // overlap. Single-scan ignores this field.
+        _embeddedCompsMs: embeddedCompsMs,
       },
       // Audit row id — client should send this back as _scanTracking._userScanId
       // on the subsequent save call so we can UPDATE the analyzed_no_save row
