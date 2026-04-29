@@ -148,20 +148,47 @@ export async function analyzeCardBuffersWithGemini(
   console.time(networkLabel);
   let response;
   try {
-    response = await client.models.generateContent({
-      model,
-      contents: [
-        {
-          role: 'user',
-          parts: [
-            { text: fullPrompt },
-            { inlineData: { data: frontBuffer.toString('base64'), mimeType: frontMime } },
-            { inlineData: { data: backBuffer.toString('base64'), mimeType: backMime } },
+    // 429-only retry with exponential backoff (1s, 2s, 4s; 3 attempts).
+    // Bulk Phase 2 runs at concurrency=8 — Gemini's per-minute (not
+    // concurrent) quota means a transient burst can 429 a single pair,
+    // and a one-attempt failure here propagates as a permanent
+    // processItem error. Non-429 errors fall straight through unchanged.
+    const RETRY_DELAYS_MS = [1000, 2000, 4000];
+    let attempt = 0;
+    while (true) {
+      try {
+        response = await client.models.generateContent({
+          model,
+          contents: [
+            {
+              role: 'user',
+              parts: [
+                { text: fullPrompt },
+                { inlineData: { data: frontBuffer.toString('base64'), mimeType: frontMime } },
+                { inlineData: { data: backBuffer.toString('base64'), mimeType: backMime } },
+              ],
+            },
           ],
-        },
-      ],
-      config: { responseMimeType: 'application/json' },
-    });
+          config: { responseMimeType: 'application/json' },
+        });
+        break;
+      } catch (err: any) {
+        const status = err?.status ?? err?.code ?? err?.response?.status;
+        const message = String(err?.message ?? err ?? '');
+        const isRateLimit =
+          status === 429 ||
+          /\b429\b/.test(message) ||
+          /RESOURCE_EXHAUSTED/i.test(message) ||
+          /rate.?limit/i.test(message) ||
+          /quota/i.test(message);
+        if (!isRateLimit || attempt >= RETRY_DELAYS_MS.length) throw err;
+        const delay = RETRY_DELAYS_MS[attempt++];
+        console.warn(
+          `[vlmGemini] 429/quota on attempt ${attempt}, retrying in ${delay}ms: ${message.slice(0, 200)}`,
+        );
+        await new Promise((r) => setTimeout(r, delay));
+      }
+    }
   } finally {
     console.timeEnd(networkLabel);
   }

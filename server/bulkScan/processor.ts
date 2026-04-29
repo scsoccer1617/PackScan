@@ -275,7 +275,15 @@ export async function runBatch(batchId: number): Promise<void> {
     // (perf/bulk-stream-phase1) can enqueue pairs as they finish discovery
     // — first pair starts processing seconds after kickoff instead of
     // after Phase 1 completes for every file.
-    const queue = new (PQueue as any)({ concurrency: 4 });
+    //
+    // Concurrency=8: PR #186 telemetry on a 74-file / 37-pair batch
+    // measured Gemini at mean 17.9s / median 17.5s per pair, so 4-wide
+    // Phase 2 spent ~218s in queue alone. 37 × 18s / 8 ≈ 83s — Gemini
+    // imposes per-minute, not concurrent, rate limits and 8 in flight
+    // is well inside that envelope. The Gemini call site has 429
+    // exponential-backoff retry (1s/2s/4s, 3 attempts) wrapped in
+    // server/dualSideOCR.ts so a transient burst can't fail a pair.
+    const queue = new (PQueue as any)({ concurrency: 8 });
 
     const enqueueItem = (item: ScanBatchItem) => {
       queue.add(async () => {

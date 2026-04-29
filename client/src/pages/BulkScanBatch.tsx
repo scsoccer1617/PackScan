@@ -69,6 +69,13 @@ interface ScanBatchItem {
 interface BatchResponse {
   batch: ScanBatch;
   items: ScanBatchItem[];
+  // pairCount: number of pairs the worker is or will be processing.
+  // phase1Done: Phase 1 (file discovery + pairing) finished. Both come
+  // from the server via /api/bulk-scan/batches/:id and let the UI show
+  // forward motion during the +25s Phase 1 window where processedCount
+  // is still 0 but the worker is actively probing files.
+  pairCount?: number;
+  phase1Done?: boolean;
 }
 
 // Human-friendly labels for the flags the confidence gate emits.
@@ -112,6 +119,38 @@ export default function BulkScanBatch() {
 
   const batch = data?.batch;
   const items = data?.items ?? [];
+  const pairCount = data?.pairCount ?? 0;
+  const phase1Done = data?.phase1Done ?? false;
+
+  // Stage chip text — drives the "forward motion" indicator while the
+  // worker is mid-batch. Phase 1 (file discovery) takes ~25s on a 74-file
+  // batch with no per-card progress to show; Phase 2 streams pair
+  // completions but the user wants to see N of M counters, not just a
+  // spinner.
+  const stageStatus = (() => {
+    if (!batch) return null;
+    if (batch.status === "completed") {
+      return `Done — ${batch.processedCount} cards processed, ${batch.reviewQueueCount} flagged for review`;
+    }
+    if (batch.status === "failed") return null;
+    if (!phase1Done) {
+      // Phase 1 in flight. fileCount may be 0 until the recorder logs
+      // listInboxImagesMs, so fall back to the inbox file count from
+      // the running worker once present.
+      const fc = batch.fileCount || 0;
+      if (fc > 0) {
+        return `Reading ${fc} files — finding pairs…`;
+      }
+      return "Scanning Drive inbox…";
+    }
+    if (pairCount === 0) {
+      return "Phase 1 done — preparing pairs…";
+    }
+    if (batch.processedCount < pairCount) {
+      return `Found ${batch.fileCount} files → ${pairCount} pairs queued · processing pair ${batch.processedCount + 1} of ${pairCount}…`;
+    }
+    return `Wrapping up ${pairCount} pairs…`;
+  })();
 
   const reviewItems = useMemo(
     () => items.filter((i) => i.status === "review"),
@@ -329,6 +368,17 @@ export default function BulkScanBatch() {
             tone={batch.reviewQueueCount > 0 ? "violet" : "neutral"}
           />
         </div>
+        {stageStatus && (
+          <p
+            className="mt-3 text-[12px] text-slate-700 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 flex items-center gap-2"
+            data-testid="text-stage-status"
+          >
+            {active && (
+              <Loader2 className="w-3 h-3 animate-spin text-slate-500 shrink-0" />
+            )}
+            <span className="truncate">{stageStatus}</span>
+          </p>
+        )}
         {batch.dryRun && (
           <p className="mt-3 text-[11px] text-foil-violet bg-foil-violet/10 border border-foil-violet/20 rounded-lg px-2 py-1.5">
             Dry-run — no rows written to your sheet, no files moved.
