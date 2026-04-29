@@ -209,6 +209,23 @@ export async function analyzeCardBuffersWithGemini(
   }
 
   const text = response.text ?? '';
+  return finalizeGeminiText(text);
+}
+
+/**
+ * Strip markdown fences and parse Gemini's JSON output, then run it through
+ * the boundary sentinel-normalizer. Pure function — no I/O, no SDK calls —
+ * so the streaming path (analyzeCardBuffersWithGeminiStream) and the
+ * non-streaming path (analyzeCardBuffersWithGemini) can share ONE
+ * post-processor.
+ *
+ * INVARIANT: streaming and non-streaming Gemini responses, given the same
+ * accumulated text, produce byte-identical GeminiCardResult objects. Year
+ * rule application (vlmPrompts.ts v2026-04-28.7) flows entirely through
+ * the prompt + JSON.parse here; there is no parallel parser. Do NOT add
+ * a second normalizer for the streaming case.
+ */
+export function finalizeGeminiText(text: string): GeminiCardResult {
   if (!text.trim()) {
     throw new Error('Gemini returned empty response');
   }
@@ -233,6 +250,101 @@ export async function analyzeCardBuffersWithGemini(
       `Gemini JSON parse error: ${err.message}. First 200 chars: ${cleaned.slice(0, 200)}`
     );
   }
+}
+
+/**
+ * Streaming variant of analyzeCardBuffersWithGemini. Uses Gemini's
+ * generateContentStream so the SSE endpoint can surface partial fields
+ * to the client while the model is still emitting tokens (perceived
+ * latency win — first text arrives in ~1–2s, not the full ~17s).
+ *
+ * The return value is built by passing the FULLY accumulated stream
+ * text through finalizeGeminiText — the EXACT same post-processor the
+ * non-streaming path uses. Byte-identical final result is guaranteed
+ * for the same accumulated text.
+ *
+ * @param onPartialText fired on every chunk with the accumulated text
+ * so the SSE handler can attempt incremental parsing for partial UX.
+ */
+export async function analyzeCardBuffersWithGeminiStream(
+  frontBuffer: Buffer,
+  backBuffer: Buffer,
+  opts: AnalyzeOptions & {
+    frontMime?: string;
+    backMime?: string;
+    onPartialText?: (accumulatedText: string) => void;
+  } = {},
+): Promise<GeminiCardResult> {
+  const client = getClient();
+  const model = opts.model || 'gemini-2.5-flash';
+  const fullPrompt = opts.prompt || VLM_FULL_PROMPT;
+  const frontMime = opts.frontMime || 'image/jpeg';
+  const backMime = opts.backMime || 'image/jpeg';
+
+  const networkLabel = `gemini-stream-network[${Math.random().toString(36).slice(2, 8)}]`;
+  console.time(networkLabel);
+  let accumulated = '';
+  try {
+    // Same 429 retry envelope as the non-streaming path. The stream
+    // request itself is a single SDK call that returns an async
+    // generator; transient quota errors typically surface on the
+    // initial request, so retrying the whole stream is safe.
+    const RETRY_DELAYS_MS = [1000, 2000, 4000];
+    let attempt = 0;
+    while (true) {
+      try {
+        const stream = await client.models.generateContentStream({
+          model,
+          contents: [
+            {
+              role: 'user',
+              parts: [
+                { text: fullPrompt },
+                { inlineData: { data: frontBuffer.toString('base64'), mimeType: frontMime } },
+                { inlineData: { data: backBuffer.toString('base64'), mimeType: backMime } },
+              ],
+            },
+          ],
+          config: { responseMimeType: 'application/json' },
+        });
+        for await (const chunk of stream) {
+          const t = chunk.text ?? '';
+          if (!t) continue;
+          accumulated += t;
+          if (opts.onPartialText) {
+            try {
+              opts.onPartialText(accumulated);
+            } catch (cbErr) {
+              // Swallow callback errors so a flaky SSE writer never
+              // kills the underlying Gemini stream.
+              console.warn('[vlmGemini.stream] onPartialText callback threw:', cbErr);
+            }
+          }
+        }
+        break;
+      } catch (err: any) {
+        const status = err?.status ?? err?.code ?? err?.response?.status;
+        const message = String(err?.message ?? err ?? '');
+        const isRateLimit =
+          status === 429 ||
+          /\b429\b/.test(message) ||
+          /RESOURCE_EXHAUSTED/i.test(message) ||
+          /rate.?limit/i.test(message) ||
+          /quota/i.test(message);
+        if (!isRateLimit || attempt >= RETRY_DELAYS_MS.length) throw err;
+        const delay = RETRY_DELAYS_MS[attempt++];
+        accumulated = '';
+        console.warn(
+          `[vlmGemini.stream] 429/quota on attempt ${attempt}, retrying in ${delay}ms: ${message.slice(0, 200)}`,
+        );
+        await new Promise((r) => setTimeout(r, delay));
+      }
+    }
+  } finally {
+    console.timeEnd(networkLabel);
+  }
+
+  return finalizeGeminiText(accumulated);
 }
 
 export const VLM_INFO = { promptVersion: VLM_PROMPT_VERSION };
