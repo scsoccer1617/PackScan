@@ -3693,6 +3693,71 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ─── /admin/bulk-batches — bulk-scan stage-timing diagnostics ──────────
+  // Returns the per-batch `timings` JSONB written by the bulk-scan worker
+  // (see server/bulkScan/timingsRecorder.ts). Prod log streams have proven
+  // unreliable for the bulk-scan worker, so this DB-backed payload is the
+  // canonical source of stage durations: list-inbox latency, per-file
+  // download/probe/classify times, per-pair Gemini/eBay/CardDB times, and
+  // the time-to-first-pair landmark. Same email-only admin gate as
+  // /admin/scans and /admin/users.
+  app.get(`${apiPrefix}/admin/bulk-batches/recent`, requireAuth, requireAdminUser, async (req, res) => {
+    const limit = Math.min(Math.max(Number(req.query.limit) || 10, 1), 50);
+    try {
+      const rows = await db
+        .select({
+          id: schema.scanBatches.id,
+          userId: schema.scanBatches.userId,
+          status: schema.scanBatches.status,
+          fileCount: schema.scanBatches.fileCount,
+          processedCount: schema.scanBatches.processedCount,
+          reviewQueueCount: schema.scanBatches.reviewQueueCount,
+          dryRun: schema.scanBatches.dryRun,
+          createdAt: schema.scanBatches.createdAt,
+          completedAt: schema.scanBatches.completedAt,
+          timings: schema.scanBatches.timings,
+          userEmail: schema.users.email,
+        })
+        .from(schema.scanBatches)
+        .leftJoin(schema.users, eq(schema.users.id, schema.scanBatches.userId))
+        .orderBy(desc(schema.scanBatches.createdAt))
+        .limit(limit);
+      return res.json({ batches: rows });
+    } catch (err: any) {
+      console.error('[admin] list recent bulk batches failed:', err);
+      return res.status(500).json({ error: 'Failed to list bulk batches' });
+    }
+  });
+
+  app.get(`${apiPrefix}/admin/bulk-batches/:id/timings`, requireAuth, requireAdminUser, async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) {
+      return res.status(400).json({ error: 'invalid_id' });
+    }
+    try {
+      const [row] = await db
+        .select({
+          id: schema.scanBatches.id,
+          userId: schema.scanBatches.userId,
+          status: schema.scanBatches.status,
+          fileCount: schema.scanBatches.fileCount,
+          processedCount: schema.scanBatches.processedCount,
+          reviewQueueCount: schema.scanBatches.reviewQueueCount,
+          createdAt: schema.scanBatches.createdAt,
+          completedAt: schema.scanBatches.completedAt,
+          timings: schema.scanBatches.timings,
+        })
+        .from(schema.scanBatches)
+        .where(eq(schema.scanBatches.id, id))
+        .limit(1);
+      if (!row) return res.status(404).json({ error: 'not_found' });
+      return res.json({ batch: row });
+    } catch (err: any) {
+      console.error(`[admin] get bulk batch ${id} timings failed:`, err);
+      return res.status(500).json({ error: 'Failed to load batch timings' });
+    }
+  });
+
   const httpServer = createServer(app);
   return httpServer;
 }
