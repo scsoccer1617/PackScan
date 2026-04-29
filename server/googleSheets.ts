@@ -618,3 +618,115 @@ export async function appendCardRow(
   invalidateSheetRowsCache(userId, sheet.googleSheetId);
   return { sheet, sheetUrl };
 }
+
+// ── eBay URL backfill (admin) ───────────────────────────────────────────────
+// One-shot rebuilder for the eBay-URL column. PR #193 introduced a
+// subset-for-player substitution upstream of both URL builders. The Sheet
+// path picked the substituted query up via embeddedComps.query, so subset
+// cards (NL Leaders, Team Leaders, Record Breaker, …) had `"NL Leaders"`
+// in the quoted player slot and returned no eBay results. This helper
+// recomputes column S from the row's existing data using the fixed
+// `getEbaySearchUrl`, which uses the real player + appends subset as an
+// unquoted hint.
+
+export interface RebuildResult {
+  totalRows: number;
+  updatedCount: number;
+  skippedCount: number;
+  errors: Array<{ rowIndex: number; message: string }>;
+  sample?: Array<{ rowIndex: number; before: string; after: string }>;
+}
+
+/**
+ * Recompute column S (eBay search URL) for every data row in the user's
+ * active sheet. Subset is NOT a sheet column — backfill rebuilds without
+ * the subset hint. Going forward, fresh saves include subset via the
+ * normal write path. This is acceptable for backfill: dropping the subset
+ * hint still produces a working URL (year + brand + "card#" + "player"
+ * already returns real eBay listings; PR #193's substitution was the
+ * actual bug).
+ *
+ * @returns {RebuildResult} totals, plus a 5-row before/after sample. When
+ *   `dryRun` is true, no batchUpdate is issued.
+ */
+export async function rebuildEbayUrlsForUser(
+  userId: number,
+  builder: (row: SheetCardRow) => string,
+  options: { dryRun?: boolean; targetSheetRowId?: number } = {},
+): Promise<RebuildResult> {
+  const { dryRun = false, targetSheetRowId } = options;
+  let sheet: UserSheet | null;
+  if (targetSheetRowId) {
+    const [t] = await db
+      .select()
+      .from(userSheets)
+      .where(and(eq(userSheets.id, targetSheetRowId), eq(userSheets.userId, userId)))
+      .limit(1);
+    sheet = t || null;
+  } else {
+    sheet = await getActiveSheet(userId);
+  }
+  if (!sheet) throw new NotConnectedError();
+  const { oauth } = await getOAuthClient(userId);
+  const sheets = sheetsFor(oauth);
+  const got = await sheets.spreadsheets.values.get({
+    spreadsheetId: sheet.googleSheetId,
+    range: `A:${String.fromCharCode(65 + SHEET_HEADERS.length - 1)}`,
+    majorDimension: 'ROWS',
+    valueRenderOption: 'UNFORMATTED_VALUE',
+  });
+  const values = got.data.values || [];
+  const result: RebuildResult = {
+    totalRows: 0,
+    updatedCount: 0,
+    skippedCount: 0,
+    errors: [],
+    sample: [],
+  };
+  // Column S = index 18 (eBay URL). We accumulate one row per data row in
+  // the same order, with a single-cell array per entry, so a single
+  // values.update against `S2:S<n>` rewrites only that column.
+  const newColumn: Array<[string]> = [];
+  for (let i = 1; i < values.length; i++) {
+    const rowIndex = i + 1; // 1-based for sheets ranges
+    result.totalRows += 1;
+    const parsed = parseSheetRow(values[i] as unknown[], rowIndex, sheet.googleSheetId);
+    if (!parsed) {
+      result.skippedCount += 1;
+      newColumn.push(['']);
+      continue;
+    }
+    let nextUrl = '';
+    try {
+      nextUrl = builder(parsed) || '';
+    } catch (err: any) {
+      result.errors.push({ rowIndex, message: err?.message || String(err) });
+      newColumn.push([parsed.ebaySearchUrl || '']);
+      continue;
+    }
+    const beforeUrl = parsed.ebaySearchUrl || '';
+    if (!nextUrl) {
+      result.skippedCount += 1;
+      newColumn.push([beforeUrl]);
+      continue;
+    }
+    if (nextUrl !== beforeUrl) {
+      result.updatedCount += 1;
+      if (result.sample!.length < 5) {
+        result.sample!.push({ rowIndex, before: beforeUrl, after: nextUrl });
+      }
+    }
+    newColumn.push([nextUrl]);
+  }
+  if (!dryRun && newColumn.length > 0) {
+    const lastRow = newColumn.length + 1; // header is row 1
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: sheet.googleSheetId,
+      range: `S2:S${lastRow}`,
+      valueInputOption: 'RAW',
+      requestBody: { values: newColumn },
+    });
+    invalidateSheetRowsCache(userId, sheet.googleSheetId);
+  }
+  return result;
+}

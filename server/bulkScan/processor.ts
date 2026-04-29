@@ -42,6 +42,7 @@ import { normalizeImageOrientation } from '../dualSideOCR';
 import { lookupCard as cardDbLookup } from '../cardDatabaseService';
 import { isCardDbLookupEnabled } from '../featureFlags';
 import { appendCardRow } from '../googleSheets';
+import { getEbaySearchUrl } from '../ebayService';
 import { getScanQuota, incrementScanCount } from '../scanQuota';
 import { logUserScan, type ScanFieldValues } from '../userScans';
 // p-queue is ESM-only; pull it via a typed `as any` to keep typecheck quiet
@@ -782,9 +783,39 @@ async function processItem(
       : 0;
     analysis.estimatedValue = averageValue;
     analysis.ebayResults = active;
-    // Outbound "View on eBay" link uses the SAME picker query the analyze
-    // handler hashed against (matches single-scan exactly).
-    analysis.ebaySearchUrl = `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(embeddedComps.query)}&_sacat=213&_sop=10`;
+    // Outbound "View on eBay" link for the Sheet row. We deliberately do
+    // NOT reuse `embeddedComps.query` (the picker query): the picker
+    // substitutes subset for player upstream (extractIdentityForEbay,
+    // PR #193) so subset cards come out as e.g.
+    // `1987 Topps "604" "NL Leaders"` — eBay returns nothing because real
+    // listings have the player name. Build the Sheet URL via
+    // getEbaySearchUrl using the real player + subset as a separate
+    // unquoted hint. See server/ebayService.ts:getEbaySearchUrl.
+    const playerForUrl = [analysis.playerFirstName, analysis.playerLastName]
+      .filter(Boolean).join(' ').trim();
+    const yearForUrl = typeof analysis.year === 'number'
+      ? analysis.year
+      : (analysis.year ? parseInt(String(analysis.year), 10) || 0 : 0);
+    const subsetForUrl = (analysis._gemini && typeof analysis._gemini.subset === 'string')
+      ? analysis._gemini.subset.trim()
+      : '';
+    analysis.ebaySearchUrl = analysis.brand ? getEbaySearchUrl(
+      playerForUrl,
+      String(analysis.cardNumber || ''),
+      String(analysis.brand || ''),
+      yearForUrl,
+      analysis.collection || '',
+      '',
+      !!analysis.isNumbered,
+      analysis.foilType || '',
+      analysis.serialNumber || '',
+      analysis.variant || '',
+      analysis.set || '',
+      undefined,
+      !!analysis.isAutographed,
+      false,
+      subsetForUrl,
+    ) : `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(embeddedComps.query)}&_sacat=213&_sop=10`;
     console.log(
       `[bulkScan] eBay comps item ${item.id}: ${active.length} active results, avg=$${averageValue.toFixed(2)} for "${embeddedComps.query}" (embedded)`,
     );
