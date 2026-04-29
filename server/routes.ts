@@ -76,6 +76,81 @@ function splitVoicePlayerName(
   return { first: tokens[0], last: tokens.slice(1).join(' ') };
 }
 
+/**
+ * Best-effort partial-JSON tolerant parse of an in-flight JSON prefix.
+ * Used by the Gemini SSE endpoint to surface partial fields while the
+ * model is still emitting tokens. Returns the parsed object on success,
+ * or null when the prefix is too truncated to recover.
+ *
+ * Strategy: walk the prefix tracking open `{`, `[`, `"` levels. If we
+ * land outside a string at a balanced point, append the closers that
+ * would balance any still-open levels. Drops a trailing partial token
+ * (comma, colon, or half-finished number/key) before closing so
+ * JSON.parse doesn't reject. Best-effort only — callers tolerate null.
+ */
+function tryParsePartialJson(prefix: string): Record<string, unknown> | null {
+  const stack: Array<'{' | '[' | '"'> = [];
+  let lastSafe = 0;
+  let i = 0;
+  while (i < prefix.length) {
+    const c = prefix[i];
+    const top = stack[stack.length - 1];
+    if (top === '"') {
+      if (c === '\\') { i += 2; continue; }
+      if (c === '"') stack.pop();
+      i += 1;
+      continue;
+    }
+    if (c === '"') stack.push('"');
+    else if (c === '{') stack.push('{');
+    else if (c === '[') stack.push('[');
+    else if (c === '}') {
+      if (top !== '{') return null;
+      stack.pop();
+    } else if (c === ']') {
+      if (top !== '[') return null;
+      stack.pop();
+    }
+    i += 1;
+    // Mark a safe truncation point after every value-completing token
+    // outside a string: ',', ']', or '}' at the top of any structure.
+    if (stack[stack.length - 1] !== '"' && (c === ',' || c === '}' || c === ']')) {
+      lastSafe = i;
+    }
+  }
+  // Truncate to last safe boundary if we're mid-token, then strip the
+  // dangling comma the safe boundary may have left behind.
+  let body = prefix.slice(0, lastSafe || prefix.length).replace(/\s+$/, '');
+  // Recompute open levels for the truncated body — it can only be a
+  // subset of the original stack since truncation only drops trailing
+  // characters that were OUTSIDE any open string.
+  const truncStack: Array<'{' | '['> = [];
+  let inStr = false;
+  for (let j = 0; j < body.length; j++) {
+    const c = body[j];
+    if (inStr) {
+      if (c === '\\') { j += 1; continue; }
+      if (c === '"') inStr = false;
+      continue;
+    }
+    if (c === '"') inStr = true;
+    else if (c === '{') truncStack.push('{');
+    else if (c === '[') truncStack.push('[');
+    else if (c === '}') truncStack.pop();
+    else if (c === ']') truncStack.pop();
+  }
+  if (body.endsWith(',')) body = body.slice(0, -1);
+  let closers = '';
+  for (let k = truncStack.length - 1; k >= 0; k--) {
+    closers += truncStack[k] === '{' ? '}' : ']';
+  }
+  try {
+    return JSON.parse(body + closers) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
 // Configure multer for handling file uploads
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -2355,6 +2430,129 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     }
   });
+
+  // ──────────────────────────────────────────────────────────────────────
+  // BR-1: Gemini streaming endpoint for single-scan UI (perceived latency).
+  //
+  // Adds a server-sent-events (SSE) endpoint that streams the Gemini VLM
+  // response progressively so the single-scan UI can show partial fields
+  // (year, brand, player, …) in 1–2s instead of waiting ~17s for the full
+  // pipeline to return. Real wall-clock is unchanged.
+  //
+  // Scope: this endpoint streams ONLY the Gemini visual reading. The full
+  // /api/analyze-card-dual-images endpoint (eBay pricing, holo grading,
+  // OCR pipeline, scan_grades persistence) is byte-identical and untouched
+  // — bulk depends on it (PR #191) and the existing Scan.tsx flow keeps
+  // calling it for the authoritative response.
+  //
+  // Year-rule guardrail: the FINAL `final` SSE event is built by passing
+  // the fully-accumulated stream text through finalizeGeminiText() — the
+  // EXACT same post-processor the non-streaming path uses (vlmGemini.ts).
+  // Year rule v2026-04-28.7 lives in the prompt; both paths use the same
+  // VLM_FULL_PROMPT and the same JSON.parse + normalizeGeminiResult chain.
+  // The streaming finalize is a shared pure function — not a parallel
+  // parser — so byte-identical equivalence is structural, not coincidental.
+  //
+  // SSE event schema (one event per `data: <json>\n\n` block):
+  //   { type: "open",    promptVersion: string }                — handshake
+  //   { type: "partial", fields: Partial<GeminiCardResult>,
+  //                      bytes: number }                         — best-effort
+  //                                                                partial JSON
+  //                                                                parse so far
+  //   { type: "final",   result: GeminiCardResult,
+  //                      promptVersion: string }                 — same shape as
+  //                                                                analyzeCardBuffersWithGemini
+  //   { type: "error",   message: string }                       — terminal
+  app.post(
+    `${apiPrefix}/cards/analyze/stream`,
+    requireScanQuota,
+    upload.fields([
+      { name: 'frontImage', maxCount: 1 },
+      { name: 'backImage', maxCount: 1 },
+    ]),
+    async (req, res) => {
+      const quotaUserId = (req.user as any)?.id as number | undefined;
+      // Only count successful streams (a `final` event was emitted). The
+      // finish hook fires on any close, so we gate via a flag.
+      let finalEmitted = false;
+      res.on('close', () => {
+        if (finalEmitted) void incrementScanCount(quotaUserId);
+      });
+
+      const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
+      const frontFile = files?.frontImage?.[0];
+      const backFile = files?.backImage?.[0];
+      if (!frontFile || !backFile) {
+        return res.status(400).json({
+          success: false,
+          message: 'Both front and back images are required for streaming analysis',
+          error: 'missing_images',
+        });
+      }
+
+      // Lazy-load the Gemini module so this endpoint mirrors how
+      // dualSideOCR pulls it in — keeps the cold-start surface tight.
+      const {
+        analyzeCardBuffersWithGeminiStream,
+        VLM_INFO: streamVlmInfo,
+      } = await import('./vlmGemini');
+
+      // SSE handshake.
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache, no-transform',
+        Connection: 'keep-alive',
+        'X-Accel-Buffering': 'no',
+      });
+      const send = (event: Record<string, unknown>) => {
+        try {
+          res.write(`data: ${JSON.stringify(event)}\n\n`);
+        } catch (writeErr) {
+          console.warn('[gemini-stream] SSE write failed:', writeErr);
+        }
+      };
+      send({ type: 'open', promptVersion: streamVlmInfo.promptVersion });
+
+      let lastSentBytes = 0;
+      let lastSentJson = '';
+      const onPartial = (accumulated: string) => {
+        // Throttle: only attempt a parse once we have meaningfully more
+        // bytes than the last successful emit, to avoid hammering the
+        // partial parser on every tiny chunk.
+        if (accumulated.length - lastSentBytes < 24) return;
+        // Strip leading fences if Gemini wrapped its JSON.
+        const trimmed = accumulated.replace(/^```(?:json)?\s*/i, '').trim();
+        const open = trimmed.indexOf('{');
+        if (open < 0) return;
+        const parsed = tryParsePartialJson(trimmed.slice(open));
+        if (!parsed) return;
+        const json = JSON.stringify(parsed);
+        if (json === lastSentJson) return;
+        lastSentJson = json;
+        lastSentBytes = accumulated.length;
+        send({ type: 'partial', fields: parsed, bytes: accumulated.length });
+      };
+
+      try {
+        const result = await analyzeCardBuffersWithGeminiStream(
+          frontFile.buffer,
+          backFile.buffer,
+          {
+            frontMime: frontFile.mimetype || 'image/jpeg',
+            backMime: backFile.mimetype || 'image/jpeg',
+            onPartialText: onPartial,
+          },
+        );
+        finalEmitted = true;
+        send({ type: 'final', result, promptVersion: streamVlmInfo.promptVersion });
+        res.end();
+      } catch (err: any) {
+        console.error('[gemini-stream] analysis failed:', err);
+        send({ type: 'error', message: err?.message || 'Gemini stream failed' });
+        res.end();
+      }
+    },
+  );
 
   // Combined OCR + eBay price lookup endpoint (legacy single image)
   //
