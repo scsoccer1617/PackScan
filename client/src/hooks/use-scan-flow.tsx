@@ -24,7 +24,7 @@ export interface ScanFlowState {
    * Null when the analyze response didn't include one (older server / log
    * write failed) — in which case the save falls back to a fresh insert.
    */
-  userScanId: number | null;
+  userScanId: number | string | null;
 }
 
 const EMPTY: ScanFlowState = {

@@ -18,7 +18,7 @@
  * /result page's price-tier breakdown.
  */
 
-import axios from 'axios';
+import { sharedHttpClient } from './httpClient';
 import { getEbayAccessToken } from './ebayTokenManager';
 
 export interface PickerListing {
@@ -299,7 +299,7 @@ export async function pickerSearch(
   let active: PickerListing[] = [];
   try {
     const token = await getEbayAccessToken();
-    const resp = await axios.get(BROWSE_SEARCH_URL, {
+    const resp = await sharedHttpClient.get(BROWSE_SEARCH_URL, {
       params: {
         q: query,
         category_ids: SPORTS_CARDS_CATEGORY,

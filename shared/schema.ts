@@ -1,4 +1,4 @@
-import { pgTable, text, serial, integer, boolean, timestamp, jsonb, numeric, index } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, boolean, timestamp, jsonb, numeric, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { z } from "zod";
 import { relations } from "drizzle-orm";
@@ -702,11 +702,18 @@ export const userScans = pgTable("user_scans", {
   // subsequent edits/updates so the admin DETECTED column always reflects
   // the original model output (even after the user edits and re-saves).
   geminiSnapshot: text("gemini_snapshot"),
+  // Client-generated UUID minted at scan-time. Lets the analyze-path log
+  // INSERT happen fire-and-forget (no `RETURNING id` await) and gives the
+  // save-path a stable handle for promoting the analyzed_no_save row to
+  // confirmed/declined_edited/saved_no_feedback. Nullable for backwards
+  // compat with rows logged before this column existed.
+  clientScanId: text("client_scan_id"),
 }, (table) => [
   index("user_scans_user_idx").on(table.userId),
   index("user_scans_scanned_at_idx").on(table.scannedAt),
   index("user_scans_action_idx").on(table.userAction),
   index("user_scans_card_idx").on(table.cardId),
+  uniqueIndex("user_scans_client_scan_id_idx").on(table.clientScanId),
 ]);
 
 export type UserScan = typeof userScans.$inferSelect;

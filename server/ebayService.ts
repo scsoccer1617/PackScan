@@ -1,4 +1,4 @@
-import axios from 'axios';
+import { sharedHttpClient } from './httpClient';
 import { getFoilSearchTerm } from './foilVariantDetector';
 
 function normalizeCollectionForSearch(collection: string): string {
@@ -712,7 +712,7 @@ export async function searchCardValues(
         'sortOrder': 'EndTimeSoonest'
       };
 
-      const resp = await axios.get('https://svcs.ebay.com/services/search/FindingService/v1', {
+      const resp = await sharedHttpClient.get('https://svcs.ebay.com/services/search/FindingService/v1', {
         params,
         timeout: 20000
       });
@@ -750,7 +750,7 @@ export async function searchCardValues(
       const token = await getEbayAccessToken();
       const cleanQuery = query.replace(/-\S+/g, '').replace(/\s{2,}/g, ' ').trim();
 
-      const resp = await axios.get('https://api.ebay.com/buy/browse/v1/item_summary/search', {
+      const resp = await sharedHttpClient.get('https://api.ebay.com/buy/browse/v1/item_summary/search', {
         params: {
           q: cleanQuery,
           category_ids: '213',
