@@ -221,17 +221,6 @@ export async function runBatch(batchId: number): Promise<void> {
   await db.update(scanBatches).set({ status: 'running' }).where(eq(scanBatches.id, batchId));
 
   try {
-    // Load existing items (on resume) OR list the inbox and create them.
-    let items = await db
-      .select()
-      .from(scanBatchItems)
-      .where(eq(scanBatchItems.batchId, batchId))
-      .orderBy(asc(scanBatchItems.position));
-
-    if (items.length === 0) {
-      items = await discoverAndPlanItems(batch);
-    }
-
     let processed = 0;
     let reviews = 0;
     // Beta scan quota: track remaining headroom locally so we can stop the
@@ -275,18 +264,13 @@ export async function runBatch(batchId: number): Promise<void> {
         .set({ processedCount: processed, reviewQueueCount: reviews })
         .where(eq(scanBatches.id, batchId));
 
-    const pendingItems: ScanBatchItem[] = [];
-    for (const item of items) {
-      if (item.status === 'auto_saved' || item.status === 'review' || item.status === 'skipped' || item.status === 'failed') {
-        if (item.status === 'review') reviews++;
-        if (item.status === 'auto_saved' || item.status === 'review' || item.status === 'skipped') processed++;
-        continue;
-      }
-      pendingItems.push(item);
-    }
-
+    // Phase 2 PQueue. Built up-front so the streaming Phase 1 callback
+    // (perf/bulk-stream-phase1) can enqueue pairs as they finish discovery
+    // — first pair starts processing seconds after kickoff instead of
+    // after Phase 1 completes for every file.
     const queue = new (PQueue as any)({ concurrency: 4 });
-    for (const item of pendingItems) {
+
+    const enqueueItem = (item: ScanBatchItem) => {
       queue.add(async () => {
         // Quota check is taken under the lock so we don't over-issue past
         // the user's remaining budget when 4 items race each other.
@@ -340,6 +324,32 @@ export async function runBatch(batchId: number): Promise<void> {
           });
         }
       });
+    };
+
+    // Load existing items (on resume) OR stream discovery into the
+    // Phase 2 queue as pairs become ready.
+    const existing = await db
+      .select()
+      .from(scanBatchItems)
+      .where(eq(scanBatchItems.batchId, batchId))
+      .orderBy(asc(scanBatchItems.position));
+
+    if (existing.length > 0) {
+      // Resume path: rebuild counters from terminal statuses, enqueue the
+      // rest. No streaming needed because Phase 1 already ran.
+      for (const item of existing) {
+        if (item.status === 'auto_saved' || item.status === 'review' || item.status === 'skipped' || item.status === 'failed') {
+          if (item.status === 'review') reviews++;
+          if (item.status === 'auto_saved' || item.status === 'review' || item.status === 'skipped') processed++;
+          continue;
+        }
+        enqueueItem(item);
+      }
+    } else {
+      // Fresh batch: stream pairs into Phase 2 the moment they finish
+      // Phase 1. discoverAndPlanItems' Phase 1 PQueue runs independently
+      // of `queue` (4 + 4 = 8 max in flight) so the two phases overlap.
+      await discoverAndPlanItems(batch, (item) => enqueueItem(item));
     }
     await queue.onIdle();
     if (quotaHit) {
@@ -369,12 +379,23 @@ export async function runBatch(batchId: number): Promise<void> {
  * pairing has the signals it needs, then persist one scan_batch_items row
  * per pair. Returns the inserted items so the caller can iterate.
  *
+ * Streaming design (perf/bulk-stream-phase1): Phase 1 work runs 4-wide
+ * via PQueue, and as soon as any two consecutive pages (positions
+ * 2k+1 and 2k+2) have both finished Phase 1 we pair-and-insert that row
+ * immediately and fire `onItemReady`. The caller (runBatch) uses that
+ * callback to enqueue Phase 2 work without waiting for the rest of
+ * Phase 1 — so the first pair starts processing seconds after kickoff
+ * instead of after every file has been downloaded + Vision-probed.
+ *
  * Design note: we pay the full orientation-probe + Vision cost during
  * discovery so the item rows can carry pre-computed OCR text + side
  * classification. That means a resumed batch skips the expensive probe
  * phase on second run.
  */
-async function discoverAndPlanItems(batch: ScanBatch): Promise<ScanBatchItem[]> {
+async function discoverAndPlanItems(
+  batch: ScanBatch,
+  onItemReady?: (item: ScanBatchItem) => void,
+): Promise<ScanBatchItem[]> {
   if (!batch.sourceFolderId) throw new Error('Batch has no source folder');
   const rawFiles = await listInboxImages(batch.userId, batch.sourceFolderId);
 
@@ -409,40 +430,49 @@ async function discoverAndPlanItems(batch: ScanBatch): Promise<ScanBatchItem[]> 
   }
   await db.update(scanBatches).set({ fileCount: files.length }).where(eq(scanBatches.id, batch.id));
 
-  // Download + orient + classify every page up front so the pairing module
-  // has full signals. We keep the raw buffers out of the DB — only file ids
-  // persist, and the worker re-downloads at analyze time. The orientation
-  // probe text is NOT reused for the dual analyzer because that analyzer
-  // has its own Vision + warming logic; probing again is cheap in the
-  // reduced-concurrency serial loop.
-  const pages: ScanPage<DriveImageFile>[] = [];
-  for (let i = 0; i < files.length; i++) {
-    const file = files[i];
-    const position = i + 1;
-    try {
-      const rawBuf = await downloadFile(batch.userId, file.id);
-      // Normalize EXIF first; then probe 0°/180° for reading orientation.
-      const exifNormalized = await normalizeImageOrientation(rawBuf, `batch${batch.id}#${position}`);
-      const orient = await detectOrientation(exifNormalized, `batch${batch.id}#${position}`);
-      const classification = classifyCardSide(orient.ocrText);
-      pages.push({ position, file, ocrText: orient.ocrText, classification });
-    } catch (err: any) {
-      console.warn(`[bulkScan] discover: failed to probe page ${position} (${file.name}) — ${err?.message}`);
-      pages.push({
-        position,
-        file,
-        ocrText: '',
-        classification: { verdict: 'unknown', confidence: 0, signals: [], debug: { bioPrefixLines: 0, copyrightHits: 0, statHeaderTokens: 0, totalWords: 0 } },
-      });
-    }
-  }
-
-  const paired = pairPages(pages);
+  // Phase 1: download + EXIF normalize + orient + classify every page
+  // 4-wide. Each page is stored in a position-indexed slot. After every
+  // store we check whether the page's pair-partner has also landed; if
+  // so we pair-and-insert that row immediately and fire `onItemReady`
+  // so the caller's Phase 2 queue can start processing it right away.
+  // This streams pairs into Phase 2 instead of waiting for the entire
+  // Phase 1 loop to finish.
+  const pages: (ScanPage<DriveImageFile> | undefined)[] = new Array(files.length);
   const inserted: ScanBatchItem[] = [];
-  for (const pair of paired) {
+  // The pair-emission step (pairPages + DB insert) reads `pages` and
+  // mutates `inserted` — serialize it so two siblings of the same pair
+  // can't both try to insert the row, and so insertion order is stable.
+  let pairMutex: Promise<void> = Promise.resolve();
+  const withPairLock = async <T>(fn: () => Promise<T> | T): Promise<T> => {
+    const prev = pairMutex;
+    let release!: () => void;
+    pairMutex = new Promise<void>((res) => { release = res; });
+    try {
+      await prev;
+      return await fn();
+    } finally {
+      release();
+    }
+  };
+
+  async function maybeEmitPair(forPosition: number): Promise<void> {
+    // forPosition is 1-based. The pair's left slot is the odd position
+    // immediately at or below it (1↔2, 3↔4, ...). The right slot is
+    // the next position. Both must be present (or the right slot must
+    // be out of range, meaning a trailing-orphan).
+    const leftIdx = forPosition % 2 === 1 ? forPosition - 1 : forPosition - 2;
+    const rightIdx = leftIdx + 1;
+    const left = pages[leftIdx];
+    const rightInRange = rightIdx < files.length;
+    const right = rightInRange ? pages[rightIdx] : null;
+    if (!left) return;
+    if (rightInRange && !right) return;
+
+    const pageList: ScanPage<DriveImageFile>[] = right ? [left, right] : [left];
+    const [pair] = pairPages(pageList);
     const [row] = await db.insert(scanBatchItems).values({
       batchId: batch.id,
-      position: pair.position,
+      position: Math.floor(leftIdx / 2) + 1,
       backFileId: pair.back?.file.id || null,
       backFileName: pair.back?.file.name || null,
       frontFileId: pair.front?.file.id || null,
@@ -451,7 +481,33 @@ async function discoverAndPlanItems(batch: ScanBatch): Promise<ScanBatchItem[]> 
       reviewReasons: pair.warnings.length > 0 ? pair.warnings : null,
     }).returning();
     inserted.push(row);
+    onItemReady?.(row);
   }
+
+  const phase1Queue = new (PQueue as any)({ concurrency: 4 });
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    const position = i + 1;
+    phase1Queue.add(async () => {
+      try {
+        const rawBuf = await downloadFile(batch.userId, file.id);
+        const exifNormalized = await normalizeImageOrientation(rawBuf, `batch${batch.id}#${position}`);
+        const orient = await detectOrientation(exifNormalized, `batch${batch.id}#${position}`);
+        const classification = classifyCardSide(orient.ocrText);
+        pages[i] = { position, file, ocrText: orient.ocrText, classification };
+      } catch (err: any) {
+        console.warn(`[bulkScan] discover: failed to probe page ${position} (${file.name}) — ${err?.message}`);
+        pages[i] = {
+          position,
+          file,
+          ocrText: '',
+          classification: { verdict: 'unknown', confidence: 0, signals: [], debug: { bioPrefixLines: 0, copyrightHits: 0, statHeaderTokens: 0, totalWords: 0 } },
+        };
+      }
+      await withPairLock(() => maybeEmitPair(position));
+    });
+  }
+  await phase1Queue.onIdle();
   return inserted;
 }
 
