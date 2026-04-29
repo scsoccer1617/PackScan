@@ -37,6 +37,7 @@ import { classifyCardSide } from './sideClassifier';
 import { detectOrientation } from './orientation';
 import { pairPages, type ScanPage, type PairedScan } from './pairing';
 import { evaluateConfidence, isCardDbCorroboration } from './confidenceGate';
+import { BatchTimingsRecorder } from './timingsRecorder';
 import { normalizeImageOrientation } from '../dualSideOCR';
 import { lookupCard as cardDbLookup } from '../cardDatabaseService';
 import { isCardDbLookupEnabled } from '../featureFlags';
@@ -220,6 +221,12 @@ export async function runBatch(batchId: number): Promise<void> {
 
   await db.update(scanBatches).set({ status: 'running' }).where(eq(scanBatches.id, batchId));
 
+  // Stage-timing telemetry: persisted to scan_batches.timings via debounced
+  // writes (~1 s) so production diagnostics survive log-stream issues. The
+  // recorder is fire-and-forget — every method updates an in-memory payload
+  // synchronously and schedules a flush; we never await on the hot path.
+  const timings = new BatchTimingsRecorder(batchId);
+
   try {
     let processed = 0;
     let reviews = 0;
@@ -297,8 +304,12 @@ export async function runBatch(batchId: number): Promise<void> {
           });
           return;
         }
+        const pairKey = `pair-${item.position}`;
+        timings.recordPairUpdate(pairKey, { startedAt: Date.now() });
+        const tPair = Date.now();
         try {
-          const outcome = await processItem(batch, item);
+          const outcome = await processItem(batch, item, timings, pairKey);
+          timings.recordPairUpdate(pairKey, { totalProcessMs: Date.now() - tPair });
           await incrementScanCount(batch.userId);
           await withCounterLock(async () => {
             if (outcome === 'review') reviews++;
@@ -307,6 +318,10 @@ export async function runBatch(batchId: number): Promise<void> {
           });
         } catch (err: any) {
           console.error(`[bulkScan] processItem(${item.id}) failed:`, err);
+          timings.recordPairUpdate(pairKey, {
+            totalProcessMs: Date.now() - tPair,
+            error: err?.message || String(err),
+          });
           await db
             .update(scanBatchItems)
             .set({
@@ -349,7 +364,10 @@ export async function runBatch(batchId: number): Promise<void> {
       // Fresh batch: stream pairs into Phase 2 the moment they finish
       // Phase 1. discoverAndPlanItems' Phase 1 PQueue runs independently
       // of `queue` (4 + 4 = 8 max in flight) so the two phases overlap.
-      await discoverAndPlanItems(batch, (item) => enqueueItem(item));
+      await discoverAndPlanItems(batch, (item) => {
+        timings.recordPairEnqueued(`pair-${item.position}`);
+        enqueueItem(item);
+      }, timings);
     }
     await queue.onIdle();
     if (quotaHit) {
@@ -360,9 +378,13 @@ export async function runBatch(batchId: number): Promise<void> {
       .update(scanBatches)
       .set({ status: 'completed', completedAt: new Date(), processedCount: processed, reviewQueueCount: reviews })
       .where(eq(scanBatches.id, batchId));
+    timings.recordFinished();
+    await timings.close();
     console.log(`[bulkScan] Batch ${batchId} complete: ${processed} processed, ${reviews} in review.`);
   } catch (err: any) {
     console.error(`[bulkScan] runBatch(${batchId}) fatal:`, err);
+    timings.recordFinished();
+    await timings.close();
     await db
       .update(scanBatches)
       .set({
@@ -395,11 +417,14 @@ export async function runBatch(batchId: number): Promise<void> {
 async function discoverAndPlanItems(
   batch: ScanBatch,
   onItemReady?: (item: ScanBatchItem) => void,
+  timings?: BatchTimingsRecorder,
 ): Promise<ScanBatchItem[]> {
   if (!batch.sourceFolderId) throw new Error('Batch has no source folder');
   const tList = Date.now();
   const rawFiles = await listInboxImages(batch.userId, batch.sourceFolderId);
-  console.log(`[bulkScan] batch ${batch.id}: listInboxImages → ${rawFiles.length} file(s) in ${Date.now() - tList}ms`);
+  const listMs = Date.now() - tList;
+  console.log(`[bulkScan] batch ${batch.id}: listInboxImages → ${rawFiles.length} file(s) in ${listMs}ms`);
+  timings?.recordListInboxImages(listMs, rawFiles.length);
 
   // Dedup against any Drive file this user has already seen in a prior
   // batch. The processor moves successful pairs to the processed folder,
@@ -520,12 +545,26 @@ async function discoverAndPlanItems(
     const file = files[i];
     const position = i + 1;
     phase1Queue.add(async () => {
+      const tDownload = Date.now();
       try {
         const rawBuf = await downloadFile(batch.userId, file.id);
+        const downloadMs = Date.now() - tDownload;
         const exifNormalized = await normalizeImageOrientation(rawBuf, `batch${batch.id}#${position}`);
+        const tProbe = Date.now();
         const orient = await detectOrientation(exifNormalized, `batch${batch.id}#${position}`);
+        const probeMs = Date.now() - tProbe;
+        const tClassify = Date.now();
         const classification = classifyCardSide(orient.ocrText);
+        const sideClassifyMs = Date.now() - tClassify;
         pages[i] = { position, file, ocrText: orient.ocrText, classification };
+        timings?.recordFile({
+          fileId: file.id,
+          name: file.name,
+          downloadMs,
+          probeMs,
+          sideClassifyMs,
+          side: classification.verdict,
+        });
       } catch (err: any) {
         console.warn(`[bulkScan] discover: failed to probe page ${position} (${file.name}) — ${err?.message}`);
         pages[i] = {
@@ -534,11 +573,19 @@ async function discoverAndPlanItems(
           ocrText: '',
           classification: { verdict: 'unknown', confidence: 0, signals: [], debug: { bioPrefixLines: 0, copyrightHits: 0, statHeaderTokens: 0, totalWords: 0 } },
         };
+        timings?.recordFile({
+          fileId: file.id,
+          name: file.name,
+          downloadMs: Date.now() - tDownload,
+          side: 'unknown',
+          error: err?.message || String(err),
+        });
       }
       await withPairLock(() => maybeEmitPair(position));
     });
   }
   await phase1Queue.onIdle();
+  timings?.recordPhase1Complete();
   return inserted;
 }
 
@@ -548,7 +595,12 @@ async function discoverAndPlanItems(
  * function, run the confidence gate, and either append to Sheets (auto-
  * save) or persist the review snapshot.
  */
-async function processItem(batch: ScanBatch, item: ScanBatchItem): Promise<'auto_save' | 'review'> {
+async function processItem(
+  batch: ScanBatch,
+  item: ScanBatchItem,
+  timings?: BatchTimingsRecorder,
+  pairKey?: string,
+): Promise<'auto_save' | 'review'> {
   await db.update(scanBatchItems).set({ status: 'processing' }).where(eq(scanBatchItems.id, item.id));
 
   // Unpaired trailing page → send straight to review. We still download
@@ -590,6 +642,7 @@ async function processItem(batch: ScanBatch, item: ScanBatchItem): Promise<'auto
     query: {},
   };
 
+  const tGemini = Date.now();
   const analysis = await new Promise<Record<string, any>>((resolve, reject) => {
     const mockRes: any = {
       json: (payload: any) => {
@@ -602,6 +655,9 @@ async function processItem(batch: ScanBatch, item: ScanBatchItem): Promise<'auto
     };
     handleDualSideCardAnalysis(mockReq, mockRes).catch(reject);
   });
+  if (pairKey && timings) {
+    timings.recordPairUpdate(pairKey, { geminiMs: Date.now() - tGemini });
+  }
 
   // CardDB corroboration: independent lookup on the analyzer's output so
   // we can feed it into the confidence gate. Gated by CARDDB_LOOKUP_ENABLED
@@ -615,6 +671,7 @@ async function processItem(batch: ScanBatch, item: ScanBatchItem): Promise<'auto
       `[BulkScan][CardDB] Lookup disabled by CARDDB_LOOKUP_ENABLED flag — Gemini VLM is authoritative for this scan.`,
     );
   } else {
+    const tCardDb = Date.now();
     try {
       if (analysis.brand && analysis.year && analysis.cardNumber) {
         const dbRes = await cardDbLookup({
@@ -635,6 +692,9 @@ async function processItem(batch: ScanBatch, item: ScanBatchItem): Promise<'auto
     } catch (err: any) {
       console.warn(`[bulkScan] CardDB corroboration lookup failed for item ${item.id}: ${err?.message}`);
     }
+    if (pairKey && timings) {
+      timings.recordPairUpdate(pairKey, { cardDbMs: Date.now() - tCardDb });
+    }
   }
 
   // eBay value lookup via PR #165's pickerSearch — the same engine that
@@ -649,6 +709,7 @@ async function processItem(batch: ScanBatch, item: ScanBatchItem): Promise<'auto
     analysis.brand &&
     analysis.year
   ) {
+    const tEbay = Date.now();
     try {
       const playerName = `${analysis.playerFirstName} ${analysis.playerLastName}`;
       const query = buildPickerQuery({
@@ -703,6 +764,9 @@ async function processItem(batch: ScanBatch, item: ScanBatchItem): Promise<'auto
       // Leave estimatedValue at whatever the analyzer set (typically 0). We
       // still let the row save — a missing price is recoverable; a missing
       // card row is not.
+    }
+    if (pairKey && timings) {
+      timings.recordPairUpdate(pairKey, { ebayMs: Date.now() - tEbay });
     }
   } else {
     console.log(

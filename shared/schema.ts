@@ -550,12 +550,51 @@ export const scanBatches = pgTable("scan_batches", {
   // Google Sheet or move files out of the inbox. Lets the dealer verify the
   // pipeline on real scans before committing.
   dryRun: boolean("dry_run").notNull().default(false),
+  // Stage-timing telemetry written by the worker. Diagnostic-only — survives
+  // restart / log buffering issues that have made the in-process timing logs
+  // unreliable in prod. Schema documented as the `BatchTimings` type next to
+  // this table. Nullable on every field so partial in-flight writes are
+  // valid; the worker debounces to ~1s so we never block the hot path.
+  timings: jsonb("timings"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   completedAt: timestamp("completed_at"),
 }, (table) => [
   index("scan_batches_user_idx").on(table.userId),
   index("scan_batches_status_idx").on(table.status),
 ]);
+
+// Stage-timing telemetry payload persisted on `scan_batches.timings`.
+// Used to diagnose where wall-clock time goes inside a bulk-scan batch
+// when prod log streams are unreliable. All ms-resolution; epoch ms for
+// timestamps, delta ms for durations. Every field optional so a flush
+// mid-batch is always a valid partial.
+export type BatchTimings = {
+  startedAt: number;
+  firstPairEmittedAt?: number | null;
+  phase1CompletedAt?: number | null;
+  finishedAt?: number | null;
+  listInboxImagesMs?: number | null;
+  inboxFileCount?: number | null;
+  files?: Array<{
+    fileId: string;
+    name: string;
+    downloadMs?: number | null;
+    probeMs?: number | null;
+    sideClassifyMs?: number | null;
+    side?: 'front' | 'back' | 'unknown';
+    error?: string;
+  }>;
+  pairs?: Array<{
+    pairKey: string;
+    enqueuedAt: number;
+    startedAt?: number | null;
+    geminiMs?: number | null;
+    ebayMs?: number | null;
+    cardDbMs?: number | null;
+    totalProcessMs?: number | null;
+    error?: string;
+  }>;
+};
 
 export type ScanBatch = typeof scanBatches.$inferSelect;
 export type ScanBatchInsert = typeof scanBatches.$inferInsert;
