@@ -272,16 +272,11 @@ export function buildPickerQuery(parts: {
     : '';
   if (normalizedSet) segments.push(normalizedSet);
   if (parts.cardNumber && String(parts.cardNumber).trim()) {
-    // Strip leading # if present, then quote so eBay treats it as a
-    // required phrase. Card numbers like "80BK-68" or "8B-28" are sparse
-    // enough that quoted phrase matching dramatically tightens results.
     const num = String(parts.cardNumber).trim().replace(/^#/, '');
-    segments.push(`"${num}"`);
+    segments.push(num);
   }
   if (parts.player && parts.player.trim()) {
-    // Quote player name so "Drake Powell" doesn't match listings with
-    // just "Drake" or just "Powell" in the title.
-    segments.push(`"${parts.player.trim()}"`);
+    segments.push(parts.player.trim());
   }
   if (parts.parallel && parts.parallel.trim()) segments.push(parts.parallel.trim());
   return segments.join(' ').replace(/\s{2,}/g, ' ').trim();

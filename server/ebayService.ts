@@ -1319,16 +1319,11 @@ export function getEbaySearchUrl(
   // player + grade. Drop card #, variant, foil, and serial.
   const isGradedTier = !!(gradeKeyword && gradeKeyword.trim());
 
-  // Identity portion: <year> <brand> "<cardNumber>" "<playerName>"
-  // [unquoted parallel] [unquoted subset]
-  // Quoting cardNumber + player keeps eBay's tokenizer from relaxing them
-  // (alphanumerics like H121, US300, two-word names). Subset is appended
-  // unquoted as a hint — see commit history / PR for the rationale.
   const parts: string[] = [];
   if (year > 0) parts.push(String(year));
   if (brand) parts.push(brand);
-  if (!isGradedTier && cardNumber) parts.push(`"${cardNumber}"`);
-  if (playerName && playerName.trim()) parts.push(`"${playerName.trim()}"`);
+  if (!isGradedTier && cardNumber) parts.push(cardNumber);
+  if (playerName && playerName.trim()) parts.push(playerName.trim());
 
   let keywords = parts.filter(Boolean).join(' ');
 
