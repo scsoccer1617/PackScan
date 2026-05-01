@@ -66,6 +66,11 @@ interface AppendCardPayload {
   cmpNumber?: string | null;
   playerFirstName?: string | null;
   playerLastName?: string | null;
+  // Multi-player snapshot mirrored from the live cardData. Forwarded
+  // verbatim so the server's Sheets row builder can join "First Last /
+  // First Last / …" for vintage Topps subsets (Living Legends, N.L.
+  // Strikeout Leaders, etc.). Single-player flows leave it absent.
+  players?: Array<{ firstName: string; lastName: string; role?: string | null }> | null;
   variant?: string | null;
   serialNumber?: string | null;
   isRookieCard?: boolean | null;
@@ -123,6 +128,13 @@ function buildAppendPayload(
     cmpNumber: (cardData as { cmpNumber?: string | null }).cmpNumber ?? null,
     playerFirstName: cardData.playerFirstName ?? null,
     playerLastName: cardData.playerLastName ?? null,
+    // Forward the full multi-player array when the VLM/edit form populated
+    // one. Server-side `/api/sheets/append` reads this and joins names into
+    // the Sheet's Player cell as "First Last / First Last / …".
+    players: Array.isArray((cardData as { players?: Array<{ firstName: string; lastName: string; role?: string | null }> | null }).players)
+        && ((cardData as { players?: Array<{ firstName: string; lastName: string; role?: string | null }> }).players?.length ?? 0) > 0
+      ? (cardData as { players?: Array<{ firstName: string; lastName: string; role?: string | null }> }).players
+      : null,
     variant: cardData.variant ?? null,
     serialNumber: cardData.serialNumber ?? null,
     isRookieCard: cardData.isRookieCard ?? null,

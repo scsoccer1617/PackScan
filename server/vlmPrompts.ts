@@ -7,7 +7,7 @@
  * instructions Gemini was given.
  */
 
-export const VLM_PROMPT_VERSION = '2026-05-01.1';
+export const VLM_PROMPT_VERSION = '2026-05-01.2';
 
 /**
  * System prompt: tells the VLM what role it plays and the card-domain
@@ -140,7 +140,12 @@ CARD-DOMAIN RULES:
     * Front-side season callouts on insert / anniversary cards (e.g. \"1989 Topps 35th Anniversary\") \u2014 those describe the THEME, not the year.
 - Never confuse the trailing \"-YY\" of a season span for a card number.
 - Player names: Title Case ("LeBron James", "Ronald Acu\u00f1a Jr."), not all-caps from how the card prints them.
-- MULTI-PLAYER CARDS. Some cards print 2 or 3 NAMED players on a single card front \u2014 vintage Topps subsets like "N.L. Strikeout Leaders", "Batting Leaders", "Pitching Leaders", "Rookie Stars", "ERA Leaders", "Manager's Dream", "Super Stars". For these, populate the "players" array with EVERY distinct named player visible on the card front, ordered top-to-bottom then left-to-right as they appear. For each entry: "firstName" and "lastName" follow the same Title Case rule as the top-level "player" field; "role" is OPTIONAL and ONLY set when an explicit inline label is printed next to that name (e.g. "OUTFIELDER", "PITCHER", "MANAGER"). Do NOT invent a role from sport context. Standard single-player cards still produce a 1-element "players" array containing the same name as the top-level "player" field. Be conservative \u2014 if you only see one named player on the front, return a 1-element array, not multiple.
+- MULTI-PLAYER CARDS. Some cards depict 2 or 3 NAMED players on a single card \u2014 vintage Topps subsets like "N.L. Strikeout Leaders", "Batting Leaders", "Pitching Leaders", "Rookie Stars", "ERA Leaders", "Manager's Dream", "Super Stars", "Living Legends", "Record Breakers", "Highlights", "In Action", and team-leader / dual-bio inserts. For these, populate the "players" array with EVERY distinct named player printed on the card. Read BOTH the FRONT and the BACK \u2014 some subsets (e.g. 1984 Topps Living Legends) show only photographs on the front and name the players exclusively in the BACK header / bio paragraphs, so a back-only naming still counts. Recognize all of these naming patterns:
+  * Two or three names joined by an ampersand or "and" on a single line ("JOHNNY BENCH & CARL YASTRZEMSKI", "Bench & Yaz", "Aaron and Mays").
+  * Names separated by a slash, comma, or middot ("Seaver / Jenkins / Niekro", "Mantle, Maris", "Ryan \u00b7 Jackson").
+  * A header line that lists multiple names followed by per-player labelled sub-paragraphs on the back ("Johnny Bench:", "Carl Yastrzemski:", "Reggie:").
+  * Two photo cells on the front with a single shared subset banner and no per-photo name overlay \u2014 in that case fall back to the back-side header / bio labels for the player names.
+  Order the array left-to-right and top-to-bottom in the order they appear on the FRONT photographs; if the front has no name labels and only the BACK names them, preserve the printed order on the BACK header line. For each entry: "firstName" and "lastName" follow the same Title Case rule as the top-level "player" field; "role" is OPTIONAL and ONLY set when an explicit inline label is printed next to that name (e.g. "OUTFIELDER", "PITCHER", "MANAGER"). Do NOT invent a role from sport context. Do NOT split a single multi-token name like "Carl Yastrzemski" or "Ronald Acu\u00f1a Jr." into separate entries \u2014 those are one player. Single-player cards still produce a 1-element "players" array containing the same name as the top-level "player" field. Be conservative \u2014 if only one player is named anywhere on the card, return a 1-element array, not multiple.
 - Confidence scores: numeric floats 0.0\u20131.0, not strings like "High" / "Medium". Lower the score when uncertain.
 - Judge parallel by visible border tint, foil pattern, and saturation \u2014 not just printed text.
 - printRun: when a card shows "X/YYY" (e.g. "291/299" or "0101/0399"), return the denominator as a number (299, 399). Set to null if not numbered.

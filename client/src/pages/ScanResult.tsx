@@ -39,6 +39,7 @@ import CollectionPickerSheet, {
 import { Camera, Check, Loader2, ScanLine, ScanSearch, Sparkles, ThumbsDown, ThumbsUp, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { CardFormValues } from "@shared/schema";
+import { joinPlayerNames, type Player } from "@shared/players";
 import {
   extractSerialLimit,
   extractKeyword,
@@ -59,9 +60,29 @@ function gradeTone(grade: number): { bg: string; text: string; ring: string } {
   return { bg: "bg-foil-amber/15", text: "text-foil-amber", ring: "ring-foil-amber/40" };
 }
 
-/** "Lance Lynn" display from first+last (either may be missing). */
+/** "Lance Lynn" display from first+last (either may be missing). For
+ *  vintage Topps subsets that name 2–3 players (Living Legends, N.L.
+ *  Strikeout Leaders, etc.), the merged record carries a `players[]`
+ *  array; when present and length > 1 we render the joined "First Last
+ *  / First Last / …" form so the read view, the sticky hero, and the
+ *  Player row all surface every named player. Single-player cards keep
+ *  the legacy first/last rendering unchanged. */
 function playerName(c: Partial<CardFormValues> | null): string {
   if (!c) return "";
+  const players = (c as { players?: Player[] | null }).players;
+  if (Array.isArray(players) && players.length > 1) {
+    const firsts = joinPlayerNames(players, 'firstName');
+    const lasts = joinPlayerNames(players, 'lastName');
+    if (firsts && lasts) {
+      // "Johnny Bench / Carl Yastrzemski" — pair each player's first+last
+      // before joining with " / " so the result reads as a roster, not
+      // two interleaved name halves.
+      return players
+        .map((p) => `${(p.firstName ?? '').trim()} ${(p.lastName ?? '').trim()}`.trim())
+        .filter((s) => s.length > 0)
+        .join(' / ');
+    }
+  }
   return [c.playerFirstName, c.playerLastName].filter(Boolean).join(" ").trim();
 }
 
@@ -1464,6 +1485,23 @@ function DetailsTab({
       ...draft,
       year: parsedYear ?? cardData.year,
     };
+    // Multi-player cards: keep `players[0]` in sync with the legacy
+    // first/last inputs so the post-save merged record's primary entry
+    // matches what the dealer just typed. Other entries pass through
+    // untouched — this inline editor only edits the primary slot today.
+    const draftPlayers = (draft as { players?: Player[] | null }).players;
+    if (Array.isArray(draftPlayers) && draftPlayers.length > 0) {
+      const synced: Player[] = draftPlayers.map((p, idx) =>
+        idx === 0
+          ? {
+              firstName: (patch.playerFirstName ?? '').trim(),
+              lastName: (patch.playerLastName ?? '').trim(),
+              ...(p.role ? { role: p.role } : {}),
+            }
+          : p,
+      );
+      (patch as { players?: Player[] }).players = synced;
+    }
     onSaveCardInfo(patch);
     setEditing(false);
   };
