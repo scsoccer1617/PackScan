@@ -42,6 +42,16 @@ export interface GeminiCardResult {
   subjectType?: string | null;
   sport?: string | null;
   player?: string | null;
+  /** Multi-player extraction (prompt v2026-05-01.1+). Array of every named
+   *  player visible on the card front, ordered top-to-bottom / left-to-right.
+   *  Single-player cards still produce a 1-element array. `role` is set only
+   *  when an inline label is printed next to the name (OUTFIELDER, PITCHER,
+   *  MANAGER, etc.). Optional so older logged outputs remain typecheckable. */
+  players?: Array<{
+    firstName?: string | null;
+    lastName?: string | null;
+    role?: string | null;
+  }> | null;
   year?: number | null;
   yearPrintedRaw?: string | null;
   brand?: string | null;

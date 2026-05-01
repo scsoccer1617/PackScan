@@ -7,7 +7,7 @@
  * instructions Gemini was given.
  */
 
-export const VLM_PROMPT_VERSION = '2026-04-28.7';
+export const VLM_PROMPT_VERSION = '2026-05-01.1';
 
 /**
  * System prompt: tells the VLM what role it plays and the card-domain
@@ -43,6 +43,21 @@ export const VLM_PROMPT_VERSION = '2026-04-28.7';
  *   - This keeps Knecht/Brunson correct (Panini Hoops back shows "2024-25"
  *     \u2192 first year 2024) AND fixes Topps NBA 2025-26 (back shows only
  *     \u00a92025 \u2192 year 2025).
+ *
+ * v2026-05-01.1 changes (from .7):
+ *   - Added multi-player extraction. Vintage Topps subsets (1971 N.L.
+ *     Strikeout Leaders, 1968 Batting Leaders, 1968 Pitching Leaders, 1968
+ *     Rookie Stars, 1969 Strikeout Leaders, 1967 ERA Leaders, Manager's
+ *     Dream, Super Stars) print 2–3 named players per card. Result now
+ *     includes a `players` array of `{firstName, lastName, role?}` ordered
+ *     top-to-bottom / left-to-right as the names appear on the card front.
+ *     Single-player cards still produce a 1-element array. Conservative —
+ *     only emit additional players when the card actually shows distinct
+ *     named players (the existing top-level `player` string remains for
+ *     back-compat and mirrors players[0]'s "first last").
+ *   - role is OPTIONAL and only set when an inline label is printed
+ *     adjacent to the name (OUTFIELDER, PITCHER, MANAGER). Blank/empty
+ *     otherwise — never invent a role from sport context.
  *
  * v2026-04-28.7 changes (from .6):
  *   - Reordered STEP 0: footer/legal-strip season range now wins first, ©
@@ -125,6 +140,7 @@ CARD-DOMAIN RULES:
     * Front-side season callouts on insert / anniversary cards (e.g. \"1989 Topps 35th Anniversary\") \u2014 those describe the THEME, not the year.
 - Never confuse the trailing \"-YY\" of a season span for a card number.
 - Player names: Title Case ("LeBron James", "Ronald Acu\u00f1a Jr."), not all-caps from how the card prints them.
+- MULTI-PLAYER CARDS. Some cards print 2 or 3 NAMED players on a single card front \u2014 vintage Topps subsets like "N.L. Strikeout Leaders", "Batting Leaders", "Pitching Leaders", "Rookie Stars", "ERA Leaders", "Manager's Dream", "Super Stars". For these, populate the "players" array with EVERY distinct named player visible on the card front, ordered top-to-bottom then left-to-right as they appear. For each entry: "firstName" and "lastName" follow the same Title Case rule as the top-level "player" field; "role" is OPTIONAL and ONLY set when an explicit inline label is printed next to that name (e.g. "OUTFIELDER", "PITCHER", "MANAGER"). Do NOT invent a role from sport context. Standard single-player cards still produce a 1-element "players" array containing the same name as the top-level "player" field. Be conservative \u2014 if you only see one named player on the front, return a 1-element array, not multiple.
 - Confidence scores: numeric floats 0.0\u20131.0, not strings like "High" / "Medium". Lower the score when uncertain.
 - Judge parallel by visible border tint, foil pattern, and saturation \u2014 not just printed text.
 - printRun: when a card shows "X/YYY" (e.g. "291/299" or "0101/0399"), return the denominator as a number (299, 399). Set to null if not numbered.
@@ -160,6 +176,9 @@ export const VLM_RESULT_TEMPLATE = `{
   "subjectType": "card",
   "sport": null,
   "player": null,
+  "players": [
+    { "firstName": null, "lastName": null, "role": null }
+  ],
   "yearPrintedRaw": null,
   "cmpCode": null,
   "year": null,

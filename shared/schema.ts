@@ -195,6 +195,23 @@ export const cardSchema = z.object({
   sport: z.string().min(1, "Sport is required"),
   playerFirstName: z.string().min(1, "First name is required"),
   playerLastName: z.string().min(1, "Last name is required"),
+  /**
+   * Multi-player card support. When the card shows >1 named player (vintage
+   * Topps subsets like 1971 N.L. Strikeout Leaders), this array carries every
+   * player; element 0 must match playerFirstName/playerLastName above so
+   * legacy readers stay correct. Optional so existing single-player flows
+   * that only set the primary first/last fields keep working unchanged.
+   * See `shared/players.ts` for helpers (primaryPlayer / joinPlayerNames).
+   */
+  players: z
+    .array(
+      z.object({
+        firstName: z.string(),
+        lastName: z.string(),
+        role: z.string().optional().nullable(),
+      }),
+    )
+    .optional(),
   brand: z.string().min(1, "Brand is required"),
   collection: z.string().optional(),
   cardNumber: z.string().min(1, "Card number is required"),
@@ -241,6 +258,19 @@ export const cardSchema = z.object({
       sport: z.string().optional().nullable(),
       playerFirstName: z.string().optional().nullable(),
       playerLastName: z.string().optional().nullable(),
+      // Multi-player snapshot — present when the VLM emitted a players[]
+      // array. The detected primary first/last above mirror players[0] for
+      // back-compat with the legacy comparison logic.
+      players: z
+        .array(
+          z.object({
+            firstName: z.string(),
+            lastName: z.string(),
+            role: z.string().optional().nullable(),
+          }),
+        )
+        .optional()
+        .nullable(),
       brand: z.string().optional().nullable(),
       collection: z.string().optional().nullable(),
       set: z.string().optional().nullable(),
