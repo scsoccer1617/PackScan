@@ -25,6 +25,7 @@
 
 import type { CardFormValues } from '@shared/schema';
 import type { GeminiCardResult } from './vlmGemini';
+import type { Player } from '@shared/players';
 
 const NONE_DETECTED_SENTINELS = new Set([
   'none detected',
@@ -78,11 +79,39 @@ export function applyGeminiToCombined(
   combined: Partial<CardFormValues>,
   gemini: GeminiCardResult,
 ): Partial<CardFormValues> {
-  // ── Player name ─────────────────────────────────────────────────────────
-  if (typeof gemini.player === 'string' && gemini.player.trim()) {
+  // ── Player name(s) ──────────────────────────────────────────────────────
+  // Prefer the multi-player `players` array (prompt v2026-05-01.1+) when
+  // present and non-empty. Each entry becomes a Player; we also mirror
+  // players[0] into the legacy playerFirstName/playerLastName slots so any
+  // caller that still reads the single-name fields stays correct. When the
+  // array is missing (older Gemini responses), fall back to splitting the
+  // top-level `player` string and wrap it as a 1-element array.
+  const rawPlayers = Array.isArray(gemini.players) ? gemini.players : null;
+  const cleanedPlayers: Player[] = [];
+  if (rawPlayers) {
+    for (const p of rawPlayers) {
+      if (!p) continue;
+      const first = (p.firstName ?? '').toString().trim();
+      const last = (p.lastName ?? '').toString().trim();
+      if (!first && !last) continue;
+      const role = typeof p.role === 'string' && p.role.trim() ? p.role.trim() : undefined;
+      cleanedPlayers.push(role ? { firstName: first, lastName: last, role } : { firstName: first, lastName: last });
+    }
+  }
+  if (cleanedPlayers.length > 0) {
+    combined.players = cleanedPlayers;
+    combined.playerFirstName = cleanedPlayers[0].firstName;
+    combined.playerLastName = cleanedPlayers[0].lastName;
+  } else if (typeof gemini.player === 'string' && gemini.player.trim()) {
     const { first, last } = splitPlayerName(gemini.player);
     if (first) combined.playerFirstName = first;
     if (last) combined.playerLastName = last;
+    // Coerce legacy single-name fallback into a 1-element players array so
+    // downstream code can rely on `combined.players` being present whenever
+    // we have any name at all.
+    if (first || last) {
+      combined.players = [{ firstName: first, lastName: last }];
+    }
   }
 
   // ── Year (must be a finite number for the form schema) ─────────────────

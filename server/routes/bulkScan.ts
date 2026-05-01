@@ -225,6 +225,12 @@ export function registerBulkScanRoutes(app: Express): void {
         cardNumber: merged.cardNumber || null,
         cmpNumber: merged.cmpNumber || null,
         player: [merged.playerFirstName, merged.playerLastName].filter(Boolean).join(' ') || null,
+        // Preserve multi-player array from the analyzer snapshot / dealer
+        // edits so the Sheet's Player cell joins as "First Last / First Last
+        // / …" for vintage Topps subsets.
+        players: Array.isArray(merged.players) && merged.players.length > 0
+          ? (merged.players as Array<{ firstName: string; lastName: string; role?: string }>)
+          : null,
         variation: merged.variant || null,
         serialNumber: merged.serialNumber || null,
         isRookieCard: !!merged.isRookieCard,
