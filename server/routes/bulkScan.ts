@@ -28,6 +28,7 @@ import {
 } from '../bulkScan/processor';
 import { getFolderName, fetchThumbnail, listInboxAllFiles } from '../bulkScan/driveClient';
 import { appendCardRow } from '../googleSheets';
+import { getEbaySearchUrl } from '../ebayService';
 import { logUserScan, diffScanFields, type ScanFieldValues } from '../userScans';
 
 /**
@@ -210,15 +211,62 @@ export function registerBulkScanRoutes(app: Express): void {
     if (!batch) return res.status(404).json({ error: 'Batch not found' });
 
     // The client may send an edited version of the analyzer result; fall
-    // back to the stored snapshot if none provided.
+    // back to the stored snapshot if none provided. Year coercion is
+    // explicit: the review UI submits `year` as a JS number (parseInt of
+    // the input), but older snapshots could carry a string here. We pin
+    // the merged year to a single canonical number so the Sheet write,
+    // the user_scans diff, and the eBay URL all read the same value.
     const incoming = (req.body || {}) as Record<string, any>;
     const snapshot = (item.analysisResult || {}) as Record<string, any>;
     const merged = { ...snapshot, ...incoming };
+    const yearNumeric = typeof merged.year === 'number' && Number.isFinite(merged.year)
+      ? merged.year
+      : (merged.year != null && merged.year !== ''
+          ? (Number.parseInt(String(merged.year), 10) || null)
+          : null);
+    merged.year = yearNumeric;
+
+    // Rebuild the Sheet's eBay link from the canonical merged fields. The
+    // snapshot's `merged.ebaySearchUrl` was computed at scan time with the
+    // VLM-detected year, so any reviewer edit (year is the most common —
+    // e.g. 1990 Donruss is misread as 1989 due to the back's "© 1989"
+    // imprint) leaves the cached URL pointing at the wrong listings.
+    // Rebuilding here mirrors the single-card append path in
+    // server/sheetsRoutes.ts: the canonical fields drive the link, never a
+    // cached string. Reviewers do not edit the subset, so we read it from
+    // the snapshot's `_gemini.subset` side-channel set by vlmApply.
+    const playerName = [merged.playerFirstName, merged.playerLastName]
+      .filter(Boolean)
+      .join(' ')
+      .trim();
+    const subset = (merged._gemini && typeof merged._gemini.subset === 'string')
+      ? merged._gemini.subset.trim()
+      : '';
+    const rebuiltEbayUrl = merged.brand
+      ? getEbaySearchUrl(
+          playerName,
+          String(merged.cardNumber || ''),
+          String(merged.brand || ''),
+          yearNumeric ?? 0,
+          merged.collection || '',
+          '',
+          !!merged.isNumbered,
+          merged.foilType || '',
+          merged.serialNumber || '',
+          merged.variant || '',
+          merged.set || '',
+          undefined,
+          !!merged.isAutographed,
+          false,
+          subset,
+        )
+      : null;
+    merged.ebaySearchUrl = rebuiltEbayUrl;
 
     try {
       await appendCardRow(userId, {
         sport: merged.sport || null,
-        year: typeof merged.year === 'number' ? merged.year : null,
+        year: yearNumeric,
         brand: merged.brand || null,
         collection: merged.collection || null,
         set: merged.set || null,
@@ -240,7 +288,7 @@ export function registerBulkScanRoutes(app: Express): void {
         averagePrice: typeof merged.estimatedValue === 'number' ? merged.estimatedValue : null,
         frontImageUrl: null,
         backImageUrl: null,
-        ebaySearchUrl: typeof merged.ebaySearchUrl === 'string' ? merged.ebaySearchUrl : null,
+        ebaySearchUrl: rebuiltEbayUrl,
       });
     } catch (err: any) {
       console.error(`[bulkScan/route] /review/:itemId/save append failed:`, err);
