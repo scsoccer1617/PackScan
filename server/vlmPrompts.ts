@@ -7,7 +7,7 @@
  * instructions Gemini was given.
  */
 
-export const VLM_PROMPT_VERSION = '2026-05-01.3';
+export const VLM_PROMPT_VERSION = '2026-05-01.4';
 
 /**
  * System prompt: tells the VLM what role it plays and the card-domain
@@ -96,6 +96,8 @@ CARD-DOMAIN RULES:
   STEP 0 \u2014 PRIMARY YEAR EXTRACTION (applies to ALL sports and ALL eras).
   Read the BACK of the card. Walk these checks IN ORDER and stop at the first that fires.
 
+  NEVER derive the card year from any of these, regardless of how prominent they are: player birthdate ("BORN 1993"), debut year, draft year ("DRAFTED 2018"), individual stat-row season years ("2022 NYM", "2023 NYM"), "Acquired" / "Signed" / "Traded" date prose, front-side anniversary callouts ("1989 Topps 35th Anniversary"), or career-highlight date stamps. The card year ONLY comes from the footer/legal-strip season range or the publisher \u00a9 imprint on the BACK \u2014 OR, when those are absent, from the rules below. If the back copyright clearly prints a year, that year ALWAYS wins over any other 4-digit number visible on the card.
+
   (a) FOOTER / LEGAL-STRIP SEASON RANGE. Look in the legal strip near the bottom edge of the back \u2014 the same horizontal band that contains the \u00a9 line, the CMP code, and "MADE IN" / "PRINTED IN" notices. Patterns:
         YYYY-YY    e.g. "2024-25"
         YYYY/YY    e.g. "2024/25"
@@ -108,10 +110,12 @@ CARD-DOMAIN RULES:
         * Career-highlights / "Year by Year" / awards sections.
       Only the FOOTER / LEGAL-STRIP range counts.
 
-  (b) PUBLISHER \u00a9 IMPRINT (only when (a) found no footer-strip range). Find the publisher copyright line in the legal strip \u2014 usually one line above or below the CMP code, on the same line as "MADE IN", "PRINTED IN", or trademark notices. The imprint contains the manufacturer name (TOPPS, PANINI, UPPER DECK, FLEER, DONRUSS, LEAF, BOWMAN). Use that year AS-IS (do not subtract).
+  (b) PUBLISHER \u00a9 IMPRINT \u2014 AUTHORITATIVE (only when (a) found no footer-strip range). Find the publisher copyright line in the legal strip \u2014 usually one line above or below the CMP code, on the same line as "MADE IN", "PRINTED IN", or trademark notices. The imprint contains the manufacturer name (TOPPS, PANINI, UPPER DECK, FLEER, DONRUSS, LEAF, BOWMAN). Patterns that all resolve the same way: "\u00a9 YYYY <BRAND>", "<BRAND>\u00ae YYYY", "Copyright YYYY <BRAND>", "\u00a9 <BRAND> YYYY". Use that YYYY AS-IS (do not subtract \u2014 except for the (b1) Donruss/Leaf 1981\u20131993 wordmark override below).
         "\u00a92025 THE TOPPS COMPANY, INC."  \u2192 year=2025
         "\u00a92024 PANINI AMERICA, INC."     \u2192 year=2024
         "\u00a92023 THE UPPER DECK COMPANY"   \u2192 year=2023
+        "\u00a9 2024 TOPPS"                   \u2192 year=2024 (even when the stat block lists 2022, 2023 \u2014 those are PAST seasons, not the card year)
+      The \u00a9 year wins over EVERY other 4-digit token visible on the card: stat-row years, birth year, draft year, debut year, "Acquired" prose. If you can read a \u00a9 YYYY on the back, return that YYYY \u2014 do not let any stat-table year override it.
       If multiple \u00a9 lines coexist (e.g. Topps + MLBPA + Players Inc.), pick the publisher's line (the one with the manufacturer name); the others are licensing notices.
       Write the imprint string verbatim into yearPrintedRaw.
 
