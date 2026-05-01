@@ -41,7 +41,7 @@ import { BatchTimingsRecorder } from './timingsRecorder';
 import { normalizeImageOrientation } from '../dualSideOCR';
 import { lookupCard as cardDbLookup } from '../cardDatabaseService';
 import { isCardDbLookupEnabled } from '../featureFlags';
-import { appendCardRow } from '../googleSheets';
+import { appendCardRow, appendCardRowsBatch, type CardRowInput } from '../googleSheets';
 import { getEbaySearchUrl } from '../ebayService';
 import { getScanQuota, incrementScanCount } from '../scanQuota';
 import { logUserScan, type ScanFieldValues } from '../userScans';
@@ -196,6 +196,80 @@ export async function resumeRunningBatches(): Promise<number> {
   return stuck.length;
 }
 
+// ── Sheets append queue ──────────────────────────────────────────────────
+//
+// Per-batch buffer for auto_save Sheet writes. Replaces the per-pair
+// appendCardRow call so a 64-card batch makes ~3 batched API requests
+// instead of 64 individual ones. Stays well under the
+// 60-write-per-minute-per-user quota that was causing late pairs in
+// large batches to 429-fail and demote to review.
+//
+// Caller flow:
+//   1. processItem hits its auto_save branch
+//   2. processItem calls queue.enqueue(item.id, card) and awaits the
+//      returned promise (resolves on success, rejects on flush failure)
+//   3. queue accumulates rows; flushes when CHUNK_SIZE rows are buffered
+//      OR FLUSH_INTERVAL_MS has elapsed since the first buffered row OR
+//      runBatch calls queue.drain() at end-of-batch
+//   4. flush calls appendCardRowsBatch (rate-limit-guarded + 429 retry)
+//      and resolves/rejects each enqueued promise based on the API
+//      result. On failure every row in the chunk is rejected with the
+//      same error so processItem demotes-to-review like before.
+class SheetsAppendQueue {
+  private readonly userId: number;
+  private buffer: { itemId: number; card: CardRowInput; resolve: () => void; reject: (e: Error) => void }[] = [];
+  private timer: NodeJS.Timeout | null = null;
+  private flushing: Promise<void> = Promise.resolve();
+  private static readonly CHUNK_SIZE = 25;
+  private static readonly FLUSH_INTERVAL_MS = 3_000;
+
+  constructor(userId: number) {
+    this.userId = userId;
+  }
+
+  enqueue(itemId: number, card: CardRowInput): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      this.buffer.push({ itemId, card, resolve, reject });
+      if (this.buffer.length >= SheetsAppendQueue.CHUNK_SIZE) {
+        this.scheduleFlush(0);
+      } else if (!this.timer) {
+        this.timer = setTimeout(() => this.scheduleFlush(0), SheetsAppendQueue.FLUSH_INTERVAL_MS);
+      }
+    });
+  }
+
+  /** Drain on end-of-batch. Resolves once all queued rows have been flushed. */
+  async drain(): Promise<void> {
+    this.scheduleFlush(0);
+    await this.flushing;
+  }
+
+  private scheduleFlush(_delay: number): void {
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+    // Chain onto the previous flush so chunks don't overlap.
+    this.flushing = this.flushing.then(() => this.flushOnce());
+  }
+
+  private async flushOnce(): Promise<void> {
+    if (this.buffer.length === 0) return;
+    const slice = this.buffer.splice(0, SheetsAppendQueue.CHUNK_SIZE);
+    try {
+      await appendCardRowsBatch(this.userId, slice.map((s) => s.card));
+      for (const s of slice) s.resolve();
+    } catch (err: any) {
+      const e = err instanceof Error ? err : new Error(String(err));
+      for (const s of slice) s.reject(e);
+    }
+    // If more rows arrived (or remained), keep draining.
+    if (this.buffer.length > 0) {
+      this.flushing = this.flushing.then(() => this.flushOnce());
+    }
+  }
+}
+
 // ── Worker ───────────────────────────────────────────────────────────────
 
 /**
@@ -229,6 +303,11 @@ export async function runBatch(batchId: number): Promise<void> {
   try {
     let processed = 0;
     let reviews = 0;
+    // Per-batch sheets append queue. Auto-save pairs hand rows to this
+    // queue and await the resulting promise; the queue flushes in
+    // chunks (CHUNK_SIZE or FLUSH_INTERVAL_MS) via the rate-limit-guarded
+    // appendCardRowsBatch. drain() runs at end-of-batch below.
+    const sheetsQueue = new SheetsAppendQueue(batch.userId);
     // Beta scan quota: track remaining headroom locally so we can stop the
     // loop cleanly the moment we run out, without making a DB round-trip
     // before every item. We re-fetch once at the top of the batch and keep
@@ -315,7 +394,7 @@ export async function runBatch(batchId: number): Promise<void> {
         timings.recordPairUpdate(pairKey, { startedAt: Date.now() });
         const tPair = Date.now();
         try {
-          const outcome = await processItem(batch, item, timings, pairKey);
+          const outcome = await processItem(batch, item, timings, pairKey, sheetsQueue);
           timings.recordPairUpdate(pairKey, { totalProcessMs: Date.now() - tPair });
           await incrementScanCount(batch.userId);
           await withCounterLock(async () => {
@@ -377,6 +456,11 @@ export async function runBatch(batchId: number): Promise<void> {
       }, timings);
     }
     await queue.onIdle();
+    // Flush any auto_save rows that are still buffered (last partial
+    // chunk and/or rows that arrived after the final timer-based flush).
+    // processItem's promises must all resolve/reject before we mark the
+    // batch completed so DB row statuses are accurate.
+    await sheetsQueue.drain();
     if (quotaHit) {
       console.log(`[bulkScan] Batch ${batchId} reached scan quota for user ${batch.userId}; remaining items marked skipped.`);
     }
@@ -636,6 +720,7 @@ async function processItem(
   item: ScanBatchItem,
   timings?: BatchTimingsRecorder,
   pairKey?: string,
+  sheetsQueue?: SheetsAppendQueue,
 ): Promise<'auto_save' | 'review'> {
   await db.update(scanBatchItems).set({ status: 'processing' }).where(eq(scanBatchItems.id, item.id));
 
@@ -887,27 +972,38 @@ async function processItem(
   const shouldAutoSave = gate.verdict === 'auto_save' && !batch.dryRun;
 
   if (shouldAutoSave) {
+    const card: CardRowInput = {
+      sport: analysis.sport || null,
+      year: typeof analysis.year === 'number' ? analysis.year : null,
+      brand: analysis.brand || null,
+      collection: analysis.collection || null,
+      set: analysis.set || null,
+      cardNumber: analysis.cardNumber || null,
+      cmpNumber: analysis.cmpNumber || null,
+      player: [analysis.playerFirstName, analysis.playerLastName].filter(Boolean).join(' ') || null,
+      variation: analysis.variant || null,
+      serialNumber: analysis.serialNumber || null,
+      isRookieCard: !!analysis.isRookieCard,
+      isAutographed: !!analysis.isAutographed,
+      isNumbered: !!analysis.isNumbered,
+      foilType: analysis.foilType || null,
+      averagePrice: typeof analysis.estimatedValue === 'number' ? analysis.estimatedValue : null,
+      frontImageUrl: null,
+      backImageUrl: null,
+      ebaySearchUrl: typeof analysis.ebaySearchUrl === 'string' ? analysis.ebaySearchUrl : null,
+    };
     try {
-      await appendCardRow(batch.userId, {
-        sport: analysis.sport || null,
-        year: typeof analysis.year === 'number' ? analysis.year : null,
-        brand: analysis.brand || null,
-        collection: analysis.collection || null,
-        set: analysis.set || null,
-        cardNumber: analysis.cardNumber || null,
-        cmpNumber: analysis.cmpNumber || null,
-        player: [analysis.playerFirstName, analysis.playerLastName].filter(Boolean).join(' ') || null,
-        variation: analysis.variant || null,
-        serialNumber: analysis.serialNumber || null,
-        isRookieCard: !!analysis.isRookieCard,
-        isAutographed: !!analysis.isAutographed,
-        isNumbered: !!analysis.isNumbered,
-        foilType: analysis.foilType || null,
-        averagePrice: typeof analysis.estimatedValue === 'number' ? analysis.estimatedValue : null,
-        frontImageUrl: null,
-        backImageUrl: null,
-        ebaySearchUrl: typeof analysis.ebaySearchUrl === 'string' ? analysis.ebaySearchUrl : null,
-      });
+      // Hand the row to the per-batch flusher and wait for ack. The
+      // flusher coalesces up to CHUNK_SIZE rows into a single Sheets
+      // API call, so a 64-card batch makes ~3 requests instead of 64
+      // and never trips the 60-write/min/user quota. Falls back to
+      // direct appendCardRow on the (single-card resume) path where
+      // the queue isn't passed in.
+      if (sheetsQueue) {
+        await sheetsQueue.enqueue(item.id, card);
+      } else {
+        await appendCardRow(batch.userId, card);
+      }
 
       // Best-effort log to user_scans. Auto-save means the confidence gate
       // passed AND the dealer never touched the row — strongest possible
