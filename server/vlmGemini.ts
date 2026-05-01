@@ -15,6 +15,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { VLM_FULL_PROMPT, VLM_PROMPT_VERSION } from './vlmPrompts';
 import { normalizeGeminiResult } from './geminiNormalize';
+import { isExemplarsEnabled, getExemplarTextPrefix, getExemplarParts } from './vlmExemplars';
 
 let cachedClient: GoogleGenAI | null = null;
 
@@ -172,18 +173,25 @@ export async function analyzeCardBuffersWithGemini(
     let attempt = 0;
     while (true) {
       try {
+        const parts: any[] = [
+          { text: fullPrompt },
+          { inlineData: { data: frontBuffer.toString('base64'), mimeType: frontMime } },
+          { inlineData: { data: backBuffer.toString('base64'), mimeType: backMime } },
+        ];
+        // Parallel Exemplar Library v1 (MOLO-grounded). Off by default;
+        // when VLM_EXEMPLARS_ENABLED=true, append a short instructional
+        // text part + 54 inline reference JPEGs so Gemini can match the
+        // scanned card's parallel against canonical patterns. The base
+        // prompt (vlmPrompts.ts, year rule v2026-04-28.7) is NOT
+        // modified — exemplar guidance lives only in the appended
+        // parts.
+        if (isExemplarsEnabled()) {
+          parts.push({ text: getExemplarTextPrefix() });
+          parts.push(...getExemplarParts());
+        }
         response = await client.models.generateContent({
           model,
-          contents: [
-            {
-              role: 'user',
-              parts: [
-                { text: fullPrompt },
-                { inlineData: { data: frontBuffer.toString('base64'), mimeType: frontMime } },
-                { inlineData: { data: backBuffer.toString('base64'), mimeType: backMime } },
-              ],
-            },
-          ],
+          contents: [{ role: 'user', parts }],
           config: { responseMimeType: 'application/json' },
         });
         break;
@@ -293,18 +301,18 @@ export async function analyzeCardBuffersWithGeminiStream(
     let attempt = 0;
     while (true) {
       try {
+        const parts: any[] = [
+          { text: fullPrompt },
+          { inlineData: { data: frontBuffer.toString('base64'), mimeType: frontMime } },
+          { inlineData: { data: backBuffer.toString('base64'), mimeType: backMime } },
+        ];
+        if (isExemplarsEnabled()) {
+          parts.push({ text: getExemplarTextPrefix() });
+          parts.push(...getExemplarParts());
+        }
         const stream = await client.models.generateContentStream({
           model,
-          contents: [
-            {
-              role: 'user',
-              parts: [
-                { text: fullPrompt },
-                { inlineData: { data: frontBuffer.toString('base64'), mimeType: frontMime } },
-                { inlineData: { data: backBuffer.toString('base64'), mimeType: backMime } },
-              ],
-            },
-          ],
+          contents: [{ role: 'user', parts }],
           config: { responseMimeType: 'application/json' },
         });
         for await (const chunk of stream) {
