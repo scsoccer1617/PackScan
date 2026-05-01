@@ -6,7 +6,18 @@ import type {
 } from "@/components/ui/toast"
 
 const TOAST_LIMIT = 1
-const TOAST_REMOVE_DELAY = 1000000
+// How long a dismissed toast lingers in state before being garbage-collected
+// from `toasts[]`. The Radix exit animation runs in this window, so this is
+// not the on-screen duration — that's controlled by the per-toast `duration`
+// prop (see DEFAULT_TOAST_DURATION_MS below). 1000ms is enough for the
+// slide-out animation to complete.
+const TOAST_REMOVE_DELAY = 1000
+
+// Default on-screen lifetime for success/info toasts. Long enough to read
+// "Added to <SheetName>" and tap the link; short enough to not obstruct.
+// Destructive toasts override this with `duration: Infinity` so errors stay
+// until manually dismissed.
+const DEFAULT_TOAST_DURATION_MS = 5000
 
 type ToasterToast = ToastProps & {
   id: string
@@ -149,12 +160,23 @@ function toast({ ...props }: Toast) {
     })
   const dismiss = () => dispatch({ type: "DISMISS_TOAST", toastId: id })
 
+  // Default success/info to a 5s auto-dismiss; errors (variant="destructive")
+  // stay open until the user closes them so they can't be missed. Callers can
+  // still override by passing an explicit `duration`.
+  const resolvedDuration =
+    typeof props.duration === "number"
+      ? props.duration
+      : props.variant === "destructive"
+        ? Infinity
+        : DEFAULT_TOAST_DURATION_MS
+
   dispatch({
     type: "ADD_TOAST",
     toast: {
       ...props,
       id,
       open: true,
+      duration: resolvedDuration,
       onOpenChange: (open) => {
         if (!open) dismiss()
       },
