@@ -35,7 +35,7 @@ import { listInboxImages, downloadFile, moveFile, type DriveImageFile } from './
 import { or, isNotNull } from 'drizzle-orm';
 import { classifyCardSide } from './sideClassifier';
 import { detectOrientation } from './orientation';
-import { pairPages, type ScanPage, type PairedScan } from './pairing';
+import { pairPages, groupFilesByDuplexBatch, type ScanPage, type PairedScan } from './pairing';
 import { evaluateConfidence, isCardDbCorroboration } from './confidenceGate';
 import { BatchTimingsRecorder } from './timingsRecorder';
 import { normalizeImageOrientation } from '../dualSideOCR';
@@ -452,17 +452,27 @@ async function discoverAndPlanItems(
     if (row.back) seenFileIds.add(row.back);
     if (row.front) seenFileIds.add(row.front);
   }
-  const files = rawFiles.filter(f => !seenFileIds.has(f.id));
-  const skipped = rawFiles.length - files.length;
+  const dedupFiles = rawFiles.filter(f => !seenFileIds.has(f.id));
+  const skipped = rawFiles.length - dedupFiles.length;
   if (skipped > 0) {
     console.log(`[bulkScan] Batch ${batch.id}: skipping ${skipped} previously-seen file(s) in inbox.`);
   }
 
-  if (files.length === 0) {
+  // Group Epson duplex pages by their filename prefix BEFORE pairing so
+  // a multi-job inbox doesn't produce front+front / back+back pairs from
+  // interleaved createdTime ordering. Returns a list with possible
+  // `null` slots (padding after odd-count groups); those slots produce
+  // orphan pairs and never cross a batch boundary.
+  const files: (DriveImageFile | null)[] = groupFilesByDuplexBatch(dedupFiles);
+
+  // Real-file count drives both the DB `fileCount` and the early-exit
+  // guard. Padding slots don't count.
+  const realFileCount = files.reduce((n, f) => n + (f ? 1 : 0), 0);
+  if (realFileCount === 0) {
     await db.update(scanBatches).set({ fileCount: 0 }).where(eq(scanBatches.id, batch.id));
     return [];
   }
-  await db.update(scanBatches).set({ fileCount: files.length }).where(eq(scanBatches.id, batch.id));
+  await db.update(scanBatches).set({ fileCount: realFileCount }).where(eq(scanBatches.id, batch.id));
 
   // Phase 1: download + EXIF normalize + orient + classify every page
   // 4-wide. Each page is stored in a position-indexed slot. After every
@@ -472,6 +482,12 @@ async function discoverAndPlanItems(
   // This streams pairs into Phase 2 instead of waiting for the entire
   // Phase 1 loop to finish.
   const pages: (ScanPage<DriveImageFile> | undefined)[] = new Array(files.length);
+  // Slots created by groupFilesByDuplexBatch's odd-group padding. These
+  // are "done but absent" — the pair logic must treat them as missing
+  // (so the sibling becomes a trailing orphan) without waiting for any
+  // Phase 1 work to land in them.
+  const paddingSlots = new Set<number>();
+  for (let i = 0; i < files.length; i++) if (files[i] === null) paddingSlots.add(i);
   const inserted: ScanBatchItem[] = [];
   // Tracks which pair indices (keyed by leftIdx) have already been emitted
   // so we can't accidentally insert the same pair row twice. Without this,
@@ -503,8 +519,12 @@ async function discoverAndPlanItems(
     const leftIdx = forPosition % 2 === 1 ? forPosition - 1 : forPosition - 2;
     const rightIdx = leftIdx + 1;
     if (emittedPairs.has(leftIdx)) return;
+    // Padding slots (from odd-count duplex groups) act as "absent": the
+    // partner slot is treated as a trailing orphan, never as a real page.
+    if (paddingSlots.has(leftIdx)) return; // padding never anchors a pair
     const left = pages[leftIdx];
-    const rightInRange = rightIdx < files.length;
+    const rightIsPadding = paddingSlots.has(rightIdx);
+    const rightInRange = rightIdx < files.length && !rightIsPadding;
     const right = rightInRange ? pages[rightIdx] : null;
     if (!left) return;
     if (rightInRange && !right) return;
@@ -551,6 +571,15 @@ async function discoverAndPlanItems(
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
     const position = i + 1;
+    if (file === null) {
+      // Padding slot from groupFilesByDuplexBatch — schedule a no-op
+      // turn so its partner can flush as a trailing orphan via the
+      // normal mutex-protected emit path.
+      phase1Queue.add(async () => {
+        await withPairLock(() => maybeEmitPair(position));
+      });
+      continue;
+    }
     phase1Queue.add(async () => {
       const tDownload = Date.now();
       try {
