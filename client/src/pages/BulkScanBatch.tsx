@@ -36,6 +36,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { cn } from "@/lib/utils";
+import type { Player } from "@shared/players";
 
 type ItemStatus = "pending" | "processing" | "auto_saved" | "review" | "skipped" | "failed";
 
@@ -555,8 +556,23 @@ function ReviewCard({
   // When the item changes (user navigates between review items) reset edits
   // back to the analyzer snapshot. Keep this in one place — if we miss a
   // field we'd carry stale state across items.
+  // Multi-player snapshots: render the joined "First Last / First Last"
+  // string in the editable input so the dealer sees both names. When the
+  // text is left unchanged on save, we forward snapshot.players[] verbatim
+  // so vintage subset cards (1984 Topps Living Legends, N.L. Strikeout
+  // Leaders, etc.) keep both players through review-save.
+  const snapshotPlayers: Player[] | null = Array.isArray(snapshot.players) && snapshot.players.length > 0
+    ? (snapshot.players as Player[])
+    : null;
+  const seededPlayerText = snapshotPlayers && snapshotPlayers.length > 1
+    ? snapshotPlayers
+        .map((p) => [p.firstName?.trim() ?? "", p.lastName?.trim() ?? ""].filter(Boolean).join(" "))
+        .filter(Boolean)
+        .join(" / ")
+    : [snapshot.playerFirstName, snapshot.playerLastName].filter(Boolean).join(" ");
+
   useEffect(() => {
-    setPlayer([snapshot.playerFirstName, snapshot.playerLastName].filter(Boolean).join(" "));
+    setPlayer(seededPlayerText);
     setYear(typeof snapshot.year === "number" ? String(snapshot.year) : snapshot.year || "");
     setBrand(snapshot.brand || "");
     setCardNumber(snapshot.cardNumber || "");
@@ -578,13 +594,27 @@ function ReviewCard({
 
   const handleSave = () => {
     const trimmed = player.trim();
+    // If the dealer left the player text unchanged AND the snapshot has a
+    // multi-player array, forward the array verbatim so /api/bulk-scan/
+    // review/:itemId/save can rebuild the joined Sheet cell. Legacy
+    // first/last mirror primaryPlayer for back-compat with existing
+    // server merge logic.
+    const dealerEditedPlayer = trimmed !== seededPlayerText.trim();
+    const playersToForward: Player[] | undefined = !dealerEditedPlayer && snapshotPlayers && snapshotPlayers.length > 1
+      ? snapshotPlayers
+      : undefined;
     const [first, ...rest] = trimmed.split(/\s+/).filter(Boolean);
     const last = rest.join(" ");
     const parsedYear = year ? Number(year) : null;
     const parsedValue = estimatedValue ? Number(estimatedValue) : null;
     onSave({
-      playerFirstName: first || null,
-      playerLastName: last || null,
+      playerFirstName: playersToForward
+        ? (playersToForward[0]?.firstName || null)
+        : (first || null),
+      playerLastName: playersToForward
+        ? (playersToForward[0]?.lastName || null)
+        : (last || null),
+      ...(playersToForward ? { players: playersToForward } : {}),
       year: Number.isFinite(parsedYear) ? parsedYear : null,
       brand: brand || null,
       cardNumber: cardNumber || null,
