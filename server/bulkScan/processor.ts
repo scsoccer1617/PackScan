@@ -35,13 +35,13 @@ import { listInboxImages, downloadFile, moveFile, type DriveImageFile } from './
 import { or, isNotNull } from 'drizzle-orm';
 import { classifyCardSide } from './sideClassifier';
 import { detectOrientation } from './orientation';
-import { pairPages, type ScanPage, type PairedScan } from './pairing';
+import { pairPages, groupFilesByDuplexBatch, type ScanPage, type PairedScan } from './pairing';
 import { evaluateConfidence, isCardDbCorroboration } from './confidenceGate';
 import { BatchTimingsRecorder } from './timingsRecorder';
 import { normalizeImageOrientation } from '../dualSideOCR';
 import { lookupCard as cardDbLookup } from '../cardDatabaseService';
 import { isCardDbLookupEnabled } from '../featureFlags';
-import { appendCardRow } from '../googleSheets';
+import { appendCardRow, appendCardRowsBatch, type CardRowInput } from '../googleSheets';
 import { getEbaySearchUrl } from '../ebayService';
 import { getScanQuota, incrementScanCount } from '../scanQuota';
 import { logUserScan, type ScanFieldValues } from '../userScans';
@@ -196,6 +196,80 @@ export async function resumeRunningBatches(): Promise<number> {
   return stuck.length;
 }
 
+// ── Sheets append queue ──────────────────────────────────────────────────
+//
+// Per-batch buffer for auto_save Sheet writes. Replaces the per-pair
+// appendCardRow call so a 64-card batch makes ~3 batched API requests
+// instead of 64 individual ones. Stays well under the
+// 60-write-per-minute-per-user quota that was causing late pairs in
+// large batches to 429-fail and demote to review.
+//
+// Caller flow:
+//   1. processItem hits its auto_save branch
+//   2. processItem calls queue.enqueue(item.id, card) and awaits the
+//      returned promise (resolves on success, rejects on flush failure)
+//   3. queue accumulates rows; flushes when CHUNK_SIZE rows are buffered
+//      OR FLUSH_INTERVAL_MS has elapsed since the first buffered row OR
+//      runBatch calls queue.drain() at end-of-batch
+//   4. flush calls appendCardRowsBatch (rate-limit-guarded + 429 retry)
+//      and resolves/rejects each enqueued promise based on the API
+//      result. On failure every row in the chunk is rejected with the
+//      same error so processItem demotes-to-review like before.
+class SheetsAppendQueue {
+  private readonly userId: number;
+  private buffer: { itemId: number; card: CardRowInput; resolve: () => void; reject: (e: Error) => void }[] = [];
+  private timer: NodeJS.Timeout | null = null;
+  private flushing: Promise<void> = Promise.resolve();
+  private static readonly CHUNK_SIZE = 25;
+  private static readonly FLUSH_INTERVAL_MS = 3_000;
+
+  constructor(userId: number) {
+    this.userId = userId;
+  }
+
+  enqueue(itemId: number, card: CardRowInput): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      this.buffer.push({ itemId, card, resolve, reject });
+      if (this.buffer.length >= SheetsAppendQueue.CHUNK_SIZE) {
+        this.scheduleFlush(0);
+      } else if (!this.timer) {
+        this.timer = setTimeout(() => this.scheduleFlush(0), SheetsAppendQueue.FLUSH_INTERVAL_MS);
+      }
+    });
+  }
+
+  /** Drain on end-of-batch. Resolves once all queued rows have been flushed. */
+  async drain(): Promise<void> {
+    this.scheduleFlush(0);
+    await this.flushing;
+  }
+
+  private scheduleFlush(_delay: number): void {
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+    // Chain onto the previous flush so chunks don't overlap.
+    this.flushing = this.flushing.then(() => this.flushOnce());
+  }
+
+  private async flushOnce(): Promise<void> {
+    if (this.buffer.length === 0) return;
+    const slice = this.buffer.splice(0, SheetsAppendQueue.CHUNK_SIZE);
+    try {
+      await appendCardRowsBatch(this.userId, slice.map((s) => s.card));
+      for (const s of slice) s.resolve();
+    } catch (err: any) {
+      const e = err instanceof Error ? err : new Error(String(err));
+      for (const s of slice) s.reject(e);
+    }
+    // If more rows arrived (or remained), keep draining.
+    if (this.buffer.length > 0) {
+      this.flushing = this.flushing.then(() => this.flushOnce());
+    }
+  }
+}
+
 // ── Worker ───────────────────────────────────────────────────────────────
 
 /**
@@ -229,6 +303,11 @@ export async function runBatch(batchId: number): Promise<void> {
   try {
     let processed = 0;
     let reviews = 0;
+    // Per-batch sheets append queue. Auto-save pairs hand rows to this
+    // queue and await the resulting promise; the queue flushes in
+    // chunks (CHUNK_SIZE or FLUSH_INTERVAL_MS) via the rate-limit-guarded
+    // appendCardRowsBatch. drain() runs at end-of-batch below.
+    const sheetsQueue = new SheetsAppendQueue(batch.userId);
     // Beta scan quota: track remaining headroom locally so we can stop the
     // loop cleanly the moment we run out, without making a DB round-trip
     // before every item. We re-fetch once at the top of the batch and keep
@@ -315,7 +394,7 @@ export async function runBatch(batchId: number): Promise<void> {
         timings.recordPairUpdate(pairKey, { startedAt: Date.now() });
         const tPair = Date.now();
         try {
-          const outcome = await processItem(batch, item, timings, pairKey);
+          const outcome = await processItem(batch, item, timings, pairKey, sheetsQueue);
           timings.recordPairUpdate(pairKey, { totalProcessMs: Date.now() - tPair });
           await incrementScanCount(batch.userId);
           await withCounterLock(async () => {
@@ -377,6 +456,11 @@ export async function runBatch(batchId: number): Promise<void> {
       }, timings);
     }
     await queue.onIdle();
+    // Flush any auto_save rows that are still buffered (last partial
+    // chunk and/or rows that arrived after the final timer-based flush).
+    // processItem's promises must all resolve/reject before we mark the
+    // batch completed so DB row statuses are accurate.
+    await sheetsQueue.drain();
     if (quotaHit) {
       console.log(`[bulkScan] Batch ${batchId} reached scan quota for user ${batch.userId}; remaining items marked skipped.`);
     }
@@ -452,17 +536,27 @@ async function discoverAndPlanItems(
     if (row.back) seenFileIds.add(row.back);
     if (row.front) seenFileIds.add(row.front);
   }
-  const files = rawFiles.filter(f => !seenFileIds.has(f.id));
-  const skipped = rawFiles.length - files.length;
+  const dedupFiles = rawFiles.filter(f => !seenFileIds.has(f.id));
+  const skipped = rawFiles.length - dedupFiles.length;
   if (skipped > 0) {
     console.log(`[bulkScan] Batch ${batch.id}: skipping ${skipped} previously-seen file(s) in inbox.`);
   }
 
-  if (files.length === 0) {
+  // Group Epson duplex pages by their filename prefix BEFORE pairing so
+  // a multi-job inbox doesn't produce front+front / back+back pairs from
+  // interleaved createdTime ordering. Returns a list with possible
+  // `null` slots (padding after odd-count groups); those slots produce
+  // orphan pairs and never cross a batch boundary.
+  const files: (DriveImageFile | null)[] = groupFilesByDuplexBatch(dedupFiles);
+
+  // Real-file count drives both the DB `fileCount` and the early-exit
+  // guard. Padding slots don't count.
+  const realFileCount = files.reduce((n, f) => n + (f ? 1 : 0), 0);
+  if (realFileCount === 0) {
     await db.update(scanBatches).set({ fileCount: 0 }).where(eq(scanBatches.id, batch.id));
     return [];
   }
-  await db.update(scanBatches).set({ fileCount: files.length }).where(eq(scanBatches.id, batch.id));
+  await db.update(scanBatches).set({ fileCount: realFileCount }).where(eq(scanBatches.id, batch.id));
 
   // Phase 1: download + EXIF normalize + orient + classify every page
   // 4-wide. Each page is stored in a position-indexed slot. After every
@@ -472,6 +566,12 @@ async function discoverAndPlanItems(
   // This streams pairs into Phase 2 instead of waiting for the entire
   // Phase 1 loop to finish.
   const pages: (ScanPage<DriveImageFile> | undefined)[] = new Array(files.length);
+  // Slots created by groupFilesByDuplexBatch's odd-group padding. These
+  // are "done but absent" — the pair logic must treat them as missing
+  // (so the sibling becomes a trailing orphan) without waiting for any
+  // Phase 1 work to land in them.
+  const paddingSlots = new Set<number>();
+  for (let i = 0; i < files.length; i++) if (files[i] === null) paddingSlots.add(i);
   const inserted: ScanBatchItem[] = [];
   // Tracks which pair indices (keyed by leftIdx) have already been emitted
   // so we can't accidentally insert the same pair row twice. Without this,
@@ -503,8 +603,12 @@ async function discoverAndPlanItems(
     const leftIdx = forPosition % 2 === 1 ? forPosition - 1 : forPosition - 2;
     const rightIdx = leftIdx + 1;
     if (emittedPairs.has(leftIdx)) return;
+    // Padding slots (from odd-count duplex groups) act as "absent": the
+    // partner slot is treated as a trailing orphan, never as a real page.
+    if (paddingSlots.has(leftIdx)) return; // padding never anchors a pair
     const left = pages[leftIdx];
-    const rightInRange = rightIdx < files.length;
+    const rightIsPadding = paddingSlots.has(rightIdx);
+    const rightInRange = rightIdx < files.length && !rightIsPadding;
     const right = rightInRange ? pages[rightIdx] : null;
     if (!left) return;
     if (rightInRange && !right) return;
@@ -551,6 +655,15 @@ async function discoverAndPlanItems(
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
     const position = i + 1;
+    if (file === null) {
+      // Padding slot from groupFilesByDuplexBatch — schedule a no-op
+      // turn so its partner can flush as a trailing orphan via the
+      // normal mutex-protected emit path.
+      phase1Queue.add(async () => {
+        await withPairLock(() => maybeEmitPair(position));
+      });
+      continue;
+    }
     phase1Queue.add(async () => {
       const tDownload = Date.now();
       try {
@@ -607,6 +720,7 @@ async function processItem(
   item: ScanBatchItem,
   timings?: BatchTimingsRecorder,
   pairKey?: string,
+  sheetsQueue?: SheetsAppendQueue,
 ): Promise<'auto_save' | 'review'> {
   await db.update(scanBatchItems).set({ status: 'processing' }).where(eq(scanBatchItems.id, item.id));
 
@@ -858,27 +972,38 @@ async function processItem(
   const shouldAutoSave = gate.verdict === 'auto_save' && !batch.dryRun;
 
   if (shouldAutoSave) {
+    const card: CardRowInput = {
+      sport: analysis.sport || null,
+      year: typeof analysis.year === 'number' ? analysis.year : null,
+      brand: analysis.brand || null,
+      collection: analysis.collection || null,
+      set: analysis.set || null,
+      cardNumber: analysis.cardNumber || null,
+      cmpNumber: analysis.cmpNumber || null,
+      player: [analysis.playerFirstName, analysis.playerLastName].filter(Boolean).join(' ') || null,
+      variation: analysis.variant || null,
+      serialNumber: analysis.serialNumber || null,
+      isRookieCard: !!analysis.isRookieCard,
+      isAutographed: !!analysis.isAutographed,
+      isNumbered: !!analysis.isNumbered,
+      foilType: analysis.foilType || null,
+      averagePrice: typeof analysis.estimatedValue === 'number' ? analysis.estimatedValue : null,
+      frontImageUrl: null,
+      backImageUrl: null,
+      ebaySearchUrl: typeof analysis.ebaySearchUrl === 'string' ? analysis.ebaySearchUrl : null,
+    };
     try {
-      await appendCardRow(batch.userId, {
-        sport: analysis.sport || null,
-        year: typeof analysis.year === 'number' ? analysis.year : null,
-        brand: analysis.brand || null,
-        collection: analysis.collection || null,
-        set: analysis.set || null,
-        cardNumber: analysis.cardNumber || null,
-        cmpNumber: analysis.cmpNumber || null,
-        player: [analysis.playerFirstName, analysis.playerLastName].filter(Boolean).join(' ') || null,
-        variation: analysis.variant || null,
-        serialNumber: analysis.serialNumber || null,
-        isRookieCard: !!analysis.isRookieCard,
-        isAutographed: !!analysis.isAutographed,
-        isNumbered: !!analysis.isNumbered,
-        foilType: analysis.foilType || null,
-        averagePrice: typeof analysis.estimatedValue === 'number' ? analysis.estimatedValue : null,
-        frontImageUrl: null,
-        backImageUrl: null,
-        ebaySearchUrl: typeof analysis.ebaySearchUrl === 'string' ? analysis.ebaySearchUrl : null,
-      });
+      // Hand the row to the per-batch flusher and wait for ack. The
+      // flusher coalesces up to CHUNK_SIZE rows into a single Sheets
+      // API call, so a 64-card batch makes ~3 requests instead of 64
+      // and never trips the 60-write/min/user quota. Falls back to
+      // direct appendCardRow on the (single-card resume) path where
+      // the queue isn't passed in.
+      if (sheetsQueue) {
+        await sheetsQueue.enqueue(item.id, card);
+      } else {
+        await appendCardRow(batch.userId, card);
+      }
 
       // Best-effort log to user_scans. Auto-save means the confidence gate
       // passed AND the dealer never touched the row — strongest possible

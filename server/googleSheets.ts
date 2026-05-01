@@ -3,6 +3,7 @@ import { OAuth2Client } from 'google-auth-library';
 import { eq, and, desc } from 'drizzle-orm';
 import { db } from '../db';
 import { users, userSheets, type User, type UserSheet } from '../shared/schema';
+import { withSheetsWriteGuard } from './sheetsRateLimit';
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_OAUTH_CLIENT_ID;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
@@ -603,13 +604,15 @@ export async function appendCardRow(
     await applyPriceColumnCurrencyFormat(oauth, sheet.googleSheetId, firstTabId);
   }
   const row = buildRow(card);
-  await sheets.spreadsheets.values.append({
-    spreadsheetId: sheet.googleSheetId,
-    range: 'A1',
-    valueInputOption: 'USER_ENTERED',
-    insertDataOption: 'INSERT_ROWS',
-    requestBody: { values: [row] },
-  });
+  await withSheetsWriteGuard(userId, 'appendCardRow', () =>
+    sheets.spreadsheets.values.append({
+      spreadsheetId: sheet!.googleSheetId,
+      range: 'A1',
+      valueInputOption: 'USER_ENTERED',
+      insertDataOption: 'INSERT_ROWS',
+      requestBody: { values: [row] },
+    }),
+  );
   const sheetUrl = `https://docs.google.com/spreadsheets/d/${sheet.googleSheetId}`;
   // Any new row means the TTL cache for this sheet is stale — clear it so
   // the next aggregate read (e.g. Home reloading /api/collection/summary
@@ -617,6 +620,91 @@ export async function appendCardRow(
   // the 15s TTL.
   invalidateSheetRowsCache(userId, sheet.googleSheetId);
   return { sheet, sheetUrl };
+}
+
+/**
+ * Append multiple card rows in ONE Sheets API write. Used by the bulk
+ * processor's auto_save flow to fold N per-row appends into ⌈N/CHUNK⌉
+ * write requests, keeping us well under the 60-write-per-minute-per-user
+ * quota on big batches.
+ *
+ * Falls through to the same rate-limit + 429 retry guard as
+ * appendCardRow, so a transient quota burst still backs off cleanly.
+ *
+ * On success returns the resolved sheet plus its URL. Caller may pass
+ * `targetSheetRowId` to write to a specific user_sheets row, otherwise
+ * the user's active sheet is used (auto-creating one if needed).
+ */
+export async function appendCardRowsBatch(
+  userId: number,
+  cards: CardRowInput[],
+  targetSheetRowId?: number,
+): Promise<{ sheet: UserSheet; sheetUrl: string; rowsWritten: number }> {
+  if (cards.length === 0) {
+    // No-op — return the active sheet so callers still get a sheetUrl
+    // for downstream logging without writing anything.
+    let sheet: UserSheet | null = targetSheetRowId
+      ? (await db.select().from(userSheets).where(and(eq(userSheets.id, targetSheetRowId), eq(userSheets.userId, userId))).limit(1))[0] || null
+      : await getActiveSheet(userId);
+    if (!sheet) {
+      const created = await ensureDefaultSheetForUser(userId);
+      if (!created) throw new NotConnectedError();
+      sheet = created;
+    }
+    return {
+      sheet,
+      sheetUrl: `https://docs.google.com/spreadsheets/d/${sheet.googleSheetId}`,
+      rowsWritten: 0,
+    };
+  }
+
+  let sheet: UserSheet | null;
+  if (targetSheetRowId) {
+    const [t] = await db.select().from(userSheets).where(and(eq(userSheets.id, targetSheetRowId), eq(userSheets.userId, userId))).limit(1);
+    sheet = t || null;
+  } else {
+    sheet = await getActiveSheet(userId);
+  }
+  if (!sheet) {
+    const created = await ensureDefaultSheetForUser(userId);
+    if (!created) throw new NotConnectedError();
+    sheet = created;
+  }
+  const { oauth } = await getOAuthClient(userId);
+  const sheets = sheetsFor(oauth);
+  await syncHeaderRow(oauth, sheet.googleSheetId);
+  const firstTabId = await getFirstTabSheetId(oauth, sheet.googleSheetId);
+  if (firstTabId != null) {
+    await applyPriceColumnCurrencyFormat(oauth, sheet.googleSheetId, firstTabId);
+  }
+
+  const rows = cards.map(buildRow);
+  // Chunk so a single API call doesn't get rejected for body size on
+  // very large batches (10K dealer scans). 100 rows is well under any
+  // documented limit and keeps the quota gate simple — one request per
+  // chunk regardless of card count.
+  const CHUNK = 100;
+  let written = 0;
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    const slice = rows.slice(i, i + CHUNK);
+    await withSheetsWriteGuard(userId, 'appendCardRowsBatch', () =>
+      sheets.spreadsheets.values.append({
+        spreadsheetId: sheet!.googleSheetId,
+        range: 'A1',
+        valueInputOption: 'USER_ENTERED',
+        insertDataOption: 'INSERT_ROWS',
+        requestBody: { values: slice },
+      }),
+    );
+    written += slice.length;
+  }
+
+  invalidateSheetRowsCache(userId, sheet.googleSheetId);
+  return {
+    sheet,
+    sheetUrl: `https://docs.google.com/spreadsheets/d/${sheet.googleSheetId}`,
+    rowsWritten: written,
+  };
 }
 
 // ── eBay URL backfill (admin) ───────────────────────────────────────────────

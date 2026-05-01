@@ -13,6 +13,104 @@
 
 import type { SideClassification } from './sideClassifier';
 
+/**
+ * Reorder a list of Drive files so that duplex-scanner pages from the
+ * same physical scan job stay contiguous, and odd-count groups don't
+ * spill across the boundary into the next job's pages.
+ *
+ * Background: the Epson duplex scanner saves a stack of pages to one
+ * Drive folder using `Epson_<MMDDYYYY><HHMMSS>(N).<ext>`, where every
+ * file from one scan run shares the same `<MMDDYYYY><HHMMSS>` prefix
+ * and `(N)` increments per page within that run. When a user runs
+ * multiple scan jobs into the same inbox folder before pressing Sync,
+ * the inbox listing returns all files sorted by `createdTime asc`,
+ * which interleaves the second job's `(1), (2), …` between the first
+ * job's pages whenever Drive's createdTime resolution drops them in a
+ * mixed order. The downstream pairing rule pairs `(2k, 2k+1)` over the
+ * GLOBAL list, so cross-job interleaving produces front+front and
+ * back+back pairs.
+ *
+ * Fix: parse the Epson filename, group by prefix, sort within group by
+ * sequence number, and concatenate groups in createdTime order. To
+ * prevent an odd-count group from sucking the first page of the next
+ * group into its pair, we pad odd groups with a `null` slot so the
+ * caller's downstream `pages[]` array picks up a `unpaired_trailing_page`
+ * instead of crossing the boundary.
+ *
+ * Files whose names don't match the Epson pattern fall through
+ * unchanged in their original order — they're paired by the existing
+ * createdTime-asc rule, preserving behaviour for non-Epson scanners.
+ *
+ * Returned array may contain `null` entries (one per odd-group
+ * trailing slot). Callers MUST handle nulls by emitting an orphan
+ * pair for that index (no download, no probe).
+ */
+export interface DuplexFile {
+  id: string;
+  name: string;
+  createdTime: string;
+}
+
+const EPSON_NAME_RE = /^(.+?)\((\d+)\)\.(jpe?g|png)$/i;
+
+export function groupFilesByDuplexBatch<F extends DuplexFile>(files: F[]): (F | null)[] {
+  if (files.length === 0) return [];
+
+  type Group = {
+    prefix: string;
+    items: { file: F; seq: number }[];
+    /** earliest createdTime across the group's files; used to order groups. */
+    earliestCreatedTime: string;
+  };
+  const groups = new Map<string, Group>();
+  const unmatched: F[] = [];
+
+  for (const f of files) {
+    const m = EPSON_NAME_RE.exec(f.name);
+    if (!m) {
+      unmatched.push(f);
+      continue;
+    }
+    const prefix = m[1];
+    const seq = parseInt(m[2], 10);
+    if (!Number.isFinite(seq)) {
+      unmatched.push(f);
+      continue;
+    }
+    let g = groups.get(prefix);
+    if (!g) {
+      g = { prefix, items: [], earliestCreatedTime: f.createdTime };
+      groups.set(prefix, g);
+    }
+    g.items.push({ file: f, seq });
+    if (f.createdTime < g.earliestCreatedTime) g.earliestCreatedTime = f.createdTime;
+  }
+
+  // No Epson-style filenames at all → preserve original order so non-Epson
+  // scanners (Brother, single-side iPhone capture, etc.) keep their
+  // existing pairing behaviour.
+  if (groups.size === 0) return files.slice();
+
+  const ordered = Array.from(groups.values()).sort((a, b) => {
+    if (a.earliestCreatedTime !== b.earliestCreatedTime) {
+      return a.earliestCreatedTime < b.earliestCreatedTime ? -1 : 1;
+    }
+    return a.prefix < b.prefix ? -1 : a.prefix > b.prefix ? 1 : 0;
+  });
+
+  const out: (F | null)[] = [];
+  for (const g of ordered) {
+    g.items.sort((a, b) => a.seq - b.seq);
+    for (const it of g.items) out.push(it.file);
+    // Pad odd-count groups with a null slot so the next group starts on
+    // an even boundary and can't be sucked into a cross-batch pair.
+    if (g.items.length % 2 === 1) out.push(null);
+  }
+  // Append any non-Epson stragglers at the tail in their input order.
+  for (const f of unmatched) out.push(f);
+  return out;
+}
+
 export interface ScanPage<FileT> {
   /** 1-based page index in scan order (createdTime asc). */
   position: number;
