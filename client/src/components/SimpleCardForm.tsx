@@ -16,6 +16,7 @@ import { useToast } from "@/hooks/use-toast";
 import OCRResults from "./OCRResults";
 import EbayValueLookup from "./EbayValueLookup";
 import ServerEbayLookup from "./ServerEbayLookup";
+import PlayersFieldset from "./PlayersFieldset";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 
@@ -37,6 +38,7 @@ export default function SimpleCardForm() {
       sport: "",
       playerFirstName: "",
       playerLastName: "",
+      players: [{ firstName: "", lastName: "" }],
       brand: "Topps",
       collection: "",
       cardNumber: "",
@@ -358,33 +360,14 @@ export default function SimpleCardForm() {
                     )}
                   />
                 
-                  <FormField
-                    control={form.control}
-                    name="playerFirstName"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>First Name <span className="text-red-500">*</span></FormLabel>
-                        <FormControl>
-                          <Input placeholder="First name" {...field} />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                  
-                  <FormField
-                    control={form.control}
-                    name="playerLastName"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Last Name <span className="text-red-500">*</span></FormLabel>
-                        <FormControl>
-                          <Input placeholder="Last name" {...field} />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
+                  {/* Multi-player support: one row per named player on the
+                      card front. Element 0 mirrors playerFirstName/Last so
+                      legacy readers (eBay query, search, MOLO) keep working
+                      unchanged. Vintage Topps subsets like "1971 N.L.
+                      Strikeout Leaders" need the extra rows. */}
+                  <div className="md:col-span-2">
+                    <PlayersFieldset form={form} />
+                  </div>
                 </div>
                 
                 <div className="form-grid mb-4">

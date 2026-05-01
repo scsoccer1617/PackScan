@@ -258,6 +258,16 @@ export interface CardRowInput {
   cardNumber?: string | null;
   cmpNumber?: string | null;
   player?: string | null;
+  /**
+   * Multi-player card support. When set with length >= 1, the row's First
+   * Name / Last Name cells are written from this array using " / " as the
+   * delimiter (e.g. firstName join "Tom / Ferguson / Bill", lastName join
+   * "Seaver / Jenkins / Niekro"). Single-player flows that pass `player`
+   * (a "First Last" string) still work unchanged when this is undefined.
+   * Always exactly ONE row per card — the SheetsAppendQueue and
+   * appendCardRowsBatch paths from PR #199 keep their per-card cardinality.
+   */
+  players?: Array<{ firstName: string; lastName: string; role?: string }> | null;
   variation?: string | null;
   serialNumber?: string | null;
   isRookieCard?: boolean | null;
@@ -296,11 +306,27 @@ export function buildRow(input: CardRowInput): (string | number)[] {
       : Number(input.averagePrice);
     price = Number.isFinite(n) ? n : '';
   }
+  // Multi-player card support: when `players` is provided, the Player cell
+  // joins each "First Last" with " / " (e.g. "Tom Seaver / Ferguson Jenkins
+  // / Phil Niekro" for 1971 N.L. Strikeout Leaders). Single-player flows
+  // pass `player` directly and we emit it unchanged. The Sheet schema is
+  // unchanged — still ONE row per card, ONE "Player" column — so PR #199's
+  // appendCardRowsBatch / SheetsAppendQueue cardinality is preserved.
+  let playerCell: string;
+  if (input.players && input.players.length > 0) {
+    playerCell = input.players
+      .map((p) => `${(p.firstName ?? '').trim()} ${(p.lastName ?? '').trim()}`.trim())
+      .filter((s) => s.length > 0)
+      .join(' / ');
+    if (!playerCell) playerCell = (input.player ?? '').toString();
+  } else {
+    playerCell = (input.player ?? '').toString();
+  }
   // Order MUST match SHEET_HEADERS exactly.
   return [
     dateScanned,
     input.sport ?? '',
-    input.player ?? '',
+    playerCell,
     input.year ?? '',
     input.brand ?? '',
     input.cardNumber ?? '',

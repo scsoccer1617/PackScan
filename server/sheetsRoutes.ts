@@ -145,6 +145,19 @@ export function registerSheetRoutes(app: Express) {
       player: z.string().optional().nullable(),
       playerFirstName: z.string().optional().nullable(),
       playerLastName: z.string().optional().nullable(),
+      // Multi-player card support. Optional; when present and non-empty,
+      // the Sheet's Player cell is built from this array as
+      // "First Last / First Last / …". Single-player flows omit it.
+      players: z
+        .array(
+          z.object({
+            firstName: z.string(),
+            lastName: z.string(),
+            role: z.string().optional().nullable(),
+          }),
+        )
+        .optional()
+        .nullable(),
       variation: z.string().optional().nullable(),
       variant: z.string().optional().nullable(),
       serialNumber: z.string().optional().nullable(),
@@ -185,9 +198,28 @@ export function registerSheetRoutes(app: Express) {
     try {
       const parsed = appendSchema.parse(req.body);
       const c = parsed.card;
-      const player = c.player
-        || [c.playerFirstName, c.playerLastName].filter(Boolean).join(' ').trim()
-        || '';
+      // For multi-player cards, build the "First Last / First Last" string
+      // from players[] up front so the eBay URL builder (which still takes a
+      // single `player` argument) sees the joined form. The Sheets row
+      // builder ALSO consumes players[] directly via CardRowInput.players
+      // — when both are set it prefers the array, but we keep `player` in
+      // sync as a defensive fallback.
+      const playersForRow: Array<{ firstName: string; lastName: string; role?: string }> | null =
+        Array.isArray(c.players) && c.players.length > 0
+          ? c.players.map((p) => ({
+              firstName: (p.firstName ?? '').trim(),
+              lastName: (p.lastName ?? '').trim(),
+              role: p.role ?? undefined,
+            }))
+          : null;
+      const player = playersForRow
+        ? playersForRow
+            .map((p) => `${p.firstName} ${p.lastName}`.trim())
+            .filter((s) => s.length > 0)
+            .join(' / ')
+        : (c.player
+          || [c.playerFirstName, c.playerLastName].filter(Boolean).join(' ').trim()
+          || '');
       const variation = c.variation || c.variant || '';
       // Build absolute URLs for image links so they work outside the app.
       const baseUrl = `${req.protocol}://${req.get('host')}`;
@@ -222,6 +254,7 @@ export function registerSheetRoutes(app: Express) {
         cardNumber: c.cardNumber ?? null,
         cmpNumber: c.cmpNumber ?? null,
         player,
+        players: playersForRow,
         variation,
         serialNumber: c.serialNumber ?? null,
         isRookieCard: c.isRookieCard ?? false,

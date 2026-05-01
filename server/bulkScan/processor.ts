@@ -981,6 +981,13 @@ async function processItem(
       cardNumber: analysis.cardNumber || null,
       cmpNumber: analysis.cmpNumber || null,
       player: [analysis.playerFirstName, analysis.playerLastName].filter(Boolean).join(' ') || null,
+      // Forward the multi-player array (when present) so the Sheet's Player
+      // cell joins each "First Last" with " / " for vintage Topps subsets
+      // (1971 N.L. Strikeout Leaders, 1968 Batting Leaders, etc.). One row
+      // per card is preserved — players[] only changes the cell text.
+      players: Array.isArray((analysis as any).players) && (analysis as any).players.length > 0
+        ? ((analysis as any).players as Array<{ firstName: string; lastName: string; role?: string }>)
+        : null,
       variation: analysis.variant || null,
       serialNumber: analysis.serialNumber || null,
       isRookieCard: !!analysis.isRookieCard,
