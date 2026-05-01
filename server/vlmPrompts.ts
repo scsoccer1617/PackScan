@@ -7,7 +7,7 @@
  * instructions Gemini was given.
  */
 
-export const VLM_PROMPT_VERSION = '2026-05-01.2';
+export const VLM_PROMPT_VERSION = '2026-05-01.3';
 
 /**
  * System prompt: tells the VLM what role it plays and the card-domain
@@ -115,6 +115,15 @@ CARD-DOMAIN RULES:
       If multiple \u00a9 lines coexist (e.g. Topps + MLBPA + Players Inc.), pick the publisher's line (the one with the manufacturer name); the others are licensing notices.
       Write the imprint string verbatim into yearPrintedRaw.
 
+  (b1) DONRUSS / LEAF 1981\u20131993 FRONT-WORDMARK OVERRIDE. When the brand is Donruss or Leaf AND the \u00a9 imprint year on the back falls in 1980\u20131992, the imprint is OFTEN off-by-one because production began in late autumn of the prior year (the "1989 LEAF, INC." line on a 1990 Donruss base is the canonical case). Before accepting (b)'s imprint year, look at the FRONT for the design's own wordmark:
+        "Donruss '90"  / "DONRUSS '90"  / "DONRUSS 90"  \u2192 year=1990
+        "Donruss '89"  / "DONRUSS '89"  / "DONRUSS 89"  \u2192 year=1989
+        "Donruss '91"  / "DONRUSS '91"  \u2192 year=1991
+        (analogously for Leaf and Score in this era when the front design prints a YY-style wordmark)
+      If the FRONT wordmark resolves a year, that year wins over the back \u00a9 imprint. Write the imprint string (e.g. "\u00a91989 LEAF, INC.") into yearPrintedRaw \u2014 NOT the front wordmark \u2014 because yearPrintedRaw is meant to record what's verbatim on the back legal strip.
+      Concrete cue for 1990 Donruss base: the FRONT is the red-and-blue ribbon design with "DONRUSS '90" along the right edge or top corner, while the BACK prints "\u00a91989 LEAF, INC." \u2014 year=1990 in this case, NOT 1989.
+      Only override when the FRONT wordmark is legible. If the FRONT wordmark is missing, smudged, or cropped, fall back to (b) and accept the \u00a9 imprint as-is.
+
   (c) Older / vintage cards with no footer range and no \u00a9 year. Use the LATEST stat-row season + 1.
         Stats end at 1968 \u2192 year=1969
         Stats end at 1979 \u2192 year=1980
@@ -126,7 +135,7 @@ CARD-DOMAIN RULES:
 
   Then walk the additional rules below ONLY when STEP 0 cannot resolve a year, OR when an era-specific exception below explicitly overrides the \u00a9 imprint.
 
-  1) DONRUSS / LEAF 1981\u20131993 BASEBALL EXCEPTION. The publisher imprint on these era cards is often off by one year because production began in late autumn of the prior year. A 1991 Donruss base card commonly prints "\u00a91990 LEAF, INC." \u2014 the actual card year is 1991. When the brand is Donruss or Leaf and the imprinted \u00a9 year falls in 1980\u20131992 (and no season range is present), treat the imprint year as low confidence and prefer a year detected from the FRONT (set logo / design year) when available.
+  1) DONRUSS / LEAF 1981\u20131993 BASEBALL EXCEPTION (now mostly handled by STEP 0(b1) above). The publisher imprint on these era cards is often off by one year because production began in late autumn of the prior year. A 1991 Donruss base card commonly prints "\u00a91990 LEAF, INC." \u2014 the actual card year is 1991. When the brand is Donruss or Leaf and the imprinted \u00a9 year falls in 1980\u20131992 (and no season range is present), treat the imprint year as low confidence and prefer a year detected from the FRONT (set logo / design year, e.g. "DONRUSS '91") when available. STEP 0(b1) makes this an explicit override; this rule remains as the catch-all for cases where the front wordmark is partially legible but still resolvable.
 
   2) VINTAGE STAT-ROW + 1 CONVENTION (pre-1995 baseball, before same-season stats became the norm). When the back contains a sequence of \u22653 CONSECUTIVE ASCENDING year values that look like stat-row seasons (e.g. "1976 NEW YORK NL" / "1977 NEW YORK NL" / "1978 NEW YORK NL"), and the latest stat year is \u22641990, the card's year is max(stat year) + 1. Example: stat rows ending at 1979 \u2192 year=1980. Do NOT apply this rule on modern cards (1995+) \u2014 modern stats are same-season, so the latest stat year IS the card year minus zero.
 

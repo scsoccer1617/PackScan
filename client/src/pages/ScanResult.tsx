@@ -1481,9 +1481,19 @@ function DetailsTab({
     // never silently drift to NaN or end-year+1.
     const rawYear = draft.year != null ? String(draft.year) : '';
     const parsedYear = rawYear ? parseSeasonYearInput(rawYear) : null;
+    // If the dealer changed the year, drop the VLM's verbatim print
+    // (`yearPrintedRaw`) so `displayYear()` falls back to the canonical
+    // `year` field in the header and the Card-info table. Otherwise the
+    // 1990 Donruss → 1989 imprint trap makes the read view show "1989"
+    // even after the user saves "1990" — the verbatim "© 1989 Donruss"
+    // string outranks the corrected integer in displayYear's preference
+    // order.
+    const yearChanged =
+      parsedYear != null && parsedYear !== cardData.year;
     const patch: Partial<CardFormValues> = {
       ...draft,
       year: parsedYear ?? cardData.year,
+      ...(yearChanged ? { yearPrintedRaw: null } : {}),
     };
     // Multi-player cards: keep `players[0]` in sync with the legacy
     // first/last inputs so the post-save merged record's primary entry
