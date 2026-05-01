@@ -184,9 +184,29 @@ export default function AddToSheetButton({ cardData, averageValue, searchUrl, fr
       );
     },
     onSuccess: (res) => {
+      // Friendly anchor instead of a raw URL — long Sheet URLs were
+      // overflowing the toast on mobile and weren't tappable. The link
+      // opens the Sheet in a new tab; clicking it does NOT dismiss the
+      // toast (the toast still auto-dismisses on its own 5s timer, or
+      // via the always-visible X).
       toast({
         title: 'Saved to Google Sheet',
-        description: `Added to ${res.sheet.title}. Open it: ${res.sheetUrl}`,
+        description: (
+          <span>
+            Added to{' '}
+            <a
+              href={res.sheetUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-medium underline underline-offset-2 hover:opacity-80"
+              data-testid="link-saved-sheet"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {res.sheet.title}
+            </a>
+            .
+          </span>
+        ),
       });
     },
     onError: (err: unknown) => {
