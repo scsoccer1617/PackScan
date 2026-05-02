@@ -849,9 +849,13 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
         scanId: scanId ?? `noscan-${Date.now()}`,
         brand: finalResult.brand,
         year: finalResult.year as any,
-        set: [finalResult.collection, finalResult.set]
-          .filter((s) => typeof s === 'string' && s.trim().length > 0)
-          .join(' · '),
+        // Set column writes ONLY the product-line `set` value (e.g.
+        // "Series One"). Pre-fix this concatenated `collection · set`
+        // (e.g. "Base Set · Series One"), conflating two distinct fields
+        // into the Set column. Collection ("Base Set", "Stars of MLB",
+        // insert subset names) belongs in its own column or downstream
+        // log fields, not mashed into Set.
+        set: typeof finalResult.set === 'string' ? finalResult.set.trim() : '',
         cardNumber: finalResult.cardNumber as any,
         player: playerName,
         detectedColor: visualFoilResult?.foilType ?? '',
