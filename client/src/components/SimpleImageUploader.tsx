@@ -41,6 +41,19 @@ interface SimpleImageUploaderProps {
    * the back-image uploader on /scan, SimpleCardForm).
    */
   onCameraModeChange?: (mode: 'raw' | 'graded') => void;
+  /**
+   * When true, the page-level "Photo Library" button (and its hidden file
+   * input) are omitted. The in-camera Library button inside
+   * CardCameraCapture is unaffected. Used on /scan where the in-camera
+   * pill + library make the page-level button redundant.
+   */
+  hideLibraryButton?: boolean;
+  /**
+   * Optional callback fired when the user dismisses the camera modal via
+   * the X button. Lets the parent decide whether to navigate away (e.g.
+   * back to Home when nothing has been captured yet).
+   */
+  onCameraClose?: () => void;
 }
 
 export default function SimpleImageUploader({
@@ -53,6 +66,8 @@ export default function SimpleImageUploader({
   cameraMode = 'raw',
   onGradedCaptured,
   onCameraModeChange,
+  hideLibraryButton = false,
+  onCameraClose,
 }: SimpleImageUploaderProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [cameraOpen, setCameraOpen] = useState(false);
@@ -125,25 +140,29 @@ export default function SimpleImageUploader({
               : 'Take Photo'}
           </span>
         </Button>
-        <Button
-          type="button"
-          onClick={() => fileInputRef.current?.click()}
-          variant="outline"
-          size="sm"
-          className="w-full"
-        >
-          <Upload className="h-4 w-4 mr-1.5 shrink-0" />
-          <span className="truncate">Photo Library</span>
-        </Button>
+        {!hideLibraryButton && (
+          <Button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            variant="outline"
+            size="sm"
+            className="w-full"
+          >
+            <Upload className="h-4 w-4 mr-1.5 shrink-0" />
+            <span className="truncate">Photo Library</span>
+          </Button>
+        )}
       </div>
 
-      <input
-        type="file"
-        ref={fileInputRef}
-        onChange={handleFileSelect}
-        accept="image/jpeg,image/png,image/heic,image/heif,image/webp"
-        className="hidden"
-      />
+      {!hideLibraryButton && (
+        <input
+          type="file"
+          ref={fileInputRef}
+          onChange={handleFileSelect}
+          accept="image/jpeg,image/png,image/heic,image/heif,image/webp"
+          className="hidden"
+        />
+      )}
 
       <CardCameraCapture
         open={cameraOpen}
@@ -159,7 +178,10 @@ export default function SimpleImageUploader({
           onGradedCaptured?.(cardBody, slabLabel);
           setCameraOpen(false);
         }}
-        onClose={() => setCameraOpen(false)}
+        onClose={() => {
+          setCameraOpen(false);
+          onCameraClose?.();
+        }}
       />
     </div>
   );
