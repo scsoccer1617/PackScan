@@ -185,7 +185,7 @@ export default function Home() {
               const player = id?.player ?? "Unknown card";
               const meta = [id?.year, id?.brand].filter(Boolean).join(" ");
               const ariaParts = [player, meta].filter(Boolean).join(" – ");
-              const href = g.cardId ? `/collection?card=${g.cardId}` : "/collection";
+              const href = `/scans/${g.id}`;
               const hasPrice = typeof g.cachedPrice === "number" && g.cachedPrice > 0;
               return (
                 <Link
