@@ -15,7 +15,7 @@ import { startScanLog } from './scanLogger';
 import { analyzeCardBuffersWithGemini, type GeminiCardResult, VLM_INFO } from './vlmGemini';
 import { applyGeminiToCombined } from './vlmApply';
 import { isCardDbLookupEnabled } from './featureFlags';
-import { pickerSearch, buildPickerQuery, type PickerListing } from './ebayPickerSearch';
+import { pickerSearch, buildPickerQuery, isMultiPlayerSubset, type PickerListing } from './ebayPickerSearch';
 
 // BR-2: identity tuple for the parallel eBay comps query. Built off the
 // post-overlay combinedResult (Gemini-authoritative when present, OCR
@@ -29,6 +29,15 @@ interface EbayQueryIdentity {
   brand: string;
   set: string;
   parallel: string;
+  /** Subset descriptor (e.g. "Team Leaders", "Record Breaker"). Plumbed as
+   *  a separate query token rather than substituting the player slot —
+   *  see Bug B in PR #209. Empty for non-subset cards. */
+  subset: string;
+  /** Number of named players on the card. >1 for multi-player subsets
+   *  (1971 Strikeout Leaders, Topps "Combos", etc.). Drives whether the
+   *  picker keeps the `requirePlayerLastName` precision filter — see
+   *  Bug B in PR #209. */
+  playerCount: number;
 }
 
 // Embedded comps shape carried in the analyze response under data.comps.
@@ -53,12 +62,15 @@ export function extractIdentityForEbay(combined: any): EbayQueryIdentity | null 
   const yearRaw = combined?.year;
   const brand = (combined?.brand ?? '').toString().trim();
   // Subset descriptor (Team Leaders, Record Breaker, Manager, etc.) plumbed
-  // by applyGeminiToCombined via the `_geminiSubset` side-channel. When
-  // present, real eBay listings for these cards are titled with the subset
-  // descriptor (e.g. "1988 Topps Reds Leaders 81") and rarely include the
-  // pictured player's name — so the query uses the subset name in the
-  // quoted slot instead of the player. When absent (subset === null), the
-  // identity tuple is byte-identical to PR #189 behavior.
+  // by applyGeminiToCombined via the `_geminiSubset` side-channel. PR #209
+  // (Bug B): the subset is now passed as a separate query token alongside
+  // the real player name rather than substituting for it, so the picker's
+  // `requirePlayerLastName` precision filter sees the actual surname (or is
+  // dropped entirely for multi-player subsets like Team Leaders/Combos).
+  // The previous behavior — `player = subset || playerName` — caused
+  // last-name "Leaders" to match unrelated Leaders cards averaging far
+  // above the true price, while the Sheet click-through (which AND'd the
+  // real player + subset) returned 0.
   const subset = (combined?._geminiSubset ?? '').toString().trim();
   // Identity gate: a subset card may legitimately have no parseable player
   // name (e.g. multi-player batting leaders), so accept the row when EITHER
@@ -66,18 +78,22 @@ export function extractIdentityForEbay(combined: any): EbayQueryIdentity | null 
   if ((!playerName && !subset) || !cardNumber || yearRaw == null || yearRaw === '' || !brand) {
     return null;
   }
-  // When subset is present, substitute it for the quoted player slot in the
-  // eBay query. The player name is dropped from the search string because
-  // listings for "1988 Topps #81 Reds Leaders" don't typically include
-  // "Eric Davis" in the title.
-  const player = subset || playerName;
+  const playersArr = Array.isArray(combined?.players) ? combined.players : [];
   return {
-    player,
+    // Real player name in the player slot. When the card has no parseable
+    // player (vintage multi-player subset where Gemini returned an empty
+    // player and the subset is descriptor-only), fall back to the subset
+    // string so the query still has *some* descriptor in the player slot.
+    // This still preserves the precision-filter fix because the picker
+    // skips the last-name filter for multi-player subsets.
+    player: playerName || subset,
     cardNumber,
     year: typeof yearRaw === 'number' ? yearRaw : String(yearRaw),
     brand,
     set: (combined?.set ?? '').toString().trim(),
     parallel: (combined?.foilType ?? combined?.variant ?? '').toString().trim(),
+    subset: playerName ? subset : '',
+    playerCount: playersArr.length,
   };
 }
 
@@ -677,14 +693,24 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
               set: ebayIdentity.set,
               cardNumber: ebayIdentity.cardNumber,
               player: ebayIdentity.player,
+              subset: ebayIdentity.subset,
               parallel: ebayIdentity.parallel,
+              excludeParallels: !ebayIdentity.parallel,
             });
             const lastName = ebayIdentity.player.split(/\s+/).pop() ?? null;
             const firstName = ebayIdentity.player.split(/\s+/)[0] ?? null;
+            // Bug B (PR #209): drop the last-name precision filter for
+            // multi-player subsets — Team Leaders / Combos / Duo / Trio /
+            // Battery Mates listings rarely contain any one surname, so
+            // requiring it would zero out otherwise-valid comps. We rely
+            // on card number + subset + year + brand for precision in
+            // those cases.
+            const isMultiPlayer = ebayIdentity.playerCount > 1
+              || isMultiPlayerSubset(ebayIdentity.subset);
             const searchPromise = pickerSearch(query, {
               limit: 5,
               requireCardNumber: ebayIdentity.cardNumber,
-              requirePlayerLastName: lastName,
+              requirePlayerLastName: isMultiPlayer ? null : lastName,
               scannedParallel: ebayIdentity.parallel || null,
               brand: ebayIdentity.brand,
               set: ebayIdentity.set || null,

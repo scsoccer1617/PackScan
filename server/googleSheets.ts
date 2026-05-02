@@ -733,6 +733,100 @@ export async function appendCardRowsBatch(
   };
 }
 
+// ── Price backfill (PR #209) ────────────────────────────────────────────────
+// Narrowly scoped UPDATE-in-place helper for the Avg eBay Price column. The
+// repriceComps endpoint re-runs the picker pipeline against an already-saved
+// row's identity and writes the new average back to column P. We deliberately
+// do NOT route through the appendCardRowsBatch / SheetsAppendQueue path
+// (PR #199 protected it) — those are append-only. This helper only touches
+// one cell per call, so the rate-limit pressure is minimal.
+
+/** Match key used to locate the Sheet row for a given saved item. All
+ *  fields are required — we want a *unique* match, not a fuzzy one. The
+ *  row's identity in the Sheet is the same identity used to build the
+ *  picker query, so the same fields suffice. */
+export interface PriceUpdateMatch {
+  year: number | string | null | undefined;
+  brand: string | null | undefined;
+  cardNumber: string | null | undefined;
+  /** Joined "First Last" or multi-player joined string. Compared case-
+   *  insensitively after trimming so dealer-edited variants ("J.T. Realmuto"
+   *  vs "JT Realmuto") still match. */
+  player: string | null | undefined;
+}
+
+/**
+ * Update column P (Average eBay price) in the user's active sheet for the
+ * single row matching `match`. Returns the number of rows updated (0 or 1
+ * — multiple matches are treated as ambiguous and skipped).
+ *
+ * Uses a single `values.update` API call against the matched row's
+ * `P{rowIndex}` cell, so this counts as one Sheets write regardless of how
+ * many candidate rows the read pulled.
+ */
+export async function updateAvgPriceForRow(
+  userId: number,
+  match: PriceUpdateMatch,
+  newAveragePrice: number,
+): Promise<{ updated: number; rowIndex: number | null; ambiguous: boolean }> {
+  const sheet = await getActiveSheet(userId);
+  if (!sheet) throw new NotConnectedError();
+  const { oauth } = await getOAuthClient(userId);
+  const sheets = sheetsFor(oauth);
+  const got = await sheets.spreadsheets.values.get({
+    spreadsheetId: sheet.googleSheetId,
+    range: `A:${String.fromCharCode(65 + SHEET_HEADERS.length - 1)}`,
+    majorDimension: 'ROWS',
+    valueRenderOption: 'UNFORMATTED_VALUE',
+  });
+  const values = got.data.values || [];
+
+  const targetYear = match.year != null && match.year !== ''
+    ? String(match.year).trim()
+    : '';
+  const targetBrand = (match.brand || '').toString().trim().toLowerCase();
+  const targetCardNum = (match.cardNumber || '').toString().trim().replace(/^#/, '').toLowerCase();
+  const targetPlayer = (match.player || '').toString().trim().toLowerCase();
+
+  if (!targetYear || !targetBrand || !targetCardNum || !targetPlayer) {
+    return { updated: 0, rowIndex: null, ambiguous: false };
+  }
+
+  const matches: number[] = [];
+  for (let i = 1; i < values.length; i++) {
+    const row = values[i] || [];
+    const player = String(row[2] ?? '').trim().toLowerCase();
+    const year = String(row[3] ?? '').trim();
+    const brand = String(row[4] ?? '').trim().toLowerCase();
+    const cardNum = String(row[5] ?? '').trim().replace(/^#/, '').toLowerCase();
+    if (year === targetYear && brand === targetBrand && cardNum === targetCardNum && player === targetPlayer) {
+      matches.push(i + 1); // 1-based sheet row index
+    }
+  }
+
+  if (matches.length === 0) {
+    return { updated: 0, rowIndex: null, ambiguous: false };
+  }
+  if (matches.length > 1) {
+    // Multiple sheet rows share the same identity (e.g. dealer scanned
+    // duplicates). Skip rather than guess — caller logs and surfaces.
+    return { updated: 0, rowIndex: null, ambiguous: true };
+  }
+
+  const rowIndex = matches[0];
+  const priceColumn = String.fromCharCode(65 + PRICE_COLUMN_INDEX); // 'P'
+  await withSheetsWriteGuard(userId, 'updateAvgPriceForRow', () =>
+    sheets.spreadsheets.values.update({
+      spreadsheetId: sheet.googleSheetId,
+      range: `${priceColumn}${rowIndex}`,
+      valueInputOption: 'USER_ENTERED',
+      requestBody: { values: [[Number.isFinite(newAveragePrice) ? newAveragePrice : '']] },
+    }),
+  );
+  invalidateSheetRowsCache(userId, sheet.googleSheetId);
+  return { updated: 1, rowIndex, ambiguous: false };
+}
+
 // ── eBay URL backfill (admin) ───────────────────────────────────────────────
 // One-shot rebuilder for the eBay-URL column. PR #193 introduced a
 // subset-for-player substitution upstream of both URL builders. The Sheet

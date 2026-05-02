@@ -16,7 +16,7 @@
 // The UI layer (PR B) will poll GET /batches/:id for live progress.
 
 import type { Express, Request, Response } from 'express';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import { db } from '@db';
 import { scanBatches, scanBatchItems } from '@shared/schema';
 import { requireAuth } from '../auth';
@@ -27,8 +27,13 @@ import {
   setUserFolders,
 } from '../bulkScan/processor';
 import { getFolderName, fetchThumbnail, listInboxAllFiles } from '../bulkScan/driveClient';
-import { appendCardRow } from '../googleSheets';
+import { appendCardRow, updateAvgPriceForRow } from '../googleSheets';
 import { getEbaySearchUrl } from '../ebayService';
+import {
+  pickerSearch,
+  buildPickerQuery,
+  isMultiPlayerSubset,
+} from '../ebayPickerSearch';
 import { logUserScan, diffScanFields, type ScanFieldValues } from '../userScans';
 
 /**
@@ -752,4 +757,262 @@ export function registerBulkScanRoutes(app: Express): void {
       return res.status(500).json({ error: err?.message || 'save_failed' });
     }
   });
+
+  // ── Reprice comps for a saved item (PR #209) ───────────────────────────
+  // Re-runs the picker pipeline against an already-saved item using its
+  // stored identity (no VLM re-run, no Drive image fetch). Updates the DB
+  // analysisResult with fresh comps + new avg price, then UPDATEs column
+  // P (Average eBay price) on the matching row in the user's active
+  // sheet. The append path (appendCardRowsBatch / SheetsAppendQueue, PR
+  // #199 protected) is intentionally untouched — this writes a single
+  // cell via the dedicated `updateAvgPriceForRow` helper.
+  //
+  // Use case: backfill avg prices on rows scanned before the picker's
+  // parallel-exclusion + subset-precision fixes (Bug A and Bug B in this
+  // PR) landed. The dealer already curated the row in their sheet, so we
+  // never re-touch the player/year/cardNumber/etc. columns.
+  app.post('/api/bulk-scan/items/:itemId/repriceComps', requireAuth, async (req: Request, res: Response) => {
+    const userId = (req.user as any)?.id as number | undefined;
+    if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+    const itemId = parseInt(req.params.itemId, 10);
+    if (!Number.isFinite(itemId)) return res.status(400).json({ error: 'Invalid item id' });
+    const [item] = await db
+      .select()
+      .from(scanBatchItems)
+      .where(eq(scanBatchItems.id, itemId))
+      .limit(1);
+    if (!item) return res.status(404).json({ error: 'Item not found' });
+
+    const [batch] = await db
+      .select()
+      .from(scanBatches)
+      .where(and(eq(scanBatches.id, item.batchId), eq(scanBatches.userId, userId)))
+      .limit(1);
+    if (!batch) return res.status(404).json({ error: 'Batch not found' });
+
+    const result = await repriceItem(userId, item);
+    if (!result.ok) {
+      return res.status(result.status ?? 500).json({ error: result.error });
+    }
+    return res.json({
+      ok: true,
+      itemId,
+      averagePrice: result.averagePrice,
+      activeCount: result.activeCount,
+      query: result.query,
+      sheetUpdate: result.sheetUpdate,
+    });
+  });
+
+  // Batch variant. Body: { itemIds: number[] } (1..50 items).
+  // Each item is repriced independently; partial failures are reported in
+  // the per-item results array but do not abort the batch. We deliberately
+  // cap at 50 per call — the picker calls eBay once per item, so a wide
+  // batch would burn the eBay quota and Sheets write quota equally.
+  app.post('/api/bulk-scan/repriceCompsBatch', requireAuth, async (req: Request, res: Response) => {
+    const userId = (req.user as any)?.id as number | undefined;
+    if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+    const body = (req.body || {}) as { itemIds?: unknown };
+    const ids = Array.isArray(body.itemIds)
+      ? body.itemIds
+          .map((v) => (typeof v === 'number' ? v : parseInt(String(v), 10)))
+          .filter((n) => Number.isFinite(n))
+      : [];
+    if (ids.length === 0) {
+      return res.status(400).json({ error: 'itemIds (non-empty number[]) required' });
+    }
+    if (ids.length > 50) {
+      return res.status(400).json({ error: 'itemIds capped at 50 per call' });
+    }
+    const items = await db
+      .select()
+      .from(scanBatchItems)
+      .where(inArray(scanBatchItems.id, ids));
+
+    // Ownership filter: drop any item whose batch isn't this user's.
+    const batches = await db
+      .select({ id: scanBatches.id })
+      .from(scanBatches)
+      .where(eq(scanBatches.userId, userId));
+    const ownedBatchIds = new Set(batches.map((b) => b.id));
+    const owned = items.filter((it) => ownedBatchIds.has(it.batchId));
+
+    const results: Array<{
+      itemId: number;
+      ok: boolean;
+      averagePrice?: number;
+      activeCount?: number;
+      sheetUpdate?: { updated: number; rowIndex: number | null; ambiguous: boolean };
+      error?: string;
+    }> = [];
+    for (const item of owned) {
+      try {
+        const r = await repriceItem(userId, item);
+        if (r.ok) {
+          results.push({
+            itemId: item.id,
+            ok: true,
+            averagePrice: r.averagePrice,
+            activeCount: r.activeCount,
+            sheetUpdate: r.sheetUpdate,
+          });
+        } else {
+          results.push({ itemId: item.id, ok: false, error: r.error });
+        }
+      } catch (err: any) {
+        results.push({ itemId: item.id, ok: false, error: err?.message || 'reprice_failed' });
+      }
+    }
+    return res.json({ ok: true, total: results.length, results });
+  });
 }
+
+// ── Reprice helpers (PR #209) ───────────────────────────────────────────────
+
+/**
+ * Reprice a single saved item: re-run the picker pipeline using the stored
+ * identity, persist the new comps + average back to the DB row, and
+ * update column P in the user's active sheet. No VLM re-run, no Drive
+ * image fetch — the analyzer's snapshot is the source of truth.
+ *
+ * Returns a discriminated result: `{ ok: true, ... }` on success or
+ * `{ ok: false, error, status? }` for handler-mappable failure modes.
+ */
+async function repriceItem(
+  userId: number,
+  item: { id: number; analysisResult: unknown },
+): Promise<
+  | {
+      ok: true;
+      averagePrice: number;
+      activeCount: number;
+      query: string;
+      sheetUpdate: { updated: number; rowIndex: number | null; ambiguous: boolean };
+    }
+  | { ok: false; error: string; status?: number }
+> {
+  const analysis = (item.analysisResult || {}) as Record<string, any>;
+  const playerFirst = (analysis.playerFirstName ?? '').toString().trim();
+  const playerLast = (analysis.playerLastName ?? '').toString().trim();
+  const playerName = [playerFirst, playerLast].filter(Boolean).join(' ').trim();
+  const cardNumber = (analysis.cardNumber ?? '').toString().trim();
+  const brand = (analysis.brand ?? '').toString().trim();
+  const yearRaw = analysis.year;
+  const yearStr = yearRaw != null && yearRaw !== '' ? String(yearRaw).trim() : '';
+  const subset = (analysis._gemini && typeof analysis._gemini.subset === 'string')
+    ? analysis._gemini.subset.trim()
+    : '';
+  const playersArr = Array.isArray(analysis.players) ? analysis.players : [];
+  const parallel = (analysis.foilType ?? analysis.variant ?? '').toString().trim();
+  const setName = (analysis.set ?? '').toString().trim();
+
+  if (!cardNumber || !brand || !yearStr || (!playerName && !subset)) {
+    return { ok: false, error: 'incomplete_identity', status: 422 };
+  }
+
+  const player = playerName || subset;
+  const isMultiPlayer = playersArr.length > 1 || isMultiPlayerSubset(subset);
+
+  const query = buildPickerQuery({
+    year: yearStr,
+    brand,
+    set: setName,
+    cardNumber,
+    player,
+    subset: playerName ? subset : '',
+    parallel,
+    excludeParallels: !parallel,
+  });
+  const lastName = player.split(/\s+/).pop() ?? null;
+  const firstName = player.split(/\s+/)[0] ?? null;
+
+  const result = await pickerSearch(query, {
+    limit: 5,
+    requireCardNumber: cardNumber,
+    requirePlayerLastName: isMultiPlayer ? null : lastName,
+    scannedParallel: parallel || null,
+    brand,
+    set: setName || null,
+    year: yearStr,
+    playerFirstName: firstName,
+  });
+
+  const active = result.active || [];
+  const averagePrice = active.length > 0
+    ? active.reduce((sum, l) => sum + (Number(l.price) || 0), 0) / active.length
+    : 0;
+
+  // Persist new comps onto the analysisResult snapshot. The append path
+  // (PR #199 protected) is unchanged — this only mutates the DB jsonb.
+  const updatedAnalysis = {
+    ...analysis,
+    estimatedValue: averagePrice,
+    ebayResults: active,
+    comps: { query: result.query, active },
+  };
+  await db
+    .update(scanBatchItems)
+    .set({ analysisResult: updatedAnalysis })
+    .where(eq(scanBatchItems.id, item.id));
+
+  // Update the corresponding Sheet row's Avg Price cell. Best-effort: if
+  // the row can't be located (dealer deleted it, or duplicate-row
+  // ambiguity), the DB-side reprice still stands and the response
+  // surfaces the sheet-update outcome separately.
+  let sheetUpdate: { updated: number; rowIndex: number | null; ambiguous: boolean } = {
+    updated: 0,
+    rowIndex: null,
+    ambiguous: false,
+  };
+  try {
+    sheetUpdate = await updateAvgPriceForRow(
+      userId,
+      {
+        year: yearStr,
+        brand,
+        cardNumber,
+        // The Sheet writes either a single "First Last" string or a
+        // multi-player " / "-joined string into column C. Build both
+        // candidates and try them in priority order.
+        player: buildSheetPlayerCell(playersArr, playerName),
+      },
+      averagePrice,
+    );
+    if (sheetUpdate.updated === 0 && playersArr.length > 1) {
+      // Multi-player rows may have been saved as just the primary "First
+      // Last" if `players` wasn't populated at write time. Fall back.
+      sheetUpdate = await updateAvgPriceForRow(
+        userId,
+        { year: yearStr, brand, cardNumber, player: playerName },
+        averagePrice,
+      );
+    }
+  } catch (err: any) {
+    console.warn(`[bulkScan/reprice] sheet update failed for item ${item.id}: ${err?.message || err}`);
+  }
+
+  return {
+    ok: true,
+    averagePrice,
+    activeCount: active.length,
+    query: result.query,
+    sheetUpdate,
+  };
+}
+
+/** Recreate the same Player cell string the Sheet write path produces, so
+ *  the row matcher in `updateAvgPriceForRow` finds the correct row. */
+function buildSheetPlayerCell(
+  players: Array<{ firstName?: string | null; lastName?: string | null }>,
+  fallback: string,
+): string {
+  if (Array.isArray(players) && players.length > 0) {
+    const joined = players
+      .map((p) => `${(p.firstName ?? '').toString().trim()} ${(p.lastName ?? '').toString().trim()}`.trim())
+      .filter((s) => s.length > 0)
+      .join(' / ');
+    if (joined) return joined;
+  }
+  return fallback;
+}
+
