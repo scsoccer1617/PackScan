@@ -980,7 +980,25 @@ async function processItem(
       set: analysis.set || null,
       cardNumber: analysis.cardNumber || null,
       cmpNumber: analysis.cmpNumber || null,
-      player: [analysis.playerFirstName, analysis.playerLastName].filter(Boolean).join(' ') || null,
+      // Player fallback: prefer the legacy single-name fields when set. For
+      // multi-player subset cards (Team Leaders, Combos, Strikeout Leaders)
+      // the top-level player slots are intentionally empty and the model
+      // fills `players[]` instead — fall back to players[0] so the Sheet's
+      // Player column never reads blank just because the legacy fields
+      // weren't mirrored. buildRow() will still prefer the full players[]
+      // array when forwarded below.
+      player: (() => {
+        const legacy = [analysis.playerFirstName, analysis.playerLastName]
+          .filter(Boolean)
+          .join(' ');
+        if (legacy) return legacy;
+        const arr = Array.isArray((analysis as any).players)
+          ? ((analysis as any).players as Array<{ firstName?: string; lastName?: string }>)
+          : [];
+        if (arr.length === 0) return null;
+        const first = `${(arr[0]?.firstName ?? '').toString().trim()} ${(arr[0]?.lastName ?? '').toString().trim()}`.trim();
+        return first || null;
+      })(),
       // Forward the multi-player array (when present) so the Sheet's Player
       // cell joins each "First Last" with " / " for vintage Topps subsets
       // (1971 N.L. Strikeout Leaders, 1968 Batting Leaders, etc.). One row
