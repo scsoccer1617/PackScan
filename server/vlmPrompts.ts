@@ -7,7 +7,7 @@
  * instructions Gemini was given.
  */
 
-export const VLM_PROMPT_VERSION = '2026-05-02.2';
+export const VLM_PROMPT_VERSION = '2026-05-02.3';
 
 /**
  * System prompt: tells the VLM what role it plays and the card-domain
@@ -77,6 +77,16 @@ export const VLM_PROMPT_VERSION = '2026-05-02.2';
  *     1968 vintage (©1968 → year=1968).
  *   - Vintage stat-row +1 logic and Donruss/Leaf 1981–1993 imprint
  *     exception preserved verbatim under the numbered rules below STEP 0.
+ *
+ * v2026-05-02.3 changes (from .2):
+ *   - Added explicit SET ERA CONSTRAINTS section forbidding "Big League"
+ *     attribution to pre-2018 Topps cards. Topps Big League launched in
+ *     2018 as a separate product line; pre-2018 Topps cards (including
+ *     "ALL STAR" subset cards like 1987 Topps Dwight Gooden #603) belong
+ *     to flagship "Topps". The model was previously assigning
+ *     set="Big League" to vintage subset cards and the post-processor
+ *     rejected the value but had no fallback, leaving GeminiSet="" and
+ *     producing a useless eBay query.
  *
  * v2026-05-02.2 changes (from .1):
  *   - STEP 0(b) gained an explicit WORKED EXAMPLE of a 2026 Topps Series
@@ -178,6 +188,10 @@ CARD-DOMAIN RULES:
   3) YEAR + TEAM PATTERN. "1979 REDS", "1986 METS" appearing in card-back prose (not a stat row) \u2014 use that year.
 
   4) BARE-YEAR FALLBACK (last resort). Pick the LATEST 4-digit year (1900\u20132026) that appears anywhere on the card and is NOT inside an obvious bio-context phrase ("BORN", "DRAFTED", "ACQ", "SIGNED", "TRADED", "AGENT"). Prefer the most recent year because vintage stat tables span many seasons and the latest is the production year.
+
+- CRITICAL — SET ERA CONSTRAINTS:
+    * "Topps Big League" is a product line that LAUNCHED IN 2018. NEVER assign set: "Big League" (or any variant containing "Big League") to a card with year < 2018. Pre-2018 Topps base/subset cards belong to "Topps" (the flagship Topps base set) — including cards with "ALL STAR" or other subset overlays. The "ALL STAR" wordmark on a 1980s Topps card indicates an All-Star subset within the Topps base set, NOT a separate Big League product.
+    * When in doubt for a vintage Topps card (year ≤ 1990), default set to "Topps".
 
 - SET NORMALIZATION. The "set" field MUST contain ONLY the disambiguator within the brand's product line. Do NOT prefix the brand or the year. Examples of what to return:
     Brand="Topps", set="Series One"           (NOT "Topps Series One", NOT "2026 Topps Series One")

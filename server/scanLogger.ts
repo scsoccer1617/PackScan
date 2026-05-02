@@ -72,6 +72,19 @@ const HEADERS = [
   // ensureHeadersOnce() will extend the header row to cover this on first
   // boot under the new code.
   'GeminiModel',
+  // eBay picker observability: the final query string sent to eBay, the
+  // candidate count returned, and the title + price of the listing the
+  // picker landed on. Appended at the end so existing rows / column
+  // meanings stay stable — ensureHeadersOnce() extends the header row to
+  // cover these on first boot under the new code. Required after the
+  // 1987 Topps Gooden #603 audit (May 2026): the picker queried
+  // "1987 Topps Big League Dwight Gooden #603" and got 0 results, but the
+  // failed query was only visible in stdout. Capturing it on the scan row
+  // makes that class of failure historically auditable.
+  'EbayQuery',
+  'EbayResultCount',
+  'EbayPickedTitle',
+  'EbayPickedPrice',
 ];
 
 // Truncate large free-text fields so the Sheet stays readable. Cells
@@ -214,6 +227,13 @@ export interface ScanLogFinal {
   // The actual Gemini model that returned the scan (e.g. "gemini-3-flash-preview"
   // or "gemini-2.5-flash" if the fallback fired). Empty when Gemini didn't run.
   geminiModel?: string | null;
+  // eBay picker observability. All fields are best-effort — when the
+  // picker call timed out, errored, or the identity tuple was incomplete,
+  // these are left null/empty and the sheet row still writes cleanly.
+  ebayQuery?: string | null;
+  ebayResultCount?: number | null;
+  ebayPickedTitle?: string | null;
+  ebayPickedPrice?: number | string | null;
 }
 
 export interface ScanLog {
@@ -299,6 +319,15 @@ async function appendRow(ctx: ScanContext, final: ScanLogFinal, indicators: stri
     final.geminiSet ?? '',
     // Which Gemini model answered (primary vs fallback)
     final.geminiModel ?? '',
+    // eBay picker observability tail
+    final.ebayQuery ?? '',
+    final.ebayResultCount != null ? String(final.ebayResultCount) : '',
+    final.ebayPickedTitle ?? '',
+    final.ebayPickedPrice != null
+      ? typeof final.ebayPickedPrice === 'number'
+        ? final.ebayPickedPrice.toFixed(2)
+        : String(final.ebayPickedPrice)
+      : '',
   ];
   await sheets.spreadsheets.values.append({
     spreadsheetId,

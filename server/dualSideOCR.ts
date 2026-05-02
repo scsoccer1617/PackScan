@@ -863,6 +863,37 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
       console.warn('[user_scans] analyze-time log setup failed (non-fatal):', logErr);
     }
 
+    // Resolve the in-flight eBay picker promise BEFORE the scanLog flush
+    // so the Sheet row can record the final query, result count, and the
+    // picked listing's title + price. The promise was launched up above
+    // alongside ensureRequiredFields / audit logging, so by the time we
+    // get here it's usually already resolved — single-scan caps it at
+    // 1500ms (yielding null on timeout, which the columns leave empty);
+    // bulk waits the full picker duration. Failures and timeouts are
+    // already swallowed inside the promise body (returns null).
+    const embeddedCompsStart = Date.now();
+    const embeddedComps = await ebayPromise;
+    const embeddedCompsMs = Date.now() - embeddedCompsStart;
+    console.timeEnd('analyze-ebay-parallel');
+
+    // Top-ranked listing (post-precision-filter, post-relevance-rank). The
+    // picker already returns `active` sorted by score desc, price asc, so
+    // active[0] IS the picked listing — pure passthrough, no scoring or
+    // selection logic added here.
+    const ebayPickedListing =
+      embeddedComps && Array.isArray(embeddedComps.active) && embeddedComps.active.length > 0
+        ? embeddedComps.active[0]
+        : null;
+    const ebayQueryForLog = embeddedComps?.query ?? null;
+    const ebayResultCountForLog = embeddedComps && Array.isArray(embeddedComps.active)
+      ? embeddedComps.active.length
+      : null;
+    const ebayPickedTitleForLog = ebayPickedListing?.title ?? null;
+    const ebayPickedPriceForLog =
+      typeof ebayPickedListing?.price === 'number' && Number.isFinite(ebayPickedListing.price)
+        ? ebayPickedListing.price
+        : null;
+
     // Append a scan-log row to the configured Sheet (no-op when the
     // sink is disabled or unconfigured — see scanLogger.ts). Fire-and-
     // forget; the response is not awaited on the Sheets append.
@@ -987,6 +1018,10 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
           geminiParallel,
           geminiSet,
           geminiModel,
+          ebayQuery: ebayQueryForLog,
+          ebayResultCount: ebayResultCountForLog,
+          ebayPickedTitle: ebayPickedTitleForLog,
+          ebayPickedPrice: ebayPickedPriceForLog,
         });
       } else {
         scanLog.setFinal({
@@ -1002,6 +1037,10 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
           geminiParallel,
           geminiSet,
           geminiModel,
+          ebayQuery: ebayQueryForLog,
+          ebayResultCount: ebayResultCountForLog,
+          ebayPickedTitle: ebayPickedTitleForLog,
+          ebayPickedPrice: ebayPickedPriceForLog,
         });
       }
       scanLog.flush();
@@ -1009,15 +1048,11 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
       console.warn('[scanLogger] flush failed (non-fatal):', logErr);
     }
 
-    // BR-2: await the in-flight eBay promise. By the time we get here,
-    // ensureRequiredFields + the user_scans audit insert dispatch + the
-    // scanLogger flush have all run alongside it, so usually this resolves
-    // immediately. Worst case it's been racing for the full 1500ms cap
-    // (single-scan) or the full pickerSearch duration (bulk context).
-    const embeddedCompsStart = Date.now();
-    const embeddedComps = await ebayPromise;
-    const embeddedCompsMs = Date.now() - embeddedCompsStart;
-    console.timeEnd('analyze-ebay-parallel');
+    // BR-2: the in-flight eBay promise is now awaited above (just before
+    // the scanLog flush) so the Sheet row can capture the picker's final
+    // query + result count + picked listing. `embeddedComps` and
+    // `embeddedCompsMs` are already populated by the time we reach the
+    // response.
 
     return res.json({
       success: true,
