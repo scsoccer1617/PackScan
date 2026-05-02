@@ -38,6 +38,10 @@ interface EbayQueryIdentity {
    *  picker keeps the `requirePlayerLastName` precision filter — see
    *  Bug B in PR #209. */
   playerCount: number;
+  /** When set (e.g. "PSA 10"), the scan was a graded slab — picker appends
+   *  the grade keyword and requires it in titles so avg price reflects
+   *  same-grade comps only. Empty for raw scans. */
+  gradeKeyword: string;
 }
 
 // Embedded comps shape carried in the analyze response under data.comps.
@@ -94,7 +98,30 @@ export function extractIdentityForEbay(combined: any): EbayQueryIdentity | null 
     parallel: (combined?.foilType ?? combined?.variant ?? '').toString().trim(),
     subset: playerName ? subset : '',
     playerCount: playersArr.length,
+    // Graded slabs: combined.isGraded is set by the routes.ts analyze handler
+    // after the slab-label VLM pass resolves. The grade keyword is the
+    // verbatim phrase that appears in eBay graded-slab titles (e.g.
+    // "PSA 10", "BGS 9.5"). We synthesize it here from gradingCompany +
+    // numericalGrade rather than expecting a pre-built field, because the
+    // bulk path also calls into this and doesn't see the front-end label.
+    gradeKeyword: combined?.isGraded
+      ? buildGradeKeyword(combined?.gradingCompany, combined?.numericalGrade)
+      : '',
   };
+}
+
+function buildGradeKeyword(
+  company: string | null | undefined,
+  grade: number | string | null | undefined,
+): string {
+  if (!company) return '';
+  const c = String(company).trim().toUpperCase();
+  if (!c) return '';
+  if (grade == null || grade === '') return '';
+  const n = typeof grade === 'number' ? grade : Number(grade);
+  if (!Number.isFinite(n)) return '';
+  const gradeStr = Number.isInteger(n) ? String(n) : String(n);
+  return `${c} ${gradeStr}`;
 }
 
 // Internal year-confidence flags attached to per-side and combined OCR
@@ -695,7 +722,8 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
               player: ebayIdentity.player,
               subset: ebayIdentity.subset,
               parallel: ebayIdentity.parallel,
-              excludeParallels: !ebayIdentity.parallel,
+              excludeParallels: !ebayIdentity.parallel && !ebayIdentity.gradeKeyword,
+              gradeKeyword: ebayIdentity.gradeKeyword || undefined,
             });
             const lastName = ebayIdentity.player.split(/\s+/).pop() ?? null;
             const firstName = ebayIdentity.player.split(/\s+/)[0] ?? null;
@@ -716,6 +744,7 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
               set: ebayIdentity.set || null,
               year: ebayIdentity.year,
               playerFirstName: firstName,
+              requireGrade: ebayIdentity.gradeKeyword || null,
             });
             const result = isBulkContext
               ? await searchPromise

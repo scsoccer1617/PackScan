@@ -1470,9 +1470,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get(`${apiPrefix}/ebay/comps`, async (req, res) => {
     try {
       const { pickerSearch, buildPickerQuery } = await import('./ebayPickerSearch.js');
-      const { year, brand, set, cardNumber, player, parallel, subset, query: rawQuery, limit } = req.query;
+      const { year, brand, set, cardNumber, player, parallel, subset, gradeKeyword, query: rawQuery, limit } = req.query;
       const parallelStr = typeof parallel === 'string' ? parallel : undefined;
       const subsetStr = typeof subset === 'string' ? subset : undefined;
+      const gradeKeywordStr = typeof gradeKeyword === 'string' && gradeKeyword.trim()
+        ? gradeKeyword.trim()
+        : undefined;
       const query = (typeof rawQuery === 'string' && rawQuery.trim())
         ? rawQuery.trim()
         : buildPickerQuery({
@@ -1485,8 +1488,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
             parallel: parallelStr,
             // Bug A (PR #209): apply the negative-keyword chain when the
             // scan is a base card. Skipped automatically inside
-            // buildPickerQuery when `parallel` is non-empty.
-            excludeParallels: !parallelStr,
+            // buildPickerQuery when `parallel` is non-empty. Also skipped
+            // when gradeKeyword is set — graded scans use a graded-comp
+            // exclusion chain (-raw -ungraded) instead.
+            excludeParallels: !parallelStr && !gradeKeywordStr,
+            gradeKeyword: gradeKeywordStr,
           });
       const limitNum = Math.max(1, Math.min(parseInt(typeof limit === 'string' ? limit : '10', 10) || 10, 50));
       // Last name is the final whitespace-separated token in the player
@@ -1506,6 +1512,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         set: typeof set === 'string' ? set : undefined,
         year: typeof year === 'string' ? year : undefined,
         playerFirstName,
+        // Graded scans require the exact grade phrase ("PSA 10") in titles
+        // so the avg price reflects same-grade comps only.
+        requireGrade: gradeKeywordStr,
       });
       // Trim the response to the active surface — `sold`/`soldAvailable`
       // are kept off the wire so clients don't accidentally render an
@@ -1929,7 +1938,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // 400/500 exits never count).
   app.post(`${apiPrefix}/analyze-card-dual-images`, requireScanQuota, upload.fields([
     { name: 'frontImage', maxCount: 1 },
-    { name: 'backImage', maxCount: 1 }
+    { name: 'backImage', maxCount: 1 },
+    // GRADED-mode path (additive). Client uploads ONE additional image — the
+    // top ~18% strip cropped from the slab label — alongside the regular
+    // front/back photos. When present, the route runs the grading-label
+    // VLM in parallel with the card-body analyzer so we still resolve in
+    // a single round trip.
+    { name: 'gradingLabelImage', maxCount: 1 },
   ]), async (req, res) => {
     const quotaUserId = (req.user as any)?.id as number | undefined;
     res.on('finish', () => {
@@ -2152,6 +2167,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       })();
 
+      // ── GRADED-mode: kick off slab-label VLM in parallel ─────────────
+      // Client-supplied `mode` field on the multipart body distinguishes
+      // RAW vs GRADED. When mode=graded AND a label image was uploaded,
+      // we run the dedicated grading-label prompt against the cropped
+      // strip in parallel with the card-body OCR so the request still
+      // resolves in one round trip. On any failure we just log and
+      // continue with isGraded=false; the scan still works.
+      const requestedMode = ((req.body as any)?.mode || '').toString().toLowerCase();
+      const isGradedMode = requestedMode === 'graded';
+      const labelFile = (files as any).gradingLabelImage?.[0] as Express.Multer.File | undefined;
+      const gradingLabelPromise: Promise<import('./vlmGradingPrompt').GradingLabelResult | null> =
+        (async () => {
+          if (!isGradedMode || !labelFile) return null;
+          try {
+            const { analyzeGradingLabelWithGemini } = await import('./vlmGrading');
+            const result = await analyzeGradingLabelWithGemini(labelFile.buffer, {
+              mime: labelFile.mimetype || 'image/jpeg',
+            });
+            console.log(
+              '[grading-label] vlm complete:',
+              `company=${result.gradingCompany} grade=${result.numericalGrade}`,
+              `cert=${result.certificationNumber ?? 'n/a'} qual=${result.gradeQualifier ?? 'n/a'}`,
+            );
+            return result;
+          } catch (err: any) {
+            console.warn('[grading-label] vlm failed (continuing as RAW):', err?.message || err);
+            return null;
+          }
+        })();
+
       // Analyze back image for detailed card information
       const backFile = files.backImage[0];
       console.log('Analyzing back image for card details...');
@@ -2237,6 +2282,85 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // OCR output flows straight through as card identification. Holo
       // contributes only the grade (attached as `data.holo` below).
       const cardData = backOcrResponse.data;
+
+      // ── Cross-validate slab label vs card-body extraction ────────────
+      // For GRADED scans, prefer the slab label's identity fields when they
+      // disagree with the card-body OCR — the grader's data entry is more
+      // authoritative than VLM extraction off a glare-prone slab photo.
+      // Mismatches are logged so the dealer can review later. When the
+      // slab returns null/empty for a field, keep whatever cardData has.
+      const gradingLabel = await gradingLabelPromise;
+      if (gradingLabel) {
+        const discrepancies: string[] = [];
+        const note = (label: string, fromBody: any, fromLabel: any) => {
+          if (fromLabel == null || fromLabel === '') return;
+          const a = (fromBody ?? '').toString().trim().toLowerCase();
+          const b = (fromLabel ?? '').toString().trim().toLowerCase();
+          if (!a) return; // body had nothing — silent overwrite is fine
+          if (a !== b) discrepancies.push(`${label}: body="${fromBody}" label="${fromLabel}"`);
+        };
+        note('year', cardData.year, gradingLabel.year);
+        note('cardNumber', cardData.cardNumber, gradingLabel.cardNumber);
+        note('set', cardData.set, gradingLabel.set);
+        if (gradingLabel.player) {
+          const composedBody = [cardData.playerFirstName, cardData.playerLastName]
+            .filter(Boolean).join(' ').trim();
+          note('player', composedBody, gradingLabel.player);
+        }
+        if (discrepancies.length) {
+          console.warn(
+            `[grading-label] cross-val mismatch (preferring slab label): ${discrepancies.join('; ')}`,
+          );
+        }
+        // Apply slab-label fields preferentially.
+        if (gradingLabel.year != null) cardData.year = gradingLabel.year;
+        if (gradingLabel.cardNumber) cardData.cardNumber = gradingLabel.cardNumber;
+        if (gradingLabel.set) cardData.set = gradingLabel.set;
+        if (gradingLabel.parallel) {
+          cardData.variant = cardData.variant || gradingLabel.parallel;
+        }
+        if (gradingLabel.player) {
+          const tokens = gradingLabel.player.trim().split(/\s+/).filter(Boolean);
+          if (tokens.length >= 1) {
+            cardData.playerFirstName = tokens[0];
+            cardData.playerLastName = tokens.slice(1).join(' ') || cardData.playerLastName;
+          }
+        }
+        // Stamp graded fields onto the cardData payload so the client
+        // (ScanResult) and downstream consumers (eBay query, sheet write)
+        // see them under their canonical names.
+        cardData.isGraded = true;
+        cardData.gradingCompany = gradingLabel.gradingCompany;
+        cardData.numericalGrade = gradingLabel.numericalGrade;
+        cardData.gradeQualifier = gradingLabel.gradeQualifier;
+        cardData.certificationNumber = gradingLabel.certificationNumber;
+      } else if (isGradedMode) {
+        // GRADED requested but the label VLM failed or wasn't usable. We
+        // still mark the card as graded=true so the UI doesn't snap back
+        // to the RAW comp tier; null company/grade fields will surface a
+        // friendly "couldn't read the label" hint on the result page.
+        cardData.isGraded = true;
+      }
+
+      // Lighting / blur diagnostics from the client. Logged for inspection
+      // and surfaced in the response so the result page can show a banner
+      // when the captured image quality may have hurt extraction.
+      const clientLighting = ((req.body as any)?.clientLighting || '').toString();
+      const clientBlurScore = (() => {
+        const raw = (req.body as any)?.clientBlurScore;
+        if (raw == null || raw === '') return null;
+        const n = typeof raw === 'number' ? raw : Number(raw);
+        return Number.isFinite(n) ? n : null;
+      })();
+      if (clientLighting || clientBlurScore != null) {
+        console.log(
+          `[scan-quality] clientLighting=${clientLighting || 'unknown'}`,
+          `clientBlurScore=${clientBlurScore ?? 'n/a'}`,
+          `mode=${isGradedMode ? 'graded' : 'raw'}`,
+        );
+      }
+      if (clientLighting) (cardData as any).clientLighting = clientLighting;
+      if (clientBlurScore != null) (cardData as any).clientBlurScore = clientBlurScore;
 
       // Patch the scan_grades row with the OCR-derived identification so
       // Home's Recent Scans carousel renders the player's name instead of
@@ -2345,6 +2469,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           
           const playerName = `${cardData.playerFirstName} ${cardData.playerLastName}`.trim();
           console.time('ebay-main-search');
+          // GRADED scan: pass the resolved grade keyword (e.g. "PSA 10") so
+          // searchCardValues filters its candidate pool to slabbed comps and
+          // getEbaySearchUrl appends the same phrase to the click-through URL.
+          // RAW scans pass nothing and the existing behavior is preserved.
+          const { formatGradeKeyword } = await import('./vlmGradingPrompt');
+          const gradeKeyword = cardData.isGraded
+            ? formatGradeKeyword(cardData.gradingCompany, cardData.numericalGrade) || undefined
+            : undefined;
           const ebayResults = await searchCardValues(
             playerName,
             cardData.cardNumber || '',
@@ -2358,7 +2490,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             cardData.variant,
             cardData.isAutographed || false,
             undefined,
-            cardData.set
+            cardData.set,
+            gradeKeyword ? { gradeKeyword } : undefined,
           );
           console.timeEnd('ebay-main-search');
           

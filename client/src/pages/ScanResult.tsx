@@ -1071,6 +1071,33 @@ export default function ScanResult() {
               <h1 className="font-display text-xl font-semibold tracking-tight leading-tight truncate text-ink">
                 {playerName(cardData) || "Unidentified card"}
               </h1>
+              {/* GRADED scan: prominent slab-grade badge directly under the
+                  player name. Surfaces gradingCompany + numericalGrade in
+                  bold colors so the user sees at a glance that comps are
+                  scoped to same-grade slabs. Falls back to a "Graded"
+                  pill when the slab-label VLM couldn't read the grade. */}
+              {cardData.isGraded && (
+                <div className="mt-1 inline-flex items-center gap-1.5">
+                  <span
+                    className="inline-flex items-center px-2 py-0.5 rounded-full bg-emerald-600 text-white text-[11px] font-semibold tracking-wide"
+                    data-testid="badge-graded"
+                  >
+                    {cardData.gradingCompany && cardData.numericalGrade != null
+                      ? `${cardData.gradingCompany} ${cardData.numericalGrade}`
+                      : 'Graded'}
+                  </span>
+                  {cardData.gradeQualifier && (
+                    <span className="text-[11px] text-slate-600 font-medium">
+                      {cardData.gradeQualifier}
+                    </span>
+                  )}
+                  {cardData.certificationNumber && (
+                    <span className="text-[10px] text-slate-400 font-medium">
+                      #{cardData.certificationNumber}
+                    </span>
+                  )}
+                </div>
+              )}
               {avgPriceLabel && (
                 <p
                   className="text-xs text-slate-600 font-medium mt-0.5 truncate tabular-nums"

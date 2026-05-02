@@ -315,6 +315,13 @@ export function buildPickerQuery(parts: {
   parallel?: string | null;
   subset?: string | null;
   excludeParallels?: boolean;
+  /** When set (e.g. "PSA 10", "BGS 9.5"), the picker is searching for graded
+   *  comps. The keyword is appended verbatim and the parallel-exclusion
+   *  chain is suppressed in favor of a graded-comp exclusion chain
+   *  (`-raw -ungraded`) so we get same-grade slabs back. Caller should also
+   *  pass `excludeParallels=false` — graded scans want their actual parallel
+   *  to surface in titles. */
+  gradeKeyword?: string | null;
 }): string {
   const segments: string[] = [];
   if (parts.year != null && String(parts.year).trim()) {
@@ -336,14 +343,25 @@ export function buildPickerQuery(parts: {
     segments.push(parts.subset.trim());
   }
   if (parts.parallel && parts.parallel.trim()) segments.push(parts.parallel.trim());
-  // Negative-keyword exclusions for base scans only. A scan with a non-
-  // empty `parallel` is itself a parallel/insert and should match parallel
-  // listings, so we suppress the chain in that case regardless of the
-  // caller's `excludeParallels` flag.
-  const wantExclusions = parts.excludeParallels !== false
-    && !(parts.parallel && parts.parallel.trim());
-  if (wantExclusions) {
-    segments.push(PICKER_EXCLUSION_CHAIN);
+  const grade = (parts.gradeKeyword || '').trim();
+  if (grade) {
+    segments.push(grade);
+    // Graded scans want same-grade slabs only. -raw -ungraded shaves off
+    // the bulk of base-scan listings without zeroing out PSA/BGS/SGC/CGC
+    // titles. We do NOT emit the PARALLEL exclusion chain here: graded
+    // slabs span every parallel and finish, and `-refractor`/`-holo` etc.
+    // would zero out the comps we actually want.
+    segments.push('-raw -ungraded');
+  } else {
+    // Negative-keyword exclusions for base scans only. A scan with a non-
+    // empty `parallel` is itself a parallel/insert and should match parallel
+    // listings, so we suppress the chain in that case regardless of the
+    // caller's `excludeParallels` flag.
+    const wantExclusions = parts.excludeParallels !== false
+      && !(parts.parallel && parts.parallel.trim());
+    if (wantExclusions) {
+      segments.push(PICKER_EXCLUSION_CHAIN);
+    }
   }
   return segments.join(' ').replace(/\s{2,}/g, ' ').trim();
 }
@@ -377,6 +395,10 @@ export interface PickerSearchOptions {
   /** Player first name for relevance scoring. +3 when matched in
    *  candidate title (last name is +5 and also acts as a hard filter). */
   playerFirstName?: string | null;
+  /** When set (e.g. "PSA 10"), require the exact grade phrase to appear in
+   *  the candidate title — drops PSA 9 / BGS 9.5 listings on a PSA 10 scan
+   *  so the avg price reflects same-grade comps only. Case-insensitive. */
+  requireGrade?: string | null;
 }
 
 export async function pickerSearch(
@@ -417,15 +439,17 @@ export async function pickerSearch(
     // long-tail loose hits that still come through.
     const cardNum = (opts?.requireCardNumber || '').trim().replace(/^#/, '').toLowerCase();
     const lastName = (opts?.requirePlayerLastName || '').trim().toLowerCase();
-    if (cardNum || lastName) {
+    const grade = (opts?.requireGrade || '').trim().toLowerCase();
+    if (cardNum || lastName || grade) {
       const before = mapped.length;
       mapped = mapped.filter((item) => {
         const title = item.title.toLowerCase();
         if (cardNum && !title.includes(cardNum)) return false;
         if (lastName && !title.includes(lastName)) return false;
+        if (grade && !title.includes(grade)) return false;
         return true;
       });
-      console.log(`[pickerSearch] precision-filter: ${mapped.length}/${before} kept (cardNum="${cardNum}", lastName="${lastName}")`);
+      console.log(`[pickerSearch] precision-filter: ${mapped.length}/${before} kept (cardNum="${cardNum}", lastName="${lastName}", grade="${grade}")`);
     }
 
     // Score every surviving candidate, then sort by score desc, price asc.
