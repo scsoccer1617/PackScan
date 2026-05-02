@@ -839,12 +839,27 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
     // forget; the response is not awaited on the Sheets append.
     try {
       const visualFoilResult = (combinedResult as any)?._visualFoilResult ?? null;
-      const playerName = [
+      // Player column composition. Prefer the legacy single-name fields
+      // when populated (vlmApply already mirrors players[0] into them for
+      // single-player cards). Fall back to players[] for multi-player
+      // subset cards (Team Leaders, Combos, Strikeout Leaders, etc.) where
+      // the top-level `player` is intentionally null but `players[]` has
+      // every name. Multi-player cards (>= 2) join all names with ", " so
+      // the Sheet reads "Freddie Freeman, Shohei Ohtani, ...".
+      const finalPlayers = Array.isArray((finalResult as any).players)
+        ? ((finalResult as any).players as Array<{ firstName?: string; lastName?: string }>)
+        : [];
+      const legacyPlayerName = [
         (finalResult as any).playerFirstName,
         (finalResult as any).playerLastName,
       ]
         .filter((s) => typeof s === 'string' && s.trim().length > 0)
         .join(' ');
+      const playersJoined = finalPlayers
+        .map((p) => `${(p?.firstName ?? '').toString().trim()} ${(p?.lastName ?? '').toString().trim()}`.trim())
+        .filter((s) => s.length > 0)
+        .join(', ');
+      const playerName = legacyPlayerName || playersJoined;
       const scanLog = startScanLog({
         scanId: scanId ?? `noscan-${Date.now()}`,
         brand: finalResult.brand,
@@ -880,10 +895,24 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
         geminiResultLog && typeof geminiResultLog.brand === 'string' && geminiResultLog.brand.trim()
           ? geminiResultLog.brand.trim()
           : null;
+      // GeminiPlayer log column. Top-level `player` is the single-name
+      // string the model emitted (single-player cards). For multi-player
+      // subsets the model intentionally emits player=null and fills
+      // `players[]` instead — fall back to that array (joined with ", "
+      // for >= 2 players) so the log column reflects what Gemini
+      // actually returned rather than going blank.
+      const geminiPlayersRaw =
+        geminiResultLog && Array.isArray(geminiResultLog.players)
+          ? (geminiResultLog.players as Array<{ firstName?: string; lastName?: string }>)
+          : [];
+      const geminiPlayersJoined = geminiPlayersRaw
+        .map((p) => `${(p?.firstName ?? '').toString().trim()} ${(p?.lastName ?? '').toString().trim()}`.trim())
+        .filter((s) => s.length > 0)
+        .join(', ');
       const geminiPlayer =
         geminiResultLog && typeof geminiResultLog.player === 'string' && geminiResultLog.player.trim()
           ? geminiResultLog.player.trim()
-          : null;
+          : (geminiPlayersJoined || null);
       const legacyYear =
         legacyCombinedLog && legacyCombinedLog.year != null
           ? legacyCombinedLog.year
