@@ -66,6 +66,12 @@ const HEADERS = [
   // existing sheet's column meanings.
   'GeminiParallel',
   'GeminiSet',
+  // PR (vlm gemini-3 swap): which Gemini model actually answered the scan
+  // (primary VLM_MODEL or the fallback after a model-availability error).
+  // Appended at the end so existing rows / column meanings are preserved —
+  // ensureHeadersOnce() will extend the header row to cover this on first
+  // boot under the new code.
+  'GeminiModel',
 ];
 
 // Truncate large free-text fields so the Sheet stays readable. Cells
@@ -205,6 +211,9 @@ export interface ScanLogFinal {
   // Gemini actually returned vs what surfaced in the picker / overlay.
   geminiParallel?: string | null;
   geminiSet?: string | null;
+  // The actual Gemini model that returned the scan (e.g. "gemini-3-flash-preview"
+  // or "gemini-2.5-flash" if the fallback fired). Empty when Gemini didn't run.
+  geminiModel?: string | null;
 }
 
 export interface ScanLog {
@@ -288,6 +297,8 @@ async function appendRow(ctx: ScanContext, final: ScanLogFinal, indicators: stri
     // PR #166: raw Gemini parallel + set
     final.geminiParallel ?? '',
     final.geminiSet ?? '',
+    // Which Gemini model answered (primary vs fallback)
+    final.geminiModel ?? '',
   ];
   await sheets.spreadsheets.values.append({
     spreadsheetId,

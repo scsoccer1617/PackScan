@@ -19,6 +19,32 @@ import { isExemplarsEnabled, getExemplarTextPrefix, getExemplarParts } from './v
 
 let cachedClient: GoogleGenAI | null = null;
 
+// Model selection. Defaults to gemini-3-flash-preview (PR: vlm gemini-3 swap)
+// based on a user A/B that showed it correctly reads dense back-of-card legal
+// strips that gemini-2.5-flash misreads. gemini-2.5-flash is kept as the
+// automatic fallback when the primary errors with model-availability errors
+// (404, "model not found", "not available", preview deprecation, etc.) — NOT
+// for transient 429/quota, which has its own retry loop. Override either side
+// via env to pin a specific model for tests / rollback.
+const VLM_PRIMARY_MODEL = process.env.VLM_MODEL || 'gemini-3-flash-preview';
+const VLM_FALLBACK_MODEL = process.env.VLM_FALLBACK_MODEL || 'gemini-2.5-flash';
+
+// Regex/status check for "this model is unreachable" vs "transient error".
+// Only the former should trigger the fallback swap; 429/quota stays on the
+// per-model retry loop because both candidate models share the same project
+// quota and swapping wouldn't help.
+function isModelAvailabilityError(err: any): boolean {
+  const msg = String(err?.message ?? err ?? '');
+  const status = err?.status ?? err?.code ?? err?.response?.status;
+  return (
+    status === 404 ||
+    /model.*not.*found/i.test(msg) ||
+    /not.*available/i.test(msg) ||
+    /preview.*deprecat/i.test(msg) ||
+    /unsupported/i.test(msg)
+  );
+}
+
 function getClient(): GoogleGenAI {
   if (cachedClient) return cachedClient;
   const apiKey = process.env.GEMINI_API_KEY;
@@ -95,6 +121,13 @@ export interface GeminiCardResult {
    *  pictured player. Null for standard individual-player cards. */
   subset?: string | null;
   notes?: string | null;
+  /** Which Gemini model actually answered this scan. Captured for the audit
+   *  Sheet so we can correlate quality regressions to a specific model — the
+   *  primary (VLM_MODEL, default gemini-3-flash-preview) and the fallback
+   *  (VLM_FALLBACK_MODEL, default gemini-2.5-flash) live behind the same
+   *  function, so without this field the Sheet can't tell which one ran on
+   *  any given row. Optional so older logged outputs still typecheck. */
+  geminiModel?: string | null;
 }
 
 export interface AnalyzeOptions {
@@ -150,7 +183,11 @@ export async function analyzeCardBuffersWithGemini(
   resultTemplate?: string,
 ): Promise<GeminiCardResult> {
   const client = getClient();
-  const model = opts.model || 'gemini-2.5-flash';
+  // When opts.model is set (tests / pinned override), skip the fallback chain
+  // and use only that model. Otherwise the chain is [primary, fallback].
+  const candidateModels = opts.model
+    ? [opts.model]
+    : [VLM_PRIMARY_MODEL, VLM_FALLBACK_MODEL];
 
   // Build the prompt. Backwards-compatible: callers can pass (prompt,
   // template) as positional args (older shape) OR rely on VLM_FULL_PROMPT.
@@ -172,62 +209,90 @@ export async function analyzeCardBuffersWithGemini(
   // isolation when judging future quick wins (e.g. server-side downscale).
   const networkLabel = `gemini-network[${Math.random().toString(36).slice(2, 8)}]`;
   console.time(networkLabel);
-  let response;
+  let response: any = null;
+  let actualModelUsed: string = candidateModels[0];
+  let modelAvailabilityErr: any = null;
   try {
-    // 429-only retry with exponential backoff (1s, 2s, 4s; 3 attempts).
-    // Bulk Phase 2 runs at concurrency=8 — Gemini's per-minute (not
-    // concurrent) quota means a transient burst can 429 a single pair,
-    // and a one-attempt failure here propagates as a permanent
-    // processItem error. Non-429 errors fall straight through unchanged.
-    const RETRY_DELAYS_MS = [1000, 2000, 4000];
-    let attempt = 0;
-    while (true) {
+    // Model fallback chain: try primary, then fallback, ONLY for
+    // model-availability errors (404 / "not found" / preview deprecated).
+    // 429/quota retries live INSIDE the per-model attempt — both candidates
+    // share the same project quota, so swapping models on a transient rate
+    // limit wouldn't help.
+    for (const candidateModel of candidateModels) {
       try {
-        const parts: any[] = [
-          { text: fullPrompt },
-          { inlineData: { data: frontBuffer.toString('base64'), mimeType: frontMime } },
-          { inlineData: { data: backBuffer.toString('base64'), mimeType: backMime } },
-        ];
-        // Parallel Exemplar Library v1 (MOLO-grounded). Off by default;
-        // when VLM_EXEMPLARS_ENABLED=true, append a short instructional
-        // text part + 54 inline reference JPEGs so Gemini can match the
-        // scanned card's parallel against canonical patterns. The base
-        // prompt (vlmPrompts.ts, year rule v2026-04-28.7) is NOT
-        // modified — exemplar guidance lives only in the appended
-        // parts.
-        if (isExemplarsEnabled()) {
-          parts.push({ text: getExemplarTextPrefix() });
-          parts.push(...getExemplarParts());
+        // 429-only retry with exponential backoff (1s, 2s, 4s; 3 attempts).
+        // Bulk Phase 2 runs at concurrency=8 — Gemini's per-minute (not
+        // concurrent) quota means a transient burst can 429 a single pair,
+        // and a one-attempt failure here propagates as a permanent
+        // processItem error. Non-429 errors fall straight through unchanged.
+        const RETRY_DELAYS_MS = [1000, 2000, 4000];
+        let attempt = 0;
+        while (true) {
+          try {
+            const parts: any[] = [
+              { text: fullPrompt },
+              { inlineData: { data: frontBuffer.toString('base64'), mimeType: frontMime } },
+              { inlineData: { data: backBuffer.toString('base64'), mimeType: backMime } },
+            ];
+            // Parallel Exemplar Library v1 (MOLO-grounded). Off by default;
+            // when VLM_EXEMPLARS_ENABLED=true, append a short instructional
+            // text part + 54 inline reference JPEGs so Gemini can match the
+            // scanned card's parallel against canonical patterns. The base
+            // prompt (vlmPrompts.ts, year rule v2026-04-28.7) is NOT
+            // modified — exemplar guidance lives only in the appended
+            // parts.
+            if (isExemplarsEnabled()) {
+              parts.push({ text: getExemplarTextPrefix() });
+              parts.push(...getExemplarParts());
+            }
+            response = await client.models.generateContent({
+              model: candidateModel,
+              contents: [{ role: 'user', parts }],
+              config: { responseMimeType: 'application/json' },
+            });
+            actualModelUsed = candidateModel;
+            if (candidateModel !== candidateModels[0]) {
+              console.warn(
+                `[vlmGemini] primary model "${candidateModels[0]}" unavailable; succeeded on fallback "${candidateModel}"`,
+              );
+            }
+            break;
+          } catch (err: any) {
+            const status = err?.status ?? err?.code ?? err?.response?.status;
+            const message = String(err?.message ?? err ?? '');
+            const isRateLimit =
+              status === 429 ||
+              /\b429\b/.test(message) ||
+              /RESOURCE_EXHAUSTED/i.test(message) ||
+              /rate.?limit/i.test(message) ||
+              /quota/i.test(message);
+            if (!isRateLimit || attempt >= RETRY_DELAYS_MS.length) throw err;
+            const delay = RETRY_DELAYS_MS[attempt++];
+            console.warn(
+              `[vlmGemini] 429/quota on attempt ${attempt} (model=${candidateModel}), retrying in ${delay}ms: ${message.slice(0, 200)}`,
+            );
+            await new Promise((r) => setTimeout(r, delay));
+          }
         }
-        response = await client.models.generateContent({
-          model,
-          contents: [{ role: 'user', parts }],
-          config: { responseMimeType: 'application/json' },
-        });
-        break;
+        break; // success — stop the model fallback chain
       } catch (err: any) {
-        const status = err?.status ?? err?.code ?? err?.response?.status;
-        const message = String(err?.message ?? err ?? '');
-        const isRateLimit =
-          status === 429 ||
-          /\b429\b/.test(message) ||
-          /RESOURCE_EXHAUSTED/i.test(message) ||
-          /rate.?limit/i.test(message) ||
-          /quota/i.test(message);
-        if (!isRateLimit || attempt >= RETRY_DELAYS_MS.length) throw err;
-        const delay = RETRY_DELAYS_MS[attempt++];
+        if (!isModelAvailabilityError(err)) throw err;
+        modelAvailabilityErr = err;
         console.warn(
-          `[vlmGemini] 429/quota on attempt ${attempt}, retrying in ${delay}ms: ${message.slice(0, 200)}`,
+          `[vlmGemini] model "${candidateModel}" unavailable: ${String(err?.message ?? err).slice(0, 200)}`,
         );
-        await new Promise((r) => setTimeout(r, delay));
+        // continue to next candidate
       }
     }
+    if (!response) throw modelAvailabilityErr ?? new Error('all candidate Gemini models failed');
   } finally {
     console.timeEnd(networkLabel);
   }
 
   const text = response.text ?? '';
-  return finalizeGeminiText(text);
+  const result = finalizeGeminiText(text);
+  result.geminiModel = actualModelUsed;
+  return result;
 }
 
 /**
@@ -294,7 +359,9 @@ export async function analyzeCardBuffersWithGeminiStream(
   } = {},
 ): Promise<GeminiCardResult> {
   const client = getClient();
-  const model = opts.model || 'gemini-2.5-flash';
+  const candidateModels = opts.model
+    ? [opts.model]
+    : [VLM_PRIMARY_MODEL, VLM_FALLBACK_MODEL];
   const fullPrompt = opts.prompt || VLM_FULL_PROMPT;
   const frontMime = opts.frontMime || 'image/jpeg';
   const backMime = opts.backMime || 'image/jpeg';
@@ -302,67 +369,98 @@ export async function analyzeCardBuffersWithGeminiStream(
   const networkLabel = `gemini-stream-network[${Math.random().toString(36).slice(2, 8)}]`;
   console.time(networkLabel);
   let accumulated = '';
+  let actualModelUsed: string = candidateModels[0];
+  let modelAvailabilityErr: any = null;
+  let succeeded = false;
   try {
-    // Same 429 retry envelope as the non-streaming path. The stream
-    // request itself is a single SDK call that returns an async
-    // generator; transient quota errors typically surface on the
-    // initial request, so retrying the whole stream is safe.
-    const RETRY_DELAYS_MS = [1000, 2000, 4000];
-    let attempt = 0;
-    while (true) {
+    for (const candidateModel of candidateModels) {
       try {
-        const parts: any[] = [
-          { text: fullPrompt },
-          { inlineData: { data: frontBuffer.toString('base64'), mimeType: frontMime } },
-          { inlineData: { data: backBuffer.toString('base64'), mimeType: backMime } },
-        ];
-        if (isExemplarsEnabled()) {
-          parts.push({ text: getExemplarTextPrefix() });
-          parts.push(...getExemplarParts());
-        }
-        const stream = await client.models.generateContentStream({
-          model,
-          contents: [{ role: 'user', parts }],
-          config: { responseMimeType: 'application/json' },
-        });
-        for await (const chunk of stream) {
-          const t = chunk.text ?? '';
-          if (!t) continue;
-          accumulated += t;
-          if (opts.onPartialText) {
-            try {
-              opts.onPartialText(accumulated);
-            } catch (cbErr) {
-              // Swallow callback errors so a flaky SSE writer never
-              // kills the underlying Gemini stream.
-              console.warn('[vlmGemini.stream] onPartialText callback threw:', cbErr);
+        // Same 429 retry envelope as the non-streaming path. The stream
+        // request itself is a single SDK call that returns an async
+        // generator; transient quota errors typically surface on the
+        // initial request, so retrying the whole stream is safe.
+        const RETRY_DELAYS_MS = [1000, 2000, 4000];
+        let attempt = 0;
+        while (true) {
+          try {
+            accumulated = '';
+            const parts: any[] = [
+              { text: fullPrompt },
+              { inlineData: { data: frontBuffer.toString('base64'), mimeType: frontMime } },
+              { inlineData: { data: backBuffer.toString('base64'), mimeType: backMime } },
+            ];
+            if (isExemplarsEnabled()) {
+              parts.push({ text: getExemplarTextPrefix() });
+              parts.push(...getExemplarParts());
             }
+            const stream = await client.models.generateContentStream({
+              model: candidateModel,
+              contents: [{ role: 'user', parts }],
+              config: { responseMimeType: 'application/json' },
+            });
+            for await (const chunk of stream) {
+              const t = chunk.text ?? '';
+              if (!t) continue;
+              accumulated += t;
+              if (opts.onPartialText) {
+                try {
+                  opts.onPartialText(accumulated);
+                } catch (cbErr) {
+                  // Swallow callback errors so a flaky SSE writer never
+                  // kills the underlying Gemini stream.
+                  console.warn('[vlmGemini.stream] onPartialText callback threw:', cbErr);
+                }
+              }
+            }
+            actualModelUsed = candidateModel;
+            if (candidateModel !== candidateModels[0]) {
+              console.warn(
+                `[vlmGemini.stream] primary model "${candidateModels[0]}" unavailable; succeeded on fallback "${candidateModel}"`,
+              );
+            }
+            break;
+          } catch (err: any) {
+            const status = err?.status ?? err?.code ?? err?.response?.status;
+            const message = String(err?.message ?? err ?? '');
+            const isRateLimit =
+              status === 429 ||
+              /\b429\b/.test(message) ||
+              /RESOURCE_EXHAUSTED/i.test(message) ||
+              /rate.?limit/i.test(message) ||
+              /quota/i.test(message);
+            if (!isRateLimit || attempt >= RETRY_DELAYS_MS.length) throw err;
+            const delay = RETRY_DELAYS_MS[attempt++];
+            console.warn(
+              `[vlmGemini.stream] 429/quota on attempt ${attempt} (model=${candidateModel}), retrying in ${delay}ms: ${message.slice(0, 200)}`,
+            );
+            await new Promise((r) => setTimeout(r, delay));
           }
         }
-        break;
+        succeeded = true;
+        break; // success — stop the model fallback chain
       } catch (err: any) {
-        const status = err?.status ?? err?.code ?? err?.response?.status;
-        const message = String(err?.message ?? err ?? '');
-        const isRateLimit =
-          status === 429 ||
-          /\b429\b/.test(message) ||
-          /RESOURCE_EXHAUSTED/i.test(message) ||
-          /rate.?limit/i.test(message) ||
-          /quota/i.test(message);
-        if (!isRateLimit || attempt >= RETRY_DELAYS_MS.length) throw err;
-        const delay = RETRY_DELAYS_MS[attempt++];
-        accumulated = '';
+        if (!isModelAvailabilityError(err)) throw err;
+        modelAvailabilityErr = err;
         console.warn(
-          `[vlmGemini.stream] 429/quota on attempt ${attempt}, retrying in ${delay}ms: ${message.slice(0, 200)}`,
+          `[vlmGemini.stream] model "${candidateModel}" unavailable: ${String(err?.message ?? err).slice(0, 200)}`,
         );
-        await new Promise((r) => setTimeout(r, delay));
+        // continue to next candidate
       }
+    }
+    if (!succeeded) {
+      throw modelAvailabilityErr ?? new Error('all candidate Gemini models failed');
     }
   } finally {
     console.timeEnd(networkLabel);
   }
 
-  return finalizeGeminiText(accumulated);
+  const result = finalizeGeminiText(accumulated);
+  result.geminiModel = actualModelUsed;
+  return result;
 }
 
-export const VLM_INFO = { promptVersion: VLM_PROMPT_VERSION };
+export const VLM_INFO = {
+  promptVersion: VLM_PROMPT_VERSION,
+  primaryModel: VLM_PRIMARY_MODEL,
+  fallbackModel: VLM_FALLBACK_MODEL,
+};
