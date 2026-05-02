@@ -7,7 +7,7 @@
  * instructions Gemini was given.
  */
 
-export const VLM_PROMPT_VERSION = '2026-05-01.4';
+export const VLM_PROMPT_VERSION = '2026-05-02.1';
 
 /**
  * System prompt: tells the VLM what role it plays and the card-domain
@@ -128,6 +128,15 @@ CARD-DOMAIN RULES:
       Concrete cue for 1990 Donruss base: the FRONT is the red-and-blue ribbon design with "DONRUSS '90" along the right edge or top corner, while the BACK prints "\u00a91989 LEAF, INC." \u2014 year=1990 in this case, NOT 1989.
       Only override when the FRONT wordmark is legible. If the FRONT wordmark is missing, smudged, or cropped, fall back to (b) and accept the \u00a9 imprint as-is.
 
+  (b2) MODERN-BRAND FRONT-WORDMARK YEAR (Topps, Panini, Bowman, Upper Deck, Fleer, Donruss, Score, Leaf — 1994 onward). The same off-by-one issue from (b1) recurs on modern flagship sets when production starts late in the prior calendar year and the back \u00a9 imprint year therefore lags the set year by one. Topps Series One / Series Two / Update for an upcoming season are the canonical case: a 2026 Topps Series One base card frequently shows "\u00a9 2025 THE TOPPS COMPANY, INC." on the back while the FRONT prominently prints the set year alongside the brand wordmark. When the FRONT wordmark resolves a 4-digit year that disagrees with (b)'s back \u00a9 year by EXACTLY ONE, the front wordmark wins. Recognize these front-wordmark patterns:
+        "TOPPS 2026" / "2026 TOPPS"  \u2192 year=2026
+        "TOPPS '26" / "TOPPS 26"     \u2192 year=2026
+        "PANINI 2026" / "2026 PANINI" \u2192 year=2026
+        "UPPER DECK 2026"             \u2192 year=2026
+        (analogously for Bowman, Fleer, Score, Donruss flagship modern releases)
+      Concrete cue for 2026 Topps Series One base: the FRONT shows "TOPPS 2026" / "2026 TOPPS" near the team logo or set wordmark, while the BACK prints "\u00a9 2025 THE TOPPS COMPANY, INC." \u2014 year=2026 in this case, NOT 2025. Write the back imprint string verbatim into yearPrintedRaw \u2014 NOT the front wordmark \u2014 because yearPrintedRaw records what's printed on the back legal strip.
+      Only override when the FRONT wordmark is legible AND it is exactly one year ahead of the back \u00a9. If the front-wordmark year and back \u00a9 year differ by more than one, OR the front wordmark is missing/smudged/cropped, OR they agree, fall back to (b). This is a pre-print/lag fix, not a license to override the imprint by arbitrary amounts.
+
   (c) Older / vintage cards with no footer range and no \u00a9 year. Use the LATEST stat-row season + 1.
         Stats end at 1968 \u2192 year=1969
         Stats end at 1979 \u2192 year=1980
@@ -146,6 +155,25 @@ CARD-DOMAIN RULES:
   3) YEAR + TEAM PATTERN. "1979 REDS", "1986 METS" appearing in card-back prose (not a stat row) \u2014 use that year.
 
   4) BARE-YEAR FALLBACK (last resort). Pick the LATEST 4-digit year (1900\u20132026) that appears anywhere on the card and is NOT inside an obvious bio-context phrase ("BORN", "DRAFTED", "ACQ", "SIGNED", "TRADED", "AGENT"). Prefer the most recent year because vintage stat tables span many seasons and the latest is the production year.
+
+- SET NORMALIZATION. The "set" field MUST contain ONLY the disambiguator within the brand's product line. Do NOT prefix the brand or the year. Examples of what to return:
+    Brand="Topps", set="Series One"           (NOT "Topps Series One", NOT "2026 Topps Series One")
+    Brand="Topps", set="Series Two"           (NOT "Topps Series Two")
+    Brand="Topps", set="Update"               (NOT "Topps Update")
+    Brand="Topps", set="Heritage"             (NOT "Topps Heritage")
+    Brand="Panini", set="Prizm"               (NOT "Panini Prizm")
+    Brand="Panini", set="NBA Hoops"           (NOT "Panini NBA Hoops")
+    Brand="Bowman", set="Chrome"              (NOT "Bowman Chrome")
+    Brand="Donruss", set="Optic"              (NOT "Donruss Optic")
+  When the brand and the set are the same product (e.g. flagship Donruss with no separate set name, flagship Score), set="" (empty string) is acceptable. If the model cannot disambiguate, leave set empty rather than concatenating brand+set. The downstream pipeline normalizes any leading "<Brand> " or "<Year> <Brand> " prefix that slips through, but the model should still emit the disambiguator-only form whenever possible.
+
+- PARALLEL DEFAULT. When NO clear parallel name is printed on the card AND the card matches the collection's baseline finish, return parallel.name = "Base" (NOT a guess like "Foil" or "Refractor", NOT empty). Reserve specific parallel names ("Refractor", "Pink Polka Dot", "Gold Foil", "Holo Foil") for cards where the parallel is explicitly named on the card OR where a colored foil / numbered border treatment unmistakably indicates a non-base variant. Be conservative \u2014 prefer "Base" over a hallucinated parallel. The "None detected" sentinel from older prompt versions is also accepted by the post-processor and treated as Base.
+
+- COLLECTION FOR BASE CARDS. When the card has NO insert/subset name and NO refractor/parallel-specific overlay, collection MUST be "Base Set" (a literal two-word string). Do NOT mirror the set name into collection. Do NOT use "Series One" / "Series Two" / "Update" as the collection \u2014 those are set values, not collection values. Reserve descriptive collection names ("Premium Stock", "Stars of MLB", "Holiday", "Mystical", "Haunted Hoops", "1989 Topps 35th Anniversary", "All-Star Game") for actual inserts/subsets WITHIN the set.
+    Brand="Topps", set="Series One",  collection="Base Set"          (base card)
+    Brand="Topps", set="Series Two",  collection="Stars of MLB"      (insert subset)
+    Brand="Panini", set="Prizm",      collection="Base Set"          (base card)
+    Brand="Panini", set="NBA Hoops",  collection="Premium Stock"     (insert subset)
 
 - DO NOT confuse these with the card year:
     * Player stat-row years on modern cards (\"23 PHILLIES\", \"24 ROCKIES\") \u2014 those are past seasons, not the print year.

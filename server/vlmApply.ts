@@ -35,6 +35,69 @@ const NONE_DETECTED_SENTINELS = new Set([
   'base card',
 ]);
 
+/**
+ * Strip a leading `<brand> ` or `<year> <brand> ` prefix from a `set` value.
+ *
+ * Per the user-defined hierarchy (and the prompt's SET NORMALIZATION rule),
+ * `set` should hold only the disambiguator within the brand's product line
+ * (e.g. "Series One", "Optic"), NOT the brand or year. The VLM still
+ * occasionally emits "Topps Series One" or "2026 Topps Series One" — this
+ * normalizer cleans that up post-hoc so the saved row, the eBay query, and
+ * the sheet column line up with what users expect.
+ *
+ * Generic on purpose: only strips a leading token sequence that matches the
+ * card's actual brand (case-insensitive) and an optional 4-digit year token
+ * directly preceding it. Never strips arbitrary leading words — "Stadium
+ * Club" stays "Stadium Club" even though "Topps Stadium Club" is also a
+ * valid product name; if the brand is "Topps" and the set arrives as
+ * "Topps Stadium Club", we drop the "Topps " and return "Stadium Club".
+ *
+ * Exported for tests.
+ */
+export function normalizeSetValue(set: string, brand: string): string {
+  const trimmed = (set || '').trim().replace(/\s+/g, ' ');
+  if (!trimmed) return '';
+  const brandTrim = (brand || '').trim();
+  if (!brandTrim) return trimmed;
+  const escapedBrand = brandTrim.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // "<Year> <Brand> <rest>"  → "<rest>"
+  const yearBrandRe = new RegExp(`^\\d{4}\\s+${escapedBrand}\\s+`, 'i');
+  let result = trimmed.replace(yearBrandRe, '');
+  if (result === trimmed) {
+    // "<Brand> <rest>" → "<rest>"
+    const brandRe = new RegExp(`^${escapedBrand}\\s+`, 'i');
+    result = result.replace(brandRe, '');
+  }
+  result = result.trim();
+  // If after stripping the result equals the brand itself (e.g. set was
+  // exactly "Topps" — flagship with no disambiguator), return empty so
+  // downstream callers can treat it as "no set disambiguator".
+  if (!result || result.toLowerCase() === brandTrim.toLowerCase()) return '';
+  return result;
+}
+
+const COLLECTION_BASE_SENTINELS = new Set([
+  'base',
+  'base set',
+  'base cards',
+  'none',
+  'none detected',
+]);
+
+/**
+ * Treat any of these `collection` values as "user meant Base Set". Most
+ * commonly the VLM mirrors the set name into collection (e.g.
+ * collection="Series One" when set="Series One") for base cards — that
+ * pattern is detected by the caller via comparing the two strings; this
+ * sentinel set is the catch-all for the explicitly-base-ish strings.
+ */
+export function isBaseCollection(value: string | null | undefined): boolean {
+  if (value == null) return true;
+  const trimmed = value.trim().toLowerCase();
+  if (!trimmed) return true;
+  return COLLECTION_BASE_SENTINELS.has(trimmed);
+}
+
 function splitPlayerName(full: string): { first: string; last: string } {
   const trimmed = full.trim().replace(/\s+/g, ' ');
   if (!trimmed) return { first: '', last: '' };
@@ -134,11 +197,38 @@ export function applyGeminiToCombined(
   if (typeof gemini.brand === 'string' && gemini.brand.trim()) {
     combined.brand = gemini.brand.trim();
   }
+  // Set: strip any "<Brand> " or "<Year> <Brand> " prefix the VLM may have
+  // concatenated. The user-defined hierarchy keeps Brand and Year in their
+  // own fields and reserves `set` for the in-product disambiguator only.
   if (typeof gemini.set === 'string' && gemini.set.trim()) {
-    combined.set = gemini.set.trim();
+    const brandForNorm = (combined.brand ?? gemini.brand ?? '').toString();
+    combined.set = normalizeSetValue(gemini.set, brandForNorm);
   }
   if (typeof gemini.collection === 'string' && gemini.collection.trim()) {
     combined.collection = gemini.collection.trim();
+  }
+  // Coerce collection → "Base Set" for base cards. The prompt instructs
+  // Gemini to emit collection="Base Set" when there's no insert/subset
+  // overlay, but it still occasionally mirrors the set name into
+  // collection (e.g. set="Series One", collection="Series One") or leaves
+  // it empty. Three cases collapse to "Base Set":
+  //   (1) collection unset / empty / explicit "Base"-style sentinel,
+  //   (2) collection equals the (normalized) set string verbatim,
+  //   (3) collection equals the brand-prefixed form of the set
+  //       (e.g. set="Series One" but collection="Topps Series One").
+  // Inserts/subsets keep their distinct collection name unchanged.
+  const setForBaseCheck = (combined.set ?? '').toString().trim();
+  const brandForBaseCheck = (combined.brand ?? '').toString().trim();
+  const collectionRaw = (combined.collection ?? '').toString().trim();
+  const collectionLower = collectionRaw.toLowerCase();
+  const setLower = setForBaseCheck.toLowerCase();
+  const brandedSetLower = brandForBaseCheck && setForBaseCheck
+    ? `${brandForBaseCheck} ${setForBaseCheck}`.toLowerCase()
+    : '';
+  const mirrorsSet =
+    !!setLower && (collectionLower === setLower || collectionLower === brandedSetLower);
+  if (isBaseCollection(collectionRaw) || mirrorsSet) {
+    combined.collection = 'Base Set';
   }
   if (typeof gemini.cardNumber === 'string' && gemini.cardNumber.trim()) {
     combined.cardNumber = gemini.cardNumber.trim();
@@ -166,10 +256,15 @@ export function applyGeminiToCombined(
   }
 
   // ── Parallel → foilType + variant ──────────────────────────────────────
-  // When Gemini reports name="None detected" we treat the card as base and
-  // clear any foilType the legacy pipeline may have wrongly inferred. When
-  // Gemini reports a real parallel name, that name becomes the canonical
-  // foilType / variant string (e.g. "Pink/Green Polka Dot", "Rainbow Foil").
+  // When Gemini reports name="None detected" / "Base" / "None" / null we
+  // treat the card as base and CLEAR foilType / variant. The persisted
+  // empty-string sentinel is load-bearing for the eBay base-card penalty
+  // path in `server/ebayService.ts` (PR #205), which uses
+  // `foilType.trim() === ''` as the signal to penalize listings whose
+  // titles contain parallel keywords. The prompt's PARALLEL DEFAULT rule
+  // is the real fix for the "VLM hallucinated a parallel on a base card"
+  // failure mode reported in the 2026 Topps bulk audit; this clearing
+  // step preserves the existing-base-card invariant.
   const parallelName = gemini.parallel?.name ?? null;
   if (isNoneDetected(parallelName)) {
     combined.foilType = '';
