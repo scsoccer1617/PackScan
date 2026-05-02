@@ -551,7 +551,7 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
     backOCRText = backSide.ocrText;
     console.timeEnd('dual-analyzers');
     if (geminiResult) {
-      console.log(`[vlm-gemini] ok promptVersion=${VLM_INFO.promptVersion} player="${geminiResult.player ?? ''}" year=${geminiResult.year ?? '?'} brand=${geminiResult.brand ?? '?'} set=${geminiResult.set ?? '?'} collection=${geminiResult.collection ?? '?'} #${geminiResult.cardNumber ?? '?'} cmp=${geminiResult.cmpCode ?? '?'} parallel="${geminiResult.parallel?.name ?? 'None'}"`);
+      console.log(`[vlm-gemini] ok model=${geminiResult.geminiModel ?? '?'} promptVersion=${VLM_INFO.promptVersion} player="${geminiResult.player ?? ''}" year=${geminiResult.year ?? '?'} brand=${geminiResult.brand ?? '?'} set=${geminiResult.set ?? '?'} collection=${geminiResult.collection ?? '?'} #${geminiResult.cardNumber ?? '?'} cmp=${geminiResult.cmpCode ?? '?'} parallel="${geminiResult.parallel?.name ?? 'None'}"`);
     } else {
       console.log('[vlm-gemini] no result — legacy OCR is authoritative for this scan');
     }
@@ -932,6 +932,12 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
         geminiResultLog && typeof geminiResultLog.set === 'string' && geminiResultLog.set.trim()
           ? geminiResultLog.set.trim()
           : null;
+      // Which Gemini model actually answered (primary vs fallback). Surfaced
+      // off the same Gemini stash as the other observability fields.
+      const geminiModel =
+        geminiResultLog && typeof geminiResultLog.geminiModel === 'string' && geminiResultLog.geminiModel.trim()
+          ? geminiResultLog.geminiModel.trim()
+          : null;
 
       if (visualFoilResult) {
         for (const line of (visualFoilResult.indicators ?? [])) {
@@ -951,6 +957,7 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
           legacyYear,
           geminiParallel,
           geminiSet,
+          geminiModel,
         });
       } else {
         scanLog.setFinal({
@@ -965,6 +972,7 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
           legacyYear,
           geminiParallel,
           geminiSet,
+          geminiModel,
         });
       }
       scanLog.flush();
