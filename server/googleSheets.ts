@@ -15,6 +15,10 @@ export const SHEET_HEADERS = [
   'Set', 'Collection', 'Parallel', 'Serial #', 'Variant',
   'Rookie', 'Auto', 'Numbered',
   'Average eBay price', 'Front image link', 'Back image link', 'eBay search URL',
+  // Graded-card columns (append-only — never reorder existing entries, the
+  // sheet reader maps by position). Populated from GRADED-mode scans;
+  // RAW-mode rows write empty strings so existing rows stay readable.
+  'Graded', 'Grading company', 'Grade', 'Grade qualifier', 'Cert #',
 ];
 
 export class NotConnectedError extends Error {
@@ -278,6 +282,13 @@ export interface CardRowInput {
   frontImageUrl?: string | null;
   backImageUrl?: string | null;
   ebaySearchUrl?: string | null;
+  // Graded-card additions. Always optional — RAW-mode rows leave these
+  // empty so the appended columns simply hold blanks for non-graded scans.
+  isGraded?: boolean | null;
+  gradingCompany?: string | null;
+  numericalGrade?: number | string | null;
+  gradeQualifier?: string | null;
+  certificationNumber?: string | null;
 }
 
 function fmtBool(b: boolean | null | undefined) { return b ? 'Yes' : 'No'; }
@@ -343,6 +354,19 @@ export function buildRow(input: CardRowInput): (string | number)[] {
     safeCellValue(input.frontImageUrl),
     safeCellValue(input.backImageUrl),
     safeCellValue(input.ebaySearchUrl),
+    // Graded-card columns. Empty strings on RAW scans so the cells stay
+    // visually blank in the sheet rather than showing "No" everywhere.
+    input.isGraded ? 'Yes' : '',
+    input.gradingCompany ?? '',
+    input.numericalGrade != null && input.numericalGrade !== ''
+      ? (typeof input.numericalGrade === 'number'
+          ? input.numericalGrade
+          : Number.isFinite(Number(input.numericalGrade))
+            ? Number(input.numericalGrade)
+            : '')
+      : '',
+    input.gradeQualifier ?? '',
+    input.certificationNumber ?? '',
   ];
 }
 
@@ -381,6 +405,12 @@ export interface SheetCardRow {
   frontImage: string | null;
   backImage: string | null;
   ebaySearchUrl: string | null;
+  // Graded-card columns (append-only, columns 19–23).
+  isGraded: boolean;
+  gradingCompany: string | null;
+  numericalGrade: number | null;
+  gradeQualifier: string | null;
+  certificationNumber: string | null;
 }
 
 function parseBool(v: string | undefined): boolean {
@@ -484,6 +514,18 @@ function parseSheetRow(
     frontImage: get(16) || null,
     backImage: get(17) || null,
     ebaySearchUrl: get(18) || null,
+    // Graded columns 19..23. Older rows that pre-date these columns simply
+    // return empty strings here, which parse to false / null cleanly.
+    isGraded: parseBool(get(19)),
+    gradingCompany: get(20) || null,
+    numericalGrade: (() => {
+      const raw = get(21);
+      if (!raw) return null;
+      const n = Number(raw);
+      return Number.isFinite(n) ? n : null;
+    })(),
+    gradeQualifier: get(22) || null,
+    certificationNumber: get(23) || null,
   };
 }
 

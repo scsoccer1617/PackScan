@@ -18,13 +18,101 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
-import { X, Image as ImageIcon, RotateCcw, Check } from 'lucide-react';
+import { X, Image as ImageIcon, RotateCcw, Check, Zap, ZapOff, Sparkles } from 'lucide-react';
+
+/** Diagnostics computed from the live preview. Surfaced to the parent on
+ *  capture so the analyze multipart can carry `clientLighting` and
+ *  `clientBlurScore` for server-side logging / quality banners. */
+export interface CaptureQuality {
+  luminance: number | null;
+  blurScore: number | null;
+  lightingState: 'good' | 'low' | 'dark';
+  blurState: 'sharp' | 'soft' | 'blurry';
+}
 
 interface CardCameraCaptureProps {
   open: boolean;
   title?: string;
-  onCapture: (dataUrl: string) => void;
+  onCapture: (dataUrl: string, quality?: CaptureQuality) => void;
   onClose: () => void;
+  /**
+   * 'graded' splits the 2.5:3.5 guide into a top ~18% slab-label strip and a
+   * bottom card-body region. On capture we crop both regions and hand them
+   * back via `onCaptureGraded`. 'raw' (default) uses the existing single
+   * full-guide crop and `onCapture`.
+   */
+  mode?: 'raw' | 'graded';
+  /**
+   * Required when mode='graded'. Receives (frontCardBody, slabLabel) data
+   * URLs cropped from the same shutter press.
+   */
+  onCaptureGraded?: (cardBody: string, slabLabel: string) => void;
+}
+
+// Fraction of the 2.5:3.5 guide that the slab-label strip occupies in
+// GRADED mode. PSA / BGS / SGC / CGC labels print at ~15-20% of slab
+// height; 18% is a good middle so the model can read the label fields
+// without including too much of the card body, and the card-body crop
+// still covers the whole front including the bottom border.
+const GRADED_LABEL_HEIGHT_FRAC = 0.18;
+
+// Lighting / blur thresholds. Tuned against a small set of indoor /
+// table-top dealer scans. Luminance is on the standard 0-255 range; blur
+// score is variance-of-Laplacian (higher = sharper).
+const LUM_LOW = 60;       // below this — yellow "low light" pill
+const LUM_DARK = 30;      // below this — red "too dark" pill (auto-torch trigger)
+const BLUR_SHARP = 50;    // above this — quietly OK
+const BLUR_SOFT = 20;     // below 50, above 20 — yellow "soft" pill
+                          // below 20 — red "blurry" pill + post-capture confirm
+const QUALITY_SAMPLE_INTERVAL_MS = 500;
+const QUALITY_SAMPLE_SIZE = 64; // downsample target for fast Laplacian
+
+type FlashMode = 'auto' | 'on' | 'off';
+const FLASH_MODE_KEY = 'holo-flash-mode';
+
+/**
+ * Variance-of-Laplacian on a downsampled grayscale image. Higher = sharper.
+ * Uses the 4-neighbor Laplacian kernel: L(x,y) = 4*p - p_up - p_down - p_left - p_right.
+ * We downsample to QUALITY_SAMPLE_SIZE so this stays well under 1ms per call.
+ */
+function varianceOfLaplacian(imageData: ImageData): number {
+  const { data, width, height } = imageData;
+  const gray = new Float32Array(width * height);
+  for (let i = 0, j = 0; i < data.length; i += 4, j += 1) {
+    gray[j] = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+  }
+  let sum = 0;
+  let sumSq = 0;
+  let n = 0;
+  for (let y = 1; y < height - 1; y += 1) {
+    for (let x = 1; x < width - 1; x += 1) {
+      const idx = y * width + x;
+      const lap =
+        4 * gray[idx] -
+        gray[idx - 1] -
+        gray[idx + 1] -
+        gray[idx - width] -
+        gray[idx + width];
+      sum += lap;
+      sumSq += lap * lap;
+      n += 1;
+    }
+  }
+  if (n === 0) return 0;
+  const mean = sum / n;
+  return sumSq / n - mean * mean;
+}
+
+function meanLuminance(imageData: ImageData): number {
+  const { data } = imageData;
+  let sum = 0;
+  const stride = 4 * 4; // sample every 4th pixel for speed
+  let n = 0;
+  for (let i = 0; i < data.length; i += stride) {
+    sum += 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+    n += 1;
+  }
+  return n > 0 ? sum / n : 0;
 }
 
 // Guide geometry — kept in sync between the SVG overlay and the capture
@@ -91,6 +179,8 @@ export default function CardCameraCapture({
   title = 'Take Photo',
   onCapture,
   onClose,
+  mode = 'raw',
+  onCaptureGraded,
 }: CardCameraCaptureProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -101,8 +191,38 @@ export default function CardCameraCapture({
 
   const [error, setError] = useState<string | null>(null);
   const [rawImage, setRawImage] = useState<string | null>(null);
+  // Slab-label crop, only populated in GRADED mode. Held alongside rawImage
+  // (which then represents the card-body crop) so Confirm can hand both
+  // back to the parent in a single callback.
+  const [labelImage, setLabelImage] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [focusing, setFocusing] = useState(false);
+
+  // Live preview diagnostics. Updated every QUALITY_SAMPLE_INTERVAL_MS.
+  const [luminance, setLuminance] = useState<number | null>(null);
+  const [blurScore, setBlurScore] = useState<number | null>(null);
+  const sampleCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const sampleTimerRef = useRef<number | null>(null);
+
+  // Manual flash override: 'auto' (torch follows luminance), 'on' (force on),
+  // 'off' (force off). Persisted to localStorage so dealers in dim spaces
+  // don't have to flip it every session. Browsers that don't expose torch
+  // capability silently ignore the constraint — UI still toggles state but
+  // the hardware doesn't change.
+  const [flashMode, setFlashMode] = useState<FlashMode>(() => {
+    if (typeof window === 'undefined') return 'auto';
+    const saved = window.localStorage.getItem(FLASH_MODE_KEY);
+    return saved === 'on' || saved === 'off' || saved === 'auto' ? saved : 'auto';
+  });
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(FLASH_MODE_KEY, flashMode);
+  }, [flashMode]);
+  const [torchCapable, setTorchCapable] = useState(false);
+  const [torchOn, setTorchOn] = useState(false);
+  // Post-capture blur confirmation sheet. When true, the captured rawImage
+  // looked blurry — show a "Use anyway?" prompt before handing back.
+  const [blurConfirm, setBlurConfirm] = useState(false);
   const watchdogRef = useRef<number | null>(null);
   const startAttemptRef = useRef(0);
 
@@ -174,6 +294,11 @@ export default function CardCameraCapture({
             advanced: [{ focusMode: 'continuous' } as any],
           });
         }
+        // Torch capability is browser/hardware dependent. iOS Safari does
+        // not expose `torch` at all; recent Chrome on Android does. We
+        // probe getCapabilities() once per stream and gate the manual
+        // flash-mode pill on the result.
+        setTorchCapable(!!caps.torch);
       } catch {}
 
       if (watchdogRef.current !== null) {
@@ -194,15 +319,23 @@ export default function CardCameraCapture({
     }
   }, [armWatchdog]);
 
-  // Crop the captured video frame to the on-screen guide rectangle.
+  // Crop the captured video frame to a sub-rect of the on-screen guide.
   //
   // The <video> element uses `object-cover`, which centers and crops the
   // source to fill the container without letterboxing. The guide overlay
   // is positioned in *container* coordinates. To crop the source image to
-  // the guide rect we have to invert object-cover: figure out what region
+  // a guide-relative rect we invert object-cover: figure out what region
   // of the video source corresponds to the container box, then map the
-  // guide's container-relative rect into source pixel space.
-  const captureGuideCrop = useCallback((): string | null => {
+  // guide's container-relative rect (offset by yFrac / heightFrac) into
+  // source pixel space.
+  //
+  // For RAW mode pass yFrac=0, heightFrac=1 to get the whole guide. For
+  // GRADED mode we call this twice — once for the top label strip and
+  // once for the card body underneath.
+  const cropGuideRegion = useCallback((
+    yFrac: number,
+    heightFrac: number,
+  ): string | null => {
     const video = videoRef.current;
     const container = containerRef.current;
     const guide = guideRef.current;
@@ -217,9 +350,6 @@ export default function CardCameraCapture({
     const ch = containerRect.height;
     if (!cw || !ch) return null;
 
-    // --- Invert object-cover: compute the source rect that the container
-    // displays. object-cover scales the source uniformly to fully cover
-    // the container, cropping whichever dimension is "extra".
     const videoAspect = vw / vh;
     const containerAspect = cw / ch;
     let srcX = 0;
@@ -227,27 +357,21 @@ export default function CardCameraCapture({
     let srcW = vw;
     let srcH = vh;
     if (videoAspect > containerAspect) {
-      // Video is wider than container — horizontal slice cropped on both sides.
       srcW = vh * containerAspect;
       srcX = (vw - srcW) / 2;
     } else {
-      // Video is taller than container — vertical slice cropped top/bottom.
       srcH = vw / containerAspect;
       srcY = (vh - srcH) / 2;
     }
 
-    // --- Map the guide's container-relative rect into source pixel space,
-    // then pad outward by CROP_PADDING_FRAC on each side so the saved
-    // photo has a little breathing room around the guide outline. The
-    // padding is applied in container coordinates first, then mapped to
-    // source pixels, so padding stays visually consistent regardless of
-    // the video-vs-container aspect mismatch.
     const padX = guideRect.width * CROP_PADDING_FRAC;
     const padY = guideRect.height * CROP_PADDING_FRAC;
+    const regionTop = guideRect.top + guideRect.height * yFrac;
+    const regionHeight = guideRect.height * heightFrac;
     const paddedLeft = guideRect.left - containerRect.left - padX;
-    const paddedTop = guideRect.top - containerRect.top - padY;
+    const paddedTop = regionTop - containerRect.top - padY;
     const paddedWidth = guideRect.width + padX * 2;
-    const paddedHeight = guideRect.height + padY * 2;
+    const paddedHeight = regionHeight + padY * 2;
 
     const gLeftFrac = paddedLeft / cw;
     const gTopFrac = paddedTop / ch;
@@ -259,7 +383,6 @@ export default function CardCameraCapture({
     const cropW = Math.round(gWidthFrac * srcW);
     const cropH = Math.round(gHeightFrac * srcH);
 
-    // Guard against off-by-one edge cases.
     const safeX = Math.max(0, Math.min(vw - 1, cropX));
     const safeY = Math.max(0, Math.min(vh - 1, cropY));
     const safeW = Math.max(1, Math.min(vw - safeX, cropW));
@@ -274,18 +397,123 @@ export default function CardCameraCapture({
     return out.toDataURL('image/jpeg', 0.95);
   }, []);
 
+  // Apply the desired torch state to the current MediaStream. Best-effort:
+  // browsers that don't expose `torch` ignore the constraint.
+  const applyTorch = useCallback(async (on: boolean) => {
+    const stream = streamRef.current;
+    if (!stream) return;
+    const track = stream.getVideoTracks()[0];
+    if (!track) return;
+    try {
+      await track.applyConstraints({ advanced: [{ torch: on } as any] });
+      setTorchOn(on);
+    } catch {
+      // Some platforms throw on unsupported torch — leave torchOn unchanged.
+    }
+  }, []);
+
+  // Reconcile torch state with luminance + manual flashMode whenever either
+  // changes. 'on' / 'off' force; 'auto' turns torch on once luminance drops
+  // below LUM_DARK and turns it off once it climbs back above LUM_LOW
+  // (hysteresis so we don't flicker around the boundary).
+  useEffect(() => {
+    if (!torchCapable) return;
+    if (flashMode === 'on') {
+      if (!torchOn) void applyTorch(true);
+      return;
+    }
+    if (flashMode === 'off') {
+      if (torchOn) void applyTorch(false);
+      return;
+    }
+    if (luminance == null) return;
+    if (!torchOn && luminance < LUM_DARK) void applyTorch(true);
+    else if (torchOn && luminance > LUM_LOW) void applyTorch(false);
+  }, [flashMode, luminance, torchCapable, torchOn, applyTorch]);
+
+  // Live preview sampler: every QUALITY_SAMPLE_INTERVAL_MS take a 64×64 crop
+  // from the center 60% of the video frame and compute mean luminance +
+  // variance-of-Laplacian. Results drive the on-screen quality pills and
+  // the auto-flash decision above.
+  useEffect(() => {
+    if (!open || rawImage) return;
+    let cancelled = false;
+    const tick = () => {
+      if (cancelled) return;
+      const video = videoRef.current;
+      if (!video || !video.videoWidth || !video.videoHeight) {
+        sampleTimerRef.current = window.setTimeout(tick, QUALITY_SAMPLE_INTERVAL_MS);
+        return;
+      }
+      try {
+        let canvas = sampleCanvasRef.current;
+        if (!canvas) {
+          canvas = document.createElement('canvas');
+          canvas.width = QUALITY_SAMPLE_SIZE;
+          canvas.height = QUALITY_SAMPLE_SIZE;
+          sampleCanvasRef.current = canvas;
+        }
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        if (!ctx) return;
+        const vw = video.videoWidth;
+        const vh = video.videoHeight;
+        const sw = vw * 0.6;
+        const sh = vh * 0.6;
+        const sx = (vw - sw) / 2;
+        const sy = (vh - sh) / 2;
+        ctx.drawImage(video, sx, sy, sw, sh, 0, 0, QUALITY_SAMPLE_SIZE, QUALITY_SAMPLE_SIZE);
+        const img = ctx.getImageData(0, 0, QUALITY_SAMPLE_SIZE, QUALITY_SAMPLE_SIZE);
+        setLuminance(meanLuminance(img));
+        setBlurScore(varianceOfLaplacian(img));
+      } catch {
+        // Sampling failures are non-fatal — the pills just stay in their
+        // last state.
+      }
+      sampleTimerRef.current = window.setTimeout(tick, QUALITY_SAMPLE_INTERVAL_MS);
+    };
+    sampleTimerRef.current = window.setTimeout(tick, QUALITY_SAMPLE_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      if (sampleTimerRef.current !== null) {
+        window.clearTimeout(sampleTimerRef.current);
+        sampleTimerRef.current = null;
+      }
+    };
+  }, [open, rawImage]);
+
   const captureFrame = useCallback(() => {
     if (capturedRef.current) return;
-    const cropped = captureGuideCrop();
-    if (!cropped) return;
-    capturedRef.current = true;
-    setRawImage(cropped);
-  }, [captureGuideCrop]);
+    if (mode === 'graded') {
+      const label = cropGuideRegion(0, GRADED_LABEL_HEIGHT_FRAC);
+      const body = cropGuideRegion(
+        GRADED_LABEL_HEIGHT_FRAC,
+        1 - GRADED_LABEL_HEIGHT_FRAC,
+      );
+      if (!label || !body) return;
+      capturedRef.current = true;
+      setLabelImage(label);
+      setRawImage(body);
+    } else {
+      const cropped = cropGuideRegion(0, 1);
+      if (!cropped) return;
+      capturedRef.current = true;
+      setRawImage(cropped);
+    }
+    // Blur post-capture re-check: when the live sampler scored below
+    // BLUR_SOFT, surface the confirmation sheet on the preview screen so
+    // the user can retake before committing to the analyze pipeline. Above
+    // BLUR_SOFT we go straight to the standard preview.
+    if (blurScore != null && blurScore < BLUR_SOFT) {
+      setBlurConfirm(true);
+    }
+  }, [cropGuideRegion, mode, blurScore]);
 
   useEffect(() => {
     if (!open) {
       detachStream();
       setRawImage(null);
+      setLabelImage(null);
+      setBlurConfirm(false);
       if (watchdogRef.current !== null) {
         window.clearTimeout(watchdogRef.current);
         watchdogRef.current = null;
@@ -356,12 +584,25 @@ export default function CardCameraCapture({
 
   const handleConfirm = () => {
     if (!rawImage) return;
-    onCapture(rawImage);
+    const lightingState: CaptureQuality['lightingState'] =
+      luminance == null ? 'good' : luminance < LUM_DARK ? 'dark' : luminance < LUM_LOW ? 'low' : 'good';
+    const blurState: CaptureQuality['blurState'] =
+      blurScore == null ? 'sharp' : blurScore < BLUR_SOFT ? 'blurry' : blurScore < BLUR_SHARP ? 'soft' : 'sharp';
+    const quality: CaptureQuality = { luminance, blurScore, lightingState, blurState };
+    if (mode === 'graded' && labelImage && onCaptureGraded) {
+      onCaptureGraded(rawImage, labelImage);
+    } else {
+      onCapture(rawImage, quality);
+    }
     setRawImage(null);
+    setLabelImage(null);
+    setBlurConfirm(false);
   };
 
   const handleRetake = () => {
     setRawImage(null);
+    setLabelImage(null);
+    setBlurConfirm(false);
     capturedRef.current = false;
   };
 
@@ -402,6 +643,8 @@ export default function CardCameraCapture({
           onClick={() => {
             detachStream();
             setRawImage(null);
+            setLabelImage(null);
+            setBlurConfirm(false);
             onClose();
           }}
           aria-label="Close camera"
@@ -478,6 +721,20 @@ export default function CardCameraCapture({
                 <div className="absolute -top-px -right-px w-5 h-5 border-t-2 border-r-2 border-white/80 rounded-tr-md" />
                 <div className="absolute -bottom-px -left-px w-5 h-5 border-b-2 border-l-2 border-white/80 rounded-bl-md" />
                 <div className="absolute -bottom-px -right-px w-5 h-5 border-b-2 border-r-2 border-white/80 rounded-br-md" />
+                {/* GRADED mode: dashed divider at 18% to show the slab-label
+                    crop region, plus a tiny "LABEL" badge so first-time users
+                    understand why the top strip is highlighted. */}
+                {mode === 'graded' && (
+                  <>
+                    <div
+                      className="absolute left-0 right-0 border-t border-dashed border-white/70"
+                      style={{ top: `${GRADED_LABEL_HEIGHT_FRAC * 100}%` }}
+                    />
+                    <div className="absolute left-1 top-1 px-1.5 py-0.5 rounded bg-emerald-500/85 text-white text-[10px] font-semibold tracking-wide">
+                      LABEL
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -489,7 +746,72 @@ export default function CardCameraCapture({
           >
             {focusing
               ? 'Focusing…'
-              : 'Align card inside the guide · tap to focus'}
+              : mode === 'graded'
+                ? 'Align slab — label in top strip, card below'
+                : 'Align card inside the guide · tap to focus'}
+          </div>
+        )}
+
+        {/* Quality pills + flash toggle. Pinned top-right so they don't
+            collide with the centered guide. Pills stay hidden when the
+            sample is good — silence is the desired state. The flash
+            toggle is always visible when the device exposes a torch
+            capability so dealers can pre-arm flash on dim tables. */}
+        {!inPreview && (
+          <div className="absolute right-2 top-10 z-10 flex flex-col items-end gap-1.5 pointer-events-none">
+            {luminance != null && luminance < LUM_LOW && (
+              <span
+                className={`pointer-events-none px-2 py-0.5 rounded-full text-[10px] font-semibold tracking-wide ${
+                  luminance < LUM_DARK ? 'bg-red-600 text-white' : 'bg-amber-500 text-white'
+                }`}
+                data-testid="pill-lighting"
+              >
+                {luminance < LUM_DARK ? 'TOO DARK' : 'LOW LIGHT'}
+              </span>
+            )}
+            {blurScore != null && blurScore < BLUR_SHARP && (
+              <span
+                className={`pointer-events-none px-2 py-0.5 rounded-full text-[10px] font-semibold tracking-wide ${
+                  blurScore < BLUR_SOFT ? 'bg-red-600 text-white' : 'bg-amber-500 text-white'
+                }`}
+                data-testid="pill-blur"
+              >
+                {blurScore < BLUR_SOFT ? 'BLURRY' : 'HOLD STEADY'}
+              </span>
+            )}
+            {torchCapable && (
+              <button
+                type="button"
+                onClick={() => {
+                  setFlashMode((m) => (m === 'auto' ? 'on' : m === 'on' ? 'off' : 'auto'));
+                }}
+                className="pointer-events-auto h-8 px-2.5 rounded-full bg-black/60 text-white text-[11px] font-semibold flex items-center gap-1 active:scale-95 transition-transform"
+                aria-label={`Flash ${flashMode}`}
+                data-testid="button-flash-mode"
+              >
+                {flashMode === 'on' ? (
+                  <Zap className="h-3.5 w-3.5 fill-yellow-300 text-yellow-300" />
+                ) : flashMode === 'off' ? (
+                  <ZapOff className="h-3.5 w-3.5" />
+                ) : (
+                  <Sparkles className="h-3.5 w-3.5" />
+                )}
+                <span className="uppercase">{flashMode}</span>
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Post-capture blur confirmation. Shown over the preview when the
+            live sampler caught a blurry frame at shutter time. Two paths:
+            Retake (default outline) drops back into the viewfinder;
+            Use Anyway commits the photo to the analyze pipeline. */}
+        {inPreview && blurConfirm && (
+          <div className="absolute inset-x-4 bottom-4 bg-amber-50 border border-amber-300 text-amber-900 rounded-xl px-4 py-3 z-20 shadow-lg">
+            <p className="text-sm font-semibold">Photo looks blurry.</p>
+            <p className="text-xs mt-0.5 text-amber-800">
+              Retake for sharper text, or use anyway if the card details are legible to you.
+            </p>
           </div>
         )}
 
@@ -511,8 +833,10 @@ export default function CardCameraCapture({
             <Button
               type="button"
               variant="ghost"
-              className="text-white hover:bg-white/10 flex-col h-auto py-2"
+              className="text-white hover:bg-white/10 flex-col h-auto py-2 disabled:opacity-40"
               onClick={handleLibrary}
+              disabled={mode === 'graded'}
+              title={mode === 'graded' ? 'Library upload disabled in Graded mode — please use the camera' : undefined}
             >
               <ImageIcon className="h-6 w-6" />
               <span className="text-xs mt-1">Library</span>

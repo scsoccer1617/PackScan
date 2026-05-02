@@ -1,12 +1,12 @@
 import { useState, useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Camera, Upload } from 'lucide-react';
-import CardCameraCapture from './CardCameraCapture';
+import CardCameraCapture, { type CaptureQuality } from './CardCameraCapture';
 
 export type ImageSource = 'camera' | 'file';
 
 interface SimpleImageUploaderProps {
-  onImageCaptured: (imageData: string, source: ImageSource) => void;
+  onImageCaptured: (imageData: string, source: ImageSource, quality?: CaptureQuality) => void;
   label: string;
   existingImage?: string;
   cameraTitle?: string;
@@ -22,6 +22,17 @@ interface SimpleImageUploaderProps {
    * label fits inside the narrow 2-column /scan slot without truncating.
    */
   retakeLabel?: string;
+  /**
+   * 'graded' splits the camera viewfinder into a slab-label strip + card
+   * body and emits both crops via `onGradedCaptured`. Library uploads are
+   * disabled in graded mode (no geometry to split a photo by).
+   */
+  cameraMode?: 'raw' | 'graded';
+  /**
+   * Required when cameraMode='graded'. Receives the card-body crop and the
+   * slab-label crop from a single shutter press.
+   */
+  onGradedCaptured?: (cardBody: string, slabLabel: string) => void;
 }
 
 export default function SimpleImageUploader({
@@ -31,6 +42,8 @@ export default function SimpleImageUploader({
   cameraTitle,
   openCameraSignal,
   retakeLabel,
+  cameraMode = 'raw',
+  onGradedCaptured,
 }: SimpleImageUploaderProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [cameraOpen, setCameraOpen] = useState(false);
@@ -126,8 +139,14 @@ export default function SimpleImageUploader({
       <CardCameraCapture
         open={cameraOpen}
         title={cameraTitle || label}
-        onCapture={(dataUrl) => {
-          onImageCaptured(dataUrl, 'camera');
+        mode={cameraMode}
+        onCapture={(dataUrl, quality) => {
+          onImageCaptured(dataUrl, 'camera', quality);
+          setCameraOpen(false);
+        }}
+        onCaptureGraded={(cardBody, slabLabel) => {
+          onImageCaptured(cardBody, 'camera');
+          onGradedCaptured?.(cardBody, slabLabel);
           setCameraOpen(false);
         }}
         onClose={() => setCameraOpen(false)}

@@ -15,7 +15,7 @@
 // + eBay comps. This is the capture half of the split that replaced the
 // old monolithic PriceLookup.tsx.
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLocation, useSearch } from "wouter";
 import SimpleImageUploader from "@/components/SimpleImageUploader";
 import VoiceLookup, { type ExtractedCardFields } from "@/components/VoiceLookup";
@@ -129,8 +129,31 @@ export default function Scan() {
   // drop captured photos.
   const [frontImage, setFrontImage] = useState<string>("");
   const [backImage, setBackImage] = useState<string>("");
+  // GRADED mode: the slab-label crop captured alongside the front image. Used
+  // as a separate multipart field on /analyze-card-dual-images so the server
+  // can run a dedicated VLM pass over the printed label fields.
+  const [gradingLabelImage, setGradingLabelImage] = useState<string>("");
+  // Live-preview quality diagnostics from CardCameraCapture's sampler. Sent
+  // alongside the analyze upload so the server can log image-quality
+  // signals next to the OCR result.
+  const [frontLighting, setFrontLighting] = useState<string>("");
+  const [frontBlurScore, setFrontBlurScore] = useState<number | null>(null);
   const [backCameraSignal, setBackCameraSignal] = useState<number>(0);
   const [analyzing, setAnalyzing] = useState<boolean>(false);
+
+  // RAW (default) ↔ GRADED toggle. Persisted across visits so users that
+  // primarily scan slabs don't have to flip the switch every time. Default
+  // RAW because most users scan ungraded cards.
+  const [scanMode, setScanMode] = useState<'raw' | 'graded'>(() => {
+    if (typeof window === 'undefined') return 'raw';
+    return window.localStorage.getItem('holo-scan-mode') === 'graded'
+      ? 'graded'
+      : 'raw';
+  });
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem('holo-scan-mode', scanMode);
+  }, [scanMode]);
 
   // Ref so minting a new scanId on each front capture doesn't re-render.
   const scanIdRef = useRef<string | null>(null);
@@ -252,7 +275,22 @@ export default function Scan() {
       const formData = new FormData();
       formData.append("backImage", backBlob, "back.jpg");
       if (frontBlob) formData.append("frontImage", frontBlob, "front.jpg");
+      // GRADED mode: send the slab-label crop as a separate multipart field
+      // and tag the request mode so the server runs the grading-label
+      // analyzer + cross-validates against the card-body OCR.
+      if (scanMode === 'graded' && gradingLabelImage) {
+        const labelBlob = await compressImage(gradingLabelImage);
+        formData.append("gradingLabelImage", labelBlob, "label.jpg");
+        formData.append("mode", "graded");
+      }
       if (scanIdRef.current) formData.append("scanId", scanIdRef.current);
+      // Diagnostic image-quality signals from the live preview. Server
+      // already accepts these as optional fields and logs them next to the
+      // analyze result; missing values are tolerated.
+      if (frontLighting) formData.append("clientLighting", frontLighting);
+      if (frontBlurScore != null && Number.isFinite(frontBlurScore)) {
+        formData.append("clientBlurScore", String(Math.round(frontBlurScore)));
+      }
       // Mint (or reuse) a client UUID for the audit row. Letting the
       // client own the id means the server can fire-and-forget the
       // user_scans INSERT and we still know how to update it on save.
@@ -375,14 +413,64 @@ export default function Scan() {
       {/* ── Image capture ───────────────────────────────────────────────── */}
       {mode === "image" && (
         <>
+          {/* RAW ↔ GRADED toggle. Pinned above the capture grid so the
+              choice is visible *before* the user shoots. Persisted to
+              localStorage so dealers that primarily scan slabs don't have
+              to re-toggle every visit. */}
+          <div className="px-4 flex justify-end">
+            <div
+              role="tablist"
+              aria-label="Scan mode"
+              className="inline-flex rounded-full border border-slate-200 bg-white p-0.5 text-xs font-semibold tracking-wide"
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={scanMode === 'raw'}
+                onClick={() => setScanMode('raw')}
+                className={cn(
+                  "px-3 py-1.5 rounded-full transition",
+                  scanMode === 'raw'
+                    ? "bg-slate-900 text-white"
+                    : "text-slate-500 hover:text-slate-700",
+                )}
+                data-testid="button-mode-raw"
+              >
+                RAW
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={scanMode === 'graded'}
+                onClick={() => setScanMode('graded')}
+                className={cn(
+                  "px-3 py-1.5 rounded-full transition",
+                  scanMode === 'graded'
+                    ? "bg-emerald-600 text-white"
+                    : "text-slate-500 hover:text-slate-700",
+                )}
+                data-testid="button-mode-graded"
+              >
+                GRADED
+              </button>
+            </div>
+          </div>
           <div className="px-4 grid grid-cols-2 gap-3">
             <div>
               <p className="text-[11px] uppercase tracking-wider font-semibold text-slate-500 mb-1.5">
                 Front
               </p>
               <SimpleImageUploader
-                onImageCaptured={(img, source) => {
+                onImageCaptured={(img, source, quality) => {
                   setFrontImage(img);
+                  // Re-take of the front in GRADED mode: clear the prior
+                  // label crop. onGradedCaptured will repopulate it from
+                  // the same shutter press.
+                  if (scanMode !== 'graded') setGradingLabelImage("");
+                  if (quality) {
+                    setFrontLighting(quality.lightingState);
+                    setFrontBlurScore(quality.blurScore);
+                  }
                   const scanId = mintScanId();
                   scanIdRef.current = scanId;
                   void firePreliminaryScan(scanId, img);
@@ -390,8 +478,12 @@ export default function Scan() {
                     setBackCameraSignal((n) => n + 1);
                   }
                 }}
+                cameraMode={scanMode}
+                onGradedCaptured={(_cardBody, label) => {
+                  setGradingLabelImage(label);
+                }}
                 label="Capture front"
-                cameraTitle="Front of Card"
+                cameraTitle={scanMode === 'graded' ? 'Front of Slab' : 'Front of Card'}
                 existingImage={frontImage}
                 retakeLabel="Rescan Front"
               />

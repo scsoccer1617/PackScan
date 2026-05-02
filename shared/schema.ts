@@ -126,6 +126,14 @@ export const cards = pgTable("cards", {
   frontImage: text("front_image"),
   backImage: text("back_image"),
   googleSheetId: text("google_sheet_id"),
+  // Graded-card support — appended at the end of the `cards` table so the
+  // column order existing readers depend on is not perturbed. Populated by
+  // the GRADED-mode scan path; null/false on every other code path.
+  isGraded: boolean("is_graded").default(false),
+  gradingCompany: text("grading_company"),
+  numericalGrade: numeric("numerical_grade", { precision: 4, scale: 1 }),
+  gradeQualifier: text("grade_qualifier"),
+  certificationNumber: text("certification_number"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
   userId: integer("user_id").references(() => users.id),
@@ -247,6 +255,15 @@ export const cardSchema = z.object({
   // basketball/hockey "-YY" suffix being appended to single-year ©
   // imprints. Not persisted to long-term storage.
   yearPrintedRaw: z.string().optional().nullable(),
+  // ── Graded-card fields ──────────────────────────────────────────────
+  // Populated when the user scans through GRADED mode (slabbed card with
+  // a label strip captured separately above the card body). Always
+  // present in the response payload but null/false on RAW mode scans.
+  isGraded: z.boolean().optional().default(false),
+  gradingCompany: z.enum(['PSA', 'BGS', 'SGC', 'CGC']).optional().nullable(),
+  numericalGrade: z.number().optional().nullable(),
+  gradeQualifier: z.string().optional().nullable(),
+  certificationNumber: z.string().optional().nullable(),
   _engine: z.literal('ocr').optional(),
   // Optional scan-tracking payload. When present, the server logs a row to
   // user_scans alongside the cards insert. Lets us record the original
