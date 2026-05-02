@@ -26,6 +26,7 @@
 import type { CardFormValues } from '@shared/schema';
 import type { GeminiCardResult } from './vlmGemini';
 import type { Player } from '@shared/players';
+import { applySetEraGuard } from './vlmPostProcess';
 
 const NONE_DETECTED_SENTINELS = new Set([
   'none detected',
@@ -203,6 +204,28 @@ export function applyGeminiToCombined(
   if (typeof gemini.set === 'string' && gemini.set.trim()) {
     const brandForNorm = (combined.brand ?? gemini.brand ?? '').toString();
     combined.set = normalizeSetValue(gemini.set, brandForNorm);
+  }
+  // Era guard: forbid impossible attributions ("Big League" pre-2018) and
+  // backfill empty set on vintage Topps. Runs AFTER normalizeSetValue so we
+  // see the canonicalized disambiguator, not the raw VLM string. Brand/year
+  // are already populated above.
+  {
+    const brandForGuard = (combined.brand ?? gemini.brand ?? '').toString();
+    const yearForGuard =
+      typeof combined.year === 'number'
+        ? combined.year
+        : typeof gemini.year === 'number'
+          ? gemini.year
+          : null;
+    const guard = applySetEraGuard({
+      set: (combined.set ?? '').toString(),
+      brand: brandForGuard,
+      year: yearForGuard,
+    });
+    combined.set = guard.set;
+    if (guard.setCorrected) {
+      (combined as any)._setCorrected = guard.setCorrected;
+    }
   }
   if (typeof gemini.collection === 'string' && gemini.collection.trim()) {
     combined.collection = gemini.collection.trim();
