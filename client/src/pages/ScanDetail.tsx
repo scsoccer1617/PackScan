@@ -1,7 +1,9 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useRoute } from "wouter";
-import { ArrowLeft, Camera, ExternalLink, RefreshCw } from "lucide-react";
+import { ArrowLeft, Camera, ExternalLink, Loader2, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 
 /**
  * Per-scan detail page reachable from Home → Recent Scans.
@@ -103,6 +105,8 @@ export default function ScanDetail() {
   const [, params] = useRoute<{ id: string }>("/scans/:id");
   const [, setLocation] = useLocation();
   const id = params ? Number(params.id) : NaN;
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
 
   const { data, isLoading, error } = useQuery<ScanGradeResponse>({
     queryKey: ["/api/scan-grades", { id }],
@@ -118,6 +122,47 @@ export default function ScanDetail() {
     },
     enabled: Number.isFinite(id) && id > 0,
     retry: (failureCount, err: any) => err?.status !== 404 && failureCount < 2,
+  });
+
+  // Re-runs the eBay lookup against the existing identification and
+  // updates scan_grades.estimated_value. The button on this page used to
+  // route into the camera capture flow — repurposed here so users can
+  // refresh stale prices without re-photographing the card.
+  const refreshPrice = useMutation<{
+    success: boolean;
+    estimatedValue: number | null;
+    query: string;
+    resultCount: number;
+  }>({
+    mutationFn: async () => {
+      return apiRequest({
+        url: `/api/scan-grades/${id}/refresh-price`,
+        method: "POST",
+      });
+    },
+    onSuccess: (res) => {
+      if (res.estimatedValue != null && res.estimatedValue > 0) {
+        // Refetch the detail row so the price tile re-renders with the
+        // new value (server already persisted it).
+        queryClient.invalidateQueries({ queryKey: ["/api/scan-grades", { id }] });
+        toast({
+          title: "Price refreshed",
+          description: `Updated to ${money(res.estimatedValue, 2)}.`,
+        });
+      } else {
+        toast({
+          title: "No new listings found",
+          description: "Price unchanged.",
+        });
+      }
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Refresh failed",
+        description: err?.message || "Could not refresh price.",
+        variant: "destructive",
+      });
+    },
   });
 
   const goBack = () => {
@@ -301,14 +346,26 @@ export default function ScanDetail() {
                   View in Collection
                 </Link>
               )}
-              <Link
-                href="/scan/camera"
-                className="w-full inline-flex items-center justify-center gap-2 rounded-2xl border border-card-border bg-white text-ink text-sm font-semibold py-3 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-ink"
-                data-testid="button-rescan-card"
+              <button
+                type="button"
+                onClick={() => refreshPrice.mutate()}
+                disabled={refreshPrice.isPending}
+                aria-label="Refresh price"
+                className="w-full inline-flex items-center justify-center gap-2 rounded-2xl border border-card-border bg-white text-ink text-sm font-semibold py-3 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-ink disabled:opacity-60 disabled:cursor-not-allowed"
+                data-testid="button-refresh-price"
               >
-                <RefreshCw className="w-4 h-4" />
-                Rescan this card
-              </Link>
+                {refreshPrice.isPending ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Refreshing price…
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="w-4 h-4" />
+                    Refresh price
+                  </>
+                )}
+              </button>
             </div>
           </>
         );
