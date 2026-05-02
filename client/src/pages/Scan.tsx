@@ -428,48 +428,9 @@ export default function Scan() {
       {/* ── Image capture ───────────────────────────────────────────────── */}
       {mode === "image" && (
         <>
-          {/* RAW ↔ GRADED toggle. Pinned above the capture grid so the
-              choice is visible *before* the user shoots. Persisted to
-              localStorage so dealers that primarily scan slabs don't have
-              to re-toggle every visit. */}
-          <div className="px-4 flex justify-end">
-            <div
-              role="tablist"
-              aria-label="Scan mode"
-              className="inline-flex rounded-full border border-slate-200 bg-white p-0.5 text-xs font-semibold tracking-wide"
-            >
-              <button
-                type="button"
-                role="tab"
-                aria-selected={scanMode === 'raw'}
-                onClick={() => setScanMode('raw')}
-                className={cn(
-                  "px-3 py-1.5 rounded-full transition",
-                  scanMode === 'raw'
-                    ? "bg-slate-900 text-white"
-                    : "text-slate-500 hover:text-slate-700",
-                )}
-                data-testid="button-mode-raw"
-              >
-                RAW
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={scanMode === 'graded'}
-                onClick={() => setScanMode('graded')}
-                className={cn(
-                  "px-3 py-1.5 rounded-full transition",
-                  scanMode === 'graded'
-                    ? "bg-emerald-600 text-white"
-                    : "text-slate-500 hover:text-slate-700",
-                )}
-                data-testid="button-mode-graded"
-              >
-                GRADED
-              </button>
-            </div>
-          </div>
+          {/* The page-level RAW/GRADED pill was removed in favor of the
+              in-camera pill (PR #216). `scanMode` state still drives the
+              camera modal's mode and is persisted to localStorage. */}
           <div className="px-4 grid grid-cols-2 gap-3">
             <div>
               <p className="text-[11px] uppercase tracking-wider font-semibold text-slate-500 mb-1.5">
@@ -503,6 +464,16 @@ export default function Scan() {
                 existingImage={frontImage}
                 openCameraSignal={frontCameraSignal}
                 retakeLabel="Rescan Front"
+                hideLibraryButton
+                onCameraClose={() => {
+                  // X on the auto-opened front camera with nothing
+                  // captured yet routes back to Home so the user isn't
+                  // left staring at an empty /scan page. If the front
+                  // is already captured (e.g. retake → cancel), stay.
+                  if (!frontImage) {
+                    navigate("/");
+                  }
+                }}
               />
             </div>
             <div>
@@ -516,6 +487,7 @@ export default function Scan() {
                 existingImage={backImage}
                 openCameraSignal={backCameraSignal}
                 retakeLabel="Rescan Back"
+                hideLibraryButton
               />
             </div>
           </div>
