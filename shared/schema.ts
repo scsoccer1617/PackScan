@@ -443,6 +443,10 @@ export const scanGrades = pgTable("scan_grades", {
   // Null on legacy rows written before identification was added.
   identification: jsonb("identification"),
   identificationConfidence: numeric("identification_confidence", { precision: 4, scale: 3 }),
+  // Cached eBay average value computed at analyze time. Lets Recent Scans /
+  // /scans/:id render a price for scans that were never saved as a card.
+  // Mirrors `cards.estimatedValue` precision/scale.
+  estimatedValue: numeric("estimated_value", { precision: 10, scale: 2 }),
   // External catalog linkage. Set when a scan is successfully matched to a
   // third-party catalog (currently SportsCardsPro). `externalCatalogId` is
   // the vendor's product ID (opaque string), `externalCatalogSource` is the
