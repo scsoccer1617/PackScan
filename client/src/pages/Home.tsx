@@ -26,6 +26,7 @@ type ScanGradesResponse = {
   success: boolean;
   grades: Array<{
     id: number;
+    cardId?: number | null;
     overall: number;
     label: string;
     /** Sentinel `"none"` marks rows inserted when auto-grade was off.
@@ -43,6 +44,9 @@ type ScanGradesResponse = {
         rows that predate image persistence. */
     frontImage?: string | null;
     backImage?: string | null;
+    /** Cached `cards.estimatedValue` joined server-side when this grade row
+        is linked to a saved card. Null for grade-only rows or unpriced cards. */
+    cachedPrice?: number | null;
   }>;
 };
 
@@ -180,10 +184,15 @@ export default function Home() {
               const id = g.identification;
               const player = id?.player ?? "Unknown card";
               const meta = [id?.year, id?.brand].filter(Boolean).join(" ");
+              const ariaParts = [player, meta].filter(Boolean).join(" – ");
+              const href = g.cardId ? `/collection?card=${g.cardId}` : "/collection";
+              const hasPrice = typeof g.cachedPrice === "number" && g.cachedPrice > 0;
               return (
-                <div
+                <Link
                   key={g.id}
-                  className="shrink-0 w-[160px] bg-white border border-card-border rounded-2xl overflow-hidden hover:shadow-md transition-shadow"
+                  href={href}
+                  aria-label={`Open ${ariaParts}`}
+                  className="shrink-0 w-[160px] bg-white border border-card-border rounded-2xl overflow-hidden hover:shadow-md transition-shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-ink"
                   data-testid={`recent-${g.id}`}
                 >
                   <div className="aspect-[3/4] bg-muted relative flex items-center justify-center">
@@ -192,6 +201,7 @@ export default function Home() {
                         src={g.frontImage}
                         alt={player}
                         loading="lazy"
+                        draggable={false}
                         className="absolute inset-0 w-full h-full object-cover"
                         data-testid={`img-recent-front-${g.id}`}
                       />
@@ -217,11 +227,19 @@ export default function Home() {
                     {meta && (
                       <p className="text-[11px] text-slate-500 truncate">{meta}</p>
                     )}
-                    <p className="text-[10px] text-slate-500 mt-1.5">
-                      {relativeTime(g.createdAt)}
-                    </p>
+                    <div className="mt-1.5 flex items-baseline justify-between gap-2 min-w-0">
+                      <p className="text-[10px] text-slate-500 truncate">
+                        {relativeTime(g.createdAt)}
+                      </p>
+                      <p
+                        className="text-[10px] text-slate-500 shrink-0"
+                        data-testid={`text-recent-price-${g.id}`}
+                      >
+                        {hasPrice ? money(g.cachedPrice as number, 2) : "No active listings"}
+                      </p>
+                    </div>
                   </div>
-                </div>
+                </Link>
               );
             })}
           </div>
