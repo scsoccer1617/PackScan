@@ -7,29 +7,36 @@ import Scan from "@/pages/Scan";
 import ScanPicker from "@/pages/ScanPicker";
 import ScanResult from "@/pages/ScanResult";
 import ScanDetail from "@/pages/ScanDetail";
-import AddCard from "@/pages/AddCard";
-import CardSearch from "@/pages/CardSearch";
-import CardDatabaseAdmin from "@/pages/CardDatabaseAdmin";
-import AdminUsers from "@/pages/AdminUsers";
-import AdminScans from "@/pages/AdminScans";
-import Login from "@/pages/Login";
-import ForgotPassword from "@/pages/ForgotPassword";
-import ResetPassword from "@/pages/ResetPassword";
-import VerifyEmail from "@/pages/VerifyEmail";
-import MySheets from "@/pages/MySheets";
-import AccountSettings from "@/pages/AccountSettings";
 import Collection from "@/pages/Collection";
-import Stats from "@/pages/Stats";
-import BulkScan from "@/pages/BulkScan";
-import BulkScanSettings from "@/pages/BulkScanSettings";
-import BulkScanBatch from "@/pages/BulkScanBatch";
 import AppShell from "@/components/AppShell";
 import { AuthProvider, useAuth } from "@/hooks/use-auth";
 import { ScanFlowProvider } from "@/hooks/use-scan-flow";
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+
+const AddCard = lazy(() => import("@/pages/AddCard"));
+const CardSearch = lazy(() => import("@/pages/CardSearch"));
+const CardDatabaseAdmin = lazy(() => import("@/pages/CardDatabaseAdmin"));
+const AdminUsers = lazy(() => import("@/pages/AdminUsers"));
+const AdminScans = lazy(() => import("@/pages/AdminScans"));
+const Login = lazy(() => import("@/pages/Login"));
+const ForgotPassword = lazy(() => import("@/pages/ForgotPassword"));
+const ResetPassword = lazy(() => import("@/pages/ResetPassword"));
+const VerifyEmail = lazy(() => import("@/pages/VerifyEmail"));
+const MySheets = lazy(() => import("@/pages/MySheets"));
+const AccountSettings = lazy(() => import("@/pages/AccountSettings"));
+const Stats = lazy(() => import("@/pages/Stats"));
+const BulkScan = lazy(() => import("@/pages/BulkScan"));
+const BulkScanSettings = lazy(() => import("@/pages/BulkScanSettings"));
+const BulkScanBatch = lazy(() => import("@/pages/BulkScanBatch"));
+
+const RouteFallback = () => (
+  <div className="flex items-center justify-center min-h-[60vh]">
+    <div className="text-sm text-muted-foreground">Loading…</div>
+  </div>
+);
 
 const PUBLIC_ROUTES = new Set([
   "/login",
@@ -102,12 +109,14 @@ function Router() {
   // Public routes (no auth required, no shell chrome)
   if (isPublic) {
     return (
-      <Switch>
-        <Route path="/login" component={() => (user ? <Redirect to="/" /> : <Login />)} />
-        <Route path="/forgot-password" component={ForgotPassword} />
-        <Route path="/reset-password" component={ResetPassword} />
-        <Route path="/verify-email" component={VerifyEmail} />
-      </Switch>
+      <Suspense fallback={<RouteFallback />}>
+        <Switch>
+          <Route path="/login" component={() => (user ? <Redirect to="/" /> : <Login />)} />
+          <Route path="/forgot-password" component={ForgotPassword} />
+          <Route path="/reset-password" component={ResetPassword} />
+          <Route path="/verify-email" component={VerifyEmail} />
+        </Switch>
+      </Suspense>
     );
   }
 
@@ -123,6 +132,7 @@ function Router() {
     <ScanFlowProvider>
       <AppShell>
         <VerificationBanner />
+        <Suspense fallback={<RouteFallback />}>
         <Switch>
           <Route path="/" component={Home} />
           {/* /scan now lands on a picker (Scan / Voice / Manual); the
@@ -180,6 +190,7 @@ function Router() {
           />
           <Route component={NotFound} />
         </Switch>
+        </Suspense>
       </AppShell>
     </ScanFlowProvider>
   );

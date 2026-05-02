@@ -28,6 +28,27 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          "vendor-react": ["react", "react-dom", "react-dom/client", "wouter"],
+          "vendor-ui": [
+            "framer-motion",
+            "lucide-react",
+            "@radix-ui/react-slot",
+            "@radix-ui/react-toast",
+            "@radix-ui/react-dialog",
+            "@radix-ui/react-tabs",
+            "@radix-ui/react-select",
+            "@radix-ui/react-checkbox",
+            "@radix-ui/react-switch",
+            "@radix-ui/react-label",
+          ],
+          "vendor-form": ["react-hook-form", "@hookform/resolvers/zod", "zod"],
+          "vendor-data": ["@tanstack/react-query", "drizzle-orm", "drizzle-zod"],
+        },
+      },
+    },
   },
   optimizeDeps: {
     include: [
