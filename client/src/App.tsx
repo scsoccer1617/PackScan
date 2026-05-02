@@ -6,6 +6,7 @@ import Home from "@/pages/Home";
 import Scan from "@/pages/Scan";
 import ScanPicker from "@/pages/ScanPicker";
 import ScanResult from "@/pages/ScanResult";
+import ScanDetail from "@/pages/ScanDetail";
 import AddCard from "@/pages/AddCard";
 import CardSearch from "@/pages/CardSearch";
 import CardDatabaseAdmin from "@/pages/CardDatabaseAdmin";
@@ -130,6 +131,7 @@ function Router() {
           <Route path="/scan" component={ScanPicker} />
           <Route path="/scan/camera" component={Scan} />
           <Route path="/result" component={ScanResult} />
+          <Route path="/scans/:id" component={ScanDetail} />
           <Route path="/add-card" component={AddCard} />
           <Route path="/search" component={CardSearch} />
           <Route path="/collection" component={Collection} />

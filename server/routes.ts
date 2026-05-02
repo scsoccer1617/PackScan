@@ -46,7 +46,7 @@ import {
   type HoloGrade,
   type HoloAnalysis,
 } from './holo/cardGrader';
-import { saveGrade, listGradesForUser, hydrateGrade, updateGradeIdentification } from './holo/storage';
+import { saveGrade, listGradesForUser, getGradeById, hydrateGrade, updateGradeIdentification } from './holo/storage';
 import { requireAuth, getUserPreferences } from './auth';
 import { requireScanQuota, incrementScanCount, getScanQuota } from './scanQuota';
 import { logUserScan, updateUserScan, type ScanFieldValues } from './userScans';
@@ -3761,6 +3761,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (err: any) {
       console.error('Error fetching scan grades:', err);
       return res.status(500).json({ success: false, error: 'Failed to fetch scan grades' });
+    }
+  });
+
+  // Per-scan detail. Powers the /scans/:id detail page reached from the
+  // Home Recent Scans tiles. Returns the same hydrated shape as the list
+  // endpoint plus `cachedPrice`, so the client can render front+back +
+  // identification + grade + cached value from a single call.
+  //
+  // Ownership gate: 404 (not 403) when the row belongs to another user, so
+  // we don't leak existence of other users' scan ids.
+  app.get(`${apiPrefix}/scan-grades/:id`, requireAuth, async (req, res) => {
+    try {
+      const userId = (req.user as any)?.id as number;
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id) || id <= 0) {
+        return res.status(400).json({ success: false, error: 'Invalid scan id' });
+      }
+      const row = await getGradeById(id);
+      if (!row || row.userId !== userId) {
+        return res.status(404).json({ success: false, error: 'Not found' });
+      }
+      const grade = hydrateGrade(row);
+      let cachedPrice: number | null = null;
+      if (grade.cardId != null) {
+        const [priceRow] = await db
+          .select({ estimatedValue: cards.estimatedValue })
+          .from(cards)
+          .where(eq(cards.id, grade.cardId))
+          .limit(1);
+        const v = priceRow?.estimatedValue != null ? Number(priceRow.estimatedValue) : NaN;
+        if (Number.isFinite(v) && v > 0) cachedPrice = v;
+      }
+      return res.json({ success: true, grade: { ...grade, cachedPrice } });
+    } catch (err: any) {
+      console.error('Error fetching scan grade:', err);
+      return res.status(500).json({ success: false, error: 'Failed to fetch scan grade' });
     }
   });
 
