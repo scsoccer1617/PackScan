@@ -47,5 +47,8 @@ sleep 0.5
 echo "[dev-fast.sh] building production bundle..."
 npm run build
 
-echo "[dev-fast.sh] starting server from dist/ in development mode..."
-NODE_ENV=development exec node dist/index.js
+echo "[dev-fast.sh] starting server from dist/ (NODE_ENV=production so Vite middleware stays off)..."
+# NODE_ENV must be production at runtime — server/index.ts mounts Vite
+# middleware (and re-optimizes deps) when NODE_ENV=development, which both
+# defeats the purpose of dev:fast and OOMs the Replit container.
+NODE_ENV=production exec node dist/index.js
