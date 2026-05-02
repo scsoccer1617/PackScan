@@ -43,6 +43,7 @@ import { lookupCard as cardDbLookup } from '../cardDatabaseService';
 import { isCardDbLookupEnabled } from '../featureFlags';
 import { appendCardRow, appendCardRowsBatch, type CardRowInput } from '../googleSheets';
 import { getEbaySearchUrl } from '../ebayService';
+import { applyTopps2026ImprintOverride } from '../yearOverrides';
 import { getScanQuota, incrementScanCount } from '../scanQuota';
 import { logUserScan, type ScanFieldValues } from '../userScans';
 // p-queue is ESM-only; pull it via a typed `as any` to keep typecheck quiet
@@ -783,6 +784,32 @@ async function processItem(
   });
   if (pairKey && timings) {
     timings.recordPairUpdate(pairKey, { geminiMs: Date.now() - tGemini });
+  }
+
+  // ── 2026 Topps imprint year override ────────────────────────────────────
+  // Belt-and-suspenders net for the dense-stat-table case where Gemini
+  // flips to year=2025 despite "© 2026 THE TOPPS" + CMP123053 visible in
+  // the OCR back text. Topps-only, no-op when year is already 2026, no-op
+  // when no imprint/CMP signal is present in the OCR. See yearOverrides.ts.
+  {
+    const brandRaw = (analysis.brand ?? '').toString().trim();
+    if (brandRaw && /^topps\b/i.test(brandRaw)) {
+      const ocrBackText = (analysis as any)._backOCRText ?? '';
+      const vlmYear =
+        typeof analysis.year === 'number'
+          ? analysis.year
+          : analysis.year != null
+            ? Number(analysis.year)
+            : null;
+      const overrideRes = applyTopps2026ImprintOverride({
+        scanId: String(item.id),
+        vlmYear: Number.isFinite(vlmYear as number) ? (vlmYear as number) : null,
+        ocrBackText,
+      });
+      if (overrideRes.overridden) {
+        analysis.year = 2026;
+      }
+    }
   }
 
   // ── Front/back auto-swap (PR fix/front-back-auto-swap) ───────────────────
