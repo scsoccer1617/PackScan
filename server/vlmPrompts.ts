@@ -7,7 +7,7 @@
  * instructions Gemini was given.
  */
 
-export const VLM_PROMPT_VERSION = '2026-05-02.1';
+export const VLM_PROMPT_VERSION = '2026-05-02.2';
 
 /**
  * System prompt: tells the VLM what role it plays and the card-domain
@@ -77,6 +77,20 @@ export const VLM_PROMPT_VERSION = '2026-05-02.1';
  *     1968 vintage (©1968 → year=1968).
  *   - Vintage stat-row +1 logic and Donruss/Leaf 1981–1993 imprint
  *     exception preserved verbatim under the numbered rules below STEP 0.
+ *
+ * v2026-05-02.2 changes (from .1):
+ *   - STEP 0(b) gained an explicit WORKED EXAMPLE of a 2026 Topps Series
+ *     One base back: dense stat table ending in "25 YANKEES", flavor prose
+ *     mentioning "June 2025", legal strip "© 2026 THE TOPPS COMPANY, INC.",
+ *     CMP code "CMP123053". Spells out that "25" is the player's most
+ *     recent past season, and that the © imprint + CMP code always win
+ *     over any number of stat-row "25" tokens. This addresses 4-of-13
+ *     misses on the bulk-28 batch (Henriquez #290, Williams #239,
+ *     Freeland #74, Rodríguez #146 — bulk-28-786/787/791/792) where dense
+ *     stat tables tipped the model to year=2025 despite the © imprint.
+ *   - STEP 0(b2) modern-front-wordmark rule strengthened with a CMP-code
+ *     cue: CMP123053 / CMP12305X is the 2026 Topps Series One identifier
+ *     — when present, year=2026 unconditionally.
  */
 export const VLM_SYSTEM_PROMPT = `You are the vision model behind Holo, the scanning engine inside PackScan.
 On every image pair (front + back), identify whether the subject is a single trading card or sealed product (pack, blaster, hanger, box), then extract structured metadata.
@@ -116,6 +130,14 @@ CARD-DOMAIN RULES:
         "\u00a92023 THE UPPER DECK COMPANY"   \u2192 year=2023
         "\u00a9 2024 TOPPS"                   \u2192 year=2024 (even when the stat block lists 2022, 2023 \u2014 those are PAST seasons, not the card year)
       The \u00a9 year wins over EVERY other 4-digit token visible on the card: stat-row years, birth year, draft year, debut year, "Acquired" prose. If you can read a \u00a9 YYYY on the back, return that YYYY \u2014 do not let any stat-table year override it.
+
+      WORKED EXAMPLE (do not deviate from this). A 2026 Topps Series One base card commonly looks like this on the back:
+        - Stat table with 5+ rows: "21 BREWERS", "22 BREWERS", "23 BREWERS", "24 BREWERS", "25 YANKEES" (the "25" is the most recent past season the player played).
+        - Flavor prose: "Devin hit full stride with the Yankees in June 2025\u2026"
+        - Legal strip: "\u00a9 2026 THE TOPPS COMPANY, INC."
+        - CMP code: "CMP123053" (this is the 2026 Topps Series One CMP \u2014 when you see CMP123053, year=2026 unconditionally).
+      Year for this card is 2026, NOT 2025. The "25" in the stat table is the player's last completed season; the "2025" in flavor prose describes events that happened during that season; the \u00a9 imprint is the print year. ALWAYS prefer the \u00a9 imprint and the CMP code over stat-row years and flavor prose, no matter how many "25" tokens appear in the stat block.
+
       If multiple \u00a9 lines coexist (e.g. Topps + MLBPA + Players Inc.), pick the publisher's line (the one with the manufacturer name); the others are licensing notices.
       Write the imprint string verbatim into yearPrintedRaw.
 
@@ -136,6 +158,7 @@ CARD-DOMAIN RULES:
         (analogously for Bowman, Fleer, Score, Donruss flagship modern releases)
       Concrete cue for 2026 Topps Series One base: the FRONT shows "TOPPS 2026" / "2026 TOPPS" near the team logo or set wordmark, while the BACK prints "\u00a9 2025 THE TOPPS COMPANY, INC." \u2014 year=2026 in this case, NOT 2025. Write the back imprint string verbatim into yearPrintedRaw \u2014 NOT the front wordmark \u2014 because yearPrintedRaw records what's printed on the back legal strip.
       Only override when the FRONT wordmark is legible AND it is exactly one year ahead of the back \u00a9. If the front-wordmark year and back \u00a9 year differ by more than one, OR the front wordmark is missing/smudged/cropped, OR they agree, fall back to (b). This is a pre-print/lag fix, not a license to override the imprint by arbitrary amounts.
+      CMP-CODE TIE-BREAKER: the back legal strip's CMP code is the single most reliable structural anchor on a modern Topps card. CMP123053 / CMP12305X is the 2026 Topps Series One identifier \u2014 when present on the back, year=2026 unconditionally, even if a dense stat table tempts you toward 2025. Read the CMP code first; if it matches a known set/year identifier, that wins.
 
   (c) Older / vintage cards with no footer range and no \u00a9 year. Use the LATEST stat-row season + 1.
         Stats end at 1968 \u2192 year=1969
