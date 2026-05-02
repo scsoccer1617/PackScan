@@ -46,7 +46,7 @@ import {
   type HoloGrade,
   type HoloAnalysis,
 } from './holo/cardGrader';
-import { saveGrade, listGradesForUser, getGradeById, hydrateGrade, updateGradeIdentification } from './holo/storage';
+import { saveGrade, listGradesForUser, getGradeById, hydrateGrade, updateGradeIdentification, updateGradeEstimatedValue } from './holo/storage';
 import { requireAuth, getUserPreferences } from './auth';
 import { requireScanQuota, incrementScanCount, getScanQuota } from './scanQuota';
 import { logUserScan, updateUserScan, type ScanFieldValues } from './userScans';
@@ -2494,9 +2494,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
             gradeKeyword ? { gradeKeyword } : undefined,
           );
           console.timeEnd('ebay-main-search');
-          
+
           console.log('eBay search results:', ebayResults);
-          
+
+          // Persist averageValue onto scan_grades so Recent Scans and
+          // /scans/:id can render a price even when the user never saves
+          // the scan into their cards table. Best-effort — never block the
+          // response on this update.
+          {
+            const gradeRowId = holoResolved?.id;
+            const averageValue = ebayResults?.averageValue;
+            if (
+              gradeRowId != null &&
+              typeof averageValue === 'number' &&
+              averageValue > 0
+            ) {
+              void updateGradeEstimatedValue(gradeRowId, averageValue).catch((err) => {
+                console.warn('[scan_grades] estimatedValue update failed (non-blocking):', err);
+              });
+            }
+          }
+
           const updatedCardData = { ...cardData };
           if (ebayResults.discoveredVariant && !cardData.foilType) {
             console.log(`eBay discovered foil type "${ebayResults.discoveredVariant}" - updating card data`);
@@ -3753,10 +3771,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
           if (Number.isFinite(v) && v > 0) priceByCardId.set(row.id, v);
         }
       }
-      const enriched = grades.map((g) => ({
-        ...g,
-        cachedPrice: g.cardId != null ? priceByCardId.get(g.cardId) ?? null : null,
-      }));
+      const enriched = grades.map((g) => {
+        // Prefer the saved card's estimatedValue (it gets re-priced via the
+        // backfill endpoint and reflects the user's chosen variant). Fall
+        // back to the scan-time average persisted on the scan_grades row so
+        // unsaved scans still render a price.
+        const cardPrice = g.cardId != null ? priceByCardId.get(g.cardId) ?? null : null;
+        const cachedPrice = cardPrice != null ? cardPrice : g.estimatedValue ?? null;
+        return { ...g, cachedPrice };
+      });
       return res.json({ success: true, grades: enriched });
     } catch (err: any) {
       console.error('Error fetching scan grades:', err);
@@ -3792,6 +3815,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           .limit(1);
         const v = priceRow?.estimatedValue != null ? Number(priceRow.estimatedValue) : NaN;
         if (Number.isFinite(v) && v > 0) cachedPrice = v;
+      }
+      // Fall back to the scan-time average value persisted on the
+      // scan_grades row when no saved-card price is available.
+      if (cachedPrice == null && grade.estimatedValue != null && grade.estimatedValue > 0) {
+        cachedPrice = grade.estimatedValue;
       }
       return res.json({ success: true, grade: { ...grade, cachedPrice } });
     } catch (err: any) {

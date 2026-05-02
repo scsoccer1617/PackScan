@@ -17,6 +17,8 @@ export type SaveGradeInput = {
   grade: HoloGrade;
   /** Optional identification captured in the same Claude call. */
   identification?: HoloIdentification | null;
+  /** eBay averageValue, persisted at analyze time. */
+  estimatedValue?: number | null;
 };
 
 export async function saveGrade(input: SaveGradeInput): Promise<ScanGrade> {
@@ -50,6 +52,12 @@ export async function saveGrade(input: SaveGradeInput): Promise<ScanGrade> {
       identificationConfidence:
         input.identification?.confidence != null
           ? input.identification.confidence.toFixed(3)
+          : null,
+      estimatedValue:
+        input.estimatedValue != null &&
+        Number.isFinite(input.estimatedValue) &&
+        input.estimatedValue > 0
+          ? input.estimatedValue.toFixed(2)
           : null,
     })
     .returning();
@@ -101,6 +109,24 @@ export async function updateGradeIdentification(
 }
 
 /**
+ * Update only the estimatedValue column on an existing row. Used when the
+ * eBay search resolves AFTER the initial saveGrade insert — the analyze
+ * handler persists the Holo grade immediately and only later has an
+ * `averageValue` from `searchCardValues()` to write back.
+ */
+export async function updateGradeEstimatedValue(
+  id: number,
+  estimatedValue: number | null,
+): Promise<void> {
+  if (!id) return;
+  const v =
+    estimatedValue != null && Number.isFinite(estimatedValue) && estimatedValue > 0
+      ? estimatedValue.toFixed(2)
+      : null;
+  await db.update(scanGrades).set({ estimatedValue: v }).where(eq(scanGrades.id, id));
+}
+
+/**
  * Legacy rows stored just the original client filename (e.g. "IMG_1234.jpg")
  * in frontImagePath because the scan route didn't persist the image buffer.
  * Old rows (pre-Object-Storage) stored a local `/uploads/scan_front_<uuid>.jpg`
@@ -131,6 +157,7 @@ export function hydrateGrade(
   identification: HoloIdentification | null;
   frontImage: string | null;
   backImage: string | null;
+  estimatedValue: number | null;
 } {
   const notes = (row.notes ?? {}) as Record<string, any>;
   return {
@@ -154,5 +181,6 @@ export function hydrateGrade(
     identification: (row.identification as HoloIdentification | null) ?? null,
     frontImage: asImageUrl(row.frontImagePath),
     backImage: asImageUrl(row.backImagePath),
+    estimatedValue: row.estimatedValue != null ? Number(row.estimatedValue) : null,
   };
 }
