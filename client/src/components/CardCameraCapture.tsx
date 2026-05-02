@@ -47,6 +47,15 @@ interface CardCameraCaptureProps {
    * URLs cropped from the same shutter press.
    */
   onCaptureGraded?: (cardBody: string, slabLabel: string) => void;
+  /**
+   * Optional. When provided, an inline RAW/GRADED pill renders in the
+   * camera modal header so the user can switch modes without dismissing
+   * the camera. Tapping a different mode calls `onModeChange(newMode)` —
+   * the parent owns the state and re-renders us with a new `mode`. When
+   * omitted, the pill is hidden and behavior is identical to today (so
+   * SimpleCardForm and other single-mode callers are unaffected).
+   */
+  onModeChange?: (mode: 'raw' | 'graded') => void;
 }
 
 // Fraction of the 2.5:3.5 guide that the slab-label strip occupies in
@@ -181,6 +190,7 @@ export default function CardCameraCapture({
   onClose,
   mode = 'raw',
   onCaptureGraded,
+  onModeChange,
 }: CardCameraCaptureProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -635,6 +645,47 @@ export default function CardCameraCapture({
     <div className="fixed inset-0 z-50 bg-black flex flex-col">
       <div className="flex items-center justify-between px-4 py-3 text-white bg-black/60 z-10">
         <div className="font-medium">{title}</div>
+        {/* In-camera RAW/GRADED toggle. Rendered only when the parent
+            provides `onModeChange` so single-mode callers (e.g.
+            SimpleCardForm, the back-image uploader on /scan) are
+            unaffected. Style mirrors the page-level pill on Scan.tsx so
+            the two read as the same control. */}
+        {onModeChange && (
+          <div
+            role="tablist"
+            aria-label="Scan mode"
+            className="inline-flex rounded-full border border-slate-200 bg-white p-0.5 text-xs font-semibold tracking-wide"
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === 'raw'}
+              onClick={() => onModeChange('raw')}
+              className={`px-3 py-1.5 rounded-full transition ${
+                mode === 'raw'
+                  ? 'bg-slate-900 text-white'
+                  : 'text-slate-500 hover:text-slate-700'
+              }`}
+              data-testid="button-camera-mode-raw"
+            >
+              RAW
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === 'graded'}
+              onClick={() => onModeChange('graded')}
+              className={`px-3 py-1.5 rounded-full transition ${
+                mode === 'graded'
+                  ? 'bg-emerald-600 text-white'
+                  : 'text-slate-500 hover:text-slate-700'
+              }`}
+              data-testid="button-camera-mode-graded"
+            >
+              GRADED
+            </button>
+          </div>
+        )}
         <Button
           type="button"
           variant="ghost"

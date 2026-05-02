@@ -139,6 +139,7 @@ export default function Scan() {
   const [frontLighting, setFrontLighting] = useState<string>("");
   const [frontBlurScore, setFrontBlurScore] = useState<number | null>(null);
   const [backCameraSignal, setBackCameraSignal] = useState<number>(0);
+  const [frontCameraSignal, setFrontCameraSignal] = useState<number>(0);
   const [analyzing, setAnalyzing] = useState<boolean>(false);
 
   // RAW (default) ↔ GRADED toggle. Persisted across visits so users that
@@ -154,6 +155,20 @@ export default function Scan() {
     if (typeof window === 'undefined') return;
     window.localStorage.setItem('holo-scan-mode', scanMode);
   }, [scanMode]);
+
+  // Auto-open the front camera when the user lands on /scan in image mode and
+  // there's no existing front capture. One-shot — driven by a signal bump so
+  // the SimpleImageUploader's existing openCameraSignal effect handles the
+  // actual modal open. Skipped for voice mode and when the user is returning
+  // with an already-captured front image.
+  const autoOpenedFrontRef = useRef(false);
+  useEffect(() => {
+    if (autoOpenedFrontRef.current) return;
+    if (mode !== 'image') return;
+    if (frontImage) return;
+    autoOpenedFrontRef.current = true;
+    setFrontCameraSignal((n) => n + 1);
+  }, [mode, frontImage]);
 
   // Ref so minting a new scanId on each front capture doesn't re-render.
   const scanIdRef = useRef<string | null>(null);
@@ -479,12 +494,14 @@ export default function Scan() {
                   }
                 }}
                 cameraMode={scanMode}
+                onCameraModeChange={setScanMode}
                 onGradedCaptured={(_cardBody, label) => {
                   setGradingLabelImage(label);
                 }}
                 label="Capture front"
                 cameraTitle={scanMode === 'graded' ? 'Front of Slab' : 'Front of Card'}
                 existingImage={frontImage}
+                openCameraSignal={frontCameraSignal}
                 retakeLabel="Rescan Front"
               />
             </div>

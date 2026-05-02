@@ -33,6 +33,14 @@ interface SimpleImageUploaderProps {
    * slab-label crop from a single shutter press.
    */
   onGradedCaptured?: (cardBody: string, slabLabel: string) => void;
+  /**
+   * Optional. When provided, the camera modal renders a small RAW/GRADED
+   * pill so the user can switch modes without dismissing the camera. The
+   * parent owns the mode state and re-renders this component with a new
+   * `cameraMode`. Omit on uploaders that don't expose a mode toggle (e.g.
+   * the back-image uploader on /scan, SimpleCardForm).
+   */
+  onCameraModeChange?: (mode: 'raw' | 'graded') => void;
 }
 
 export default function SimpleImageUploader({
@@ -44,6 +52,7 @@ export default function SimpleImageUploader({
   retakeLabel,
   cameraMode = 'raw',
   onGradedCaptured,
+  onCameraModeChange,
 }: SimpleImageUploaderProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [cameraOpen, setCameraOpen] = useState(false);
@@ -140,6 +149,7 @@ export default function SimpleImageUploader({
         open={cameraOpen}
         title={cameraTitle || label}
         mode={cameraMode}
+        onModeChange={onCameraModeChange}
         onCapture={(dataUrl, quality) => {
           onImageCaptured(dataUrl, 'camera', quality);
           setCameraOpen(false);
