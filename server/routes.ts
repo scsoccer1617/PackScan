@@ -3828,6 +3828,192 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // POST /api/scan-grades/:id/refresh-price — re-run the eBay price lookup
+  // against an already-stored scan's identification and persist the result.
+  // Powers the "Refresh price" button on /scans/:id (see ScanDetail). The
+  // resolution pattern (cards+brands JOIN when cardId is set, else the
+  // identification JSONB blob) mirrors scripts/backfill_scan_grades_estimated_value.ts
+  // so the live and backfill paths stay in sync.
+  //
+  // Persistence: only writes a hit. A miss leaves any existing
+  // estimated_value untouched so a transient eBay outage can't erase a
+  // good price.
+  app.post(`${apiPrefix}/scan-grades/:id/refresh-price`, requireAuth, async (req, res) => {
+    try {
+      const userId = (req.user as any)?.id as number;
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id) || id <= 0) {
+        return res.status(400).json({ success: false, error: 'Invalid scan id' });
+      }
+      const row = await getGradeById(id);
+      // 404 (not 403) on cross-user access — same rationale as the GET sibling:
+      // don't leak existence of other users' scan ids.
+      if (!row || row.userId !== userId) {
+        return res.status(404).json({ success: false, error: 'Not found' });
+      }
+
+      type Resolved = {
+        playerName: string;
+        cardNumber: string;
+        brand: string;
+        year: number;
+        collection: string | undefined;
+        set: string | undefined;
+        isNumbered: boolean;
+        foilType: string | undefined;
+        serialNumber: string | undefined;
+        variant: string | undefined;
+        isAutographed: boolean;
+        gradeKeyword: string | undefined;
+      };
+
+      let resolved: Resolved | null = null;
+
+      if (row.cardId != null) {
+        const [cardRow] = await db
+          .select({
+            playerFirstName: cards.playerFirstName,
+            playerLastName: cards.playerLastName,
+            brandName: brands.name,
+            collection: cards.collection,
+            cardNumber: cards.cardNumber,
+            year: cards.year,
+            variant: cards.variant,
+            serialNumber: cards.serialNumber,
+            isNumbered: cards.isNumbered,
+            isAutographed: cards.isAutographed,
+            foilType: cards.foilType,
+            isGraded: cards.isGraded,
+            gradingCompany: cards.gradingCompany,
+            numericalGrade: cards.numericalGrade,
+          })
+          .from(cards)
+          .innerJoin(brands, eq(cards.brandId, brands.id))
+          .where(eq(cards.id, row.cardId))
+          .limit(1);
+        if (cardRow) {
+          const { formatGradeKeyword } = await import('./vlmGradingPrompt');
+          const playerName =
+            `${cardRow.playerFirstName ?? ''} ${cardRow.playerLastName ?? ''}`.trim();
+          const gradeNum =
+            cardRow.numericalGrade != null ? Number(cardRow.numericalGrade) : null;
+          const gradeKeyword = cardRow.isGraded
+            ? formatGradeKeyword(
+                cardRow.gradingCompany ?? null,
+                gradeNum != null && Number.isFinite(gradeNum) ? gradeNum : null,
+              ) || undefined
+            : undefined;
+          resolved = {
+            playerName,
+            cardNumber: cardRow.cardNumber || '',
+            brand: cardRow.brandName || '',
+            year: cardRow.year || 2024,
+            collection: cardRow.collection || undefined,
+            set: undefined,
+            isNumbered: !!cardRow.isNumbered,
+            foilType: cardRow.foilType || undefined,
+            serialNumber: cardRow.serialNumber || undefined,
+            variant: cardRow.variant || undefined,
+            isAutographed: !!cardRow.isAutographed,
+            gradeKeyword,
+          };
+        }
+      }
+
+      if (!resolved) {
+        const ident = (row.identification ?? null) as
+          | {
+              player?: string | null;
+              brand?: string | null;
+              setName?: string | null;
+              collection?: string | null;
+              year?: string | number | null;
+              cardNumber?: string | null;
+              serialNumber?: string | null;
+              parallel?: string | null;
+              variant?: string | null;
+            }
+          | null;
+        const playerName = (ident?.player || '').toString().trim();
+        if (playerName) {
+          let yearNum = 2024;
+          if (typeof ident?.year === 'number' && Number.isFinite(ident.year)) {
+            yearNum = Math.floor(ident.year);
+          } else if (typeof ident?.year === 'string') {
+            const m = ident.year.match(/\d{4}/);
+            if (m) yearNum = Number(m[0]);
+          }
+          resolved = {
+            playerName,
+            cardNumber: (ident?.cardNumber || '').toString().trim(),
+            brand: (ident?.brand || '').toString().trim(),
+            year: yearNum,
+            collection: ident?.collection ? ident.collection.toString().trim() : undefined,
+            set: ident?.setName ? ident.setName.toString().trim() : undefined,
+            isNumbered: !!(ident?.serialNumber && ident.serialNumber.toString().trim()),
+            foilType: ident?.parallel ? ident.parallel.toString().trim() : undefined,
+            serialNumber: ident?.serialNumber
+              ? ident.serialNumber.toString().trim()
+              : undefined,
+            variant: ident?.variant ? ident.variant.toString().trim() : undefined,
+            isAutographed: false,
+            gradeKeyword: undefined,
+          };
+        }
+      }
+
+      if (!resolved || !resolved.playerName) {
+        return res.status(422).json({
+          success: false,
+          error: 'No identification on this scan to search with',
+        });
+      }
+
+      const ebay = await searchCardValues(
+        resolved.playerName,
+        resolved.cardNumber,
+        resolved.brand,
+        resolved.year,
+        resolved.collection,
+        '',
+        resolved.isNumbered,
+        resolved.foilType,
+        resolved.serialNumber,
+        resolved.variant,
+        resolved.isAutographed,
+        undefined,
+        resolved.set,
+        resolved.gradeKeyword ? { gradeKeyword: resolved.gradeKeyword } : undefined,
+      );
+
+      const value = ebay?.averageValue;
+      const resultCount = Array.isArray(ebay?.results) ? ebay!.results.length : 0;
+      const query = ebay?.searchUrl ?? '';
+      if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+        await updateGradeEstimatedValue(id, value);
+        return res.json({
+          success: true,
+          estimatedValue: value,
+          query,
+          resultCount,
+        });
+      }
+      // No listings — leave the existing estimated_value alone so a
+      // transient miss can't erase a good price.
+      return res.json({
+        success: true,
+        estimatedValue: null,
+        query,
+        resultCount: 0,
+      });
+    } catch (err: any) {
+      console.error('Error refreshing scan price:', err);
+      return res
+        .status(500)
+        .json({ success: false, error: err?.message || 'Failed to refresh price' });
+    }
+  });
+
   // ─── Beta Launch: Scan Quota + Feedback + Admin User Management ───────────
   // These endpoints support the closed beta (~6 testers + 1 dealer). They
   // are NOT bolted onto the existing card-database admin routes because:
