@@ -250,9 +250,61 @@ function normalizeSet(set: string, brand: string): string {
 }
 
 /**
+ * Negative-keyword exclusion chain appended to the picker query when the
+ * scan is a *base* card (no foilType / parallel detected). Mirrors the
+ * Sheet click-through URL chain in `getEbaySearchUrl` so the avg-price
+ * driver and the user-facing eBay link see the same listings.
+ *
+ * Bug A (PR #209): `buildPickerQuery` previously emitted no exclusions, so
+ * the eBay Browse API pulled in foil/parallel/auto/relic listings even for
+ * a base scan, inflating the Sheet's avg price relative to the click-
+ * through view. Adding `-keyword` tokens to `q` is the supported Browse
+ * API behavior and matches the chain the Sheet URL already used.
+ *
+ * Skipped when `foilType` is non-empty — a parallel scan WANTS to find
+ * parallel comps. Adding `-parallel` would zero those out.
+ */
+const PICKER_EXCLUSION_CHAIN = [
+  '-autograph', '-signed', '-parallel', '-refractor', '-xfractor',
+  '-rainbow', '-mojo', '-holo', '-relic', '-memorabilia',
+  '-"game-used"', '-"game used"', '-patch', '-jersey',
+].join(' ');
+
+/**
+ * Subsets that name multiple players on a single card (Team Leaders,
+ * Combos, etc.). When the scan's subset matches, the picker drops the
+ * `requirePlayerLastName` precision filter — those listings rarely
+ * include any one of the players' surnames, so requiring it would zero
+ * out otherwise-valid comps. See Bug B (PR #209).
+ */
+const MULTI_PLAYER_SUBSET_PATTERNS = [
+  /\bteam leaders\b/i,
+  /\bleaders\b/i,
+  /\bcombos?\b/i,
+  /\bduo\b/i,
+  /\btrio\b/i,
+  /\bbattery\s*mates\b/i,
+];
+
+export function isMultiPlayerSubset(subset: string | null | undefined): boolean {
+  const s = (subset || '').trim();
+  if (!s) return false;
+  return MULTI_PLAYER_SUBSET_PATTERNS.some((re) => re.test(s));
+}
+
+/**
  * Build a picker search query from final-form fields. Skips empty parts so
  * the query stays compact ("2025 Topps Series One #193 Nolan Arenado Pink
  * Polka Dot") without trailing whitespace artefacts.
+ *
+ * Pass `subset` separately so multi-player subsets (Team Leaders, Combos,
+ * …) are AND'd into the query without overwriting the `player` slot. See
+ * Bug B (PR #209).
+ *
+ * Pass `excludeParallels: true` (the default for base scans — caller
+ * should set it from `!parts.parallel`) to append the parallel/foil
+ * exclusion chain. Skipped automatically when `parts.parallel` is non-
+ * empty, since a parallel scan wants parallel comps.
  */
 export function buildPickerQuery(parts: {
   year?: number | string | null;
@@ -261,6 +313,8 @@ export function buildPickerQuery(parts: {
   cardNumber?: string | null;
   player?: string | null;
   parallel?: string | null;
+  subset?: string | null;
+  excludeParallels?: boolean;
 }): string {
   const segments: string[] = [];
   if (parts.year != null && String(parts.year).trim()) {
@@ -278,7 +332,19 @@ export function buildPickerQuery(parts: {
   if (parts.player && parts.player.trim()) {
     segments.push(parts.player.trim());
   }
+  if (parts.subset && parts.subset.trim()) {
+    segments.push(parts.subset.trim());
+  }
   if (parts.parallel && parts.parallel.trim()) segments.push(parts.parallel.trim());
+  // Negative-keyword exclusions for base scans only. A scan with a non-
+  // empty `parallel` is itself a parallel/insert and should match parallel
+  // listings, so we suppress the chain in that case regardless of the
+  // caller's `excludeParallels` flag.
+  const wantExclusions = parts.excludeParallels !== false
+    && !(parts.parallel && parts.parallel.trim());
+  if (wantExclusions) {
+    segments.push(PICKER_EXCLUSION_CHAIN);
+  }
   return segments.join(' ').replace(/\s{2,}/g, ' ').trim();
 }
 

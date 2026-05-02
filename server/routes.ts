@@ -1470,7 +1470,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get(`${apiPrefix}/ebay/comps`, async (req, res) => {
     try {
       const { pickerSearch, buildPickerQuery } = await import('./ebayPickerSearch.js');
-      const { year, brand, set, cardNumber, player, parallel, query: rawQuery, limit } = req.query;
+      const { year, brand, set, cardNumber, player, parallel, subset, query: rawQuery, limit } = req.query;
+      const parallelStr = typeof parallel === 'string' ? parallel : undefined;
+      const subsetStr = typeof subset === 'string' ? subset : undefined;
       const query = (typeof rawQuery === 'string' && rawQuery.trim())
         ? rawQuery.trim()
         : buildPickerQuery({
@@ -1479,7 +1481,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
             set: typeof set === 'string' ? set : undefined,
             cardNumber: typeof cardNumber === 'string' ? cardNumber : undefined,
             player: typeof player === 'string' ? player : undefined,
-            parallel: typeof parallel === 'string' ? parallel : undefined,
+            subset: subsetStr,
+            parallel: parallelStr,
+            // Bug A (PR #209): apply the negative-keyword chain when the
+            // scan is a base card. Skipped automatically inside
+            // buildPickerQuery when `parallel` is non-empty.
+            excludeParallels: !parallelStr,
           });
       const limitNum = Math.max(1, Math.min(parseInt(typeof limit === 'string' ? limit : '10', 10) || 10, 50));
       // Last name is the final whitespace-separated token in the player
