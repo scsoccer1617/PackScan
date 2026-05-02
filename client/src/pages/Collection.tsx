@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useSearch } from "wouter";
 import {
   Search as SearchIcon,
   Filter as FilterIcon,
@@ -134,10 +135,31 @@ export default function Collection() {
   const [filter, setFilter] = useState<FilterKey>("all");
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState<CardWithRelations | null>(null);
+  const search = useSearch();
+  const autoOpenedRef = useRef<number | null>(null);
 
   const { data: cards, isLoading } = useQuery<CardWithRelations[]>({
     queryKey: ["/api/cards"],
   });
+
+  // Deep-link from Recent scans on Home: `/collection?card=<id>` auto-opens
+  // the existing EditCardModal so users land on a card detail view without
+  // a dedicated /result/:id route. Guarded by a ref so navigating away and
+  // back, or closing the modal, doesn't reopen it.
+  useEffect(() => {
+    if (!cards || cards.length === 0) return;
+    const params = new URLSearchParams(search);
+    const cardParam = params.get("card");
+    if (!cardParam) return;
+    const targetId = Number(cardParam);
+    if (!Number.isFinite(targetId) || targetId <= 0) return;
+    if (autoOpenedRef.current === targetId) return;
+    const match = cards.find((c) => c.id === targetId);
+    if (match) {
+      autoOpenedRef.current = targetId;
+      setEditing(match);
+    }
+  }, [cards, search]);
 
   const { data: summary } = useQuery<CollectionSummary>({
     queryKey: ["/api/collection/summary"],

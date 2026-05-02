@@ -3,7 +3,7 @@ import { Server, createServer } from 'http';
 import multer from 'multer';
 import { randomUUID } from 'crypto';
 import { db } from '../db';
-import { and, desc, eq, gte, isNull, sql, max } from 'drizzle-orm';
+import { and, desc, eq, gte, isNull, sql, max, inArray } from 'drizzle-orm';
 import { syncConfirmedCard } from './syncDatabase';
 import {
   cards,
@@ -3594,7 +3594,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const limit = Math.min(Math.max(Number(req.query.limit) || 25, 1), 100);
       const rows = await listGradesForUser(userId, limit);
       const grades = rows.map(hydrateGrade);
-      return res.json({ success: true, grades });
+
+      const cardIds = Array.from(
+        new Set(
+          grades
+            .map((g) => g.cardId)
+            .filter((id): id is number => typeof id === 'number' && id > 0),
+        ),
+      );
+      const priceByCardId = new Map<number, number>();
+      if (cardIds.length > 0) {
+        const priceRows = await db
+          .select({ id: cards.id, estimatedValue: cards.estimatedValue })
+          .from(cards)
+          .where(inArray(cards.id, cardIds));
+        for (const row of priceRows) {
+          const v = row.estimatedValue != null ? Number(row.estimatedValue) : NaN;
+          if (Number.isFinite(v) && v > 0) priceByCardId.set(row.id, v);
+        }
+      }
+      const enriched = grades.map((g) => ({
+        ...g,
+        cachedPrice: g.cardId != null ? priceByCardId.get(g.cardId) ?? null : null,
+      }));
+      return res.json({ success: true, grades: enriched });
     } catch (err: any) {
       console.error('Error fetching scan grades:', err);
       return res.status(500).json({ success: false, error: 'Failed to fetch scan grades' });
