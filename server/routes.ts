@@ -20,6 +20,8 @@ import {
 import * as schema from '../shared/schema';
 import { storage } from './storage';
 import { searchCardValues, getEbaySearchUrl, clearEbayCache } from './ebayService';
+import { verifyIdentificationWithSearch } from './vlmSearchVerify';
+import { filterUnsafeCorrections } from './vlmSearchVerifyApply';
 import { holoOverallToPsaInt, psaKeyword } from './holo/psaGrade';
 import { z } from 'zod';
 import { handleDualSideCardAnalysis } from './dualSideOCR';
@@ -2571,12 +2573,129 @@ export async function registerRoutes(app: Express): Promise<Server> {
             updatedCardData.collection = ebayResults.discoveredCollection;
           }
 
+          // ── Gated search-verify retry on eBay-zero cards ─────────────────
+          // Fires only when: (1) env flag on, (2) first-pass eBay returned 0
+          // matches, (3) identity is complete (player + brand + year +
+          // cardNumber), (4) not graded. Verifier corrections pass through
+          // `filterUnsafeCorrections` — player corrections never apply,
+          // cardNumber prefix strips and stylistic set changes are dropped.
+          // A retry eBay search MUST find >0 matches or we revert to the
+          // original zero-match result. Any thrown error is swallowed so a
+          // verifier outage cannot break the analyze flow.
+          let finalEbayResults = ebayResults;
+          const ebayHadZero = (ebayResults.results?.length ?? 0) === 0;
+          const verifyPlayerName = `${updatedCardData.playerFirstName || ''} ${updatedCardData.playerLastName || ''}`.trim();
+          const identityComplete =
+            !!verifyPlayerName &&
+            !!(updatedCardData.brand || '').toString().trim() &&
+            !!updatedCardData.year &&
+            !!(updatedCardData.cardNumber || '').toString().trim();
+          const isGradedScan = !!updatedCardData.isGraded;
+          if (
+            process.env.VLM_SEARCH_VERIFY_ENABLED === 'true'
+            && ebayHadZero
+            && identityComplete
+            && !isGradedScan
+          ) {
+            try {
+              const verify = await verifyIdentificationWithSearch({
+                player: verifyPlayerName,
+                year: String(updatedCardData.year ?? ''),
+                brand: (updatedCardData.brand ?? '').toString(),
+                set: (updatedCardData.set ?? '').toString() || undefined,
+                cardNumber: (updatedCardData.cardNumber ?? '').toString(),
+              });
+              // Fold the verifier's corrections array into a { field: newValue }
+              // map for `filterUnsafeCorrections`. The verifier emits an
+              // array of `{ field, oldValue, newValue }`; we only need the
+              // new value keyed by field.
+              const correctionsMap: Record<string, string> = {};
+              for (const c of verify.corrections ?? []) {
+                if (c && typeof c.field === 'string') {
+                  correctionsMap[c.field] = String(c.newValue ?? '');
+                }
+              }
+              (updatedCardData as any)._searchVerified = true;
+              (updatedCardData as any)._searchCorrectionsAttempted = Object.keys(correctionsMap);
+              (updatedCardData as any)._searchSources = (verify.sources ?? []).slice(0, 3);
+
+              const hasAnyCorrection = Object.keys(correctionsMap).length > 0;
+              if (verify.confidence === 'low' || !hasAnyCorrection) {
+                (updatedCardData as any)._searchCorrections = {};
+              } else {
+                const filtered = filterUnsafeCorrections(
+                  {
+                    player: verifyPlayerName,
+                    year: updatedCardData.year ?? null,
+                    brand: updatedCardData.brand ?? null,
+                    set: updatedCardData.set ?? null,
+                    cardNumber: updatedCardData.cardNumber ?? null,
+                  },
+                  correctionsMap,
+                );
+                const safeKeys = Object.keys(filtered.safe);
+                if (safeKeys.length === 0) {
+                  (updatedCardData as any)._searchCorrections = {};
+                } else {
+                  const correctedBrand = filtered.safe.brand ?? (updatedCardData.brand ?? '').toString();
+                  const correctedYearRaw = filtered.safe.year ?? String(updatedCardData.year ?? '');
+                  const correctedYearNum = Number.parseInt(correctedYearRaw, 10);
+                  const correctedYear = Number.isFinite(correctedYearNum)
+                    ? correctedYearNum
+                    : Number(updatedCardData.year) || 2024;
+                  const correctedSet = filtered.safe.set ?? (updatedCardData.set ?? '');
+                  const correctedCardNumber =
+                    filtered.safe.cardNumber ?? (updatedCardData.cardNumber ?? '').toString();
+
+                  console.log('[searchVerify] re-running eBay with corrected identity:', {
+                    brand: correctedBrand,
+                    year: correctedYear,
+                    set: correctedSet,
+                    cardNumber: correctedCardNumber,
+                  });
+                  const retryEbay = await searchCardValues(
+                    verifyPlayerName,
+                    correctedCardNumber,
+                    correctedBrand,
+                    correctedYear,
+                    updatedCardData.collection,
+                    '',
+                    updatedCardData.isNumbered || false,
+                    updatedCardData.foilType,
+                    updatedCardData.serialNumber,
+                    updatedCardData.variant,
+                    updatedCardData.isAutographed || false,
+                    undefined,
+                    correctedSet || undefined,
+                    undefined,
+                  );
+                  if ((retryEbay?.results?.length ?? 0) > 0) {
+                    if (filtered.safe.brand) updatedCardData.brand = filtered.safe.brand;
+                    if (filtered.safe.year) updatedCardData.year = correctedYear;
+                    if (filtered.safe.set) updatedCardData.set = filtered.safe.set;
+                    if (filtered.safe.cardNumber) updatedCardData.cardNumber = filtered.safe.cardNumber;
+                    (updatedCardData as any)._searchCorrections = { ...filtered.safe };
+                    finalEbayResults = retryEbay;
+                    persistEstimatedValue(retryEbay);
+                  } else {
+                    (updatedCardData as any)._searchValidationFailed = true;
+                    (updatedCardData as any)._searchCorrections = {};
+                  }
+                }
+              }
+            } catch (err: any) {
+              console.error('[searchVerify] failed:', err?.message ?? err);
+              // Intentionally swallow — the un-corrected zero-match result
+              // still ships to the client.
+            }
+          }
+
           logScanTotal('ok');
           return res.json({
             success: true,
             data: {
               ...updatedCardData,
-              ebayResults: ebayResults,
+              ebayResults: finalEbayResults,
               holo: holoForClient,
               speculativeCatalog,
             }
