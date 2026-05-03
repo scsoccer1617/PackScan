@@ -1264,7 +1264,7 @@ export function buildCardSearchNegatives(opts: {
   hasGrade: boolean;
 }): string {
   const excludes: string[] = [];
-  if (!opts.isAuto) excludes.push('-autograph', '-signed');
+  if (!opts.isAuto) excludes.push('-autograph', '-autographed', '-autographs', '-auto', '-autos', '-signed');
   if (opts.isBase && !opts.hasGrade) {
     excludes.push('-parallel', '-refractor', '-xfractor', '-rainbow', '-mojo', '-holo');
   }
