@@ -75,15 +75,12 @@ const BLUR_SOFT = 20;     // below 50, above 20 — yellow "soft" pill
                           // below 20 — red "blurry" pill + post-capture confirm
 const QUALITY_SAMPLE_INTERVAL_MS = 500;
 const QUALITY_SAMPLE_SIZE = 64; // downsample target for fast Laplacian
-// Was 800ms (PR #238). Reduced to 250ms after low-light field testing showed
-// that hand-drift during the longer wait shifted the card out of the framed
-// region by the time we grabbed the frame. 250ms is enough for the LED to
-// be fully on and for AE to begin converging — the captured frame is mildly
-// underexposed compared to a fully-settled frame, but flash exposure is
-// forgiving and the VLM is tolerant of moderate exposure variance. The
-// crop-fidelity win (capturing what the user actually framed) far
-// outweighs the exposure cost.
-const AE_SETTLE_MS = 250;
+// 700ms: enough for iOS Safari AE to converge to torch illumination so the
+// captured frame isn't washed out. Hand-drift during this window used to
+// shift the card off-center, but the frozen-preview overlay (below) eliminates
+// the visual feedback loop that drove the drift — the user sees a steady
+// snapshot, not a moving preview, and naturally holds still.
+const AE_SETTLE_MS = 700;
 
 type FlashMode = 'auto' | 'on' | 'off';
 const FLASH_MODE_KEY = 'holo-flash-mode';
@@ -243,6 +240,7 @@ export default function CardCameraCapture({
   // overlay that prompts the user to keep the camera steady through the
   // brief settle wait.
   const [capturing, setCapturing] = useState(false);
+  const [frozenPreviewDataUrl, setFrozenPreviewDataUrl] = useState<string | null>(null);
   // Post-capture blur confirmation sheet. When true, the captured rawImage
   // looked blurry — show a "Use anyway?" prompt before handing back.
   const [blurConfirm, setBlurConfirm] = useState(false);
@@ -433,6 +431,27 @@ export default function CardCameraCapture({
     return out.toDataURL('image/jpeg', 0.95);
   }, []);
 
+  // Snapshot the current video frame into a JPEG data URL for use as the
+  // frozen-preview overlay during low-light capture. Uses the same source
+  // frame the user is currently looking at (post-orientation-swap from the
+  // existing object-cover inverse) so the frozen overlay matches the
+  // viewfinder exactly. Returns null if refs aren't ready.
+  const snapshotFullVideoFrame = useCallback((): string | null => {
+    const video = videoRef.current;
+    if (!video) return null;
+    let vw = video.videoWidth;
+    let vh = video.videoHeight;
+    if (!vw || !vh) return null;
+    const canvas = document.createElement('canvas');
+    canvas.width = vw;
+    canvas.height = vh;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    ctx.drawImage(video, 0, 0, vw, vh);
+    // 0.7 quality is fine — this is a transient overlay, not a saved asset.
+    return canvas.toDataURL('image/jpeg', 0.7);
+  }, []);
+
   // Apply the desired torch state to the current MediaStream. Best-effort:
   // browsers that don't expose `torch` ignore the constraint.
   const applyTorch = useCallback(async (on: boolean) => {
@@ -536,6 +555,12 @@ export default function CardCameraCapture({
 
     try {
       if (turnedOnForCapture) {
+        // Snapshot the framed scene BEFORE turning the torch on, then
+        // display it as a full-cover overlay during the AE settle wait.
+        // This removes the visual feedback loop (jitter + wash-out) that
+        // was causing users' hands to drift during the longer wait.
+        const snapshot = snapshotFullVideoFrame();
+        if (snapshot) setFrozenPreviewDataUrl(snapshot);
         setCapturing(true);
         await applyTorch(true);
         await new Promise((r) => setTimeout(r, AE_SETTLE_MS));
@@ -576,8 +601,9 @@ export default function CardCameraCapture({
         void applyTorch(false);
       }
       setCapturing(false);
+      setFrozenPreviewDataUrl(null);
     }
-  }, [cropGuideRegion, mode, blurScore, torchCapable, flashMode, luminance, torchOn, applyTorch]);
+  }, [cropGuideRegion, mode, blurScore, torchCapable, flashMode, luminance, torchOn, applyTorch, snapshotFullVideoFrame]);
 
   useEffect(() => {
     if (!open) {
@@ -936,6 +962,15 @@ export default function CardCameraCapture({
           <div className="absolute inset-0 flex items-center justify-center text-white/70 text-sm">
             Starting camera…
           </div>
+        )}
+
+        {frozenPreviewDataUrl && !inPreview && (
+          <img
+            src={frozenPreviewDataUrl}
+            alt=""
+            aria-hidden
+            className="absolute inset-0 w-full h-full object-cover z-20 pointer-events-none"
+          />
         )}
 
         {capturing && !inPreview && (
