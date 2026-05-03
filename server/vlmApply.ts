@@ -342,5 +342,9 @@ export function applyGeminiToCombined(
     (combined as any)._geminiSubset = gemini.subset.trim();
   }
 
+  if ((!combined.set || combined.set.trim() === '') && combined.brand && combined.brand.trim() !== '') {
+    combined.set = combined.brand.trim();
+  }
+
   return combined;
 }
