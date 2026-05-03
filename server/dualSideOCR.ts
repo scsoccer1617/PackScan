@@ -17,7 +17,7 @@ import { applyGeminiToCombined } from './vlmApply';
 import { isCardDbLookupEnabled } from './featureFlags';
 import { pickerSearch, buildPickerQuery, isMultiPlayerSubset, type PickerListing } from './ebayPickerSearch';
 import { verifyIdentificationWithSearch } from './vlmSearchVerify';
-import { filterUnsafeCorrections } from './vlmSearchVerifyApply';
+import { filterUnsafeCorrections, isMaterialSetChange } from './vlmSearchVerifyApply';
 
 // BR-2: identity tuple for the parallel eBay comps query. Built off the
 // post-overlay combinedResult (Gemini-authoritative when present, OCR
@@ -973,13 +973,31 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
             let retryResult: { query: string; active: PickerListing[] } | null = null;
             if (ebayIdentity) {
               try {
+                // PR #248: When search-verify materially corrects the
+                // `set` value, the original `subset` (e.g. a team-prefixed
+                // collection banner like "Reds Top Prospect") was tuned
+                // to the WRONG set and will tank the eBay re-validation
+                // match. Drop it so the retry runs without the stale tail.
+                const setMateriallyChanged = isMaterialSetChange(
+                  (finalResult.set ?? null) as string | null,
+                  filtered.safe.set ?? null,
+                );
+                const retrySubset = setMateriallyChanged ? '' : ebayIdentity.subset;
+                if (setMateriallyChanged) {
+                  console.log('[searchVerify] dropping subset on retry due to material set change:', {
+                    originalSet: finalResult.set ?? null,
+                    correctedSet: filtered.safe.set,
+                    droppedSubset: ebayIdentity.subset,
+                  });
+                  (finalResult as any)._searchRetryDroppedSubset = ebayIdentity.subset || '';
+                }
                 const retryQuery = buildPickerQuery({
                   year: correctedYear,
                   brand: correctedBrand,
                   set: correctedSet ? String(correctedSet) : '',
                   cardNumber: correctedCardNumber,
                   player: ebayIdentity.player,
-                  subset: ebayIdentity.subset,
+                  subset: retrySubset,
                   parallel: ebayIdentity.parallel,
                   excludeParallels: !ebayIdentity.parallel && !ebayIdentity.gradeKeyword,
                   gradeKeyword: ebayIdentity.gradeKeyword || undefined,
