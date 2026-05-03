@@ -351,8 +351,8 @@ export default function CardCameraCapture({
     const container = containerRef.current;
     const guide = guideRef.current;
     if (!video || !container || !guide) return null;
-    const vw = video.videoWidth;
-    const vh = video.videoHeight;
+    let vw = video.videoWidth;
+    let vh = video.videoHeight;
     if (!vw || !vh) return null;
 
     const containerRect = container.getBoundingClientRect();
@@ -360,6 +360,19 @@ export default function CardCameraCapture({
     const cw = containerRect.width;
     const ch = containerRect.height;
     if (!cw || !ch) return null;
+
+    // iOS Safari can report videoWidth/videoHeight in sensor-native landscape
+    // even when the <video> element is displayed rotated to portrait. Detect
+    // the mismatch by comparing the sensor's portrait/landscape sense against
+    // the on-screen container's, and swap so the rest of the inverse-object-cover
+    // math operates on display-orientation dimensions. Branch is a no-op when
+    // dimensions already match (the common case on Android Chrome and on
+    // modern Safari that returns rotated dims).
+    const sensorIsLandscape = vw > vh;
+    const containerIsLandscape = cw > ch;
+    if (sensorIsLandscape !== containerIsLandscape) {
+      [vw, vh] = [vh, vw];
+    }
 
     const videoAspect = vw / vh;
     const containerAspect = cw / ch;
