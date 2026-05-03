@@ -265,7 +265,8 @@ function normalizeSet(set: string, brand: string): string {
  * parallel comps. Adding `-parallel` would zero those out.
  */
 const PICKER_EXCLUSION_CHAIN = [
-  '-autograph', '-signed', '-parallel', '-refractor', '-xfractor',
+  '-autograph', '-autographed', '-autographs', '-auto', '-autos', '-signed',
+  '-parallel', '-refractor', '-xfractor',
   '-rainbow', '-mojo', '-holo', '-relic', '-memorabilia',
   '-"game-used"', '-"game used"', '-patch', '-jersey',
 ].join(' ');
