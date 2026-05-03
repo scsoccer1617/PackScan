@@ -218,12 +218,29 @@ export function findFrontWordmark(frontOcr: string, knownBrand: string | null | 
   const text = normalizeOcrText(frontOcr);
   if (!text) return null;
 
-  // If the brand is unknown, try each brand's whitelist and pick the first
-  // hit (product names across brands don't collide in practice — there's no
-  // "Chrome" in Panini, no "Origins" in Topps).
-  const brandsToTry = knownBrand && PRODUCT_LINES[canonicalBrand(knownBrand.toLowerCase()) || knownBrand]
-    ? [canonicalBrand(knownBrand.toLowerCase()) || knownBrand]
-    : Object.keys(PRODUCT_LINES);
+  // Brand-scope the whitelist iteration. The all-brand fallback exists for
+  // the "no brand info at all" case — NOT for cards whose brand is known
+  // but isn't a multi-product-line publisher (Donruss, Fleer, Score, Leaf,
+  // Pacific, Pinnacle, Skybox, etc.). Letting those fall through used to
+  // cross-match into Bowman/Topps/Panini whitelists; e.g. 1990 Donruss
+  // back-of-card bios contain the word "draft" and were resolving to
+  // Bowman's bare "Draft" entry.
+  const trimmedKnown = (knownBrand ?? '').trim();
+  let brandsToTry: string[];
+  if (trimmedKnown.length === 0) {
+    // No brand info — try every whitelisted brand.
+    brandsToTry = Object.keys(PRODUCT_LINES);
+  } else {
+    const canonical = canonicalBrand(trimmedKnown.toLowerCase()) || trimmedKnown;
+    if (PRODUCT_LINES[canonical]) {
+      // Recognized multi-product-line brand — scope to just that one.
+      brandsToTry = [canonical];
+    } else {
+      // Brand is known but isn't a multi-product-line publisher. Don't
+      // cross-leak into other brands' whitelists.
+      return null;
+    }
+  }
 
   for (const brand of brandsToTry) {
     const hit = findProductLine(text, brand);
