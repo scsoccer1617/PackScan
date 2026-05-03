@@ -195,3 +195,38 @@ export function filterUnsafeCorrections(
 
   return { safe, dropped };
 }
+
+/**
+ * Returns true when the corrected `set` value is materially different
+ * from the original (i.e., not just a stylistic re-spelling). Materially
+ * different means: after canonicalization, the corrected set's tokens are
+ * NOT a subset of the original's tokens AND vice versa is also false.
+ *
+ * Examples:
+ *   ("Upper Deck", "Upper Deck Minor League") → true   (added "minor league")
+ *   ("Upper Deck Minor League", "Upper Deck") → true   (removed "minor league")
+ *   ("Series One", "Series 1")                → false  (stylistic — already filtered upstream)
+ *   ("Topps Chrome", "Topps Chrome")          → false  (no change)
+ *   (null, "Upper Deck Minor League")         → true   (added a Set when none)
+ */
+export function isMaterialSetChange(
+  originalSet: string | null | undefined,
+  correctedSet: string | null | undefined,
+): boolean {
+  const o = canonicalizeSetString(originalSet);
+  const c = canonicalizeSetString(correctedSet);
+  if (!c) return false;          // no correction or empty
+  if (o === c) return false;     // identical (stylistic gate already drops these upstream)
+  if (!o) return true;           // adding a Set when there was none
+  // Compare token sets — material change iff neither is a subset of the other.
+  const ot = new Set(o.split(/\s+/).filter(Boolean));
+  const ct = new Set(c.split(/\s+/).filter(Boolean));
+  const oSubsetOfC = [...ot].every((t) => ct.has(t));
+  const cSubsetOfO = [...ct].every((t) => ot.has(t));
+  // If one is a strict subset of the other (different size), it's a
+  // material change — tokens were added or removed.
+  if (oSubsetOfC && !cSubsetOfO) return true;
+  if (cSubsetOfO && !oSubsetOfC) return true;
+  // Disjoint or partial overlap — definitely material.
+  return true;
+}
