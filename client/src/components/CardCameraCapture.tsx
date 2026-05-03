@@ -75,7 +75,7 @@ const BLUR_SOFT = 20;     // below 50, above 20 — yellow "soft" pill
                           // below 20 — red "blurry" pill + post-capture confirm
 const QUALITY_SAMPLE_INTERVAL_MS = 500;
 const QUALITY_SAMPLE_SIZE = 64; // downsample target for fast Laplacian
-const TORCH_COOLDOWN_MS = 1500; // AE settling window — ignore brightness changes within this window of a torch flip
+const AE_SETTLE_MS = 800; // torch-on → AE re-exposes for the lit scene → grab
 
 type FlashMode = 'auto' | 'on' | 'off';
 const FLASH_MODE_KEY = 'holo-flash-mode';
@@ -231,7 +231,6 @@ export default function CardCameraCapture({
   }, [flashMode]);
   const [torchCapable, setTorchCapable] = useState(false);
   const [torchOn, setTorchOn] = useState(false);
-  const lastTorchToggleAtRef = useRef<number>(0);
   // Post-capture blur confirmation sheet. When true, the captured rawImage
   // looked blurry — show a "Use anyway?" prompt before handing back.
   const [blurConfirm, setBlurConfirm] = useState(false);
@@ -419,16 +418,17 @@ export default function CardCameraCapture({
     try {
       await track.applyConstraints({ advanced: [{ torch: on } as any] });
       setTorchOn(on);
-      lastTorchToggleAtRef.current = Date.now();
     } catch {
       // Some platforms throw on unsupported torch — leave torchOn unchanged.
     }
   }, []);
 
-  // Reconcile torch state with luminance + manual flashMode whenever either
-  // changes. 'on' / 'off' force; 'auto' turns torch on once luminance drops
-  // below LUM_DARK and turns it off once it climbs back above LUM_LOW
-  // (hysteresis so we don't flicker around the boundary).
+  // Reconcile torch state with the manual flashMode for ON/OFF only. AUTO
+  // mode no longer drives steady-state torch from luminance — instead the
+  // torch fires only at shutter time inside captureFrame (Apple-style
+  // capture-time flash). Steady-state fill light made the camera's auto-
+  // exposure repeatedly re-balance against its own light source, which
+  // produced the oscillation reported in PR #237.
   useEffect(() => {
     if (!torchCapable) return;
     if (flashMode === 'on') {
@@ -439,12 +439,9 @@ export default function CardCameraCapture({
       if (torchOn) void applyTorch(false);
       return;
     }
-    if (luminance == null) return;
-    // AE settling cooldown: ignore brightness samples taken within TORCH_COOLDOWN_MS of any torch flip.
-    if (Date.now() - lastTorchToggleAtRef.current < TORCH_COOLDOWN_MS) return;
-    if (!torchOn && luminance < LUM_DARK) void applyTorch(true);
-    else if (torchOn && luminance > LUM_LOW) void applyTorch(false);
-  }, [flashMode, luminance, torchCapable, torchOn, applyTorch]);
+    // flashMode === 'auto': torch stays off during preview; capture-time
+    // envelope in captureFrame handles the actual flash.
+  }, [flashMode, torchCapable, torchOn, applyTorch]);
 
   // Live preview sampler: every QUALITY_SAMPLE_INTERVAL_MS take a 64×64 crop
   // from the center 60% of the video frame and compute mean luminance +
@@ -496,32 +493,64 @@ export default function CardCameraCapture({
     };
   }, [open, rawImage]);
 
-  const captureFrame = useCallback(() => {
+  const captureFrame = useCallback(async () => {
     if (capturedRef.current) return;
-    if (mode === 'graded') {
-      const label = cropGuideRegion(0, GRADED_LABEL_HEIGHT_FRAC);
-      const body = cropGuideRegion(
-        GRADED_LABEL_HEIGHT_FRAC,
-        1 - GRADED_LABEL_HEIGHT_FRAC,
+    // Claim early — blocks double-tap re-entry during the AE settle wait.
+    capturedRef.current = true;
+
+    // Decision is captured ONCE — locked even if the user toggles the
+    // flash pill or luminance changes during the AE wait.
+    const shouldFireFlash =
+      torchCapable && (
+        flashMode === 'on' ||
+        (flashMode === 'auto' && luminance != null && luminance < LUM_LOW)
       );
-      if (!label || !body) return;
-      capturedRef.current = true;
-      setLabelImage(label);
-      setRawImage(body);
-    } else {
-      const cropped = cropGuideRegion(0, 1);
-      if (!cropped) return;
-      capturedRef.current = true;
-      setRawImage(cropped);
+    // 'on' mode is steady-state (torch already on), so this branch is
+    // only true for auto-mode capture-time flash.
+    const turnedOnForCapture = shouldFireFlash && !torchOn;
+
+    try {
+      if (turnedOnForCapture) {
+        await applyTorch(true);
+        await new Promise((r) => setTimeout(r, AE_SETTLE_MS));
+      }
+
+      if (mode === 'graded') {
+        const label = cropGuideRegion(0, GRADED_LABEL_HEIGHT_FRAC);
+        const body = cropGuideRegion(
+          GRADED_LABEL_HEIGHT_FRAC,
+          1 - GRADED_LABEL_HEIGHT_FRAC,
+        );
+        if (!label || !body) {
+          // Crop failed (refs not ready / modal closed). Release the claim
+          // so the user can re-tap once state recovers.
+          capturedRef.current = false;
+          return;
+        }
+        setLabelImage(label);
+        setRawImage(body);
+      } else {
+        const cropped = cropGuideRegion(0, 1);
+        if (!cropped) {
+          capturedRef.current = false;
+          return;
+        }
+        setRawImage(cropped);
+      }
+      // Blur post-capture re-check: when the live sampler scored below
+      // BLUR_SOFT, surface the confirmation sheet on the preview screen so
+      // the user can retake before committing to the analyze pipeline. Above
+      // BLUR_SOFT we go straight to the standard preview.
+      if (blurScore != null && blurScore < BLUR_SOFT) {
+        setBlurConfirm(true);
+      }
+    } finally {
+      if (turnedOnForCapture) {
+        // Fire-and-forget: restore preview state. No await needed.
+        void applyTorch(false);
+      }
     }
-    // Blur post-capture re-check: when the live sampler scored below
-    // BLUR_SOFT, surface the confirmation sheet on the preview screen so
-    // the user can retake before committing to the analyze pipeline. Above
-    // BLUR_SOFT we go straight to the standard preview.
-    if (blurScore != null && blurScore < BLUR_SOFT) {
-      setBlurConfirm(true);
-    }
-  }, [cropGuideRegion, mode, blurScore]);
+  }, [cropGuideRegion, mode, blurScore, torchCapable, flashMode, luminance, torchOn, applyTorch]);
 
   useEffect(() => {
     if (!open) {
