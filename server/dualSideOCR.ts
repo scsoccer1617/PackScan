@@ -16,6 +16,8 @@ import { analyzeCardBuffersWithGemini, type GeminiCardResult, VLM_INFO } from '.
 import { applyGeminiToCombined } from './vlmApply';
 import { isCardDbLookupEnabled } from './featureFlags';
 import { pickerSearch, buildPickerQuery, isMultiPlayerSubset, type PickerListing } from './ebayPickerSearch';
+import { verifyIdentificationWithSearch } from './vlmSearchVerify';
+import { filterUnsafeCorrections } from './vlmSearchVerifyApply';
 
 // BR-2: identity tuple for the parallel eBay comps query. Built off the
 // post-overlay combinedResult (Gemini-authoritative when present, OCR
@@ -766,7 +768,7 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
           }
         })()
       : Promise.resolve(null);
-    const ebayQuerySnapshot = ebayIdentity
+    let ebayQuerySnapshot = ebayIdentity
       ? {
           year: ebayIdentity.year,
           brand: ebayIdentity.brand,
@@ -872,9 +874,171 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
     // bulk waits the full picker duration. Failures and timeouts are
     // already swallowed inside the promise body (returns null).
     const embeddedCompsStart = Date.now();
-    const embeddedComps = await ebayPromise;
+    let embeddedComps = await ebayPromise;
     const embeddedCompsMs = Date.now() - embeddedCompsStart;
     console.timeEnd('analyze-ebay-parallel');
+
+    // ── Gated search-verify retry on eBay-zero cards ─────────────────
+    // Fires only when: (1) env flag on, (2) embedded picker returned 0
+    // matches, (3) identity is complete (player + brand + year +
+    // cardNumber), (4) not graded. Verifier corrections pass through
+    // `filterUnsafeCorrections` — player corrections never apply,
+    // cardNumber prefix strips and stylistic set changes are dropped.
+    // A retry pickerSearch MUST find >0 matches or we revert to the
+    // original zero-match result. Any thrown error is swallowed so a
+    // verifier outage cannot break the analyze flow.
+    //
+    // Lives here (PR #247) instead of routes.ts so BOTH the single-scan
+    // path (/api/analyze-card-dual-images) AND the bulk-scan path
+    // (server/bulkScan/processor.ts → handleDualSideCardAnalysis) get
+    // the corrected identity. The previous routes.ts location only
+    // served the live single-scan flow.
+    const ebayHadZero =
+      !embeddedComps
+      || !Array.isArray(embeddedComps.active)
+      || embeddedComps.active.length === 0;
+    const verifyPlayerName = `${finalResult.playerFirstName || ''} ${finalResult.playerLastName || ''}`.trim();
+    const identityComplete =
+      !!verifyPlayerName
+      && !!(finalResult.brand || '').toString().trim()
+      && !!finalResult.year
+      && !!(finalResult.cardNumber || '').toString().trim();
+    const isGradedScan = !!(finalResult as any).isGraded;
+    if (
+      process.env.VLM_SEARCH_VERIFY_ENABLED === 'true'
+      && ebayHadZero
+      && identityComplete
+      && !isGradedScan
+    ) {
+      try {
+        const verify = await verifyIdentificationWithSearch({
+          player: verifyPlayerName,
+          year: String(finalResult.year ?? ''),
+          brand: (finalResult.brand ?? '').toString(),
+          set: (finalResult.set ?? '').toString() || undefined,
+          cardNumber: (finalResult.cardNumber ?? '').toString(),
+        });
+        // Fold the verifier's corrections array into a { field: newValue }
+        // map for `filterUnsafeCorrections`. The verifier emits an
+        // array of `{ field, oldValue, newValue }`; we only need the
+        // new value keyed by field.
+        const correctionsMap: Record<string, string> = {};
+        for (const c of verify.corrections ?? []) {
+          if (c && typeof c.field === 'string') {
+            correctionsMap[c.field] = String(c.newValue ?? '');
+          }
+        }
+        (finalResult as any)._searchVerified = true;
+        (finalResult as any)._searchCorrectionsAttempted = Object.keys(correctionsMap);
+        (finalResult as any)._searchSources = (verify.sources ?? []).slice(0, 3);
+
+        const hasAnyCorrection = Object.keys(correctionsMap).length > 0;
+        if (verify.confidence === 'low' || !hasAnyCorrection) {
+          (finalResult as any)._searchCorrections = {};
+        } else {
+          const filtered = filterUnsafeCorrections(
+            {
+              player: verifyPlayerName,
+              year: finalResult.year ?? null,
+              brand: finalResult.brand ?? null,
+              set: finalResult.set ?? null,
+              cardNumber: finalResult.cardNumber ?? null,
+            },
+            correctionsMap,
+          );
+          const safeKeys = Object.keys(filtered.safe);
+          if (safeKeys.length === 0) {
+            (finalResult as any)._searchCorrections = {};
+          } else {
+            const correctedBrand = filtered.safe.brand ?? (finalResult.brand ?? '').toString();
+            const correctedYearRaw = filtered.safe.year ?? String(finalResult.year ?? '');
+            const correctedYearNum = Number.parseInt(correctedYearRaw, 10);
+            const correctedYear = Number.isFinite(correctedYearNum)
+              ? correctedYearNum
+              : Number(finalResult.year) || 2024;
+            const correctedSet = filtered.safe.set ?? (finalResult.set ?? '');
+            const correctedCardNumber =
+              filtered.safe.cardNumber ?? (finalResult.cardNumber ?? '').toString();
+
+            console.log('[searchVerify] re-running eBay with corrected identity:', {
+              brand: correctedBrand,
+              year: correctedYear,
+              set: correctedSet,
+              cardNumber: correctedCardNumber,
+            });
+            // Re-run the same picker query shape used above (lines ~717–748)
+            // with corrected brand / year / set / cardNumber. The original
+            // `ebayIdentity` snapshot drives every other knob so this stays
+            // a pure identity-override retry.
+            let retryResult: { query: string; active: PickerListing[] } | null = null;
+            if (ebayIdentity) {
+              try {
+                const retryQuery = buildPickerQuery({
+                  year: correctedYear,
+                  brand: correctedBrand,
+                  set: correctedSet ? String(correctedSet) : '',
+                  cardNumber: correctedCardNumber,
+                  player: ebayIdentity.player,
+                  subset: ebayIdentity.subset,
+                  parallel: ebayIdentity.parallel,
+                  excludeParallels: !ebayIdentity.parallel && !ebayIdentity.gradeKeyword,
+                  gradeKeyword: ebayIdentity.gradeKeyword || undefined,
+                });
+                const lastName = ebayIdentity.player.split(/\s+/).pop() ?? null;
+                const firstName = ebayIdentity.player.split(/\s+/)[0] ?? null;
+                const isMultiPlayer = ebayIdentity.playerCount > 1
+                  || isMultiPlayerSubset(ebayIdentity.subset);
+                const retry = await pickerSearch(retryQuery, {
+                  limit: 5,
+                  requireCardNumber: correctedCardNumber,
+                  requirePlayerLastName: isMultiPlayer ? null : lastName,
+                  scannedParallel: ebayIdentity.parallel || null,
+                  brand: correctedBrand,
+                  set: correctedSet ? String(correctedSet) : null,
+                  year: correctedYear,
+                  playerFirstName: firstName,
+                  requireGrade: ebayIdentity.gradeKeyword || null,
+                });
+                if (retry && Array.isArray(retry.active) && retry.active.length > 0) {
+                  retryResult = { query: retry.query, active: retry.active };
+                }
+              } catch (retryErr: any) {
+                console.warn('[searchVerify] retry pickerSearch failed:', retryErr?.message ?? retryErr);
+              }
+            }
+            if (retryResult) {
+              if (filtered.safe.brand) finalResult.brand = filtered.safe.brand;
+              if (filtered.safe.year) finalResult.year = correctedYear;
+              if (filtered.safe.set) finalResult.set = filtered.safe.set;
+              if (filtered.safe.cardNumber) finalResult.cardNumber = filtered.safe.cardNumber;
+              (finalResult as any)._searchCorrections = { ...filtered.safe };
+              // Replace the carried embedded comps + snapshot so the
+              // response (and the bulk worker, which consumes
+              // data.comps) sees the corrected identity. The
+              // routes.ts caller's persistEstimatedValue runs after
+              // this returns and observes the corrected ebayResults
+              // shape via the analyze handler's existing flow.
+              embeddedComps = retryResult;
+              ebayQuerySnapshot = {
+                year: correctedYear,
+                brand: correctedBrand,
+                set: correctedSet ? String(correctedSet) : '',
+                cardNumber: correctedCardNumber,
+                player: ebayIdentity?.player ?? verifyPlayerName,
+                parallel: ebayIdentity?.parallel ?? '',
+              };
+            } else {
+              (finalResult as any)._searchValidationFailed = true;
+              (finalResult as any)._searchCorrections = {};
+            }
+          }
+        }
+      } catch (err: any) {
+        console.error('[searchVerify] failed:', err?.message ?? err);
+        // Intentionally swallow — the un-corrected zero-match result
+        // still ships to the client.
+      }
+    }
 
     // Top-ranked listing (post-precision-filter, post-relevance-rank). The
     // picker already returns `active` sorted by score desc, price asc, so
