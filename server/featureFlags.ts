@@ -19,3 +19,20 @@ export function isCardDbLookupEnabled(): boolean {
   const raw = (process.env.CARDDB_LOOKUP_ENABLED ?? '').trim().toLowerCase();
   return raw === 'true' || raw === '1' || raw === 'yes';
 }
+
+/**
+ * Gemini Search-grounding verifier gate.
+ *
+ * When true, callers (planned: PR-B post-eBay-zero retry path) may
+ * invoke `verifyIdentificationWithSearch` from `server/vlmSearchVerify.ts`
+ * to cross-check a weak identification against TCDB/Beckett/COMC via
+ * Google Search grounding. Default false — the verifier adds ~1.5–3s of
+ * latency per call, so it must stay opt-in until PR-B wires up the
+ * "only on weak cards" gate.
+ *
+ * Accepts: "true" / "1" / "yes" (case-insensitive). Anything else → off.
+ */
+export function isVlmSearchVerifyEnabled(): boolean {
+  const raw = (process.env.VLM_SEARCH_VERIFY_ENABLED ?? '').trim().toLowerCase();
+  return raw === 'true' || raw === '1' || raw === 'yes';
+}
