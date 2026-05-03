@@ -11,6 +11,7 @@
  */
 
 import { GoogleGenAI } from '@google/genai';
+import { createHash } from 'crypto';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { VLM_FULL_PROMPT, VLM_PROMPT_VERSION } from './vlmPrompts';
@@ -18,6 +19,54 @@ import { normalizeGeminiResult } from './geminiNormalize';
 import { isExemplarsEnabled, getExemplarTextPrefix, getExemplarParts } from './vlmExemplars';
 
 let cachedClient: GoogleGenAI | null = null;
+
+// QW-3: in-memory LRU cache for Gemini responses keyed by image content +
+// prompt version + model. Users frequently retry the same buffers after a
+// "didn't get it" toast and bulk testers re-upload the same Drive folders;
+// the same (front, back, prompt, model) tuple should not pay the ~17s
+// network round-trip twice. Cache is process-local — Replit dyno restarts
+// wipe it, which is fine. Capped at 200 entries × ~1-3KB JSON = <1MB RAM.
+// Including VLM_PROMPT_VERSION in the key means a prompt edit auto-
+// invalidates every entry; including the model name means a VLM_MODEL env
+// var swap invalidates entries for the old model.
+type GeminiCacheEntry = { value: GeminiCardResult; expiresAt: number };
+const GEMINI_CACHE_MAX = 200;
+const GEMINI_CACHE_TTL_MS = 60 * 60 * 1000;
+const geminiCache = new Map<string, GeminiCacheEntry>();
+
+function geminiCacheKey(
+  frontBuffer: Buffer,
+  backBuffer: Buffer,
+  model: string,
+): string {
+  const hash = createHash('sha256')
+    .update(frontBuffer ?? Buffer.alloc(0))
+    .update(backBuffer ?? Buffer.alloc(0))
+    .digest('hex');
+  return `${hash}|${VLM_PROMPT_VERSION}|${model}`;
+}
+
+function geminiCacheGet(key: string): GeminiCardResult | null {
+  const entry = geminiCache.get(key);
+  if (!entry) return null;
+  if (entry.expiresAt < Date.now()) {
+    geminiCache.delete(key);
+    return null;
+  }
+  // LRU touch: re-insert so this key becomes most-recently-used.
+  geminiCache.delete(key);
+  geminiCache.set(key, entry);
+  return entry.value;
+}
+
+function geminiCacheSet(key: string, value: GeminiCardResult): void {
+  if (geminiCache.has(key)) geminiCache.delete(key);
+  if (geminiCache.size >= GEMINI_CACHE_MAX) {
+    const oldest = geminiCache.keys().next().value;
+    if (oldest !== undefined) geminiCache.delete(oldest);
+  }
+  geminiCache.set(key, { value, expiresAt: Date.now() + GEMINI_CACHE_TTL_MS });
+}
 
 // Model selection. Defaults to gemini-3-flash-preview (PR: vlm gemini-3 swap)
 // based on a user A/B that showed it correctly reads dense back-of-card legal
@@ -189,6 +238,25 @@ export async function analyzeCardBuffersWithGemini(
     ? [opts.model]
     : [VLM_PRIMARY_MODEL, VLM_FALLBACK_MODEL];
 
+  // QW-3 cache lookup. Only consults the cache when callers use the
+  // default prompt path (no positional prompt override) — a custom prompt
+  // would invalidate the prompt-version component of the key. Keyed by the
+  // first candidate model: on a future identical call we'd attempt that
+  // same primary first, so serving the cached response (even if it
+  // originally came from the fallback) is semantically equivalent and
+  // saves the ~17s round-trip.
+  const isDefaultPrompt = !promptOrSystem && !resultTemplate;
+  const cacheKey = isDefaultPrompt
+    ? geminiCacheKey(frontBuffer, backBuffer, candidateModels[0])
+    : null;
+  if (cacheKey) {
+    const cached = geminiCacheGet(cacheKey);
+    if (cached) {
+      console.log(`[gemini-cache-hit] ${cacheKey.slice(0, 12)}…`);
+      return cached;
+    }
+  }
+
   // Build the prompt. Backwards-compatible: callers can pass (prompt,
   // template) as positional args (older shape) OR rely on VLM_FULL_PROMPT.
   let fullPrompt: string;
@@ -292,6 +360,10 @@ export async function analyzeCardBuffersWithGemini(
   const text = response.text ?? '';
   const result = finalizeGeminiText(text);
   result.geminiModel = actualModelUsed;
+  // QW-3 cache write. Only on success — failures throw before reaching here,
+  // so any response that lands in the cache parsed cleanly through
+  // finalizeGeminiText (no empty/placeholder result).
+  if (cacheKey) geminiCacheSet(cacheKey, result);
   return result;
 }
 
@@ -365,6 +437,22 @@ export async function analyzeCardBuffersWithGeminiStream(
   const fullPrompt = opts.prompt || VLM_FULL_PROMPT;
   const frontMime = opts.frontMime || 'image/jpeg';
   const backMime = opts.backMime || 'image/jpeg';
+
+  // QW-3 cache lookup (streaming variant). Only consult the cache for the
+  // default prompt path. A cache hit returns immediately without invoking
+  // onPartialText — the caller treats it as a single final delivery, which
+  // is consistent with how non-streaming consumers see the same hit.
+  const isDefaultPrompt = !opts.prompt;
+  const cacheKey = isDefaultPrompt
+    ? geminiCacheKey(frontBuffer, backBuffer, candidateModels[0])
+    : null;
+  if (cacheKey) {
+    const cached = geminiCacheGet(cacheKey);
+    if (cached) {
+      console.log(`[gemini-cache-hit] ${cacheKey.slice(0, 12)}… (stream)`);
+      return cached;
+    }
+  }
 
   const networkLabel = `gemini-stream-network[${Math.random().toString(36).slice(2, 8)}]`;
   console.time(networkLabel);
@@ -456,6 +544,8 @@ export async function analyzeCardBuffersWithGeminiStream(
 
   const result = finalizeGeminiText(accumulated);
   result.geminiModel = actualModelUsed;
+  // QW-3 cache write — same gate as the non-streaming path.
+  if (cacheKey) geminiCacheSet(cacheKey, result);
   return result;
 }
 
