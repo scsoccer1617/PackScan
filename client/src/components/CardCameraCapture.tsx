@@ -356,13 +356,33 @@ export default function CardCameraCapture({
   const cropGuideRegion = useCallback((
     yFrac: number,
     heightFrac: number,
+    source?: { kind: 'image'; image: HTMLImageElement; naturalWidth: number; naturalHeight: number },
   ): string | null => {
-    const video = videoRef.current;
     const container = containerRef.current;
     const guide = guideRef.current;
-    if (!video || !container || !guide) return null;
-    let vw = video.videoWidth;
-    let vh = video.videoHeight;
+    if (!container || !guide) return null;
+
+    // Source dimensions: either the live video frame OR the decoded frozen
+    // snapshot taken at shutter-tap time. Cropping from the snapshot
+    // eliminates the hand-drift window introduced by the AE settle wait —
+    // the user's framing intent is captured the instant they tap, not 700ms
+    // later. The orientation-swap and inverse-object-cover math below
+    // applies identically to both sources because `snapshotFullVideoFrame`
+    // preserves the video's intrinsic dim convention.
+    let drawSource: CanvasImageSource;
+    let vw: number;
+    let vh: number;
+    if (source?.kind === 'image') {
+      drawSource = source.image;
+      vw = source.naturalWidth;
+      vh = source.naturalHeight;
+    } else {
+      const video = videoRef.current;
+      if (!video) return null;
+      drawSource = video;
+      vw = video.videoWidth;
+      vh = video.videoHeight;
+    }
     if (!vw || !vh) return null;
 
     const containerRect = container.getBoundingClientRect();
@@ -427,7 +447,7 @@ export default function CardCameraCapture({
     out.height = safeH;
     const ctx = out.getContext('2d');
     if (!ctx) return null;
-    ctx.drawImage(video, safeX, safeY, safeW, safeH, 0, 0, safeW, safeH);
+    ctx.drawImage(drawSource, safeX, safeY, safeW, safeH, 0, 0, safeW, safeH);
     return out.toDataURL('image/jpeg', 0.95);
   }, []);
 
@@ -450,6 +470,19 @@ export default function CardCameraCapture({
     ctx.drawImage(video, 0, 0, vw, vh);
     // 0.7 quality is fine — this is a transient overlay, not a saved asset.
     return canvas.toDataURL('image/jpeg', 0.7);
+  }, []);
+
+  // Decode a JPEG data URL into an HTMLImageElement so canvas drawImage can
+  // use it as a source. Resolves once the image's pixel data is ready. Used
+  // to crop from the frozen-preview snapshot (taken at shutter-tap time)
+  // instead of the live, drifted post-AE-wait video frame.
+  const decodeSnapshot = useCallback((dataUrl: string): Promise<HTMLImageElement> => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = (e) => reject(e);
+      img.src = dataUrl;
+    });
   }, []);
 
   // Apply the desired torch state to the current MediaStream. Best-effort:
@@ -553,6 +586,16 @@ export default function CardCameraCapture({
     // only true for auto-mode capture-time flash.
     const turnedOnForCapture = shouldFireFlash && !torchOn;
 
+    // When flash fires, we crop from the frozen snapshot (captured at
+    // shutter-tap time) rather than the post-AE-wait live frame, so the
+    // user's framing intent is what gets saved. Decoding the snapshot
+    // happens in parallel with the AE settle wait — by the time we crop,
+    // the HTMLImageElement is ready. If decode fails, we fall back to the
+    // live-video crop path (today's behavior — drift but still gets a
+    // shot). Non-flash captures stay synchronous and crop the live frame.
+    let snapshotImage: HTMLImageElement | null = null;
+    let snapshotDims: { w: number; h: number } | null = null;
+
     try {
       if (turnedOnForCapture) {
         // Snapshot the framed scene BEFORE turning the torch on, then
@@ -560,17 +603,31 @@ export default function CardCameraCapture({
         // This removes the visual feedback loop (jitter + wash-out) that
         // was causing users' hands to drift during the longer wait.
         const snapshot = snapshotFullVideoFrame();
-        if (snapshot) setFrozenPreviewDataUrl(snapshot);
+        if (snapshot) {
+          setFrozenPreviewDataUrl(snapshot);
+          try {
+            snapshotImage = await decodeSnapshot(snapshot);
+            snapshotDims = { w: snapshotImage.naturalWidth, h: snapshotImage.naturalHeight };
+          } catch {
+            // Decode failed — fall through to live-video crop below.
+            snapshotImage = null;
+          }
+        }
         setCapturing(true);
         await applyTorch(true);
         await new Promise((r) => setTimeout(r, AE_SETTLE_MS));
       }
 
+      const cropSource = snapshotImage && snapshotDims
+        ? { kind: 'image' as const, image: snapshotImage, naturalWidth: snapshotDims.w, naturalHeight: snapshotDims.h }
+        : undefined;
+
       if (mode === 'graded') {
-        const label = cropGuideRegion(0, GRADED_LABEL_HEIGHT_FRAC);
+        const label = cropGuideRegion(0, GRADED_LABEL_HEIGHT_FRAC, cropSource);
         const body = cropGuideRegion(
           GRADED_LABEL_HEIGHT_FRAC,
           1 - GRADED_LABEL_HEIGHT_FRAC,
+          cropSource,
         );
         if (!label || !body) {
           // Crop failed (refs not ready / modal closed). Release the claim
@@ -581,7 +638,7 @@ export default function CardCameraCapture({
         setLabelImage(label);
         setRawImage(body);
       } else {
-        const cropped = cropGuideRegion(0, 1);
+        const cropped = cropGuideRegion(0, 1, cropSource);
         if (!cropped) {
           capturedRef.current = false;
           return;
@@ -603,7 +660,7 @@ export default function CardCameraCapture({
       setCapturing(false);
       setFrozenPreviewDataUrl(null);
     }
-  }, [cropGuideRegion, mode, blurScore, torchCapable, flashMode, luminance, torchOn, applyTorch, snapshotFullVideoFrame]);
+  }, [cropGuideRegion, mode, blurScore, torchCapable, flashMode, luminance, torchOn, applyTorch, snapshotFullVideoFrame, decodeSnapshot]);
 
   useEffect(() => {
     if (!open) {
