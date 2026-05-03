@@ -19,6 +19,7 @@ import { pickerSearch, buildPickerQuery, isMultiPlayerSubset, type PickerListing
 import { verifyIdentificationWithSearch } from './vlmSearchVerify';
 import { filterUnsafeCorrections, isMaterialSetChange } from './vlmSearchVerifyApply';
 import { decideSearchVerifyGate, computeAveragePrice } from './searchVerifyGate';
+import { checkPlayerOcrConsistency } from './playerOcrConsistency';
 
 // BR-2: identity tuple for the parallel eBay comps query. Built off the
 // post-overlay combinedResult (Gemini-authoritative when present, OCR
@@ -879,6 +880,64 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
     const embeddedCompsMs = Date.now() - embeddedCompsStart;
     console.timeEnd('analyze-ebay-parallel');
 
+    // ── Player-OCR consistency guard (PR #250) ───────────────────────
+    // Cross-check Gemini's player lastName against the front + back OCR
+    // text BEFORE the search-verify gate runs. Catches cases like
+    // bulk-37-958 (Allensworth) where Gemini hallucinated "Jermaine Dye"
+    // on a card whose OCR clearly read "JERMAINE ALLENSWORTH" 3x. If the
+    // legacy combine pipeline's lastName matched OCR, fall back to it
+    // (and use its cardNumber too — a hallucinated player typically
+    // pairs with a hallucinated card #). Otherwise mark the scan for
+    // review without mutating the identity.
+    {
+      const legacySnapshot = (finalResult as any)._legacyCombined ?? null;
+      const consistency = checkPlayerOcrConsistency({
+        geminiFirstName: finalResult.playerFirstName ?? null,
+        geminiLastName: finalResult.playerLastName ?? null,
+        legacyFirstName: legacySnapshot?.playerFirstName ?? null,
+        legacyLastName: legacySnapshot?.playerLastName ?? null,
+        frontOcrText: frontOCRText ?? null,
+        backOcrText: backOCRText ?? null,
+      });
+      if (consistency.decision === 'fallback-to-legacy' && legacySnapshot) {
+        const beforeFirst = finalResult.playerFirstName ?? null;
+        const beforeLast = finalResult.playerLastName ?? null;
+        const beforeCard = (finalResult as any).cardNumber ?? null;
+        finalResult.playerFirstName = legacySnapshot.playerFirstName ?? '';
+        finalResult.playerLastName = legacySnapshot.playerLastName ?? '';
+        // Also rewrite the players[] array (which Gemini overlay populated
+        // with the hallucinated identity) so downstream consumers — scan
+        // log, eBay query rebuild, sheet append — see the corrected name.
+        (finalResult as any).players = [{
+          firstName: legacySnapshot.playerFirstName ?? '',
+          lastName: legacySnapshot.playerLastName ?? '',
+        }];
+        const legacyCard = legacySnapshot.cardNumber ?? null;
+        if (legacyCard != null && String(legacyCard).trim()) {
+          (finalResult as any).cardNumber = legacyCard;
+        }
+        (finalResult as any)._playerFallbackUsed = true;
+        (finalResult as any)._playerFallbackReason = consistency.reason;
+        console.warn('[playerOcrConsistency] fallback-to-legacy:', {
+          reason: consistency.reason,
+          before: { first: beforeFirst, last: beforeLast, cardNumber: beforeCard },
+          after: {
+            first: finalResult.playerFirstName,
+            last: finalResult.playerLastName,
+            cardNumber: (finalResult as any).cardNumber,
+          },
+        });
+      } else if (consistency.decision === 'no-confident-player') {
+        (finalResult as any)._geminiPlayerHallucinated = true;
+        (finalResult as any)._geminiPlayerHallucinationReason = consistency.reason;
+        (finalResult as any)._demoteToReview = true;
+        console.warn('[playerOcrConsistency] no-confident-player:', {
+          reason: consistency.reason,
+          geminiLastName: finalResult.playerLastName ?? null,
+        });
+      }
+    }
+
     // ── Gated search-verify retry on eBay-zero cards ─────────────────
     // Fires only when: (1) env flag on, (2) embedded picker returned 0
     // matches, (3) identity is complete (player + brand + year +
@@ -1066,6 +1125,32 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
         console.error('[searchVerify] failed:', err?.message ?? err);
         // Intentionally swallow — the un-corrected zero-match result
         // still ships to the client.
+      }
+    }
+
+    // ── No-active-listings preservation (PR #250) ────────────────────
+    // When the embedded picker returned 0 active listings AND search-verify
+    // either (a) didn't fire OR (b) fired but didn't ship corrections, the
+    // identity we have is the original (or post-Part-A-fallback) one — i.e.
+    // we never validated against a real eBay listing. In that case:
+    //   - Leave the identity alone (do NOT mutate player/cardNumber/year/set).
+    //   - Surface a `null` estimatedValue so downstream (bulk processor →
+    //     Sheet) renders the price cell empty instead of "$0".
+    //   - Tag the result so the bulk processor knows to preserve `null`.
+    {
+      const activeCount = embeddedComps && Array.isArray(embeddedComps.active)
+        ? embeddedComps.active.length
+        : 0;
+      const searchCorrections = (finalResult as any)._searchCorrections ?? null;
+      const searchValidationFailed = !!(finalResult as any)._searchValidationFailed;
+      const searchVerified = !!(finalResult as any)._searchVerified;
+      const correctionsApplied =
+        !!searchCorrections && Object.keys(searchCorrections).length > 0;
+      const noCorrectionsShipped =
+        !searchVerified || searchValidationFailed || !correctionsApplied;
+      if (activeCount === 0 && noCorrectionsShipped) {
+        (finalResult as any).estimatedValue = null;
+        (finalResult as any)._noActiveListings = true;
       }
     }
 

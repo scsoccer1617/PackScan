@@ -922,7 +922,17 @@ async function processItem(
     const averageValue = active.length > 0
       ? active.reduce((sum, l) => sum + (Number(l.price) || 0), 0) / active.length
       : 0;
-    analysis.estimatedValue = averageValue;
+    // PR #250: preserve null estimatedValue when there are zero active
+    // listings AND dualSideOCR flagged the result with `_noActiveListings`.
+    // The Sheet column already renders `null`/empty as a blank cell
+    // (googleSheets.ts safeCellValue + numeric coercion), so we propagate
+    // null end-to-end instead of slamming "$0.00" onto cards we never
+    // priced. With active listings present we keep the existing average.
+    if (active.length === 0 && (analysis as any)._noActiveListings === true) {
+      analysis.estimatedValue = null as any;
+    } else {
+      analysis.estimatedValue = averageValue;
+    }
     analysis.ebayResults = active;
     // Outbound "View on eBay" link for the Sheet row. We deliberately do
     // NOT reuse `embeddedComps.query` (the picker query): the picker
