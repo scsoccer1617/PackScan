@@ -188,8 +188,20 @@ export function applyGeminiToCombined(
   // (CardDB lookups, eBay search, Sheet writes). This raw string lets the
   // UI render what's actually printed on the card, so we don't slap "-YY"
   // onto a single-year © imprint for basketball/hockey cards.
+  // Drop the raw string when its first 4-digit token differs from `year` by
+  // exactly 1 — the prompt's (b1) Donruss/Leaf 1981–1993 and (b2) modern
+  // front-wordmark overrides intentionally decouple `year` from the back ©
+  // imprint, so the verbatim string would mis-render via displayYear().
   if (typeof gemini.yearPrintedRaw === 'string' && gemini.yearPrintedRaw.trim()) {
-    combined.yearPrintedRaw = gemini.yearPrintedRaw.trim();
+    const raw = gemini.yearPrintedRaw.trim();
+    const rawYearMatch = raw.match(/(?:19|20)\d{2}/);
+    const rawYear = rawYearMatch ? Number(rawYearMatch[0]) : null;
+    const cardYear = combined.year;
+    const looksLikeOverrideLag =
+      typeof cardYear === 'number' &&
+      typeof rawYear === 'number' &&
+      Math.abs(cardYear - rawYear) === 1;
+    combined.yearPrintedRaw = looksLikeOverrideLag ? null : raw;
   } else {
     combined.yearPrintedRaw = null;
   }
