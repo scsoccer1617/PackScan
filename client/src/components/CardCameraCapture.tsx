@@ -75,7 +75,15 @@ const BLUR_SOFT = 20;     // below 50, above 20 — yellow "soft" pill
                           // below 20 — red "blurry" pill + post-capture confirm
 const QUALITY_SAMPLE_INTERVAL_MS = 500;
 const QUALITY_SAMPLE_SIZE = 64; // downsample target for fast Laplacian
-const AE_SETTLE_MS = 800; // torch-on → AE re-exposes for the lit scene → grab
+// Was 800ms (PR #238). Reduced to 250ms after low-light field testing showed
+// that hand-drift during the longer wait shifted the card out of the framed
+// region by the time we grabbed the frame. 250ms is enough for the LED to
+// be fully on and for AE to begin converging — the captured frame is mildly
+// underexposed compared to a fully-settled frame, but flash exposure is
+// forgiving and the VLM is tolerant of moderate exposure variance. The
+// crop-fidelity win (capturing what the user actually framed) far
+// outweighs the exposure cost.
+const AE_SETTLE_MS = 250;
 
 type FlashMode = 'auto' | 'on' | 'off';
 const FLASH_MODE_KEY = 'holo-flash-mode';
@@ -231,6 +239,10 @@ export default function CardCameraCapture({
   }, [flashMode]);
   const [torchCapable, setTorchCapable] = useState(false);
   const [torchOn, setTorchOn] = useState(false);
+  // True while a capture-time flash sequence is mid-flight. Drives the
+  // overlay that prompts the user to keep the camera steady through the
+  // brief settle wait.
+  const [capturing, setCapturing] = useState(false);
   // Post-capture blur confirmation sheet. When true, the captured rawImage
   // looked blurry — show a "Use anyway?" prompt before handing back.
   const [blurConfirm, setBlurConfirm] = useState(false);
@@ -524,6 +536,7 @@ export default function CardCameraCapture({
 
     try {
       if (turnedOnForCapture) {
+        setCapturing(true);
         await applyTorch(true);
         await new Promise((r) => setTimeout(r, AE_SETTLE_MS));
       }
@@ -562,6 +575,7 @@ export default function CardCameraCapture({
         // Fire-and-forget: restore preview state. No await needed.
         void applyTorch(false);
       }
+      setCapturing(false);
     }
   }, [cropGuideRegion, mode, blurScore, torchCapable, flashMode, luminance, torchOn, applyTorch]);
 
@@ -921,6 +935,14 @@ export default function CardCameraCapture({
         {starting && !error && !inPreview && (
           <div className="absolute inset-0 flex items-center justify-center text-white/70 text-sm">
             Starting camera…
+          </div>
+        )}
+
+        {capturing && !inPreview && (
+          <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/40 pointer-events-none">
+            <div className="bg-white/90 text-slate-900 px-4 py-2 rounded-full text-sm font-medium shadow-lg">
+              Hold still…
+            </div>
           </div>
         )}
       </div>
