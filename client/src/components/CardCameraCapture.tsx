@@ -353,10 +353,17 @@ export default function CardCameraCapture({
   // For RAW mode pass yFrac=0, heightFrac=1 to get the whole guide. For
   // GRADED mode we call this twice — once for the top label strip and
   // once for the card body underneath.
+  type CropSource = {
+    kind: 'image';
+    image: HTMLImageElement;
+    naturalWidth: number;
+    naturalHeight: number;
+    boost?: boolean;
+  };
   const cropGuideRegion = useCallback((
     yFrac: number,
     heightFrac: number,
-    source?: { kind: 'image'; image: HTMLImageElement; naturalWidth: number; naturalHeight: number },
+    source?: CropSource,
   ): string | null => {
     const container = containerRef.current;
     const guide = guideRef.current;
@@ -448,6 +455,33 @@ export default function CardCameraCapture({
     const ctx = out.getContext('2d');
     if (!ctx) return null;
     ctx.drawImage(drawSource, safeX, safeY, safeW, safeH, 0, 0, safeW, safeH);
+
+    // Brightness boost for low-light snapshot crops only. Continuous-LED
+    // torch can't deliver a real flash's instant luminance, so the
+    // snapshot frame is captured under low ambient light. Gamma 0.55
+    // lifts shadow/midtone detail that a pure linear gain would crush
+    // less efficiently, then a 1.4x post-gamma gain pushes the result
+    // bright enough to read on the review screen and for the VLM. Live
+    // video crops (good-light path) skip this — they already look right.
+    if (source?.kind === 'image' && source.boost) {
+      const imageData = ctx.getImageData(0, 0, safeW, safeH);
+      const data = imageData.data;
+      const gamma = 0.55;
+      const gain = 1.4;
+      const lut = new Uint8ClampedArray(256);
+      for (let i = 0; i < 256; i++) {
+        const normalized = i / 255;
+        const corrected = Math.pow(normalized, gamma) * gain;
+        lut[i] = Math.max(0, Math.min(255, Math.round(corrected * 255)));
+      }
+      for (let i = 0; i < data.length; i += 4) {
+        data[i] = lut[data[i]];
+        data[i + 1] = lut[data[i + 1]];
+        data[i + 2] = lut[data[i + 2]];
+      }
+      ctx.putImageData(imageData, 0, 0);
+    }
+
     return out.toDataURL('image/jpeg', 0.95);
   }, []);
 
@@ -619,7 +653,13 @@ export default function CardCameraCapture({
       }
 
       const cropSource = snapshotImage && snapshotDims
-        ? { kind: 'image' as const, image: snapshotImage, naturalWidth: snapshotDims.w, naturalHeight: snapshotDims.h }
+        ? {
+            kind: 'image' as const,
+            image: snapshotImage,
+            naturalWidth: snapshotDims.w,
+            naturalHeight: snapshotDims.h,
+            boost: true,
+          }
         : undefined;
 
       if (mode === 'graded') {
