@@ -27,6 +27,7 @@ import type { CardFormValues } from '@shared/schema';
 import type { GeminiCardResult } from './vlmGemini';
 import type { Player } from '@shared/players';
 import { applySetEraGuard } from './vlmPostProcess';
+import { PRODUCT_LINES } from './productLineExtractor';
 
 const NONE_DETECTED_SENTINELS = new Set([
   'none detected',
@@ -75,6 +76,21 @@ export function normalizeSetValue(set: string, brand: string): string {
   // downstream callers can treat it as "no set disambiguator".
   if (!result || result.toLowerCase() === brandTrim.toLowerCase()) return '';
   return result;
+}
+
+/**
+ * Returns true when `set` is in PRODUCT_LINES[brand] (case-insensitive).
+ *
+ * Returns true when the brand has no whitelist entry (e.g. Fleer, Pinnacle,
+ * Score-as-brand) — we can't validate without a whitelist, so we don't
+ * gate. This preserves today's behavior for brands not yet whitelisted.
+ */
+function isWhitelistedProductLine(set: string, brand: string): boolean {
+  if (!set) return false;
+  const lines = PRODUCT_LINES[brand];
+  if (!lines) return true;
+  const setLower = set.toLowerCase();
+  return lines.some((p) => p.toLowerCase() === setLower);
 }
 
 const COLLECTION_BASE_SENTINELS = new Set([
@@ -215,7 +231,28 @@ export function applyGeminiToCombined(
   // own fields and reserves `set` for the in-product disambiguator only.
   if (typeof gemini.set === 'string' && gemini.set.trim()) {
     const brandForNorm = (combined.brand ?? gemini.brand ?? '').toString();
-    combined.set = normalizeSetValue(gemini.set, brandForNorm);
+    const normalizedSet = normalizeSetValue(gemini.set, brandForNorm);
+    // Whitelist gate: only overwrite combined.set when the VLM's value matches
+    // a known product line for the brand. When it doesn't, the VLM is almost
+    // certainly emitting a subset/insert name (e.g. "Future Stock",
+    // "Top Prospect", "The Upper Deck Times") which produces zero-match eBay
+    // queries when used as the set. In that case, KEEP whatever
+    // combineCardResults already wrote (productLineExtractor.ts is also
+    // whitelist-driven, so its set is always either whitelisted or empty).
+    // If the OCR-derived set was empty too, the fallback at the end of this
+    // function fires (set = brand). For brands with no whitelist (Fleer,
+    // Pinnacle, Score-as-brand, etc.), isWhitelistedProductLine returns
+    // true and we preserve today's behavior.
+    if (isWhitelistedProductLine(normalizedSet, brandForNorm)) {
+      combined.set = normalizedSet;
+    } else if (!(combined as any)._geminiSubset) {
+      // Stash the dropped value as a subset descriptor IF no subset already.
+      // This preserves the information for downstream consumers (e.g. eBay
+      // query negative-keyword refinement) without polluting the `set` field.
+      // Only fill the side channel when empty — never clobber an existing
+      // subset descriptor coming from `gemini.subset`.
+      (combined as any)._geminiSubset = normalizedSet;
+    }
   }
   // Era guard: forbid impossible attributions ("Big League" pre-2018) and
   // backfill empty set on vintage Topps. Runs AFTER normalizeSetValue so we
