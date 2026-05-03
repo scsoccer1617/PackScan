@@ -2477,7 +2477,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const gradeKeyword = cardData.isGraded
             ? formatGradeKeyword(cardData.gradingCompany, cardData.numericalGrade) || undefined
             : undefined;
-          const ebayResults = await searchCardValues(
+          // Race the eBay search against an 800ms timeout so a slow eBay day
+          // doesn't keep the user staring at a spinner after Gemini already
+          // burned ~17s. If eBay wins, behavior is identical to before. If
+          // the timeout wins, the response ships with ebayResults=null and
+          // the client's EbayActiveComps fetches comps post-mount; the
+          // original eBay promise is NOT cancelled so updateGradeEstimatedValue
+          // still fires when it eventually resolves.
+          const EBAY_RACE_TIMEOUT_MS = 800;
+          const ebayPromise = searchCardValues(
             playerName,
             cardData.cardNumber || '',
             cardData.brand || '',
@@ -2493,17 +2501,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
             cardData.set,
             gradeKeyword ? { gradeKeyword } : undefined,
           );
+          const TIMEOUT_SENTINEL = Symbol('ebay-race-timeout');
+          const timeoutPromise = new Promise<typeof TIMEOUT_SENTINEL>((resolve) =>
+            setTimeout(() => resolve(TIMEOUT_SENTINEL), EBAY_RACE_TIMEOUT_MS),
+          );
+          const raceResult = await Promise.race([ebayPromise, timeoutPromise]);
           console.timeEnd('ebay-main-search');
 
-          console.log('eBay search results:', ebayResults);
-
-          // Persist averageValue onto scan_grades so Recent Scans and
-          // /scans/:id can render a price even when the user never saves
-          // the scan into their cards table. Best-effort — never block the
-          // response on this update.
-          {
+          const persistEstimatedValue = (results: Awaited<typeof ebayPromise>) => {
             const gradeRowId = holoResolved?.id;
-            const averageValue = ebayResults?.averageValue;
+            const averageValue = results?.averageValue;
             if (
               gradeRowId != null &&
               typeof averageValue === 'number' &&
@@ -2513,7 +2520,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 console.warn('[scan_grades] estimatedValue update failed (non-blocking):', err);
               });
             }
+          };
+
+          if (raceResult === TIMEOUT_SENTINEL) {
+            console.log(
+              `[ebay-race] race-lost — eBay slower than ${EBAY_RACE_TIMEOUT_MS}ms; shipping response with ebayResults=null`,
+            );
+            // Background-resolve so estimatedValue still gets persisted.
+            // Discovered variant/collection backfills are intentionally
+            // dropped on this branch — they shape the response and can't be
+            // retroactively patched after res.json ships.
+            ebayPromise
+              .then((results) => {
+                persistEstimatedValue(results);
+              })
+              .catch((err) => {
+                console.warn('[ebay-race] background eBay resolution failed:', err?.message || err);
+              });
+            logScanTotal('ok');
+            return res.json({
+              success: true,
+              data: {
+                ...cardData,
+                ebayResults: null,
+                holo: holoForClient,
+                speculativeCatalog,
+              }
+            });
           }
+
+          console.log('[ebay-race] race-won — eBay returned within timeout');
+          const ebayResults = raceResult;
+          console.log('eBay search results:', ebayResults);
+
+          // Persist averageValue onto scan_grades so Recent Scans and
+          // /scans/:id can render a price even when the user never saves
+          // the scan into their cards table. Best-effort — never block the
+          // response on this update.
+          persistEstimatedValue(ebayResults);
 
           const updatedCardData = { ...cardData };
           if (ebayResults.discoveredVariant && !cardData.foilType) {
@@ -2526,7 +2570,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             console.log(`eBay discovered more specific collection "${ebayResults.discoveredCollection}" - updating card data`);
             updatedCardData.collection = ebayResults.discoveredCollection;
           }
-          
+
           logScanTotal('ok');
           return res.json({
             success: true,
