@@ -10,7 +10,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { normalizeSetValue, isBaseCollection } from '../vlmApply';
+import { normalizeSetValue, isBaseCollection, applyGeminiToCombined } from '../vlmApply';
 
 let failed = 0;
 function check(name: string, fn: () => void) {
@@ -92,6 +92,36 @@ check('isBaseCollection rejects insert/subset names', () => {
   assert.equal(isBaseCollection('Stars of MLB'), false);
   assert.equal(isBaseCollection('Series One'), false); // a set name slipped into collection
   assert.equal(isBaseCollection('Topps Series One'), false);
+});
+
+// ── PRODUCT_LINES whitelist gate ─────────────────────────────────────────
+
+check('drops non-whitelisted Upper Deck set, falls back to brand', () => {
+  const combined: any = { brand: 'Upper Deck' };
+  applyGeminiToCombined(combined, { set: 'Future Stock' } as any);
+  assert.equal(combined.set, 'Upper Deck');
+  assert.equal(combined._geminiSubset, 'Future Stock');
+});
+
+check('keeps whitelisted Topps set "Heritage"', () => {
+  const combined: any = { brand: 'Topps' };
+  applyGeminiToCombined(combined, { set: 'Heritage' } as any);
+  assert.equal(combined.set, 'Heritage');
+});
+
+check('preserves behavior for non-whitelisted brand (Fleer → no gate)', () => {
+  const combined: any = { brand: 'Fleer' };
+  applyGeminiToCombined(combined, { set: 'Ultra' } as any);
+  assert.equal(combined.set, 'Ultra');
+});
+
+check('does not clobber existing subset descriptor', () => {
+  const combined: any = { brand: 'Upper Deck' };
+  applyGeminiToCombined(combined, { set: 'Future Stock', subset: 'Team Leaders' } as any);
+  assert.equal(combined.set, 'Upper Deck');
+  // gemini.subset takes precedence at the bottom of applyGeminiToCombined,
+  // and the gate refuses to overwrite an existing _geminiSubset.
+  assert.equal(combined._geminiSubset, 'Team Leaders');
 });
 
 if (failed > 0) {

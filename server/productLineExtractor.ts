@@ -31,7 +31,7 @@
 //
 // Keep entries UPPERCASE-free here — this is the source of truth for
 // display casing ("Origins", not "ORIGINS").
-const PRODUCT_LINES: Record<string, string[]> = {
+export const PRODUCT_LINES: Record<string, string[]> = {
   Panini: [
     // Put multi-word and longer names FIRST so they win the scan when they
     // contain shorter single-word names (e.g. "National Treasures" before
