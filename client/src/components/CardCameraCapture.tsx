@@ -75,6 +75,7 @@ const BLUR_SOFT = 20;     // below 50, above 20 — yellow "soft" pill
                           // below 20 — red "blurry" pill + post-capture confirm
 const QUALITY_SAMPLE_INTERVAL_MS = 500;
 const QUALITY_SAMPLE_SIZE = 64; // downsample target for fast Laplacian
+const TORCH_COOLDOWN_MS = 1500; // AE settling window — ignore brightness changes within this window of a torch flip
 
 type FlashMode = 'auto' | 'on' | 'off';
 const FLASH_MODE_KEY = 'holo-flash-mode';
@@ -230,6 +231,7 @@ export default function CardCameraCapture({
   }, [flashMode]);
   const [torchCapable, setTorchCapable] = useState(false);
   const [torchOn, setTorchOn] = useState(false);
+  const lastTorchToggleAtRef = useRef<number>(0);
   // Post-capture blur confirmation sheet. When true, the captured rawImage
   // looked blurry — show a "Use anyway?" prompt before handing back.
   const [blurConfirm, setBlurConfirm] = useState(false);
@@ -417,6 +419,7 @@ export default function CardCameraCapture({
     try {
       await track.applyConstraints({ advanced: [{ torch: on } as any] });
       setTorchOn(on);
+      lastTorchToggleAtRef.current = Date.now();
     } catch {
       // Some platforms throw on unsupported torch — leave torchOn unchanged.
     }
@@ -437,6 +440,8 @@ export default function CardCameraCapture({
       return;
     }
     if (luminance == null) return;
+    // AE settling cooldown: ignore brightness samples taken within TORCH_COOLDOWN_MS of any torch flip.
+    if (Date.now() - lastTorchToggleAtRef.current < TORCH_COOLDOWN_MS) return;
     if (!torchOn && luminance < LUM_DARK) void applyTorch(true);
     else if (torchOn && luminance > LUM_LOW) void applyTorch(false);
   }, [flashMode, luminance, torchCapable, torchOn, applyTorch]);
