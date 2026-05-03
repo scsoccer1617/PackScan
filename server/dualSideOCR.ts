@@ -18,6 +18,7 @@ import { isCardDbLookupEnabled } from './featureFlags';
 import { pickerSearch, buildPickerQuery, isMultiPlayerSubset, type PickerListing } from './ebayPickerSearch';
 import { verifyIdentificationWithSearch } from './vlmSearchVerify';
 import { filterUnsafeCorrections, isMaterialSetChange } from './vlmSearchVerifyApply';
+import { decideSearchVerifyGate, computeAveragePrice } from './searchVerifyGate';
 
 // BR-2: identity tuple for the parallel eBay comps query. Built off the
 // post-overlay combinedResult (Gemini-authoritative when present, OCR
@@ -904,9 +905,18 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
       && !!finalResult.year
       && !!(finalResult.cardNumber || '').toString().trim();
     const isGradedScan = !!(finalResult as any).isGraded;
+    const broadGateEnabled = process.env.VLM_SEARCH_VERIFY_BROAD_GATE === 'true';
+    const gateDecision = decideSearchVerifyGate(
+      {
+        active: embeddedComps?.active ?? null,
+        year: finalResult.year ?? null,
+        averagePriceUsd: computeAveragePrice(embeddedComps?.active ?? null),
+      },
+      broadGateEnabled,
+    );
     if (
       process.env.VLM_SEARCH_VERIFY_ENABLED === 'true'
-      && ebayHadZero
+      && gateDecision.fire
       && identityComplete
       && !isGradedScan
     ) {
@@ -929,6 +939,7 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
           }
         }
         (finalResult as any)._searchVerified = true;
+        (finalResult as any)._searchTriggerReason = gateDecision.reason;
         (finalResult as any)._searchCorrectionsAttempted = Object.keys(correctionsMap);
         (finalResult as any)._searchSources = (verify.sources ?? []).slice(0, 3);
 
