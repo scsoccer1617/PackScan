@@ -4,6 +4,7 @@ import { eq, and, desc } from 'drizzle-orm';
 import { db } from '../db';
 import { users, userSheets, type User, type UserSheet } from '../shared/schema';
 import { withSheetsWriteGuard } from './sheetsRateLimit';
+import { ensureBinFilter } from './ebayCompsSummary';
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_OAUTH_CLIENT_ID;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
@@ -378,7 +379,12 @@ export function buildRow(input: CardRowInput): (string | number)[] {
     price,
     safeCellValue(input.frontImageUrl),
     safeCellValue(input.backImageUrl),
-    safeCellValue(input.ebaySearchUrl),
+    // PR K: append `LH_BIN=1` to the "View on eBay" URL so the link the
+    // user clicks lands on the same BIN-only pool the price column was
+    // computed against. Idempotent — no-op if the URL already carries
+    // LH_BIN. The protected URL builder in server/ebayService.ts is
+    // untouched; this transform happens at the cell write boundary.
+    safeCellValue(ensureBinFilter(input.ebaySearchUrl)),
     // Graded-card columns. Empty strings on RAW scans so the cells stay
     // visually blank in the sheet rather than showing "No" everywhere.
     input.isGraded ? 'Yes' : '',

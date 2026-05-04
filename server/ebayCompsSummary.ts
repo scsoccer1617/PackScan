@@ -1,20 +1,23 @@
 /**
- * PR G — Single source of truth for the comp-price metric.
+ * PR K — Unified 10-listing pool, mean price across all surfaces.
  *
- * Hits the eBay Browse API directly (limit=100, BIN-only) for a wider
- * pool than the 5-listing picker, applies the same precision filters
- * (card # + last name in title), folds shipping into each price, and
- * returns BOTH median and mean. Median is the canonical metric the UI
- * hero, bulk auto-save, and reprice all consume — replacing three
- * locally-computed mean-of-≤N pipelines that produced different numbers
- * for the same card.
+ * Single source of truth for the comp-price metric AND for the listings
+ * the Price tab renders. Hits the eBay Browse API with limit=10,
+ * sort=newlyListed, BIN-only, applies the same precision filters the
+ * picker uses (card # + last name in title), drops shipping (item price
+ * only), and returns the MEAN over the survivor pool plus the listings
+ * themselves so the UI can render the EXACT pool the average was
+ * computed from.
  *
- * The picker (ebayPickerSearch.ts) still ranks and returns the top 5
- * listings the UI displays as the listings strip; this helper does NOT
- * replace that. The two paths intentionally agree on the same query
- * (buildPickerQuery) and the same precision filters but differ on the
- * pool size — picker = top-N for display, summary = wide pool for a
- * stable median.
+ * Pre-PR-K (PR G — PR #263) used limit=100, best-match sort, shipping
+ * folded in, and returned MEDIAN as canonical. The Price tab then made
+ * a separate `/api/ebay/comps` fetch for display, which produced a
+ * different pool — the user observed "Median $2.98 (n=13)" on the hero
+ * but only 5 listings rendered in the Price tab. PR K collapses both
+ * fetches into this one helper.
+ *
+ * `median` is still computed and returned for diagnostics / backwards
+ * compat, but is deprecated as the canonical metric.
  */
 
 import { sharedHttpClient } from './httpClient';
@@ -22,20 +25,42 @@ import { getEbayAccessToken } from './ebayTokenManager';
 
 const BROWSE_SEARCH_URL = 'https://api.ebay.com/buy/browse/v1/item_summary/search';
 const SPORTS_CARDS_CATEGORY = '261328';
-// eBay Browse API hard cap is 200; 100 is plenty for a stable median
-// without doubling the network/CPU cost. Telemetry-guided default.
-const SUMMARY_POOL_SIZE = 100;
+// PR K: 10 newest BIN listings. Single pool the hero, Price tab, sheet
+// column, bulk auto-save, and reprice all read from.
+const SUMMARY_POOL_SIZE = 10;
 // Cache TTL — the picker can fire repeatedly during a burst of scans
 // (BR-2 fast-path + per-scan re-fetch + bulk processor + reprice). 60s
 // is short enough to track market moves, long enough to absorb bursts.
 const CACHE_TTL_MS = 60_000;
 
+/**
+ * Listing shape returned to the UI. Mirrors `ActiveListing` in
+ * client/src/components/EbayActiveComps.tsx so the Price tab can drop
+ * the existing `/api/ebay/comps` fetch and render summary.listings
+ * directly.
+ */
+export interface SummaryListing {
+  title: string;
+  price: number;
+  currency: string;
+  url: string;
+  imageUrl: string;
+  condition: string;
+}
+
 export interface CompsSummary {
-  median: number | null;
+  /** PR K canonical: arithmetic mean over the ≤10 pool, item price only. */
   mean: number | null;
+  /**
+   * @deprecated PR K — preserved for diagnostics and any caller still
+   * reading the old field name. Do not use as the displayed metric.
+   */
+  median: number | null;
   count: number;
   query: string;
   currency: 'USD';
+  /** PR K: the actual ≤10 listings the mean was computed from. */
+  listings: SummaryListing[];
 }
 
 export interface CompsSummaryOptions {
@@ -47,6 +72,16 @@ export interface CompsSummaryOptions {
   requirePlayerLastName?: string | null;
   /** Optional grade phrase ("PSA 10") to require in title. */
   requireGrade?: string | null;
+  /**
+   * PR K: when true (default), the helper applies the base-card negative
+   * keyword chain (`-autograph -refractor -xfractor -rainbow -mojo -holo
+   * -relic -memorabilia -"game-used" -"game used" -patch -jersey -auto
+   * -autographed -autographs -autos -signed -parallel`) inside the
+   * Browse `q` parameter. Set false when scanning a parallel/auto/relic
+   * (the user already chose a parallel, so excluding those terms would
+   * filter the legitimate target listings out).
+   */
+  excludeParallels?: boolean;
 }
 
 interface CacheEntry {
@@ -59,7 +94,8 @@ function cacheKey(query: string, opts?: CompsSummaryOptions): string {
   const cardNum = (opts?.requireCardNumber || '').trim().replace(/^#/, '').toLowerCase();
   const lastName = (opts?.requirePlayerLastName || '').trim().toLowerCase();
   const grade = (opts?.requireGrade || '').trim().toLowerCase();
-  return `${query}||${cardNum}||${lastName}||${grade}`;
+  const excl = opts?.excludeParallels !== false ? '1' : '0';
+  return `${query}||${cardNum}||${lastName}||${grade}||${excl}`;
 }
 
 export function median(nums: number[]): number | null {
@@ -77,30 +113,70 @@ export function mean(nums: number[]): number | null {
 }
 
 /**
- * Pull effective price (item price + shipping) from a Browse API item.
- * Buyers see total cost on the listing card, so the median should
- * reflect that — folding shipping in matches the user's eBay click-
- * through experience.
+ * PR K: item price only. Shipping fold-in was dropped — the user wants
+ * the item-price average across BIN listings, matching what the buyer
+ * sees as the headline number on each listing card.
  */
-export function effectivePrice(item: any): number {
+export function itemPrice(item: any): number {
   const price = parseFloat(item?.price?.value || '0');
-  const ship = parseFloat(item?.shippingOptions?.[0]?.shippingCost?.value || '0');
-  return price + (Number.isFinite(ship) ? ship : 0);
+  return Number.isFinite(price) ? price : 0;
 }
 
 /**
- * Fetch a wide pool of BIN-only Browse API listings, apply the same
- * precision filters as the picker, and compute median + mean over the
+ * Base-card negative keyword chain — same set ebayPickerSearch.ts uses
+ * when the picker is searching for a base card. Kept here so the
+ * summary pool excludes the same junk; otherwise the mean would be
+ * dragged up by a foil/refractor/auto sneaking through Browse's
+ * default match.
+ */
+const BASE_NEGATIVE_KEYWORDS =
+  '-autograph -refractor -xfractor -rainbow -mojo -holo -relic ' +
+  '-memorabilia -"game-used" -"game used" -patch -jersey -auto ' +
+  '-autographed -autographs -autos -signed -parallel';
+
+/**
+ * Map a raw Browse `itemSummary` to the listing shape the UI renders.
+ */
+function toListing(item: any): SummaryListing {
+  return {
+    title: (item?.title || '').toString(),
+    price: itemPrice(item),
+    currency: (item?.price?.currency || 'USD').toString(),
+    url: (item?.itemWebUrl || '').toString(),
+    imageUrl: (item?.image?.imageUrl || item?.thumbnailImages?.[0]?.imageUrl || '').toString(),
+    condition: (item?.condition || '').toString(),
+  };
+}
+
+/**
+ * Fetch up to 10 newest-listed BIN-only Browse API listings, apply the
+ * same precision filters as the picker, and compute mean over the
  * survivor pool. Cached ~60s per (query, filters).
  */
 export async function getCompsSummary(
   rawQuery: string,
   opts?: CompsSummaryOptions,
 ): Promise<CompsSummary> {
-  const query = (rawQuery || '').replace(/\s{2,}/g, ' ').trim();
-  if (!query) {
-    return { median: null, mean: null, count: 0, query: '', currency: 'USD' };
+  const baseQuery = (rawQuery || '').replace(/\s{2,}/g, ' ').trim();
+  if (!baseQuery) {
+    return {
+      mean: null,
+      median: null,
+      count: 0,
+      query: '',
+      currency: 'USD',
+      listings: [],
+    };
   }
+
+  // PR K: append the base-card negative chain into the Browse `q` so
+  // the small (10-listing) pool isn't burned by unrelated parallels.
+  // Default is "exclude" — callers scanning a known parallel pass
+  // `excludeParallels: false` to keep the parallel-matching listings.
+  const excludeParallels = opts?.excludeParallels !== false;
+  const query = excludeParallels
+    ? `${baseQuery} ${BASE_NEGATIVE_KEYWORDS}`
+    : baseQuery;
 
   const key = cacheKey(query, opts);
   const cached = cache.get(key);
@@ -117,9 +193,13 @@ export async function getCompsSummary(
         category_ids: SPORTS_CARDS_CATEGORY,
         limit: SUMMARY_POOL_SIZE,
         // BIN-only — matches the LH_BIN=1 in the user's eBay click-
-        // through URL so the median tracks what the buyer would pay
-        // for an immediate purchase, not auction min bids.
+        // through URL so the mean tracks what the buyer would pay for
+        // an immediate purchase, not auction min bids.
         filter: 'buyingOptions:{FIXED_PRICE}',
+        // PR K: newest listed first, matching the spreadsheet
+        // "View on eBay" URL (`_sop=10`) so the pool the buyer sees
+        // when they click through equals the pool we averaged.
+        sort: 'newlyListed',
       },
       headers: {
         Authorization: `Bearer ${token}`,
@@ -131,7 +211,14 @@ export async function getCompsSummary(
     result = computeSummary(items, query, opts);
   } catch (err: any) {
     console.warn('[ebayCompsSummary] fetch failed:', err?.response?.data || err?.message || err);
-    result = { median: null, mean: null, count: 0, query, currency: 'USD' };
+    result = {
+      mean: null,
+      median: null,
+      count: 0,
+      query,
+      currency: 'USD',
+      listings: [],
+    };
   }
 
   cache.set(key, { expiresAt: Date.now() + CACHE_TTL_MS, result });
@@ -140,7 +227,8 @@ export async function getCompsSummary(
 
 /**
  * Pure function: filter raw Browse items by precision rules + price > 0,
- * fold in shipping, compute median/mean. Exported for unit testing.
+ * compute mean (canonical) and median (deprecated diagnostic), and
+ * return the survivor listings. Exported for unit testing.
  */
 export function computeSummary(
   rawItems: any[],
@@ -151,6 +239,7 @@ export function computeSummary(
   const lastName = (opts?.requirePlayerLastName || '').trim().toLowerCase();
   const grade = (opts?.requireGrade || '').trim().toLowerCase();
 
+  const listings: SummaryListing[] = [];
   const prices: number[] = [];
   for (const item of rawItems) {
     const title = (item?.title || '').toLowerCase();
@@ -158,17 +247,36 @@ export function computeSummary(
     if (cardNum && !title.includes(cardNum)) continue;
     if (lastName && !title.includes(lastName)) continue;
     if (grade && !title.includes(grade)) continue;
-    const eff = effectivePrice(item);
-    if (eff > 0) prices.push(eff);
+    const listing = toListing(item);
+    if (listing.price > 0) {
+      prices.push(listing.price);
+      listings.push(listing);
+    }
   }
 
   return {
-    median: median(prices),
     mean: mean(prices),
+    median: median(prices),
     count: prices.length,
     query,
     currency: 'USD',
+    listings,
   };
+}
+
+/**
+ * PR K: append `LH_BIN=1` to a "View on eBay" search URL so the link
+ * the user clicks (in the Sheet, in the bulk reprice flow, etc.)
+ * lands them on the same BIN-only pool we computed the mean against.
+ *
+ * Idempotent: if the URL already contains `LH_BIN=1` (or any
+ * `LH_BIN=...`) we return it unchanged. Safe on URLs with or without
+ * an existing query string.
+ */
+export function ensureBinFilter(url: string | null | undefined): string {
+  if (!url) return '';
+  if (/[?&]LH_BIN=/i.test(url)) return url;
+  return url.includes('?') ? `${url}&LH_BIN=1` : `${url}?LH_BIN=1`;
 }
 
 /** Test/debug helper: drop the cache. Not exported on the wire. */

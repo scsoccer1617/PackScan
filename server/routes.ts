@@ -1527,21 +1527,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // PR G — Single source of truth for the canonical comp-price metric.
+  // PR K — Single source of truth for the comp-price metric AND for the
+  // listings the UI Price tab renders.
   //
-  // Pre-PR-G the UI hero averaged ≤10 listings (EbayActiveComps), the
-  // Sheet bulk auto-save averaged ≤5 (bulkScan/processor), and the
-  // reprice path averaged ≤5 (routes/bulkScan) — three different numbers
-  // for the same card. This endpoint hits eBay Browse directly with
-  // limit=100 (BIN-only, shipping folded in), applies the same precision
-  // filters the picker uses (card # + last name in title), and returns
-  // the MEDIAN over the wider pool. Median is robust to the long-tail
-  // outliers that skew small-pool means.
+  // Pre-PR-K (PR G — PR #263) used limit=100 with shipping folded in and
+  // returned median; the Price tab made a separate `/api/ebay/comps`
+  // fetch for the displayed listings — that produced a different pool
+  // (the user observed Hero "Median $2.98 (n=13)" but only 5 listings
+  // shown in the Price tab). PR K returns up to 10 newest-listed BIN
+  // listings, the MEAN over their item prices, and the listings array
+  // itself, so every surface (hero, Price tab, sheet column, bulk
+  // auto-save, reprice) reads from one pool.
   //
-  // Mean is returned alongside for diagnostics / backwards compat. The
-  // existing `/api/ebay/comps` endpoint above is preserved for the
-  // listings strip the UI displays — this is purely an additive endpoint
-  // for the price metric.
+  // Median is still returned for diagnostics / backwards compat but is
+  // deprecated as the displayed metric.
   app.get(`${apiPrefix}/ebay/comps/summary`, async (req, res) => {
     try {
       const { buildPickerQuery } = await import('./ebayPickerSearch.js');
@@ -1552,6 +1551,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const gradeKeywordStr = typeof gradeKeyword === 'string' && gradeKeyword.trim()
         ? gradeKeyword.trim()
         : undefined;
+      const excludeParallels = !parallelStr && !gradeKeywordStr;
       const query = (typeof rawQuery === 'string' && rawQuery.trim())
         ? rawQuery.trim()
         : buildPickerQuery({
@@ -1562,7 +1562,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             player: typeof player === 'string' ? player : undefined,
             subset: subsetStr,
             parallel: parallelStr,
-            excludeParallels: !parallelStr && !gradeKeywordStr,
+            excludeParallels,
             gradeKeyword: gradeKeywordStr,
           });
       const playerStr = typeof player === 'string' ? player : undefined;
@@ -1571,16 +1571,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         requireCardNumber: typeof cardNumber === 'string' ? cardNumber : undefined,
         requirePlayerLastName: lastName,
         requireGrade: gradeKeywordStr,
+        excludeParallels,
       });
       return res.json(summary);
     } catch (err: any) {
       console.error('[ebay/comps/summary] failed:', err?.message || err);
       return res.status(500).json({
-        median: null,
         mean: null,
+        median: null,
         count: 0,
         query: '',
         currency: 'USD',
+        listings: [],
         error: 'eBay comps summary lookup failed',
       });
     }

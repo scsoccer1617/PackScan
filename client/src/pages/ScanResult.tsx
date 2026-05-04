@@ -1027,20 +1027,15 @@ export default function ScanResult() {
 
   const tone = holoGrade ? gradeTone(holoGrade.overall) : null;
 
-  // Formatted price label for the hero subtitle. PR G: the source is
-  // /api/ebay/comps/summary — MEDIAN over a wider (limit=100, BIN-only,
-  // shipping folded in) Browse pool. The label says "Median" and shows
-  // the pool size (n=NN) so the user can judge confidence at a glance.
+  // Formatted price label for the hero subtitle. PR K: the source is
+  // /api/ebay/comps/summary — MEAN over the unified ≤10 BIN-listing pool
+  // (item price only, newest-listed first). Hero, Price tab, sheet
+  // column, bulk auto-save, and reprice all read from this same pool.
   //
-  // Terminal states:
-  //   1. `priceInfo === null`     → still loading; render nothing.
-  //   2. `count === 0`            → comps came back empty. Render
-  //      "No active listings" (PR #250 design directive — silent
-  //      omission misled dealers into thinking the lookup was pending).
-  //   3. `count === 1`            → a single listing. Render
-  //      "From $X.XX" since "median of one" is misleading.
-  //   4. `averageValue > 0`       → render "Median $X.XX (n=NN)".
-  // averageValue=0 with count>0 is treated the same as "no listings".
+  // Per the user-locked spec: the hero label is `Avg $X.XX` — no
+  // `(n=NN)` suffix anywhere. `count === 0` still renders the explicit
+  // "No active listings" copy (PR #250) so an empty lookup isn't
+  // mistaken for still-loading.
   const heroPriceLabel: string | null = (() => {
     if (!priceInfo) return null;
     if (priceInfo.count > 0 && priceInfo.averageValue > 0) {
@@ -1048,8 +1043,7 @@ export default function ScanResult() {
         style: 'currency',
         currency: 'USD',
       }).format(priceInfo.averageValue);
-      if (priceInfo.count === 1) return `From ${formatted}`;
-      return `Median ${formatted} (n=${priceInfo.count})`;
+      return `Avg ${formatted}`;
     }
     return 'No active listings';
   })();

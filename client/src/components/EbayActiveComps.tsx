@@ -1,19 +1,15 @@
-// PR #165 — Active-only eBay comps for the result-screen Price tab.
+// PR K — Active-only eBay comps for the result-screen Price tab, reading
+// from the unified `/api/ebay/comps/summary` pool.
 //
-// Calls /api/ebay/comps with the final Gemini fields plus the parallel
-// the user picked in the (now terminal) GeminiParallelPickerSheet. Renders
-// the top ~10 Active listings and bubbles the average price up so the
-// persistent hero header can render "Avg $X.XX" alongside the card title.
+// Pre-PR-K this component fetched `/api/ebay/comps` for the displayed
+// listings AND `/api/ebay/comps/summary` for the hero average — two
+// separate pools that could (and did) disagree (user-reported: hero
+// "Median $2.98 (n=13)" but only 5 listings shown). PR K collapses both
+// into a single `/api/ebay/comps/summary` fetch which now returns the
+// listings array itself plus the mean over those exact listings.
 //
 // Active-listings-only by design — the user has confirmed there is no
-// sold-listings access through the current eBay credentials, so this UI
-// never offers a Sold tab. The label is just "Avg" (no asking/sold
-// disambiguation needed when there is exactly one source).
-//
-// This component is intentionally smaller than EbayPriceResults — it only
-// owns the comps list and the avg. EbayPriceResults still drives the
-// graded breakdown / catalog strip path, and the search-keyword waterfall
-// in /api/ebay-search remains untouched.
+// sold-listings access through the current eBay credentials.
 
 import { useEffect, useState } from "react";
 import { ExternalLink, TrendingUp, Loader2 } from "lucide-react";
@@ -30,21 +26,25 @@ export interface ActiveListing {
   condition: string;
 }
 
-interface CompsResponse {
+interface SummaryResponse {
+  mean: number | null;
+  /** @deprecated PR K — kept on the wire for diagnostics. */
+  median: number | null;
+  count: number;
   query: string;
-  active: ActiveListing[];
-  error?: string;
+  currency: string;
+  listings: ActiveListing[];
 }
 
 interface EbayActiveCompsProps {
   cardData: Partial<CardFormValues>;
   /**
    * Bubble the canonical comp-price metric + the search query up so
-   * ScanResult can render the hero subtitle. PR G: `average` is the
-   * MEDIAN over the wider Browse pool (limit=100, BIN-only, shipping
-   * folded in) returned by /api/ebay/comps/summary — NOT the local
-   * mean over the displayed listings. Mean is forwarded too for
-   * diagnostics. Fires on every successful (or empty) response.
+   * ScanResult can render the hero subtitle. PR K: `average` is the
+   * MEAN over the unified ≤10-listing pool returned by
+   * /api/ebay/comps/summary — exactly the listings rendered below.
+   * Median is forwarded for diagnostics only. Fires on every
+   * successful (or empty) response.
    */
   onAverage?: (info: {
     average: number;
@@ -175,7 +175,11 @@ export default function EbayActiveComps({
   const embeddedAuthoritative =
     !!initialComps && serverKey !== null && serverKey === liveKey;
 
-  const [loading, setLoading] = useState(!embeddedAuthoritative);
+  // PR K: BR-2 fast-path becomes display-only — it lets us paint *some*
+  // listings on first frame while the summary fetch is in flight. The
+  // mean and the *canonical* listings still come from the summary
+  // response so the Price tab and the hero share one pool.
+  const [loading, setLoading] = useState(true);
   const [listings, setListings] = useState<ActiveListing[]>(
     embeddedAuthoritative && initialComps ? initialComps.active : [],
   );
@@ -215,51 +219,29 @@ export default function EbayActiveComps({
       params.set("subset", compsQuery.subset);
     }
 
-    // PR G: the hero subtitle reads MEDIAN from /api/ebay/comps/summary
-    // (wider pool of 100 BIN-only listings) — single source of truth
-    // shared with bulk auto-save and the reprice path. The displayed
-    // listings strip below still comes from /api/ebay/comps (top-N
-    // ranked picker output). The two endpoints share the same query +
-    // precision filters by design; they only diverge on pool size.
-    const summaryParams = new URLSearchParams(params);
-    const compsParams = new URLSearchParams(params);
-    compsParams.set("limit", "10");
-
-    const compsPromise =
-      initialComps && serverKey !== null && serverKey === liveKey
-        ? Promise.resolve({
-            query: initialComps.query || "",
-            active: initialComps.active,
-          } as CompsResponse)
-        : fetch(`/api/ebay/comps?${compsParams.toString()}`).then(async (r) => {
-            if (!r.ok) throw new Error(`comps ${r.status}`);
-            return (await r.json()) as CompsResponse;
-          });
-    const summaryPromise = fetch(
-      `/api/ebay/comps/summary?${summaryParams.toString()}`,
-    ).then(async (r) => {
-      if (!r.ok) throw new Error(`summary ${r.status}`);
-      return (await r.json()) as {
-        median: number | null;
-        mean: number | null;
-        count: number;
-        query: string;
-      };
-    });
-
-    Promise.all([compsPromise, summaryPromise])
-      .then(([compsData, summaryData]) => {
+    // PR K: ONE fetch. /api/ebay/comps/summary returns mean (canonical)
+    // + the listings the mean was computed from. Hero subtitle and
+    // Price tab now share the same ≤10 pool. The legacy
+    // /api/ebay/comps endpoint is preserved for non-EbayActiveComps
+    // callers (e.g. BR-2 server-side prefetch) but no longer drives
+    // this component's display.
+    fetch(`/api/ebay/comps/summary?${params.toString()}`)
+      .then(async (r) => {
+        if (!r.ok) throw new Error(`summary ${r.status}`);
+        return (await r.json()) as SummaryResponse;
+      })
+      .then((summaryData) => {
         if (cancelled) return;
-        const active = Array.isArray(compsData.active) ? compsData.active : [];
+        const active = Array.isArray(summaryData.listings)
+          ? summaryData.listings
+          : [];
         setListings(active);
-        setQuery(compsData.query || summaryData.query || "");
-        const median = summaryData.median;
-        const mean = summaryData.mean;
+        setQuery(summaryData.query || "");
         onAverage?.({
-          average: median ?? 0,
-          median,
-          mean,
-          query: compsData.query || summaryData.query || "",
+          average: summaryData.mean ?? 0,
+          median: summaryData.median,
+          mean: summaryData.mean,
+          query: summaryData.query || "",
           count: summaryData.count,
         });
         setLoading(false);
