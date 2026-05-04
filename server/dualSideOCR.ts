@@ -46,7 +46,7 @@ export interface StageEvent {
 const STAGE_LABELS: Record<StageId, string> = {
   analyzing_card: 'Analyzing card',
   detecting_parallel: 'Detecting parallel',
-  verifying_with_ebay: 'Verifying with eBay',
+  verifying_with_ebay: 'Looking for active eBay listings',
   getting_price: 'Getting price',
 };
 
@@ -1258,7 +1258,7 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
       }
     }
 
-    // PR H — Stage 3 ("Verifying with eBay") completes after the
+    // PR H — Stage 3 ("Looking for active eBay listings") completes after the
     // search-verify gate has decided (or skipped). Stage 4 ("Getting
     // price") follows: in the non-streaming flow the comps median is
     // computed by /api/ebay/comps/summary post-mount, but the streaming

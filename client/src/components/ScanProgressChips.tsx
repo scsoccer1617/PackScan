@@ -98,6 +98,6 @@ function ChipIcon({ status }: { status: ChipStatus }) {
 export const DEFAULT_SCAN_STAGES: ScanProgressChipStage[] = [
   { id: "analyzing_card", label: "Analyzing card", status: "pending" },
   { id: "detecting_parallel", label: "Detecting parallel", status: "pending" },
-  { id: "verifying_with_ebay", label: "Verifying with eBay", status: "pending" },
+  { id: "verifying_with_ebay", label: "Looking for active eBay listings", status: "pending" },
   { id: "getting_price", label: "Getting price", status: "pending" },
 ];

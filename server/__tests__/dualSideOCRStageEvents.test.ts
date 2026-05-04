@@ -46,8 +46,8 @@ function emit(req: any, stage: StageId, status: StageStatus, label: string) {
     ['analyzing_card', 'completed', 'Analyzing card'],
     ['detecting_parallel', 'in_progress', 'Detecting parallel'],
     ['detecting_parallel', 'completed', 'Detecting parallel'],
-    ['verifying_with_ebay', 'in_progress', 'Verifying with eBay'],
-    ['verifying_with_ebay', 'completed', 'Verifying with eBay'],
+    ['verifying_with_ebay', 'in_progress', 'Looking for active eBay listings'],
+    ['verifying_with_ebay', 'completed', 'Looking for active eBay listings'],
     ['getting_price', 'in_progress', 'Getting price'],
     ['getting_price', 'completed', 'Getting price'],
   ];
