@@ -1,0 +1,21 @@
+User-agent: *
+Allow: /$
+Allow: /login
+Disallow: /admin
+Disallow: /admin/
+Disallow: /api/
+Disallow: /scan
+Disallow: /scans/
+Disallow: /result
+Disallow: /add-card
+Disallow: /search
+Disallow: /collection
+Disallow: /sheets
+Disallow: /stats
+Disallow: /account
+Disallow: /bulk-scan
+Disallow: /verify-email
+Disallow: /reset-password
+Disallow: /forgot-password
+
+Sitemap: https://packscan.io/sitemap.xml
