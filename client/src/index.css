@@ -271,14 +271,19 @@
   }
 
   /* PR S Item 1 — sequenced field reveal in <ScanInfoHeader>. Each
-     field fades + translates the same 4px the chip-mount uses, so the
-     stage-1 OCR fields don't all "pop" at once when the JSON blob
-     arrives. The header schedules the visibility — this rule animates
-     the visible→visible transition each time a new field lands. */
+     field fades + translates as the stage-1 OCR fields land so they
+     don't all "pop" at once when the JSON blob arrives. The header
+     schedules the visibility — this rule animates the visible→visible
+     transition each time a new field lands.
+
+     PR T Item 2 — bumped duration 150ms → 280ms and translate 4px →
+     8px. The user reported the stagger was imperceptible on phone;
+     a longer fade with a larger Y travel makes each field's entrance
+     visually distinct from the next at the 200ms tick cadence. */
   @keyframes scan-field-reveal-kf {
     from {
       opacity: 0;
-      transform: translateY(4px);
+      transform: translateY(8px);
     }
     to {
       opacity: 1;
@@ -286,7 +291,7 @@
     }
   }
   .scan-field-reveal {
-    animation: scan-field-reveal-kf 150ms ease-out both;
+    animation: scan-field-reveal-kf 280ms ease-out both;
   }
   @media (prefers-reduced-motion: reduce) {
     .scan-field-reveal {

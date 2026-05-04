@@ -8,8 +8,7 @@ import { cn } from "@/lib/utils";
 // as a single JSON blob, so all five fields land in one `setFields()`
 // call on the parent. To avoid the "pop back all at once" feel, the
 // header reveals each field one by one in reading order
-// (Year → Brand → Set → Collection → # → Player) with ~150ms between
-// each. Total reveal duration ~750ms-1s. Honors
+// (Year → Brand → Set → Collection → # → Player). Honors
 // `prefers-reduced-motion` — users with that setting see all fields
 // rendered immediately.
 //
@@ -18,6 +17,17 @@ import { cn } from "@/lib/utils";
 // collection is the parallel/variant within the set ("Base Set",
 // "Pink Sparkle", "Gold"). They're two distinct fields in the data
 // model so we render two distinct slots — even if one is empty.
+//
+// PR T Item 2 — diagnosed user report ("fields appear all at once,
+// stagger not visible"). Root cause: the stagger logic IS firing, but
+// the per-field 150ms fade combined with a 160ms tick made the total
+// reveal complete in ~800ms with a 4px translate that was hard to
+// perceive on a phone screen. Two changes:
+//   1. Default stagger bumped from 160ms → 200ms (total reveal now
+//      ~1s end-to-end across 6 fields).
+//   2. Per-field CSS animation lengthened to 280ms with an 8px
+//      translate so each field's entrance is visibly distinct from
+//      the next. Reduced-motion still bypasses the animation.
 
 export interface ScanInfoHeaderFields {
   year?: number | string | null;
@@ -34,8 +44,10 @@ interface ScanInfoHeaderProps {
    *  populated fields (used after the final result lands). */
   showSkeletons?: boolean;
   /** Stagger between successive fields during the sequenced reveal,
-   *  in milliseconds. Defaults to 160ms. Tests can pass `0` to
-   *  short-circuit the animation. */
+   *  in milliseconds. Defaults to 200ms (PR T — bumped from 160ms so
+   *  the total reveal across 6 fields lands at ~1s instead of ~800ms,
+   *  which the user reported as imperceptible on phone). Tests can
+   *  pass `0` to short-circuit the animation. */
   revealStaggerMs?: number;
   /** Override prefers-reduced-motion detection. Tests can force
    *  immediate reveal regardless of media query state. */
@@ -130,7 +142,7 @@ function hiddenPlaceholder(width: string, testId: string): JSX.Element {
 export function ScanInfoHeader({
   fields,
   showSkeletons = true,
-  revealStaggerMs = 160,
+  revealStaggerMs = 200,
   forceReducedMotion,
 }: ScanInfoHeaderProps) {
   const { year, brand, set, collection, cardNumber, player } = fields;
