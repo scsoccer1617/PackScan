@@ -2271,6 +2271,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         },
         body: req.body || {},
         query: req.query || {},
+        // PR O: thread the SSE stage emitter through to dualSideOCR. The
+        // streaming route (/analyze-card-dual-images/stream) attaches
+        // `onStage` to the outer req; without this hop the synthesized
+        // `dualRequest` lacked the property and emitStage() silently
+        // no-op'd, leaving all four chips stuck on pending.
+        onStage: (req as any).onStage,
       } as any;
       
       let backOcrResponse: any = null;
