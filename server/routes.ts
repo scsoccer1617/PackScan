@@ -1995,16 +1995,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // increments scanCount only on 200 responses (the multi-branch ebay
   // success paths all funnel through res.json with status 200, while
   // 400/500 exits never count).
-  app.post(`${apiPrefix}/analyze-card-dual-images`, requireScanQuota, upload.fields([
-    { name: 'frontImage', maxCount: 1 },
-    { name: 'backImage', maxCount: 1 },
-    // GRADED-mode path (additive). Client uploads ONE additional image — the
-    // top ~18% strip cropped from the slab label — alongside the regular
-    // front/back photos. When present, the route runs the grading-label
-    // VLM in parallel with the card-body analyzer so we still resolve in
-    // a single round trip.
-    { name: 'gradingLabelImage', maxCount: 1 },
-  ]), async (req, res) => {
+  // Shared handler body for /analyze-card-dual-images and the SSE
+  // streaming sibling /analyze-card-dual-images/stream (PR H). The
+  // streaming route invokes this with a mock `res` that captures the
+  // final JSON payload, which it then ships as the trailing SSE
+  // `result` event after the chip-progress events emitted by
+  // dualSideOCR.ts.
+  async function runAnalyzeCardDualImages(req: Request, res: Response): Promise<any> {
     const quotaUserId = (req.user as any)?.id as number | undefined;
     res.on('finish', () => {
       if (res.statusCode === 200) void incrementScanCount(quotaUserId);
@@ -2710,7 +2707,113 @@ export async function registerRoutes(app: Express): Promise<Server> {
         error: 'analysis_failed'
       });
     }
+  }
+
+  // Legacy non-streaming entry point (PR #191 + everything that calls it).
+  // Bulk depends on this URL; the streaming sibling registered below
+  // delegates into the same shared body so behavior stays identical
+  // when streaming isn't requested.
+  app.post(`${apiPrefix}/analyze-card-dual-images`, requireScanQuota, upload.fields([
+    { name: 'frontImage', maxCount: 1 },
+    { name: 'backImage', maxCount: 1 },
+    // GRADED-mode path (additive). Client uploads ONE additional image — the
+    // top ~18% strip cropped from the slab label — alongside the regular
+    // front/back photos. When present, the route runs the grading-label
+    // VLM in parallel with the card-body analyzer so we still resolve in
+    // a single round trip.
+    { name: 'gradingLabelImage', maxCount: 1 },
+  ]), async (req, res) => {
+    await runAnalyzeCardDualImages(req, res);
   });
+
+  // PR H — SSE streaming sibling for the single-card scan flow. Same
+  // multipart input as the legacy route, plus four `stage` events
+  // streamed live as the analyze pipeline hits each milestone, then a
+  // single trailing `result` event carrying the same JSON payload the
+  // legacy route would return. Bulk and any non-streaming caller stay
+  // on the legacy route untouched. EventSource can't POST, so the
+  // client uses fetch() with a ReadableStream reader.
+  //
+  // Event schema:
+  //   data: {"type":"stage","stage":"analyzing_card","status":"in_progress","label":"Analyzing card"}\n\n
+  //   data: {"type":"stage","stage":"analyzing_card","status":"completed","label":"Analyzing card"}\n\n
+  //   ... (detecting_parallel, verifying_with_ebay, getting_price)
+  //   data: {"type":"result","status":<httpStatus>,"body":<legacy JSON>}\n\n
+  //   data: {"type":"error","message":"..."}\n\n   (terminal alternative)
+  app.post(
+    `${apiPrefix}/analyze-card-dual-images/stream`,
+    requireScanQuota,
+    upload.fields([
+      { name: 'frontImage', maxCount: 1 },
+      { name: 'backImage', maxCount: 1 },
+      { name: 'gradingLabelImage', maxCount: 1 },
+    ]),
+    async (req, res) => {
+      const quotaUserId = (req.user as any)?.id as number | undefined;
+      let finalEmitted = false;
+      res.on('close', () => {
+        if (finalEmitted) void incrementScanCount(quotaUserId);
+      });
+
+      // SSE preamble. X-Accel-Buffering disables proxy buffering so
+      // chips render live; no-cache is critical because intermediaries
+      // would otherwise hold the stream until completion.
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache, no-transform',
+        Connection: 'keep-alive',
+        'X-Accel-Buffering': 'no',
+      });
+
+      const send = (payload: Record<string, unknown>) => {
+        try {
+          res.write(`data: ${JSON.stringify(payload)}\n\n`);
+        } catch (writeErr) {
+          console.warn('[analyze-stream] SSE write failed:', writeErr);
+        }
+      };
+
+      // Attach the stage emitter onto the request so dualSideOCR.ts
+      // can fire events at its four milestones. Non-streaming callers
+      // never set this and the helper is a silent no-op for them.
+      (req as any).onStage = (event: { stage: string; status: string; label: string }) => {
+        send({ type: 'stage', ...event });
+      };
+
+      // Mock response that the shared handler can write its final JSON
+      // payload into. We capture status + body, then forward via SSE
+      // rather than letting the shared handler ship a JSON response.
+      let captured: { status: number; body: any } | null = null;
+      const mockRes: any = {
+        statusCode: 200,
+        on: (_event: string, _cb: () => void) => mockRes,
+        status(code: number) {
+          this.statusCode = code;
+          return this;
+        },
+        json(body: any) {
+          captured = { status: this.statusCode || 200, body };
+          return this;
+        },
+      };
+
+      try {
+        await runAnalyzeCardDualImages(req as Request, mockRes as Response);
+        if (!captured) {
+          send({ type: 'error', message: 'analyze pipeline produced no result' });
+          res.end();
+          return;
+        }
+        finalEmitted = (captured as any).status === 200;
+        send({ type: 'result', status: (captured as any).status, body: (captured as any).body });
+        res.end();
+      } catch (err: any) {
+        console.error('[analyze-stream] pipeline failed:', err);
+        send({ type: 'error', message: err?.message || 'Analyze pipeline failed' });
+        res.end();
+      }
+    },
+  );
 
   // ──────────────────────────────────────────────────────────────────────
   // BR-1: Gemini streaming endpoint for single-scan UI (perceived latency).
