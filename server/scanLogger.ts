@@ -85,6 +85,14 @@ const HEADERS = [
   'EbayResultCount',
   'EbayPickedTitle',
   'EbayPickedPrice',
+  // Variant-detection signal computed off the picker's returned listing
+  // titles (see variantDetection.ts and variant_detection_spec.md).
+  // "Yes" if at least one returned title contained scarcity/variation/
+  // error verbiage (SP, SSP, Variation, Error, Corrected, etc.); "No"
+  // when titles are present but none matched; empty string when there
+  // were no listings to evaluate at all (so "No" still means
+  // "comps are clean", not "no comps").
+  'PotentialVariant',
 ];
 
 // Truncate large free-text fields so the Sheet stays readable. Cells
@@ -234,6 +242,10 @@ export interface ScanLogFinal {
   ebayResultCount?: number | null;
   ebayPickedTitle?: string | null;
   ebayPickedPrice?: number | string | null;
+  // Variant-detection result. "Yes" / "No" when there were listings to
+  // evaluate; "" or undefined when there were no comps (so the column
+  // distinguishes "review needed" from "clean comps" from "no comps").
+  potentialVariant?: 'Yes' | 'No' | '' | null;
 }
 
 export interface ScanLog {
@@ -328,6 +340,9 @@ async function appendRow(ctx: ScanContext, final: ScanLogFinal, indicators: stri
         ? final.ebayPickedPrice.toFixed(2)
         : String(final.ebayPickedPrice)
       : '',
+    // PotentialVariant — empty string both when caller sent "" / null
+    // (no comps to evaluate) and when nothing was set at all.
+    final.potentialVariant ?? '',
   ];
   await sheets.spreadsheets.values.append({
     spreadsheetId,

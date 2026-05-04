@@ -12,6 +12,7 @@ import { cardVariations, cardDatabase } from '@shared/schema';
 import { and, eq, sql, inArray } from 'drizzle-orm';
 import { logUserScan, type ScanFieldValues } from './userScans';
 import { startScanLog } from './scanLogger';
+import { detectPotentialVariant } from './variantDetection';
 import { analyzeCardBuffersWithGemini, type GeminiCardResult, VLM_INFO } from './vlmGemini';
 import { applyGeminiToCombined } from './vlmApply';
 import { isCardDbLookupEnabled } from './featureFlags';
@@ -1211,6 +1212,23 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
       typeof ebayPickedListing?.price === 'number' && Number.isFinite(ebayPickedListing.price)
         ? ebayPickedListing.price
         : null;
+    // Variant-detection scan over the picker's returned active titles.
+    // Empty list ⇒ blank cell (vs "No"); any single match ⇒ "Yes" so the
+    // user knows to review whether an SSP/Variation/Error listing is
+    // skewing the average. See variant_detection_spec.md.
+    const ebayActiveTitlesForLog: string[] =
+      embeddedComps && Array.isArray(embeddedComps.active)
+        ? (embeddedComps.active as Array<{ title?: unknown }>)
+            .map((l) => (typeof l?.title === 'string' ? l.title : ''))
+            .filter((s) => s.length > 0)
+        : [];
+    const variantDetection = detectPotentialVariant(ebayActiveTitlesForLog);
+    const potentialVariantForLog: 'Yes' | 'No' | '' =
+      ebayResultCountForLog == null || ebayResultCountForLog === 0
+        ? ''
+        : variantDetection.isPotentialVariant
+          ? 'Yes'
+          : 'No';
 
     // Append a scan-log row to the configured Sheet (no-op when the
     // sink is disabled or unconfigured — see scanLogger.ts). Fire-and-
@@ -1371,6 +1389,7 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
           ebayResultCount: ebayResultCountForLog,
           ebayPickedTitle: ebayPickedTitleForLog,
           ebayPickedPrice: ebayPickedPriceForLog,
+          potentialVariant: potentialVariantForLog,
         });
       } else {
         scanLog.setFinal({
@@ -1390,6 +1409,7 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
           ebayResultCount: ebayResultCountForLog,
           ebayPickedTitle: ebayPickedTitleForLog,
           ebayPickedPrice: ebayPickedPriceForLog,
+          potentialVariant: potentialVariantForLog,
         });
       }
       scanLog.flush();
