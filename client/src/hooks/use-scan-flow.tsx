@@ -29,6 +29,15 @@ export interface CompsQuerySnapshot {
   cardNumber: string;
   player: string;
   parallel: string;
+  /** PR #252: subset descriptor (Team Leaders, MVP, "All-Star Special
+   *  Edition", etc.). Empty when the card has no subset. */
+  subset?: string;
+  /** PR #252: per-scan drop decision computed server-side (see
+   *  `decideSubsetDrop`). When false, EbayActiveComps must NOT include
+   *  `subset` in its `/api/ebay/comps` re-fetch URL — and the BR-2
+   *  fast-path key compares ignoring subset, since the server's embedded
+   *  query also dropped it. */
+  useSubsetInComps?: boolean;
 }
 
 export interface ScanFlowState {

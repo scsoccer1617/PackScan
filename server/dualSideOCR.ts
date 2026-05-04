@@ -20,6 +20,7 @@ import { verifyIdentificationWithSearch } from './vlmSearchVerify';
 import { filterUnsafeCorrections, isMaterialSetChange } from './vlmSearchVerifyApply';
 import { decideSearchVerifyGate, computeAveragePrice } from './searchVerifyGate';
 import { checkPlayerOcrConsistency } from './playerOcrConsistency';
+import { decideSubsetDrop, type SubsetSource } from './subsetDropDecision';
 
 // BR-2: identity tuple for the parallel eBay comps query. Built off the
 // post-overlay combinedResult (Gemini-authoritative when present, OCR
@@ -42,6 +43,12 @@ interface EbayQueryIdentity {
    *  picker keeps the `requirePlayerLastName` precision filter — see
    *  Bug B in PR #209. */
   playerCount: number;
+  /** PR #252: which path produced `_geminiSubset` — Gemini's dedicated
+   *  `subset` JSON field (`gemini-direct`, trusted) or the
+   *  `vlmApply.ts:248-254` fallback that salvages a non-whitelisted
+   *  Gemini.set (`vlmApply-fallback`, lower confidence). Null when no
+   *  subset was emitted. Read by `decideSubsetDrop` only. */
+  subsetSource: SubsetSource;
   /** When set (e.g. "PSA 10"), the scan was a graded slab — picker appends
    *  the grade keyword and requires it in titles so avg price reflects
    *  same-grade comps only. Empty for raw scans. */
@@ -87,6 +94,11 @@ export function extractIdentityForEbay(combined: any): EbayQueryIdentity | null 
     return null;
   }
   const playersArr = Array.isArray(combined?.players) ? combined.players : [];
+  const rawSubsetSource = (combined as any)?._geminiSubsetSource;
+  const subsetSource: SubsetSource =
+    rawSubsetSource === 'gemini-direct' || rawSubsetSource === 'vlmApply-fallback'
+      ? rawSubsetSource
+      : null;
   return {
     // Real player name in the player slot. When the card has no parseable
     // player (vintage multi-player subset where Gemini returned an empty
@@ -102,6 +114,7 @@ export function extractIdentityForEbay(combined: any): EbayQueryIdentity | null 
     parallel: (combined?.foilType ?? combined?.variant ?? '').toString().trim(),
     subset: playerName ? subset : '',
     playerCount: playersArr.length,
+    subsetSource,
     // Graded slabs: combined.isGraded is set by the routes.ts analyze handler
     // after the slab-label VLM pass resolves. The grade keyword is the
     // verbatim phrase that appears in eBay graded-slab titles (e.g.
@@ -715,6 +728,23 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
     const isBulkContext = scanContext === 'bulk';
     console.time('analyze-ebay-parallel');
     const ebayIdentity = extractIdentityForEbay(combinedResult);
+    // PR #252: decide whether subset participates in the picker query for
+    // this scan. Single source of truth — the same decision is forwarded
+    // to the single-scan UI as `compsQuery.useSubsetInComps` so the
+    // EbayActiveComps re-fetch stays in sync with the embedded picker
+    // call and both surfaces converge on the same comps list.
+    const subsetDecision = ebayIdentity
+      ? decideSubsetDrop({
+          playerCount: ebayIdentity.playerCount,
+          subset: ebayIdentity.subset,
+          subsetSource: ebayIdentity.subsetSource,
+        })
+      : { useSubsetInComps: true, subsetSource: null, subsetDroppedReason: null };
+    const subsetForQuery = ebayIdentity
+      ? subsetDecision.useSubsetInComps
+        ? ebayIdentity.subset
+        : ''
+      : '';
     const ebayPromise: Promise<EmbeddedCompsPayload | null> = ebayIdentity
       ? (async () => {
           try {
@@ -724,7 +754,7 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
               set: ebayIdentity.set,
               cardNumber: ebayIdentity.cardNumber,
               player: ebayIdentity.player,
-              subset: ebayIdentity.subset,
+              subset: subsetForQuery,
               parallel: ebayIdentity.parallel,
               excludeParallels: !ebayIdentity.parallel && !ebayIdentity.gradeKeyword,
               gradeKeyword: ebayIdentity.gradeKeyword || undefined,
@@ -778,6 +808,12 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
           cardNumber: ebayIdentity.cardNumber,
           player: ebayIdentity.player,
           parallel: ebayIdentity.parallel,
+          // PR #252: subset + per-scan drop decision shipped to the
+          // single-scan UI so EbayActiveComps mirrors the bulk picker
+          // exactly. When `useSubsetInComps=false`, the client must NOT
+          // include `subset` in its `/api/ebay/comps` re-fetch URL.
+          subset: ebayIdentity.subset,
+          useSubsetInComps: subsetDecision.useSubsetInComps,
         }
       : null;
 
@@ -1114,6 +1150,10 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
                 cardNumber: correctedCardNumber,
                 player: ebayIdentity?.player ?? verifyPlayerName,
                 parallel: ebayIdentity?.parallel ?? '',
+                // PR #252: search-verify retry preserves the original
+                // subset + drop decision (it doesn't mutate either).
+                subset: ebayIdentity?.subset ?? '',
+                useSubsetInComps: subsetDecision.useSubsetInComps,
               };
             } else {
               (finalResult as any)._searchValidationFailed = true;
@@ -1293,6 +1333,19 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
         if (parts.length > 0) scanLog.addIndicator(parts.join(' '));
       } catch {
         // Non-fatal — sharpness logging is diagnostic only.
+      }
+
+      // PR #252: subset provenance + drop decision telemetry. Same free-text
+      // Indicators column pattern as sharpness above so SHEET_HEADERS stays
+      // stable. Always emitted (even when no subset) so post-hoc analysis
+      // can distinguish "no subset on this scan" from "subset dropped".
+      // Format: `subsetSource=<gemini-direct|vlmApply-fallback|none> subsetDropped=<reason|no>`
+      try {
+        const src = subsetDecision.subsetSource ?? 'none';
+        const dropped = subsetDecision.subsetDroppedReason ?? 'no';
+        scanLog.addIndicator(`subsetSource=${src} subsetDropped=${dropped}`);
+      } catch {
+        // Non-fatal — subset telemetry is diagnostic only.
       }
 
       if (visualFoilResult) {
