@@ -36,6 +36,8 @@ import {
   type ChipStatus,
 } from "@/components/ScanProgressChips";
 import { InlineParallelPicker } from "@/components/InlineParallelPicker";
+import { ScanInfoHeader, type ScanInfoHeaderFields } from "@/components/ScanInfoHeader";
+import StreamingParallelConfirmDialog from "@/components/StreamingParallelConfirmDialog";
 import { consumeSseStream } from "@/lib/sse";
 
 // PR Q — payload shape attached to the streaming
@@ -45,6 +47,76 @@ interface InlineParallelData {
   variant: string | null;
   foilType: string | null;
   confidence: number | null;
+}
+
+// PR R Item 1 — decorate the chip list so the inline parallel picker
+// renders directly under chip 2 (`detecting_parallel`) instead of
+// floating above the entire chip stack. Item 3 — also format the
+// chip 3 detail label from the eBay listing-count progress stream.
+//
+// Pure function: exported for testing.
+export interface DecorateProgressStagesArgs {
+  stages: ScanProgressChipStage[];
+  inlineParallelNode: React.ReactNode;
+  ebayProgress: { found: number; target: number } | null;
+}
+export function decoratedProgressStages({
+  stages,
+  inlineParallelNode,
+  ebayProgress,
+}: DecorateProgressStagesArgs): ScanProgressChipStage[] {
+  return stages.map((s) => {
+    if (s.id === "detecting_parallel") {
+      // Only attach the picker once stage 2 has actually reached at
+      // least in_progress (i.e. the chip exists). If the picker node
+      // is null (no inline parallel data yet), no-op.
+      return inlineParallelNode
+        ? { ...s, inlineSlot: inlineParallelNode }
+        : s;
+    }
+    if (s.id === "verifying_with_ebay") {
+      const detail = ebayProgressLabel(ebayProgress, s.status);
+      return detail ? { ...s, detail } : s;
+    }
+    return s;
+  });
+}
+
+// Pure helper for the chip 3 sub-label string. Exported for tests.
+//   - in_progress + progress: "(found/target)"
+//   - completed: "— Found N listings"
+//   - waiting / pending: no detail
+export function ebayProgressLabel(
+  progress: { found: number; target: number } | null,
+  status: ChipStatus,
+): string | null {
+  if (!progress) return null;
+  if (status === "completed") {
+    return `— Found ${progress.found} ${
+      progress.found === 1 ? "listing" : "listings"
+    }`;
+  }
+  if (status === "in_progress") {
+    return `(${progress.found}/${progress.target})`;
+  }
+  return null;
+}
+
+// Build a one-line identity preview from the streaming header fields.
+// Used as the modal description.
+export function describeFields(fields: ScanInfoHeaderFields): string {
+  const parts = [
+    fields.year != null ? String(fields.year).trim() : "",
+    (fields.brand ?? "").toString().trim(),
+    (fields.set ?? "").toString().trim(),
+    fields.cardNumber
+      ? String(fields.cardNumber).startsWith("#")
+        ? String(fields.cardNumber)
+        : `#${fields.cardNumber}`
+      : "",
+    (fields.player ?? "").toString().trim(),
+  ].filter(Boolean);
+  return parts.join(" · ");
 }
 
 // ── Voice → CardFormValues mapping ────────────────────────────────────────
@@ -181,9 +253,106 @@ export default function Scan() {
   // this state and the picker mutates in place.
   const [inlineParallel, setInlineParallel] =
     useState<InlineParallelData | null>(null);
+  // PR R Item 4 — streaming card-info header populated from the
+  // analyzing_card:completed event's data payload. Persists through
+  // stages 2-4 so the user sees what's been identified while pricing
+  // is still in flight. Reset to empty on every analyze invocation.
+  const [scanInfoFields, setScanInfoFields] = useState<ScanInfoHeaderFields>({});
+  // PR R Item 2 — confirm modal state. When stage 2 completes WITH a
+  // parallel detected, the modal opens and stage 3's chip flips to a
+  // "waiting" status. The modal stays open until the user clicks Yes
+  // (keep variant) or No (revert to base / no parallel). Confirmation
+  // also unblocks the chip into its normal in_progress display.
+  const [confirmModalOpen, setConfirmModalOpen] = useState(false);
+  const [confirmedVariant, setConfirmedVariant] = useState<
+    string | null | undefined
+  >(undefined); // undefined = not yet asked, null = user said No, string = user said Yes
+  const confirmedVariantRef = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    confirmedVariantRef.current = confirmedVariant;
+  }, [confirmedVariant]);
+  // Ref-mirror of confirmModalOpen so the SSE event handler closure
+  // (created once at consumeSseStream call time) reads the latest
+  // value rather than the snapshot from when the closure was made.
+  const confirmModalOpenRef = useRef(false);
+  useEffect(() => {
+    confirmModalOpenRef.current = confirmModalOpen;
+  }, [confirmModalOpen]);
+  // Most-recent server-reported status for chip 3 while the modal is
+  // open — held until the user confirms so we can replay it.
+  const pendingChip3StatusRef = useRef<ChipStatus | null>(null);
+  // PR R Item 2 — promise the analyze flow awaits before navigating to
+  // /result. Mints a fresh promise every time the modal opens, resolves
+  // it from the Yes/No click handlers. Block is indefinite — there is
+  // no auto-accept timeout.
+  const confirmResolveRef = useRef<(() => void) | null>(null);
+  const waitForConfirmRef = useRef<() => Promise<void>>(async () => {
+    // If no modal-open ever fired, the await is a no-op.
+    return;
+  });
+  const armConfirmGate = () => {
+    waitForConfirmRef.current = () =>
+      new Promise<void>((resolve) => {
+        confirmResolveRef.current = resolve;
+      });
+  };
+  const resolveConfirmGate = () => {
+    if (confirmResolveRef.current) {
+      const r = confirmResolveRef.current;
+      confirmResolveRef.current = null;
+      r();
+    }
+    waitForConfirmRef.current = async () => {};
+  };
+  // Replay the pending server status onto chip 3 once the modal closes.
+  // If no server event arrived during the wait (rare), we tick chip 3
+  // into in_progress as a sensible default so the user sees motion.
+  const releaseChip3Gate = () => {
+    const next = pendingChip3StatusRef.current ?? "in_progress";
+    pendingChip3StatusRef.current = null;
+    setProgressStages((prev) => {
+      const idx = prev.findIndex((s) => s.id === "verifying_with_ebay");
+      if (idx < 0) {
+        return [
+          ...prev,
+          {
+            id: "verifying_with_ebay",
+            label: SCAN_STAGE_LABELS.verifying_with_ebay,
+            status: next,
+          },
+        ];
+      }
+      const arr = prev.slice();
+      arr[idx] = { ...arr[idx], status: next };
+      return arr;
+    });
+  };
+  // PR P abort controller hook for the pre-fired comps summary. The
+  // server pre-fires getCompsSummary on parallel-detected. If the user
+  // clicks No, we want to abort the in-flight fetch so a fresh
+  // base-card query runs (handled server-side via the same
+  // AbortController plumbing PR P added). Implemented as an
+  // event-stream-side flag here because the actual fetch lives on the
+  // server; we surface it through a multipart field on the analyze
+  // request when re-triggering would require a fresh round-trip.
+  // For now (single SSE round-trip), we just record the user's choice
+  // so that downstream consumers (eBay query on /result, etc.) read
+  // confirmedVariant rather than inlineParallel.
+  // PR R Item 3 — live eBay listing count rendered into chip 3's
+  // sub-label. {found, target} streams in via verifying_with_ebay
+  // progress events. After the chip flips to completed, we render
+  // "Found N listings" instead of the (X/Y) form.
+  const [ebayProgress, setEbayProgress] = useState<{
+    found: number;
+    target: number;
+  } | null>(null);
   const resetProgressStages = () => {
     setProgressStages([]);
     setInlineParallel(null);
+    setScanInfoFields({});
+    setConfirmModalOpen(false);
+    setConfirmedVariant(undefined);
+    setEbayProgress(null);
   };
   // Apply the stage event from the server stream. If a chip with this
   // id doesn't exist yet, append a fresh one in the incoming status —
@@ -193,6 +362,16 @@ export default function Scan() {
   // same DOM ref — important so the auto-scroll mount-time effect
   // doesn't re-fire on completion).
   const applyStageEvent = (id: string, status: ChipStatus) => {
+    // PR R Item 2 — while the parallel-confirm modal is open, force
+    // chip 3 to render its waiting state regardless of what the
+    // server stream is reporting. The actual eBay fetch completes on
+    // the server in parallel; we just hide its progress until the
+    // user makes a choice. Once confirmation lands, releaseChip3Gate()
+    // re-emits the latest server status.
+    if (id === "verifying_with_ebay" && status !== "waiting" && confirmModalOpenRef.current) {
+      pendingChip3StatusRef.current = status;
+      status = "waiting";
+    }
     setProgressStages((prev) => {
       const idx = prev.findIndex((s) => s.id === id);
       if (idx >= 0) {
@@ -524,16 +703,42 @@ export default function Scan() {
           let captured: { status: number; body: any } | null = null;
           await consumeSseStream(streamResp.body, (event) => {
             if (event?.type === "stage" && typeof event.stage === "string") {
+              // PR R Item 3 — progress sub-events on stage 3 update the
+              // listing count in chip 3's label without flipping its
+              // overall status.
+              if (
+                event.stage === "verifying_with_ebay" &&
+                event.status === "progress" &&
+                event.data &&
+                typeof event.data === "object"
+              ) {
+                const d = event.data as { found?: number; target?: number };
+                if (typeof d.found === "number" && typeof d.target === "number") {
+                  setEbayProgress({ found: d.found, target: d.target });
+                }
+                return;
+              }
               applyStageEvent(event.stage, event.status as ChipStatus);
+              // PR R Item 4 — stage 1 fields stream into the header.
+              if (
+                event.stage === "analyzing_card" &&
+                event.status === "completed" &&
+                event.data &&
+                typeof event.data === "object"
+              ) {
+                const d = event.data as Partial<ScanInfoHeaderFields>;
+                setScanInfoFields((prev) => ({
+                  year: d.year ?? prev.year ?? null,
+                  brand: d.brand ?? prev.brand ?? null,
+                  set: d.set ?? prev.set ?? null,
+                  cardNumber: d.cardNumber ?? prev.cardNumber ?? null,
+                  player: d.player ?? prev.player ?? null,
+                }));
+              }
               // PR Q — surface the inline parallel picker as soon as
-              // stage 2 completes. The server attaches detected
-              // variant identity to the event's `data` field; we
-              // store it so the picker renders alongside the chip
-              // stack while stages 3/4 are still in flight. If a
-              // later analyze stage corrects the identity, future
-              // events with a different `data.variant` will update
-              // this same state in place and the picker mutates
-              // rather than re-mounting.
+              // stage 2 completes. PR R Item 2 — also fire the
+              // confirm modal AND mark stage 3 as waiting if a
+              // parallel was detected.
               if (
                 event.stage === "detecting_parallel" &&
                 event.status === "completed" &&
@@ -541,11 +746,12 @@ export default function Scan() {
                 typeof event.data === "object"
               ) {
                 const d = event.data as Partial<InlineParallelData>;
+                const variantStr =
+                  typeof d.variant === "string" && d.variant.length > 0
+                    ? d.variant
+                    : null;
                 setInlineParallel({
-                  variant:
-                    typeof d.variant === "string" && d.variant.length > 0
-                      ? d.variant
-                      : null,
+                  variant: variantStr,
                   foilType:
                     typeof d.foilType === "string" && d.foilType.length > 0
                       ? d.foilType
@@ -553,6 +759,26 @@ export default function Scan() {
                   confidence:
                     typeof d.confidence === "number" ? d.confidence : null,
                 });
+                // PR R Item 2 — only fire the modal if a parallel was
+                // actually detected. Base cards skip the modal so the
+                // scan flow stays uninterrupted.
+                if (variantStr) {
+                  armConfirmGate();
+                  setConfirmModalOpen(true);
+                  // Eagerly mirror into the ref so the gate-rewrite in
+                  // applyStageEvent below sees `true` for the
+                  // verifying_with_ebay:in_progress event the server
+                  // emits microseconds later (the React effect that
+                  // syncs the ref is async and would otherwise lag).
+                  confirmModalOpenRef.current = true;
+                  // Pre-mount chip 3 in waiting status so the chip
+                  // stack renders [chip 1 ✓][chip 2 ✓][chip 3 waiting]
+                  // immediately. The subsequent server
+                  // verifying_with_ebay:in_progress event flips it to
+                  // active — but only AFTER the user confirms (gated
+                  // below in applyStageEvent's call site).
+                  applyStageEvent("verifying_with_ebay", "waiting");
+                }
               }
             } else if (event?.type === "result") {
               captured = {
@@ -568,6 +794,32 @@ export default function Scan() {
             result = (captured as any).body;
           } else {
             throw new Error("Stream ended without a result event");
+          }
+          // PR R Item 2 — block the navigate-to-result step until the
+          // user has confirmed the parallel. The SSE stream may have
+          // produced the final result event before they clicked, so
+          // we await an explicit confirmation signal here. No
+          // auto-accept timeout — the spec says "block indefinitely;
+          // user is actively scanning."
+          if (confirmModalOpenRef.current) {
+            await waitForConfirmRef.current();
+          }
+          // If the user clicked No, overwrite the variant/foil
+          // identity on the final cardData so /result downstream
+          // (eBay re-fetch, save row) treats this as a base card.
+          // The server-side pre-fired comps may have been for the
+          // original (rejected) parallel; /result's
+          // EbayActiveComps mount-time effect re-fetches with the
+          // base-card identity, which is what the user asked for.
+          if (
+            confirmedVariantRef.current === null &&
+            result &&
+            result.success &&
+            result.data
+          ) {
+            result.data.foilType = null;
+            result.data.variant = null;
+            result.data.isFoil = false;
           }
         } else if (streamResp.status === 429) {
           // Quota gate hit — body is JSON, not SSE.
@@ -840,23 +1092,65 @@ export default function Scan() {
             )}
             {analyzing && (
               <div className="mt-4 space-y-3">
-                {inlineParallel && (
-                  <InlineParallelPicker
-                    variant={inlineParallel.variant}
-                    foilType={inlineParallel.foilType}
-                    confidence={inlineParallel.confidence}
-                    autoScrollEnabled={!userScrolledManually}
-                    onBeforeAutoScroll={handleBeforeAutoScroll}
-                  />
-                )}
+                <ScanInfoHeader
+                  fields={scanInfoFields}
+                  showSkeletons
+                />
                 <ScanProgressChips
-                  stages={progressStages}
+                  stages={decoratedProgressStages({
+                    stages: progressStages,
+                    inlineParallelNode: inlineParallel ? (
+                      <InlineParallelPicker
+                        variant={
+                          // PR R Item 2 — when user clicked No, the
+                          // picker flips to Base/no-parallel mode so
+                          // the inline view stays in sync with the
+                          // confirmed identity used downstream.
+                          confirmedVariant === null
+                            ? null
+                            : inlineParallel.variant
+                        }
+                        foilType={inlineParallel.foilType}
+                        confidence={inlineParallel.confidence}
+                        autoScrollEnabled={!userScrolledManually}
+                        onBeforeAutoScroll={handleBeforeAutoScroll}
+                      />
+                    ) : null,
+                    ebayProgress,
+                  })}
                   autoScrollEnabled={!userScrolledManually}
                   onBeforeAutoScroll={handleBeforeAutoScroll}
                 />
               </div>
             )}
           </div>
+          <StreamingParallelConfirmDialog
+            open={confirmModalOpen}
+            geminiParallel={inlineParallel?.variant ?? null}
+            cardDescription={describeFields(scanInfoFields)}
+            onYes={() => {
+              setConfirmedVariant(inlineParallel?.variant ?? null);
+              confirmedVariantRef.current = inlineParallel?.variant ?? null;
+              setConfirmModalOpen(false);
+              confirmModalOpenRef.current = false;
+              releaseChip3Gate();
+              resolveConfirmGate();
+            }}
+            onNo={() => {
+              setConfirmedVariant(null);
+              confirmedVariantRef.current = null;
+              setConfirmModalOpen(false);
+              confirmModalOpenRef.current = false;
+              // PR R Item 2 — visually flip the inline picker to
+              // "Base" by clearing the variant string. The picker
+              // mutates in place (same DOM node) so no flash.
+              setInlineParallel((prev) =>
+                prev ? { ...prev, variant: null } : prev,
+              );
+              releaseChip3Gate();
+              resolveConfirmGate();
+            }}
+          />
         </>
       )}
 

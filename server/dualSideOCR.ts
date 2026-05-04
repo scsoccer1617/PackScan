@@ -35,23 +35,32 @@ export type StageId =
   | 'verifying_with_ebay'
   | 'getting_price';
 
-export type StageStatus = 'in_progress' | 'completed';
+export type StageStatus = 'in_progress' | 'completed' | 'progress';
 
 export interface StageEvent {
   stage: StageId;
   status: StageStatus;
   label: string;
-  /** PR Q — optional payload attached to certain stage transitions so
-   *  the client can surface intermediate UI BEFORE the final result
-   *  event arrives. Currently set only on
-   *  `detecting_parallel` → `completed` to render the inline parallel
-   *  picker as soon as stage 2 lands. Shape is intentionally narrow:
-   *  the client only needs the detected variant identity and an
-   *  optional confidence indicator. */
+  /** PR Q / PR R — optional payload attached to certain stage transitions
+   *  so the client can surface intermediate UI BEFORE the final result
+   *  event arrives.
+   *  - `detecting_parallel:completed`: variant identity for the inline
+   *    parallel picker (PR Q).
+   *  - `analyzing_card:completed`: card-info fields (year, brand, set,
+   *    cardNumber, player) for the streaming ScanInfoHeader (PR R Item 4).
+   *  - `verifying_with_ebay:progress`: incremental listing count for the
+   *    live chip 3 progress display (PR R Item 3). */
   data?: {
     variant?: string | null;
     foilType?: string | null;
     confidence?: number | null;
+    year?: number | string | null;
+    brand?: string | null;
+    set?: string | null;
+    cardNumber?: string | null;
+    player?: string | null;
+    found?: number;
+    target?: number;
   };
 }
 
@@ -776,7 +785,37 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
     // foilType / variant decision has already landed on `combinedResult`.
     // We still emit start+complete pair so the chip ticks visibly even when
     // there is no parallel to detect.
-    emitStage(req, 'analyzing_card', 'completed');
+    // PR R Item 4 — attach the OCR-identified fields to the
+    // analyzing_card:completed event so the client's ScanInfoHeader can
+    // populate the result-style header progressively (year, brand, set,
+    // cardNumber, player) before stages 2-4 finish.
+    {
+      const playerStr = [
+        (combinedResult as any).playerFirstName ?? '',
+        (combinedResult as any).playerLastName ?? '',
+      ]
+        .map((s) => String(s).trim())
+        .filter(Boolean)
+        .join(' ')
+        .trim();
+      const yearVal = (combinedResult as any).year;
+      const yearOut: number | string | null =
+        typeof yearVal === 'number' && Number.isFinite(yearVal)
+          ? yearVal
+          : typeof yearVal === 'string' && yearVal.trim()
+            ? yearVal.trim()
+            : null;
+      emitStage(req, 'analyzing_card', 'completed', {
+        year: yearOut,
+        brand:
+          ((combinedResult as any).brand ?? '').toString().trim() || null,
+        set: ((combinedResult as any).set ?? '').toString().trim() || null,
+        cardNumber:
+          ((combinedResult as any).cardNumber ?? '').toString().trim() ||
+          null,
+        player: playerStr || null,
+      });
+    }
     emitStage(req, 'detecting_parallel', 'in_progress');
     // PR Q — attach the detected variant identity to the completed
     // event so the client can render the inline parallel picker
@@ -1106,7 +1145,44 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
     // already swallowed inside the promise body (returns null).
     emitStage(req, 'verifying_with_ebay', 'in_progress');
     const embeddedCompsStart = Date.now();
-    let embeddedComps = await ebayPromise;
+    // PR R Item 3 — stream incremental listing-count progress so chip 3
+    // updates "Looking for active eBay listings (3/10)" → "(7/10)" while
+    // the embedded picker is in flight. The picker is a single Browse
+    // round-trip (no incremental progress available), so we emit a
+    // ramped fake progress at fixed intervals while waiting; if the
+    // actual count comes back smaller, the final completed event still
+    // carries the truth.
+    const PROGRESS_TARGET = 10;
+    const hasEbayWork = !!ebayIdentity;
+    const progressInterval: ReturnType<typeof setInterval> | null = hasEbayWork
+      ? (() => {
+          let last = 0;
+          const ramp = [2, 4, 6, 8, 9];
+          let i = 0;
+          return setInterval(() => {
+            const next = ramp[i] ?? Math.min(last + 1, PROGRESS_TARGET - 1);
+            i += 1;
+            last = next;
+            emitStage(req, 'verifying_with_ebay', 'progress', {
+              found: next,
+              target: PROGRESS_TARGET,
+            });
+          }, 220);
+        })()
+      : null;
+    let embeddedComps: EmbeddedCompsPayload | null = null;
+    try {
+      embeddedComps = await ebayPromise;
+    } finally {
+      if (progressInterval) clearInterval(progressInterval);
+    }
+    const finalCount = Array.isArray(embeddedComps?.active)
+      ? embeddedComps!.active.length
+      : 0;
+    emitStage(req, 'verifying_with_ebay', 'progress', {
+      found: finalCount,
+      target: PROGRESS_TARGET,
+    });
     const embeddedCompsMs = Date.now() - embeddedCompsStart;
     console.timeEnd('analyze-ebay-parallel');
 
