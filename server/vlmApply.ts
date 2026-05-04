@@ -37,6 +37,17 @@ const NONE_DETECTED_SENTINELS = new Set([
   'base card',
 ]);
 
+const KNOWN_SPORTS = ['Baseball', 'Basketball', 'Football', 'Hockey', 'Soccer'];
+
+export function normalizeSport(s: string): string {
+  const trimmed = s.trim();
+  if (!trimmed) return '';
+  const lower = trimmed.toLowerCase();
+  const match = KNOWN_SPORTS.find((k) => k.toLowerCase() === lower);
+  if (match) return match;
+  return trimmed.charAt(0).toUpperCase() + trimmed.slice(1).toLowerCase();
+}
+
 /**
  * Strip a leading `<brand> ` or `<year> <brand> ` prefix from a `set` value.
  *
@@ -325,7 +336,7 @@ export function applyGeminiToCombined(
 
   // ── Sport ──────────────────────────────────────────────────────────────
   if (typeof gemini.sport === 'string' && gemini.sport.trim()) {
-    combined.sport = gemini.sport.trim();
+    combined.sport = normalizeSport(gemini.sport);
   }
 
   // ── Team ───────────────────────────────────────────────────────────────
