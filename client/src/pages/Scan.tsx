@@ -38,6 +38,7 @@ import {
 import { InlineParallelPicker } from "@/components/InlineParallelPicker";
 import { ScanInfoHeader, type ScanInfoHeaderFields } from "@/components/ScanInfoHeader";
 import StreamingParallelConfirmDialog from "@/components/StreamingParallelConfirmDialog";
+import StreamingManualParallelDialog from "@/components/StreamingManualParallelDialog";
 import { consumeSseStream } from "@/lib/sse";
 
 // PR Q — payload shape attached to the streaming
@@ -54,18 +55,34 @@ interface InlineParallelData {
 // floating above the entire chip stack. Item 3 — also format the
 // chip 3 detail label from the eBay listing-count progress stream.
 //
+// PR T Item 1 — extends the same pattern to chip 1: the
+// <ScanInfoHeader> identity card mounts as chip 1's inlineSlot
+// instead of floating above the entire chip stack. Visual order:
+//   [Processing] [chip 1] <ScanInfoHeader/> [chip 2] <picker/>
+//   [chip 3] [chip 4]
+//
 // Pure function: exported for testing.
 export interface DecorateProgressStagesArgs {
   stages: ScanProgressChipStage[];
+  scanInfoNode: React.ReactNode;
   inlineParallelNode: React.ReactNode;
   ebayProgress: { found: number; target: number } | null;
 }
 export function decoratedProgressStages({
   stages,
+  scanInfoNode,
   inlineParallelNode,
   ebayProgress,
 }: DecorateProgressStagesArgs): ScanProgressChipStage[] {
   return stages.map((s) => {
+    if (s.id === "analyzing_card") {
+      // PR T Item 1 — attach the streaming card-info header under
+      // chip 1 so the layout is "Processing → chip 1 → header" rather
+      // than "Processing → header → chip 1". Mounts as soon as chip 1
+      // exists (status: in_progress or completed) so the skeletons
+      // are visible during stage-1 OCR.
+      return scanInfoNode ? { ...s, inlineSlot: scanInfoNode } : s;
+    }
     if (s.id === "detecting_parallel") {
       // Only attach the picker once stage 2 has actually reached at
       // least in_progress (i.e. the chip exists). If the picker node
@@ -277,6 +294,24 @@ export default function Scan() {
   useEffect(() => {
     confirmedVariantRef.current = confirmedVariant;
   }, [confirmedVariant]);
+  // PR T Item 3 — manual-entry modal that takes over from the Yes/No
+  // dialog when the user clicks No. Stage 3 stays in `waiting` until
+  // the user saves a value here. `manualEnteredVariant` is the raw
+  // string the user typed (or "" for base) — the analyze flow uses
+  // this to overwrite the final cardData.foilType/variant downstream
+  // so eBay/pricing run with the user's value.
+  const [manualModalOpen, setManualModalOpen] = useState(false);
+  const manualModalOpenRef = useRef(false);
+  useEffect(() => {
+    manualModalOpenRef.current = manualModalOpen;
+  }, [manualModalOpen]);
+  const [manualEnteredVariant, setManualEnteredVariant] = useState<
+    string | null
+  >(null);
+  const manualEnteredVariantRef = useRef<string | null>(null);
+  useEffect(() => {
+    manualEnteredVariantRef.current = manualEnteredVariant;
+  }, [manualEnteredVariant]);
   // Ref-mirror of confirmModalOpen so the SSE event handler closure
   // (created once at consumeSseStream call time) reads the latest
   // value rather than the snapshot from when the closure was made.
@@ -358,6 +393,10 @@ export default function Scan() {
     setScanInfoFields({});
     setConfirmModalOpen(false);
     setConfirmedVariant(undefined);
+    setManualModalOpen(false);
+    manualModalOpenRef.current = false;
+    setManualEnteredVariant(null);
+    manualEnteredVariantRef.current = null;
     setEbayProgress(null);
   };
   // Apply the stage event from the server stream. If a chip with this
@@ -374,7 +413,14 @@ export default function Scan() {
     // the server in parallel; we just hide its progress until the
     // user makes a choice. Once confirmation lands, releaseChip3Gate()
     // re-emits the latest server status.
-    if (id === "verifying_with_ebay" && status !== "waiting" && confirmModalOpenRef.current) {
+    // PR T Item 3 — extend the gate to also cover the manual-entry
+    // modal that opens when the user clicks No. Stage 3 stays in
+    // `waiting` until the manual modal is dismissed too.
+    if (
+      id === "verifying_with_ebay" &&
+      status !== "waiting" &&
+      (confirmModalOpenRef.current || manualModalOpenRef.current)
+    ) {
       pendingChip3StatusRef.current = status;
       status = "waiting";
     }
@@ -808,25 +854,43 @@ export default function Scan() {
           // we await an explicit confirmation signal here. No
           // auto-accept timeout — the spec says "block indefinitely;
           // user is actively scanning."
-          if (confirmModalOpenRef.current) {
+          //
+          // PR T Item 3 — the gate now resolves at the END of the
+          // manual-entry modal too (when the user clicks No on the
+          // Yes/No modal, the gate is held open until they save the
+          // manual modal). One await covers both flows.
+          if (confirmModalOpenRef.current || manualModalOpenRef.current) {
             await waitForConfirmRef.current();
           }
-          // If the user clicked No, overwrite the variant/foil
-          // identity on the final cardData so /result downstream
-          // (eBay re-fetch, save row) treats this as a base card.
-          // The server-side pre-fired comps may have been for the
-          // original (rejected) parallel; /result's
-          // EbayActiveComps mount-time effect re-fetches with the
-          // base-card identity, which is what the user asked for.
-          if (
-            confirmedVariantRef.current === null &&
-            result &&
-            result.success &&
-            result.data
-          ) {
-            result.data.foilType = null;
-            result.data.variant = null;
-            result.data.isFoil = false;
+          // Apply the user's final decision to the result payload
+          // so /result downstream (eBay re-fetch, save row) reflects
+          // the parallel they chose. Three cases:
+          //   - manual entry with text → write the user's string into
+          //     foilType/variant.
+          //   - manual entry blank, OR Yes/No modal answered No
+          //     (without manual entry being reachable in the new
+          //     flow) → treat as base, clear foil markers.
+          //   - Yes → keep the auto-detected variant (no overwrite
+          //     needed).
+          if (result && result.success && result.data) {
+            const manual = manualEnteredVariantRef.current;
+            if (manual !== null && manual.length > 0) {
+              // PR T Item 3 — user typed a parallel inline; thread it
+              // onto the cardData so /result and the eBay query use
+              // the user's value, not the auto-detected one.
+              result.data.foilType = manual;
+              result.data.variant = manual;
+              result.data.isFoil = true;
+            } else if (
+              confirmedVariantRef.current === null ||
+              manual === ""
+            ) {
+              // No-with-blank-manual or No-without-manual (legacy
+              // path). Treat as base card.
+              result.data.foilType = null;
+              result.data.variant = null;
+              result.data.isFoil = false;
+            }
           }
         } else if (streamResp.status === 429) {
           // Quota gate hit — body is JSON, not SSE.
@@ -906,19 +970,33 @@ export default function Scan() {
       userScanIdRef.current = null;
       // PR S Item 3 — capture the streaming-modal decision so the
       // result page knows whether to skip the legacy
-      // GeminiParallelPickerSheet "Yes/No" stage entirely. Three cases:
-      //   - confirmedVariantRef.current === undefined → modal never
-      //     fired (base card / stream error / fallback path). Result
-      //     page falls back to the legacy flow.
-      //   - confirmedVariantRef.current is a string → user said Yes
-      //     (parallel confirmed). Skip the modal; downstream just uses
-      //     the confirmed parallel.
-      //   - confirmedVariantRef.current === null → user said No
-      //     (parallel was wrong). Skip the Yes/No prompt and jump
-      //     straight to the "Type a parallel" freetext input.
-      const streamingAnswered = confirmedVariantRef.current !== undefined;
+      // GeminiParallelPickerSheet "Yes/No" stage entirely.
+      //
+      // PR T Item 3 extends this: when the user typed a parallel in
+      // the inline manual-entry modal (or saved it blank for base),
+      // they've already picked the value — the result page must NOT
+      // re-prompt them with the legacy freetext modal. We treat
+      // "manual modal answered" as equivalent to streaming-Yes for
+      // dedupe purposes (skipToPricing).
+      //
+      //   - confirmedVariantRef.current === undefined AND no manual
+      //     entry → modal never fired. Result page falls back.
+      //   - confirmedVariantRef.current is a string → user said Yes.
+      //     Skip the legacy modal; use confirmed parallel.
+      //   - manualEnteredVariantRef.current !== null (user saved
+      //     anything in the inline manual modal, including blank) →
+      //     skip the legacy modal entirely.
+      //   - confirmedVariantRef.current === null AND manual ref still
+      //     null → No without manual entry (shouldn't happen in PR T
+      //     since onNo opens the manual modal, but defensive). Fall
+      //     back to legacy freetext.
+      const manualAnsweredInStream =
+        manualEnteredVariantRef.current !== null;
+      const streamingAnswered =
+        confirmedVariantRef.current !== undefined || manualAnsweredInStream;
       const streamingYes =
-        streamingAnswered && confirmedVariantRef.current !== null;
+        manualAnsweredInStream ||
+        (streamingAnswered && confirmedVariantRef.current !== null);
       setAll({
         frontImage,
         backImage,
@@ -1116,13 +1194,22 @@ export default function Scan() {
             )}
             {analyzing && (
               <div className="mt-4 space-y-3">
-                <ScanInfoHeader
-                  fields={scanInfoFields}
-                  showSkeletons
-                />
                 <ScanProgressChips
                   stages={decoratedProgressStages({
                     stages: progressStages,
+                    scanInfoNode: (
+                      // PR T Item 1 — ScanInfoHeader now mounts as
+                      // chip 1's inlineSlot so the layout reads
+                      // "Processing → chip 1 → identity card → chip
+                      // 2 → ...". The header remains visible while
+                      // chip 1 is in_progress (showing skeletons)
+                      // and stays through completion (revealing
+                      // fields with the sequenced animation).
+                      <ScanInfoHeader
+                        fields={scanInfoFields}
+                        showSkeletons
+                      />
+                    ),
                     inlineParallelNode: inlineParallel ? (
                       <InlineParallelPicker
                         variant={
@@ -1130,9 +1217,14 @@ export default function Scan() {
                           // picker flips to Base/no-parallel mode so
                           // the inline view stays in sync with the
                           // confirmed identity used downstream.
-                          confirmedVariant === null
-                            ? null
-                            : inlineParallel.variant
+                          // PR T Item 3 — when user manually entered
+                          // a parallel inline, surface it on the
+                          // picker too.
+                          manualEnteredVariant && manualEnteredVariant.length > 0
+                            ? manualEnteredVariant
+                            : confirmedVariant === null
+                              ? null
+                              : inlineParallel.variant
                         }
                         foilType={inlineParallel.foilType}
                         confidence={inlineParallel.confidence}
@@ -1171,6 +1263,39 @@ export default function Scan() {
               setInlineParallel((prev) =>
                 prev ? { ...prev, variant: null } : prev,
               );
+              // PR T Item 3 — INSTEAD of releasing chip 3 here, open
+              // the inline manual-entry modal. Chip 3 stays in
+              // `waiting` (the gate in applyStageEvent now also
+              // covers manualModalOpen). The user types a parallel
+              // (or leaves blank for base) and saves — that's when
+              // chip 3 actually unblocks.
+              setManualModalOpen(true);
+              manualModalOpenRef.current = true;
+            }}
+          />
+          <StreamingManualParallelDialog
+            open={manualModalOpen}
+            cardDescription={describeFields(scanInfoFields)}
+            onSave={(parallel) => {
+              const trimmed = parallel.trim().slice(0, 100);
+              setManualEnteredVariant(trimmed);
+              manualEnteredVariantRef.current = trimmed;
+              setManualModalOpen(false);
+              manualModalOpenRef.current = false;
+              // Reflect the user's value on the inline picker so the
+              // chip stack visually catches up to what's about to
+              // feed the eBay query.
+              setInlineParallel((prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      variant: trimmed.length > 0 ? trimmed : null,
+                    }
+                  : prev,
+              );
+              // Now that the user has confirmed a value, unblock
+              // stage 3 + resolve the analyze flow's gate so eBay
+              // can run with the correct query.
               releaseChip3Gate();
               resolveConfirmGate();
             }}
