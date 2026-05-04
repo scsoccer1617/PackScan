@@ -770,8 +770,40 @@ export default function Scan() {
                 }
                 return;
               }
+              // PR U — incremental field events from stage 1's streaming
+              // Gemini call. Each event carries ONE newly-completed field
+              // (e.g. just { year: 2026 } or { player: "Mike Trout" }) as
+              // soon as it lands in the partial JSON parse. We merge into
+              // scanInfoFields so <ScanInfoHeader> renders that slot as
+              // soon as we receive it. The chip stays in_progress — only
+              // the `analyzing_card:completed` event flips it to done.
+              if (
+                event.stage === "analyzing_card" &&
+                event.status === "progress" &&
+                event.data &&
+                typeof event.data === "object"
+              ) {
+                const d = event.data as Partial<ScanInfoHeaderFields>;
+                setScanInfoFields((prev) => ({
+                  ...prev,
+                  ...(d.year !== undefined ? { year: d.year } : {}),
+                  ...(d.brand !== undefined ? { brand: d.brand } : {}),
+                  ...(d.set !== undefined ? { set: d.set } : {}),
+                  ...(d.collection !== undefined
+                    ? { collection: d.collection }
+                    : {}),
+                  ...(d.cardNumber !== undefined
+                    ? { cardNumber: d.cardNumber }
+                    : {}),
+                  ...(d.player !== undefined ? { player: d.player } : {}),
+                }));
+                return;
+              }
               applyStageEvent(event.stage, event.status as ChipStatus);
               // PR R Item 4 — stage 1 fields stream into the header.
+              // PR U — this is now the SOURCE-OF-TRUTH event, ensuring all
+              // fields are populated even if any per-field progress event
+              // was dropped or the partial parse missed one.
               if (
                 event.stage === "analyzing_card" &&
                 event.status === "completed" &&

@@ -1,3 +1,6 @@
+// PR U: extracted to ./partialJson so dualSideOCR can share the same
+// in-flight JSON tolerant parser without depending on routes.ts.
+import { tryParsePartialJson } from './partialJson';
 import express, { Express, Request, Response, NextFunction } from 'express';
 import { Server, createServer } from 'http';
 import multer from 'multer';
@@ -76,80 +79,7 @@ function splitVoicePlayerName(
   return { first: tokens[0], last: tokens.slice(1).join(' ') };
 }
 
-/**
- * Best-effort partial-JSON tolerant parse of an in-flight JSON prefix.
- * Used by the Gemini SSE endpoint to surface partial fields while the
- * model is still emitting tokens. Returns the parsed object on success,
- * or null when the prefix is too truncated to recover.
- *
- * Strategy: walk the prefix tracking open `{`, `[`, `"` levels. If we
- * land outside a string at a balanced point, append the closers that
- * would balance any still-open levels. Drops a trailing partial token
- * (comma, colon, or half-finished number/key) before closing so
- * JSON.parse doesn't reject. Best-effort only — callers tolerate null.
- */
-function tryParsePartialJson(prefix: string): Record<string, unknown> | null {
-  const stack: Array<'{' | '[' | '"'> = [];
-  let lastSafe = 0;
-  let i = 0;
-  while (i < prefix.length) {
-    const c = prefix[i];
-    const top = stack[stack.length - 1];
-    if (top === '"') {
-      if (c === '\\') { i += 2; continue; }
-      if (c === '"') stack.pop();
-      i += 1;
-      continue;
-    }
-    if (c === '"') stack.push('"');
-    else if (c === '{') stack.push('{');
-    else if (c === '[') stack.push('[');
-    else if (c === '}') {
-      if (top !== '{') return null;
-      stack.pop();
-    } else if (c === ']') {
-      if (top !== '[') return null;
-      stack.pop();
-    }
-    i += 1;
-    // Mark a safe truncation point after every value-completing token
-    // outside a string: ',', ']', or '}' at the top of any structure.
-    if (stack[stack.length - 1] !== '"' && (c === ',' || c === '}' || c === ']')) {
-      lastSafe = i;
-    }
-  }
-  // Truncate to last safe boundary if we're mid-token, then strip the
-  // dangling comma the safe boundary may have left behind.
-  let body = prefix.slice(0, lastSafe || prefix.length).replace(/\s+$/, '');
-  // Recompute open levels for the truncated body — it can only be a
-  // subset of the original stack since truncation only drops trailing
-  // characters that were OUTSIDE any open string.
-  const truncStack: Array<'{' | '['> = [];
-  let inStr = false;
-  for (let j = 0; j < body.length; j++) {
-    const c = body[j];
-    if (inStr) {
-      if (c === '\\') { j += 1; continue; }
-      if (c === '"') inStr = false;
-      continue;
-    }
-    if (c === '"') inStr = true;
-    else if (c === '{') truncStack.push('{');
-    else if (c === '[') truncStack.push('[');
-    else if (c === '}') truncStack.pop();
-    else if (c === ']') truncStack.pop();
-  }
-  if (body.endsWith(',')) body = body.slice(0, -1);
-  let closers = '';
-  for (let k = truncStack.length - 1; k >= 0; k--) {
-    closers += truncStack[k] === '{' ? '}' : ']';
-  }
-  try {
-    return JSON.parse(body + closers) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-}
+// PR U: tryParsePartialJson moved to ./partialJson — see top of file.
 
 // Configure multer for handling file uploads
 const upload = multer({
