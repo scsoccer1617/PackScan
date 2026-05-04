@@ -269,4 +269,28 @@
       animation: none;
     }
   }
+
+  /* PR S Item 1 — sequenced field reveal in <ScanInfoHeader>. Each
+     field fades + translates the same 4px the chip-mount uses, so the
+     stage-1 OCR fields don't all "pop" at once when the JSON blob
+     arrives. The header schedules the visibility — this rule animates
+     the visible→visible transition each time a new field lands. */
+  @keyframes scan-field-reveal-kf {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  .scan-field-reveal {
+    animation: scan-field-reveal-kf 150ms ease-out both;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .scan-field-reveal {
+      animation: none;
+    }
+  }
 }

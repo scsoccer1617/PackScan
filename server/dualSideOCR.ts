@@ -57,6 +57,12 @@ export interface StageEvent {
     year?: number | string | null;
     brand?: string | null;
     set?: string | null;
+    /** PR S Item 2 — separate collection field on
+     *  `analyzing_card:completed`. Set is the product line ("Update
+     *  Series"); collection is the parallel/variant within that set
+     *  ("Base Set", "Pink Sparkle"). The streaming ScanInfoHeader
+     *  renders both as distinct slots. */
+    collection?: string | null;
     cardNumber?: string | null;
     player?: string | null;
     found?: number;
@@ -810,6 +816,14 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
         brand:
           ((combinedResult as any).brand ?? '').toString().trim() || null,
         set: ((combinedResult as any).set ?? '').toString().trim() || null,
+        // PR S Item 2 — separate collection field. Set is the product
+        // line ("Update Series"); collection is the parallel/variant
+        // within that set ("Base Set", "Pink Sparkle", "Gold"). Both
+        // flow through verbatim so the streaming header can render
+        // them as two distinct slots.
+        collection:
+          ((combinedResult as any).collection ?? '').toString().trim() ||
+          null,
         cardNumber:
           ((combinedResult as any).cardNumber ?? '').toString().trim() ||
           null,

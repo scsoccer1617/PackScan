@@ -60,6 +60,19 @@ export interface ScanFlowState {
   /** BR-2: exact query the server hashed eBay against. Compared against
    *  live cardData query parts to decide whether to refetch. */
   compsQuery: CompsQuerySnapshot | null;
+  /** PR S Item 3 — true once the user has clicked Yes or No on the
+   *  streaming parallel-confirm modal during a live scan. When true,
+   *  the result page must NOT re-prompt with the legacy
+   *  GeminiParallelPickerSheet "Yes/No" stage — the user has already
+   *  answered. Default false (no streaming modal fired, e.g. base
+   *  card or stream-error fallback). */
+  streamingConfirmAnswered: boolean;
+  /** PR S Item 3 — final answer from the streaming modal. `true` =
+   *  Yes (the auto-detected parallel was right), `false` = No (the
+   *  parallel was wrong; user wants to type their own). `null` when
+   *  no streaming modal was answered yet (or didn't fire). Used by
+   *  the result page to decide which downstream prompt to show. */
+  parallelConfirmedInStream: boolean | null;
 }
 
 const EMPTY: ScanFlowState = {
@@ -70,6 +83,8 @@ const EMPTY: ScanFlowState = {
   userScanId: null,
   initialComps: null,
   compsQuery: null,
+  streamingConfirmAnswered: false,
+  parallelConfirmedInStream: null,
 };
 
 interface ScanFlowContextValue extends ScanFlowState {

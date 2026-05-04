@@ -50,8 +50,8 @@ export const PRODUCT_LINES: Record<string, string[]> = {
     'Allen & Ginter', 'Stadium Club', 'Tier One', 'Gypsy Queen', 'Gold Label',
     'Triple Threads', 'Five Star',
     'Chrome', 'Heritage', 'Finest', 'Archives', 'Big League', 'Pristine',
-    'Dynasty', 'Transcendent', 'Opening Day', 'Update', 'Series One',
-    'Series Two',
+    'Dynasty', 'Transcendent', 'Opening Day', 'Update', 'Update Series',
+    'Series One', 'Series Two', 'Series 1', 'Series 2',
   ],
   Bowman: [
     'Bowman Draft', 'Bowman Chrome', 'Bowman Sterling', 'Bowman Platinum',
