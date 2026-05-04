@@ -23,6 +23,48 @@ import { decideSearchVerifyGate, computeAveragePrice } from './searchVerifyGate'
 import { checkPlayerOcrConsistency } from './playerOcrConsistency';
 import { decideSubsetDrop, type SubsetSource } from './subsetDropDecision';
 
+// PR H — Stage events for the single-scan SSE streaming progress UI.
+// The streaming route attaches an `onStage` callback to the request object
+// before invoking handleDualSideCardAnalysis; the handler fires events at
+// four user-visible milestones. Non-streaming callers (legacy
+// /api/analyze-card-dual-images, bulk worker) leave onStage undefined and
+// the helper below is a no-op — zero behavior change for them.
+export type StageId =
+  | 'analyzing_card'
+  | 'detecting_parallel'
+  | 'verifying_with_ebay'
+  | 'getting_price';
+
+export type StageStatus = 'in_progress' | 'completed';
+
+export interface StageEvent {
+  stage: StageId;
+  status: StageStatus;
+  label: string;
+}
+
+const STAGE_LABELS: Record<StageId, string> = {
+  analyzing_card: 'Analyzing card',
+  detecting_parallel: 'Detecting parallel',
+  verifying_with_ebay: 'Verifying with eBay',
+  getting_price: 'Getting price',
+};
+
+export type StageEmitter = (event: StageEvent) => void;
+
+function emitStage(req: any, stage: StageId, status: StageStatus): void {
+  const fn: StageEmitter | undefined = typeof req?.onStage === 'function'
+    ? req.onStage
+    : undefined;
+  if (!fn) return;
+  try {
+    fn({ stage, status, label: STAGE_LABELS[stage] });
+  } catch (err) {
+    // Never let the emitter break the analyze pipeline.
+    console.warn('[stage-event] emitter threw (ignored):', err);
+  }
+}
+
 // BR-2: identity tuple for the parallel eBay comps query. Built off the
 // post-overlay combinedResult (Gemini-authoritative when present, OCR
 // fallback otherwise). Returns null when any required field is missing
@@ -358,6 +400,7 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
   // spent on this scan. The flush block below subtracts this from
   // Date.now() right before res.json().
   const handlerStartedAt = Date.now();
+  emitStage(req, 'analyzing_card', 'in_progress');
   try {
     // Check if we have at least one image
     if (!req.files || Object.keys(req.files).length === 0) {
@@ -707,6 +750,17 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
       }
     }
 
+    // PR H — Stage 1 ("Analyzing card") completes once Gemini identity has
+    // been overlaid onto the OCR result. Stage 2 ("Detecting parallel") is
+    // emitted as start+complete back-to-back: the visual foil pass actually
+    // ran inside `combineCardResults` above, so by the time we get here the
+    // foilType / variant decision has already landed on `combinedResult`.
+    // We still emit start+complete pair so the chip ticks visibly even when
+    // there is no parallel to detect.
+    emitStage(req, 'analyzing_card', 'completed');
+    emitStage(req, 'detecting_parallel', 'in_progress');
+    emitStage(req, 'detecting_parallel', 'completed');
+
     // ── VLM-empty-identity provenance flag ───────────────────────────────
     // Distinguishes "Gemini supplied the core identity fields" from "the
     // legacy combiner / CardDB surname-salvage loop fabricated values that
@@ -946,6 +1000,7 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
     // 1500ms (yielding null on timeout, which the columns leave empty);
     // bulk waits the full picker duration. Failures and timeouts are
     // already swallowed inside the promise body (returns null).
+    emitStage(req, 'verifying_with_ebay', 'in_progress');
     const embeddedCompsStart = Date.now();
     let embeddedComps = await ebayPromise;
     const embeddedCompsMs = Date.now() - embeddedCompsStart;
@@ -1202,6 +1257,17 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
         // still ships to the client.
       }
     }
+
+    // PR H — Stage 3 ("Verifying with eBay") completes after the
+    // search-verify gate has decided (or skipped). Stage 4 ("Getting
+    // price") follows: in the non-streaming flow the comps median is
+    // computed by /api/ebay/comps/summary post-mount, but the streaming
+    // chip merely needs a start+complete pair after the picker payload
+    // and median-derived signals (estimatedValue, _noActiveListings) are
+    // settled below. We emit start here and complete after the embedded
+    // comps payload is finalized so the chip ticks before res.end.
+    emitStage(req, 'verifying_with_ebay', 'completed');
+    emitStage(req, 'getting_price', 'in_progress');
 
     // ── No-active-listings preservation (PR #250) ────────────────────
     // When the embedded picker returned 0 active listings AND search-verify
@@ -1461,6 +1527,8 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
     // query + result count + picked listing. `embeddedComps` and
     // `embeddedCompsMs` are already populated by the time we reach the
     // response.
+
+    emitStage(req, 'getting_price', 'completed');
 
     return res.json({
       success: true,

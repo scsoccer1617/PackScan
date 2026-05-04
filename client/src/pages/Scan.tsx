@@ -28,6 +28,13 @@ import type { HoloGrade } from "@/components/HoloGradeCard";
 import { ScanLine, RotateCw, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { isLikelyBlurry } from "@shared/sharpness";
+import {
+  ScanProgressChips,
+  DEFAULT_SCAN_STAGES,
+  type ScanProgressChipStage,
+  type ChipStatus,
+} from "@/components/ScanProgressChips";
+import { consumeSseStream } from "@/lib/sse";
 
 // ── Voice → CardFormValues mapping ────────────────────────────────────────
 // Mirrors the server-side splitPlayerName() so Jr/Sr/III stay attached to the
@@ -148,6 +155,25 @@ export default function Scan() {
   const [backCameraSignal, setBackCameraSignal] = useState<number>(0);
   const [frontCameraSignal, setFrontCameraSignal] = useState<number>(0);
   const [analyzing, setAnalyzing] = useState<boolean>(false);
+  // PR H — chip-stack progress for the single-card scan flow. Initialized
+  // with all stages pending; the streaming analyze route updates each
+  // stage's status as the server hits its milestones. Reset on every
+  // analyze invocation.
+  const [progressStages, setProgressStages] = useState<ScanProgressChipStage[]>(
+    () => DEFAULT_SCAN_STAGES.map((s) => ({ ...s })),
+  );
+  const resetProgressStages = () =>
+    setProgressStages(DEFAULT_SCAN_STAGES.map((s) => ({ ...s })));
+  const updateStageStatus = (id: string, status: ChipStatus) => {
+    setProgressStages((prev) =>
+      prev.map((s) => (s.id === id ? { ...s, status } : s)),
+    );
+  };
+  const completeAllStages = () => {
+    setProgressStages((prev) =>
+      prev.map((s) => ({ ...s, status: "completed" as const })),
+    );
+  };
 
   // RAW (default) ↔ GRADED toggle. Persisted across visits so users that
   // primarily scan slabs don't have to flip the switch every time. Default
@@ -335,20 +361,88 @@ export default function Scan() {
       console.log(
         `[holo-timing] request sent +${(timing.requestSentAt - timing.clickedAt).toFixed(0)}ms`,
       );
-      const response = await fetch("/api/analyze-card-dual-images", {
-        method: "POST",
-        body: formData,
-      });
+
+      // PR H — try the SSE streaming sibling first so the chip stack ticks
+      // live as the server hits each milestone. On any failure (older
+      // server, mid-stream disconnect, browser without ReadableStream) we
+      // fall back to the legacy non-streaming route and tick all chips
+      // green when its JSON response lands.
+      resetProgressStages();
+      let result: any = null;
+      let httpStatus = 200;
+      let usedStreaming = false;
+      try {
+        const streamResp = await fetch(
+          "/api/analyze-card-dual-images/stream",
+          { method: "POST", body: formData },
+        );
+        httpStatus = streamResp.status;
+        if (
+          streamResp.ok &&
+          streamResp.body &&
+          typeof streamResp.body.getReader === "function" &&
+          (streamResp.headers.get("content-type") || "").includes(
+            "text/event-stream",
+          )
+        ) {
+          usedStreaming = true;
+          let captured: { status: number; body: any } | null = null;
+          await consumeSseStream(streamResp.body, (event) => {
+            if (event?.type === "stage" && typeof event.stage === "string") {
+              updateStageStatus(event.stage, event.status as ChipStatus);
+            } else if (event?.type === "result") {
+              captured = {
+                status: typeof event.status === "number" ? event.status : 200,
+                body: event.body,
+              };
+            } else if (event?.type === "error") {
+              throw new Error(event.message || "Stream reported error");
+            }
+          });
+          if (captured) {
+            httpStatus = (captured as any).status;
+            result = (captured as any).body;
+          } else {
+            throw new Error("Stream ended without a result event");
+          }
+        } else if (streamResp.status === 429) {
+          // Quota gate hit — body is JSON, not SSE.
+          httpStatus = 429;
+        } else {
+          // Streaming sibling missing or unsupported — fall back below.
+          throw new Error(`Streaming unavailable (status ${streamResp.status})`);
+        }
+      } catch (streamErr) {
+        console.warn(
+          "[Scan] streaming analyze unavailable, falling back to legacy route:",
+          streamErr,
+        );
+        usedStreaming = false;
+        const legacy = await fetch("/api/analyze-card-dual-images", {
+          method: "POST",
+          body: formData,
+        });
+        httpStatus = legacy.status;
+        if (legacy.ok) {
+          result = await legacy.json();
+          // No live chip events arrived — tick everything green now that
+          // the legacy response has landed so the UI still tells the user
+          // the work finished.
+          completeAllStages();
+        }
+      }
+
       timing.responseReceivedAt = performance.now();
       console.log(
         `[holo-timing] response received +${(timing.responseReceivedAt - timing.clickedAt).toFixed(0)}ms ` +
-          `(network+server: ${(timing.responseReceivedAt - timing.requestSentAt).toFixed(0)}ms)`,
+          `(network+server: ${(timing.responseReceivedAt - timing.requestSentAt).toFixed(0)}ms)` +
+          ` streaming=${usedStreaming}`,
       );
       // Beta scan cap: surface a friendly message + bail before parsing
       // the body. The server returns { error: 'limit_reached', limit, used }
       // which we don't need to display — the TopBar usage pill already
       // renders the numbers, so the toast just needs to explain *why*.
-      if (response.status === 429) {
+      if (httpStatus === 429) {
         toast({
           title: "Beta scan limit reached",
           description:
@@ -359,11 +453,12 @@ export default function Scan() {
         queryClient.invalidateQueries({ queryKey: ["/api/user/scan-quota"] });
         return;
       }
-      if (!response.ok) throw new Error("Analysis failed");
-
-      const result = await response.json();
+      if (!result || httpStatus < 200 || httpStatus >= 300) {
+        throw new Error("Analysis failed");
+      }
       console.log("[Scan] analyze response", {
-        ok: response.ok,
+        httpStatus,
+        streaming: usedStreaming,
         success: result?.success,
         hasData: !!result?.data,
         foilType: result?.data?.foilType,
@@ -578,6 +673,11 @@ export default function Scan() {
               <p className="text-xs text-slate-500 text-center mt-2">
                 Capture the back of the card to continue
               </p>
+            )}
+            {analyzing && (
+              <div className="mt-4">
+                <ScanProgressChips stages={progressStages} />
+              </div>
             )}
           </div>
         </>
