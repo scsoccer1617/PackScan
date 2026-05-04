@@ -81,6 +81,7 @@ interface AppendCardPayload {
   frontImageUrl?: string;
   backImageUrl?: string;
   ebaySearchUrl?: string;
+  potentialVariant?: 'Yes' | 'No' | '' | null;
   _scanTracking?: ScanTracking & { detected?: ScanFieldSnapshot };
 }
 
@@ -148,6 +149,7 @@ function buildAppendPayload(
     frontImageUrl: frontImage,
     backImageUrl: backImage,
     ebaySearchUrl: searchUrl,
+    potentialVariant: (cardData as { potentialVariant?: 'Yes' | 'No' | '' | null }).potentialVariant ?? null,
     ...(scanTracking
       ? { _scanTracking: { ...scanTracking, detected: initialDetected } }
       : {}),

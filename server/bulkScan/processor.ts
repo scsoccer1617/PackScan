@@ -1053,6 +1053,7 @@ async function processItem(
       frontImageUrl: null,
       backImageUrl: null,
       ebaySearchUrl: typeof analysis.ebaySearchUrl === 'string' ? analysis.ebaySearchUrl : null,
+      potentialVariant: analysis.potentialVariant ?? null,
     };
     try {
       // Hand the row to the per-batch flusher and wait for ack. The

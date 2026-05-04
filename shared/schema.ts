@@ -264,6 +264,10 @@ export const cardSchema = z.object({
   numericalGrade: z.number().optional().nullable(),
   gradeQualifier: z.string().optional().nullable(),
   certificationNumber: z.string().optional().nullable(),
+  // Variant-detection flag derived server-side from active eBay listing
+  // titles in dualSideOCR.ts. Travels with cardData through edit/save so
+  // /api/sheets/append can write column 24 ("Potential Variant").
+  potentialVariant: z.enum(['Yes', 'No', '']).optional().nullable(),
   _engine: z.literal('ocr').optional(),
   // Optional scan-tracking payload. When present, the server logs a row to
   // user_scans alongside the cards insert. Lets us record the original
