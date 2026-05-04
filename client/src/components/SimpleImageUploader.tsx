@@ -92,6 +92,12 @@ export default function SimpleImageUploader({
       onImageCaptured(imageData, 'file');
     };
     reader.readAsDataURL(file);
+    // Note: page-level library uploads skip sharpness scoring. The
+    // camera modal's in-modal Library button DOES score (see
+    // CardCameraCapture.handleLibraryFile) and the result flows through
+    // the standard onCapture callback. Page-level Library is rare —
+    // hideLibraryButton is true on /scan — so this is a deliberate
+    // simplification rather than an oversight.
   };
 
   const replaceLabel = label.replace(/^Upload\s+/i, '').replace(/\s+image$/i, '');

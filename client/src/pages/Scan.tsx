@@ -25,8 +25,9 @@ import { compressImage } from "@/lib/scanFlow";
 import { queryClient } from "@/lib/queryClient";
 import type { CardFormValues } from "@shared/schema";
 import type { HoloGrade } from "@/components/HoloGradeCard";
-import { ScanLine, RotateCw } from "lucide-react";
+import { ScanLine, RotateCw, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { isLikelyBlurry } from "@shared/sharpness";
 
 // ── Voice → CardFormValues mapping ────────────────────────────────────────
 // Mirrors the server-side splitPlayerName() so Jr/Sr/III stay attached to the
@@ -138,6 +139,12 @@ export default function Scan() {
   // signals next to the OCR result.
   const [frontLighting, setFrontLighting] = useState<string>("");
   const [frontBlurScore, setFrontBlurScore] = useState<number | null>(null);
+  // Sharpness scores from the burst-pick path (or library bitmap score).
+  // Used to render a soft warning banner under each thumbnail and threaded
+  // into the analyze upload as `frontSharpness` / `backSharpness` so the
+  // server-side scan log carries the same number the user saw.
+  const [frontSharpness, setFrontSharpness] = useState<number | null>(null);
+  const [backSharpness, setBackSharpness] = useState<number | null>(null);
   const [backCameraSignal, setBackCameraSignal] = useState<number>(0);
   const [frontCameraSignal, setFrontCameraSignal] = useState<number>(0);
   const [analyzing, setAnalyzing] = useState<boolean>(false);
@@ -306,6 +313,18 @@ export default function Scan() {
       if (frontBlurScore != null && Number.isFinite(frontBlurScore)) {
         formData.append("clientBlurScore", String(Math.round(frontBlurScore)));
       }
+      // Burst-picked sharpness scores. Distinct from clientBlurScore (the
+      // live-preview 64x64 sample) — these come from the 480x480 sample
+      // of the actual selected burst frame, so they reflect the saved
+      // image rather than the viewfinder. Server logs them to the scan
+      // sheet's Indicators column for retrospective tuning of the warning
+      // threshold.
+      if (frontSharpness != null && Number.isFinite(frontSharpness)) {
+        formData.append("frontSharpness", frontSharpness.toFixed(2));
+      }
+      if (backSharpness != null && Number.isFinite(backSharpness)) {
+        formData.append("backSharpness", backSharpness.toFixed(2));
+      }
       // Mint (or reuse) a client UUID for the audit row. Letting the
       // client own the id means the server can fire-and-forget the
       // user_scans INSERT and we still know how to update it on save.
@@ -446,6 +465,9 @@ export default function Scan() {
                   if (quality) {
                     setFrontLighting(quality.lightingState);
                     setFrontBlurScore(quality.blurScore);
+                    setFrontSharpness(quality.pickedSharpness);
+                  } else {
+                    setFrontSharpness(null);
                   }
                   const scanId = mintScanId();
                   scanIdRef.current = scanId;
@@ -481,7 +503,10 @@ export default function Scan() {
                 Back
               </p>
               <SimpleImageUploader
-                onImageCaptured={setBackImage}
+                onImageCaptured={(img, _source, quality) => {
+                  setBackImage(img);
+                  setBackSharpness(quality?.pickedSharpness ?? null);
+                }}
                 label="Capture back"
                 cameraTitle="Back of Card"
                 existingImage={backImage}
@@ -491,6 +516,40 @@ export default function Scan() {
               />
             </div>
           </div>
+
+          {/* Soft sharpness warning banners. Rendered under the
+              corresponding thumbnail when the burst-picked frame scored
+              below SHARPNESS_BLURRY_THRESHOLD. Non-blocking — Analyze
+              stays enabled so users with a borderline-but-readable shot
+              can proceed. The banner is the only signal the user sees
+              about the back-side image quality (no live-preview
+              visibility for the back side at the time of capture). */}
+          {(isLikelyBlurry(frontSharpness) || isLikelyBlurry(backSharpness)) && (
+            <div className="px-4 grid grid-cols-2 gap-3" data-testid="sharpness-warnings">
+              <div>
+                {isLikelyBlurry(frontSharpness) && (
+                  <div
+                    className="rounded-lg bg-amber-50 border border-amber-300 text-amber-900 px-2.5 py-2 text-[11px] leading-snug flex items-start gap-1.5"
+                    data-testid="warning-front-blurry"
+                  >
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-px text-amber-600" />
+                    <span>Looks blurry — tap Rescan Front for a sharper shot.</span>
+                  </div>
+                )}
+              </div>
+              <div>
+                {isLikelyBlurry(backSharpness) && (
+                  <div
+                    className="rounded-lg bg-amber-50 border border-amber-300 text-amber-900 px-2.5 py-2 text-[11px] leading-snug flex items-start gap-1.5"
+                    data-testid="warning-back-blurry"
+                  >
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-px text-amber-600" />
+                    <span>Looks blurry — tap Rescan Back for a sharper shot.</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           <div className="px-4 pt-2">
             <button

@@ -19,15 +19,28 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { X, Image as ImageIcon, RotateCcw, Check, Zap, ZapOff, Sparkles } from 'lucide-react';
+import {
+  scoreImageData,
+  pickSharpest,
+  SHARPNESS_SAMPLE_SIZE,
+} from '@shared/sharpness';
 
 /** Diagnostics computed from the live preview. Surfaced to the parent on
  *  capture so the analyze multipart can carry `clientLighting` and
- *  `clientBlurScore` for server-side logging / quality banners. */
+ *  `clientBlurScore` for server-side logging / quality banners.
+ *
+ *  `pickedSharpness` is the variance-of-Laplacian score of the frame the
+ *  3-frame burst selected — measured on the 480x480 center crop of the
+ *  full video frame, distinct from `blurScore` (which is the live-preview
+ *  64x64 sample at shutter-press time). The two are kept separate so the
+ *  pre-shutter pill and the post-shutter banner stay apples-to-apples
+ *  with their own reference points. */
 export interface CaptureQuality {
   luminance: number | null;
   blurScore: number | null;
   lightingState: 'good' | 'low' | 'dark';
   blurState: 'sharp' | 'soft' | 'blurry';
+  pickedSharpness: number | null;
 }
 
 interface CardCameraCaptureProps {
@@ -81,6 +94,24 @@ const QUALITY_SAMPLE_SIZE = 64; // downsample target for fast Laplacian
 // the visual feedback loop that drove the drift — the user sees a steady
 // snapshot, not a moving preview, and naturally holds still.
 const AE_SETTLE_MS = 700;
+
+// 3-frame burst settings. We grab three frames spaced BURST_INTERVAL_MS
+// apart and keep whichever scores highest on variance-of-Laplacian. Three
+// frames at ~150ms covers the typical hand-tremor envelope without
+// noticeably stretching the shutter latency (total burst window ≈ 300ms).
+// On devices that can't snapshot fast enough we fall back to whatever the
+// burst produced — even one frame is fine, the burst just degrades to a
+// single-frame capture in that case.
+const BURST_FRAMES = 3;
+const BURST_INTERVAL_MS = 150;
+
+// AF settle wait used when we explicitly issue a single-shot focus
+// request before the burst. Empirically converges in 350-450ms on iOS
+// Safari and recent Android Chrome — pick the upper bound so the burst
+// fires after the lens has stopped hunting. Skipped silently when the
+// device doesn't expose `single-shot` focusMode (most desktop browsers,
+// older Android stock browsers).
+const AF_SETTLE_MS = 400;
 
 type FlashMode = 'auto' | 'on' | 'off';
 const FLASH_MODE_KEY = 'holo-flash-mode';
@@ -217,6 +248,10 @@ export default function CardCameraCapture({
   // Live preview diagnostics. Updated every QUALITY_SAMPLE_INTERVAL_MS.
   const [luminance, setLuminance] = useState<number | null>(null);
   const [blurScore, setBlurScore] = useState<number | null>(null);
+  // Sharpness score of the burst-picked frame, set inside captureFrame
+  // and read by handleConfirm. A ref instead of state so the value
+  // doesn't trigger re-renders during the post-capture preview screen.
+  const pickedSharpnessRef = useRef<number | null>(null);
   const sampleCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const sampleTimerRef = useRef<number | null>(null);
 
@@ -506,6 +541,54 @@ export default function CardCameraCapture({
     return canvas.toDataURL('image/jpeg', 0.7);
   }, []);
 
+  // Snapshot a JPEG data URL AND score its sharpness on a 480x480 center
+  // crop of the full frame. Returns null if the video isn't ready. Used
+  // by the 3-frame burst path so each candidate frame is scored against
+  // the same window the eventual saved crop will draw from.
+  //
+  // Why score the full-frame center rather than the on-screen guide
+  // rect? The guide-cropped output is what the user keeps, but the burst
+  // happens before any cropping — and the inverse-object-cover math in
+  // cropGuideRegion needs a stable source image, not a transient
+  // <video> element. Scoring a fixed center crop of the source frame is
+  // both faster and deterministic across devices that rotate sensor
+  // dimensions vs ones that don't.
+  const captureAndScoreFrame = useCallback((): { dataUrl: string; score: number } | null => {
+    const video = videoRef.current;
+    if (!video) return null;
+    const vw = video.videoWidth;
+    const vh = video.videoHeight;
+    if (!vw || !vh) return null;
+    const fullCanvas = document.createElement('canvas');
+    fullCanvas.width = vw;
+    fullCanvas.height = vh;
+    const fullCtx = fullCanvas.getContext('2d');
+    if (!fullCtx) return null;
+    fullCtx.drawImage(video, 0, 0, vw, vh);
+    // Score on a downsampled center crop. 480x480 preserves enough
+    // high-frequency detail (back-of-card text edges) to discriminate
+    // between sharp and blurry while keeping the per-frame compute well
+    // under 10ms — three back-to-back scores during the 300ms burst
+    // window without visible stalls.
+    const cropSize = Math.min(vw, vh);
+    const sx = (vw - cropSize) / 2;
+    const sy = (vh - cropSize) / 2;
+    const sample = document.createElement('canvas');
+    sample.width = SHARPNESS_SAMPLE_SIZE;
+    sample.height = SHARPNESS_SAMPLE_SIZE;
+    const sampleCtx = sample.getContext('2d', { willReadFrequently: true });
+    if (!sampleCtx) return null;
+    sampleCtx.drawImage(
+      fullCanvas,
+      sx, sy, cropSize, cropSize,
+      0, 0, SHARPNESS_SAMPLE_SIZE, SHARPNESS_SAMPLE_SIZE,
+    );
+    const imageData = sampleCtx.getImageData(0, 0, SHARPNESS_SAMPLE_SIZE, SHARPNESS_SAMPLE_SIZE);
+    const score = scoreImageData(imageData);
+    const dataUrl = fullCanvas.toDataURL('image/jpeg', 0.7);
+    return { dataUrl, score };
+  }, []);
+
   // Decode a JPEG data URL into an HTMLImageElement so canvas drawImage can
   // use it as a source. Resolves once the image's pixel data is ready. Used
   // to crop from the frozen-preview snapshot (taken at shutter-tap time)
@@ -620,6 +703,34 @@ export default function CardCameraCapture({
     // only true for auto-mode capture-time flash.
     const turnedOnForCapture = shouldFireFlash && !torchOn;
 
+    // ── AF lock attempt ─────────────────────────────────────────────
+    // Best-effort single-shot AF before the burst. iOS Safari + recent
+    // Android Chrome expose 'single-shot' focusMode via getCapabilities;
+    // older browsers / desktops don't, in which case we leave the
+    // continuous focus from startStream alone. Wrapped in try/catch
+    // because some Android stock browsers throw on unknown advanced
+    // constraints rather than ignoring them. Skipped in flash-on mode —
+    // the AE settle wait below already gives the lens time to converge,
+    // and stacking AF + AE adds visible latency without measurable
+    // sharpness gain on the test devices.
+    if (!turnedOnForCapture) {
+      try {
+        const stream = streamRef.current;
+        const track = stream?.getVideoTracks()[0];
+        const caps: any = track?.getCapabilities ? track.getCapabilities() : {};
+        if (track && caps?.focusMode?.includes?.('single-shot')) {
+          await track.applyConstraints({
+            advanced: [{ focusMode: 'single-shot' } as any],
+          });
+          await new Promise((r) => setTimeout(r, AF_SETTLE_MS));
+        }
+      } catch (afErr) {
+        // Log once and move on. Capture must not break for users on
+        // devices that don't support the constraint.
+        console.debug('[CardCameraCapture] single-shot AF unavailable', afErr);
+      }
+    }
+
     // When flash fires, we crop from the frozen snapshot (captured at
     // shutter-tap time) rather than the post-AE-wait live frame, so the
     // user's framing intent is what gets saved. Decoding the snapshot
@@ -629,6 +740,7 @@ export default function CardCameraCapture({
     // shot). Non-flash captures stay synchronous and crop the live frame.
     let snapshotImage: HTMLImageElement | null = null;
     let snapshotDims: { w: number; h: number } | null = null;
+    let pickedSharpness: number | null = null;
 
     try {
       if (turnedOnForCapture) {
@@ -650,6 +762,37 @@ export default function CardCameraCapture({
         setCapturing(true);
         await applyTorch(true);
         await new Promise((r) => setTimeout(r, AE_SETTLE_MS));
+      } else {
+        // ── 3-frame burst (non-flash path) ──────────────────────────
+        // Capture BURST_FRAMES snapshots ~150ms apart, score each, and
+        // keep the sharpest. Replaces the single-frame live-video
+        // crop. Hand-tremor is the dominant blur source at this
+        // distance; a brief burst picks the steadiest moment from the
+        // shutter-press envelope. We also use the sharpest snapshot
+        // as the crop source (instead of the live video frame) so the
+        // cropped output matches the scored frame exactly.
+        const candidates: Array<{ dataUrl: string; score: number }> = [];
+        for (let i = 0; i < BURST_FRAMES; i += 1) {
+          const frame = captureAndScoreFrame();
+          if (frame) candidates.push(frame);
+          if (i < BURST_FRAMES - 1) {
+            await new Promise((r) => setTimeout(r, BURST_INTERVAL_MS));
+          }
+        }
+        if (candidates.length > 0) {
+          const bestIdx = pickSharpest(candidates.map((c) => c.score));
+          const best = candidates[bestIdx];
+          pickedSharpness = best.score;
+          try {
+            snapshotImage = await decodeSnapshot(best.dataUrl);
+            snapshotDims = { w: snapshotImage.naturalWidth, h: snapshotImage.naturalHeight };
+          } catch {
+            // Decode failed — fall back to live-video crop path
+            // (capturedRef stays claimed, so cropGuideRegion still
+            // works against videoRef).
+            snapshotImage = null;
+          }
+        }
       }
 
       const cropSource = snapshotImage && snapshotDims
@@ -658,7 +801,9 @@ export default function CardCameraCapture({
             image: snapshotImage,
             naturalWidth: snapshotDims.w,
             naturalHeight: snapshotDims.h,
-            boost: true,
+            // Brightness boost only on the flash path — the burst-pick
+            // path runs in normal lighting and looks correct as-is.
+            boost: turnedOnForCapture,
           }
         : undefined;
 
@@ -685,6 +830,10 @@ export default function CardCameraCapture({
         }
         setRawImage(cropped);
       }
+      // Stash the burst-picked sharpness for handleConfirm to surface to
+      // the parent. Null on the flash path (no burst), in which case the
+      // parent falls back to the live-preview blurScore for telemetry.
+      pickedSharpnessRef.current = pickedSharpness;
       // Blur post-capture re-check: when the live sampler scored below
       // BLUR_SOFT, surface the confirmation sheet on the preview screen so
       // the user can retake before committing to the analyze pipeline. Above
@@ -700,7 +849,7 @@ export default function CardCameraCapture({
       setCapturing(false);
       setFrozenPreviewDataUrl(null);
     }
-  }, [cropGuideRegion, mode, blurScore, torchCapable, flashMode, luminance, torchOn, applyTorch, snapshotFullVideoFrame, decodeSnapshot]);
+  }, [cropGuideRegion, mode, blurScore, torchCapable, flashMode, luminance, torchOn, applyTorch, snapshotFullVideoFrame, decodeSnapshot, captureAndScoreFrame]);
 
   useEffect(() => {
     if (!open) {
@@ -782,7 +931,13 @@ export default function CardCameraCapture({
       luminance == null ? 'good' : luminance < LUM_DARK ? 'dark' : luminance < LUM_LOW ? 'low' : 'good';
     const blurState: CaptureQuality['blurState'] =
       blurScore == null ? 'sharp' : blurScore < BLUR_SOFT ? 'blurry' : blurScore < BLUR_SHARP ? 'soft' : 'sharp';
-    const quality: CaptureQuality = { luminance, blurScore, lightingState, blurState };
+    const quality: CaptureQuality = {
+      luminance,
+      blurScore,
+      lightingState,
+      blurState,
+      pickedSharpness: pickedSharpnessRef.current,
+    };
     if (mode === 'graded' && labelImage && onCaptureGraded) {
       onCaptureGraded(rawImage, labelImage);
     } else {
@@ -791,6 +946,7 @@ export default function CardCameraCapture({
     setRawImage(null);
     setLabelImage(null);
     setBlurConfirm(false);
+    pickedSharpnessRef.current = null;
   };
 
   const handleRetake = () => {
@@ -806,7 +962,10 @@ export default function CardCameraCapture({
 
   // Library uploads skip the guide crop — we have no camera geometry to
   // work against, so the photo is used as-is. Analyzer already handles
-  // arbitrary framing.
+  // arbitrary framing. We still score sharpness on the loaded bitmap so
+  // the parent can surface the same blurry-photo warning banner that
+  // camera captures get — this is the only signal available for library
+  // uploads (no live preview, no burst).
   const handleLibraryFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
@@ -817,6 +976,33 @@ export default function CardCameraCapture({
       if (!dataUrl) return;
       capturedRef.current = true;
       setRawImage(dataUrl);
+      // Score the loaded bitmap on a 480x480 center crop. Best-effort —
+      // any failure (decode error, missing canvas ctx) leaves the
+      // sharpness ref null and the parent treats it as "no signal".
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const cropSize = Math.min(img.naturalWidth, img.naturalHeight);
+          if (cropSize < 3) return;
+          const sx = (img.naturalWidth - cropSize) / 2;
+          const sy = (img.naturalHeight - cropSize) / 2;
+          const sample = document.createElement('canvas');
+          sample.width = SHARPNESS_SAMPLE_SIZE;
+          sample.height = SHARPNESS_SAMPLE_SIZE;
+          const ctx = sample.getContext('2d', { willReadFrequently: true });
+          if (!ctx) return;
+          ctx.drawImage(
+            img,
+            sx, sy, cropSize, cropSize,
+            0, 0, SHARPNESS_SAMPLE_SIZE, SHARPNESS_SAMPLE_SIZE,
+          );
+          const data = ctx.getImageData(0, 0, SHARPNESS_SAMPLE_SIZE, SHARPNESS_SAMPLE_SIZE);
+          pickedSharpnessRef.current = scoreImageData(data);
+        } catch {
+          pickedSharpnessRef.current = null;
+        }
+      };
+      img.src = dataUrl;
     };
     reader.readAsDataURL(file);
   };
