@@ -179,6 +179,13 @@ export default function ScanResult() {
     averageValue: number;
     dataType: 'sold' | 'current';
     searchUrl: string | null;
+    /** Number of active listings the picker returned. 0 means "we tried
+     *  and nothing matched" — distinct from `priceInfo === null` which
+     *  means "still loading". The hero uses this to show the explicit
+     *  "No active listings" copy instead of silently hiding the price
+     *  area when comps come back empty (Van Slyke 1988 Donruss DK #18
+     *  reproduction). */
+    count: number;
   } | null>(null);
 
   // Once the user has answered the "Is this a parallel?" prompt (Yes opens
@@ -1020,16 +1027,31 @@ export default function ScanResult() {
 
   const tone = holoGrade ? gradeTone(holoGrade.overall) : null;
 
-  // Formatted avg label for the hero subtitle. Only shows after the
-  // active-comps lookup returns a non-zero average. PR #165: source is
-  // the Active eBay listings on the Price tab, so a single "Avg" label
+  // Formatted avg label for the hero subtitle. Source is the Active
+  // eBay listings on the Price tab (PR #165), so a single "Avg" label
   // covers it — no asking/sold disambiguation when there's one source.
-  const avgPriceLabel = priceInfo && priceInfo.averageValue > 0
-    ? `Avg ${new Intl.NumberFormat('en-US', {
+  //
+  // Three terminal states:
+  //   1. `priceInfo === null`            → still loading; render nothing.
+  //   2. `count === 0`                   → comps came back empty. Render
+  //      "No active listings" instead of leaving the price area blank
+  //      (PR #250 design directive — silent omission misled dealers
+  //      into thinking the lookup was still pending).
+  //   3. `averageValue > 0`              → render "Avg $X.XX".
+  // averageValue=0 with count>0 (every listing genuinely $0) is treated
+  // the same as "no listings" for the dealer — the avg conveys nothing.
+  const heroPriceLabel: string | null = (() => {
+    if (!priceInfo) return null;
+    if (priceInfo.count > 0 && priceInfo.averageValue > 0) {
+      return `Avg ${new Intl.NumberFormat('en-US', {
         style: 'currency',
         currency: 'USD',
-      }).format(priceInfo.averageValue)}`
-    : null;
+      }).format(priceInfo.averageValue)}`;
+    }
+    return 'No active listings';
+  })();
+  const heroPriceIsEmpty =
+    !!priceInfo && (priceInfo.count === 0 || priceInfo.averageValue <= 0);
 
   return (
     <div className="pb-6">
@@ -1098,12 +1120,21 @@ export default function ScanResult() {
                   )}
                 </div>
               )}
-              {avgPriceLabel && (
+              {heroPriceLabel && (
                 <p
-                  className="text-xs text-slate-600 font-medium mt-0.5 truncate tabular-nums"
-                  data-testid="text-hero-avg-price"
+                  className={cn(
+                    "text-xs font-medium mt-0.5 truncate",
+                    heroPriceIsEmpty
+                      ? "text-slate-500 italic"
+                      : "text-slate-600 tabular-nums",
+                  )}
+                  data-testid={
+                    heroPriceIsEmpty
+                      ? "text-hero-no-listings"
+                      : "text-hero-avg-price"
+                  }
                 >
-                  {avgPriceLabel}
+                  {heroPriceLabel}
                 </p>
               )}
               {cardData.foilType && (
@@ -1384,7 +1415,7 @@ export default function ScanResult() {
               // edit / mismatch / null, it falls back to the legacy fetch.
               initialComps={flow.initialComps}
               compsQuery={flow.compsQuery}
-              onAverage={({ average, query }) =>
+              onAverage={({ average, query, count }) =>
                 setPriceInfo({
                   averageValue: average,
                   // Active-only data source — the hero header label is
@@ -1394,6 +1425,7 @@ export default function ScanResult() {
                   searchUrl: query
                     ? `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(query)}&LH_BIN=1`
                     : null,
+                  count,
                 })
               }
             />
