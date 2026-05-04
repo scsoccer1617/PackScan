@@ -35,7 +35,17 @@ import {
   type ScanProgressChipStage,
   type ChipStatus,
 } from "@/components/ScanProgressChips";
+import { InlineParallelPicker } from "@/components/InlineParallelPicker";
 import { consumeSseStream } from "@/lib/sse";
+
+// PR Q — payload shape attached to the streaming
+// `detecting_parallel:completed` stage event so the inline picker
+// can render before stages 3/4 fire.
+interface InlineParallelData {
+  variant: string | null;
+  foilType: string | null;
+  confidence: number | null;
+}
 
 // ── Voice → CardFormValues mapping ────────────────────────────────────────
 // Mirrors the server-side splitPlayerName() so Jr/Sr/III stay attached to the
@@ -164,7 +174,17 @@ export default function Scan() {
   const [progressStages, setProgressStages] = useState<ScanProgressChipStage[]>(
     [],
   );
-  const resetProgressStages = () => setProgressStages([]);
+  // PR Q — inline parallel picker state. Populated when the
+  // streaming SSE emits `detecting_parallel:completed` with a `data`
+  // payload. Reset to null on each new analyze invocation. If a
+  // later stage corrects the variant identity, the parent updates
+  // this state and the picker mutates in place.
+  const [inlineParallel, setInlineParallel] =
+    useState<InlineParallelData | null>(null);
+  const resetProgressStages = () => {
+    setProgressStages([]);
+    setInlineParallel(null);
+  };
   // Apply the stage event from the server stream. If a chip with this
   // id doesn't exist yet, append a fresh one in the incoming status —
   // this is what makes the chips appear one-at-a-time as `in_progress`
@@ -196,42 +216,64 @@ export default function Scan() {
   };
 
   // PR P — auto-scroll guard. When chips mount they call
-  // `scrollIntoView({ block: 'nearest' })` so the active chip stays
+  // `scrollIntoView({ block: 'center' })` so the active chip stays
   // visible if the page has scrolled past it. The first time the user
   // takes a manual scroll action during a scan, we flip the guard and
   // suppress further auto-scrolls for the rest of THIS scan. The flag
   // is reset at the start of every analyze invocation.
+  //
+  // PR Q tightens this: scroll events with deltaY < SCROLL_DELTA_PX are
+  // treated as noise (iOS Safari fires synthetic scroll events on
+  // viewport resize / rubber-band that previously tripped the guard
+  // and disabled auto-scroll for the rest of the scan).
   const [userScrolledManually, setUserScrolledManually] = useState(false);
   // Programmatic scroll flag — set true just before each
-  // chip.scrollIntoView call, cleared ~600ms later. The user-scroll
-  // detector below ignores any scroll events that fire while this is
-  // true, so the smooth-scroll animation triggered by us doesn't trip
-  // the manual-scroll guard. We listen for `wheel`, `touchmove`, and
-  // keyboard scroll keys (PageDown/Space/Arrows) AS WELL as the
-  // scroll event so user input that hasn't yet caused a scroll
-  // (e.g. a wheel tick during a still-in-flight programmatic scroll)
-  // still reliably flips the guard.
+  // chip.scrollIntoView call, cleared ~800ms later (was 600ms in PR P;
+  // bumped because iOS Safari's smooth-scroll animation occasionally
+  // dispatches its final scroll event past the 600ms boundary).
   const programmaticScrollRef = useRef(false);
   const programmaticScrollTimerRef = useRef<number | null>(null);
+  const lastScrollYRef = useRef<number>(0);
   const handleBeforeAutoScroll = () => {
     programmaticScrollRef.current = true;
+    // Snapshot scrollY at the start of the programmatic window so the
+    // delta-threshold check below has a baseline to compare against.
+    if (typeof window !== "undefined") {
+      lastScrollYRef.current = window.scrollY;
+    }
     if (programmaticScrollTimerRef.current != null) {
       window.clearTimeout(programmaticScrollTimerRef.current);
     }
     programmaticScrollTimerRef.current = window.setTimeout(() => {
       programmaticScrollRef.current = false;
       programmaticScrollTimerRef.current = null;
-    }, 600);
+    }, 800);
   };
   useEffect(() => {
     if (!analyzing) return;
+    // PR Q: ignore scrolls smaller than this many pixels — iOS Safari
+    // emits 1-3px synthetic scrolls on viewport resize / address-bar
+    // collapse that previously tripped the guard.
+    const SCROLL_DELTA_PX = 10;
+    lastScrollYRef.current =
+      typeof window !== "undefined" ? window.scrollY : 0;
     const flagManual = () => {
       // Wheel / touch / keyboard events ARE always user-initiated, so
       // ignore the programmaticScrollRef gate here.
       setUserScrolledManually(true);
     };
     const onScroll = () => {
-      if (programmaticScrollRef.current) return;
+      if (programmaticScrollRef.current) {
+        // Keep tracking the moving baseline so the first user scroll
+        // AFTER the programmatic window is measured from the chip's
+        // settled position, not the pre-scroll page position.
+        lastScrollYRef.current = window.scrollY;
+        return;
+      }
+      const y = window.scrollY;
+      const delta = Math.abs(y - lastScrollYRef.current);
+      lastScrollYRef.current = y;
+      if (delta < SCROLL_DELTA_PX) return;
       setUserScrolledManually(true);
     };
     const SCROLL_KEYS = new Set([
@@ -483,6 +525,35 @@ export default function Scan() {
           await consumeSseStream(streamResp.body, (event) => {
             if (event?.type === "stage" && typeof event.stage === "string") {
               applyStageEvent(event.stage, event.status as ChipStatus);
+              // PR Q — surface the inline parallel picker as soon as
+              // stage 2 completes. The server attaches detected
+              // variant identity to the event's `data` field; we
+              // store it so the picker renders alongside the chip
+              // stack while stages 3/4 are still in flight. If a
+              // later analyze stage corrects the identity, future
+              // events with a different `data.variant` will update
+              // this same state in place and the picker mutates
+              // rather than re-mounting.
+              if (
+                event.stage === "detecting_parallel" &&
+                event.status === "completed" &&
+                event.data &&
+                typeof event.data === "object"
+              ) {
+                const d = event.data as Partial<InlineParallelData>;
+                setInlineParallel({
+                  variant:
+                    typeof d.variant === "string" && d.variant.length > 0
+                      ? d.variant
+                      : null,
+                  foilType:
+                    typeof d.foilType === "string" && d.foilType.length > 0
+                      ? d.foilType
+                      : null,
+                  confidence:
+                    typeof d.confidence === "number" ? d.confidence : null,
+                });
+              }
             } else if (event?.type === "result") {
               captured = {
                 status: typeof event.status === "number" ? event.status : 200,
@@ -768,7 +839,16 @@ export default function Scan() {
               </p>
             )}
             {analyzing && (
-              <div className="mt-4">
+              <div className="mt-4 space-y-3">
+                {inlineParallel && (
+                  <InlineParallelPicker
+                    variant={inlineParallel.variant}
+                    foilType={inlineParallel.foilType}
+                    confidence={inlineParallel.confidence}
+                    autoScrollEnabled={!userScrolledManually}
+                    onBeforeAutoScroll={handleBeforeAutoScroll}
+                  />
+                )}
                 <ScanProgressChips
                   stages={progressStages}
                   autoScrollEnabled={!userScrolledManually}

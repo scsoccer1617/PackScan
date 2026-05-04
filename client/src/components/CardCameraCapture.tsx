@@ -72,11 +72,16 @@ interface CardCameraCaptureProps {
 }
 
 // Fraction of the 2.5:3.5 guide that the slab-label strip occupies in
-// GRADED mode. PSA / BGS / SGC / CGC labels print at ~15-20% of slab
-// height; 18% is a good middle so the model can read the label fields
-// without including too much of the card body, and the card-body crop
-// still covers the whole front including the bottom border.
-const GRADED_LABEL_HEIGHT_FRAC = 0.18;
+// GRADED mode. PSA / BGS / SGC / CGC labels print at ~22% of the
+// overall slab height (slab is ~3.18"×4.30" with a ~0.95" tall label
+// strip on top of the 2.5"×3.5" card window). 0.22 keeps the label
+// crop tight while leaving the card-body crop covering the full front
+// border including the bottom edge.
+//
+// PR Q — bumped from 0.18 → 0.22 to match the corrected
+// graded-aspect guide below; the tall guide reveals the full slab,
+// so the proportional label slice grows accordingly.
+const GRADED_LABEL_HEIGHT_FRAC = 0.22;
 
 // Lighting / blur thresholds. Tuned against a small set of indoor /
 // table-top dealer scans. Luminance is on the standard 0-255 range; blur
@@ -166,7 +171,21 @@ function meanLuminance(imageData: ImageData): number {
 // `WIDTH_FRAC` is derived at runtime because the CSS uses
 // `min(72%, calc(60vh * 2.5/3.5))`, so we measure the rendered guide box
 // directly rather than re-implementing that math in JS.
-const GUIDE_ASPECT = 2.5 / 3.5;
+// Raw (ungraded) cards are 2.5"×3.5" — aspect ~0.714. Graded slabs
+// are taller (PSA outer ~3.18"×4.30", aspect ~0.74) but the visible
+// label strip pushes the SLAB+LABEL extent to ~2.5"×4.5" (aspect
+// ~0.556) once you account for the way users hold the slab in the
+// frame. PR Q switches the GRADED guide to that taller aspect so the
+// label region is visible on screen — the previous shared 2.5/3.5
+// guide invited users to align the *card body* inside the guide,
+// which cropped the label out of frame entirely.
+const GUIDE_ASPECT_RAW = 2.5 / 3.5;
+const GUIDE_ASPECT_GRADED = 2.5 / 4.5;
+// Backwards-compatible alias for the raw aspect — kept as
+// `GUIDE_ASPECT` because some downstream code (and inline CSS calc()
+// strings) still reference the constant by name. New code should
+// pick the right one explicitly off the mode prop.
+const GUIDE_ASPECT = GUIDE_ASPECT_RAW;
 
 // PR #164: crop matches the visible guide rect exactly — no padding.
 // PR #163 used 8% breathing room, which left fingers/sleeve/table visible
@@ -1112,8 +1131,15 @@ export default function CardCameraCapture({
                 aria-hidden
                 className="relative"
                 style={{
-                  width: 'min(72%, calc(60vh * 2.5 / 3.5))',
-                  aspectRatio: `${GUIDE_ASPECT}`,
+                  // PR Q — switch aspect & width-cap by capture mode.
+                  // GRADED uses a TALLER guide (2.5/4.5) so the slab
+                  // fits with its label visible above the card; the
+                  // height-cap formula uses the same aspect so the
+                  // box stays vertically centered on tall phones.
+                  width: mode === 'graded'
+                    ? 'min(64%, calc(78vh * 2.5 / 4.5))'
+                    : 'min(72%, calc(60vh * 2.5 / 3.5))',
+                  aspectRatio: `${mode === 'graded' ? GUIDE_ASPECT_GRADED : GUIDE_ASPECT_RAW}`,
                   // Massive box-shadow paints the dim everywhere the
                   // element doesn't cover. spread is large enough to
                   // reach past any reasonable viewport without us having
@@ -1129,8 +1155,10 @@ export default function CardCameraCapture({
                 ref={guideRef}
                 className="relative"
                 style={{
-                  width: 'min(72%, calc(60vh * 2.5 / 3.5))',
-                  aspectRatio: `${GUIDE_ASPECT}`,
+                  width: mode === 'graded'
+                    ? 'min(64%, calc(78vh * 2.5 / 4.5))'
+                    : 'min(72%, calc(60vh * 2.5 / 3.5))',
+                  aspectRatio: `${mode === 'graded' ? GUIDE_ASPECT_GRADED : GUIDE_ASPECT_RAW}`,
                 }}
               >
                 {/* Soft full outline — low-opacity so it reads as a guide,
