@@ -45,6 +45,34 @@ const COPYRIGHT_MARKERS = [
   /\bTOPPS\s+COMPANY\b/i,
 ];
 
+// Vintage subset / leaderboard back wordmarks. Cards in these subsets carry
+// none of the usual back signals — no per-line stat header (the layout is a
+// leaderboard or feature box, not a year-by-year stat grid), no bio prefix,
+// and the legal strip often reads "TOPPS CHEWING GUM" rather than the
+// "TOPPS COMPANY" string the copyright markers expect. The 1986 Topps NL
+// Leaders Valenzuela back ("604 1986 NL LEADERS VICTORIES …") was the
+// motivating example — without this signal it scored 0 and classified as
+// `unknown`, which let position-default route the leaderboard side as the
+// front. Each pattern is anchored to a SINGLE LINE so flowing prose
+// elsewhere on the card cannot trigger a false positive (the audit
+// specifically called out the "MANAGER" word, which is also a fielding
+// position abbreviation that shows up in stat-row prose).
+const SUBSET_BACK_MARKERS: { name: string; rx: RegExp }[] = [
+  { name: 'LEADERS', rx: /^.*\bLEADERS\b.*$/im },
+  { name: 'RECORD BREAKERS', rx: /^.*\bRECORD\s+BREAKERS?\b.*$/im },
+  { name: 'ALL-STAR', rx: /^.*\bALL[-\s]?STAR\b.*$/im },
+  { name: 'FUTURE STARS', rx: /^.*\bFUTURE\s+STARS?\b.*$/im },
+  { name: 'TEAM LEADERS', rx: /^.*\bTEAM\s+LEADERS\b.*$/im },
+  // Manager: only when it appears as a banner-style heading with little else
+  // on the line (≤6 tokens). Avoids false positives on stat-row prose like
+  // "MANAGERIAL RECORD" paragraphs or "former manager" mentions.
+  { name: 'MANAGER', rx: /^\s*(?:[A-Z0-9.''\-]+\s+){0,5}MANAGER(?:\s+[A-Z0-9.''\-]+){0,5}\s*$/m },
+  { name: 'TURN BACK THE CLOCK', rx: /^.*\bTURN\s+BACK\s+THE\s+CLOCK\b.*$/im },
+  { name: 'IN ACTION', rx: /^.*\bIN\s+ACTION\b.*$/im },
+  { name: 'BIG LEAGUE BROTHERS', rx: /^.*\bBIG\s+LEAGUE\s+BROTHERS\b.*$/im },
+  { name: 'WORLD SERIES', rx: /^.*\bWORLD\s+SERIES\b.*$/im },
+];
+
 // Common per-sport stat abbreviations that appear together in a header row.
 // We don't require a specific sport — any mix is a back-side indicator.
 const STAT_HEADER_TOKENS = new Set<string>([
@@ -73,6 +101,7 @@ export interface SideClassification {
     bioPrefixLines: number;
     copyrightHits: number;
     statHeaderTokens: number;
+    subsetMarkerHits: number;
     totalWords: number;
   };
 }
@@ -123,6 +152,20 @@ function countCopyrightHits(text: string): number {
 }
 
 /**
+ * Find subset/leaderboard back wordmarks. Returns the list of marker names
+ * that matched, in the order they appear in SUBSET_BACK_MARKERS. Each marker
+ * regex is line-anchored (multiline `^…$`) so flowing prose mentioning one
+ * of these words elsewhere on the card cannot trigger a false positive.
+ */
+function findSubsetBackMarkers(text: string): string[] {
+  const hits: string[] = [];
+  for (const { name, rx } of SUBSET_BACK_MARKERS) {
+    if (rx.test(text)) hits.push(name);
+  }
+  return hits;
+}
+
+/**
  * Classify a single card image's OCR text as back vs front.
  *
  * The scoring is deliberately simple and additive so the weights can be
@@ -140,13 +183,14 @@ export function classifyCardSide(ocrText: string): SideClassification {
       verdict: 'unknown',
       confidence: 0,
       signals: [],
-      debug: { bioPrefixLines: 0, copyrightHits: 0, statHeaderTokens: 0, totalWords: 0 },
+      debug: { bioPrefixLines: 0, copyrightHits: 0, statHeaderTokens: 0, subsetMarkerHits: 0, totalWords: 0 },
     };
   }
 
   const bioPrefixLines = countBioPrefixLines(text);
   const copyrightHits = countCopyrightHits(text);
   const statHeaderTokens = countStatHeaderTokens(text);
+  const subsetMarkers = findSubsetBackMarkers(text);
   const totalWords = text.split(/\s+/).filter(Boolean).length;
 
   // Back-score is a soft sum in [0, 1]. Each signal caps its own contribution
@@ -175,6 +219,18 @@ export function classifyCardSide(ocrText: string): SideClassification {
   } else if (copyrightHits === 1) {
     backScore += 0.12;
     signals.push('copyright(1)');
+  }
+
+  // Vintage subset/leaderboard wordmark — a single banner-style hit on its
+  // own line is enough to lift backScore past the 0.35 floor when no other
+  // signal is firing (a Future Stars or Turn Back The Clock back may carry
+  // nothing else recognizable to the classifier). Weighted to clear the
+  // floor on its own; multiple hits stack but cap to avoid pegging the
+  // score from one OCR pass that detected the same banner twice.
+  if (subsetMarkers.length > 0) {
+    const contribution = subsetMarkers.length >= 2 ? 0.45 : 0.35;
+    backScore += contribution;
+    signals.push(`subset_back("${subsetMarkers[0]}")`);
   }
 
   // Long text lean — backs are dense with prose + stats. A page with > 60
@@ -211,6 +267,6 @@ export function classifyCardSide(ocrText: string): SideClassification {
     verdict,
     confidence: Number(confidence.toFixed(2)),
     signals,
-    debug: { bioPrefixLines, copyrightHits, statHeaderTokens, totalWords },
+    debug: { bioPrefixLines, copyrightHits, statHeaderTokens, subsetMarkerHits: subsetMarkers.length, totalWords },
   };
 }
