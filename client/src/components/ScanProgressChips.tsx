@@ -16,12 +16,24 @@ import { cn } from "@/lib/utils";
 // scrolled during this scan the caller suppresses auto-scroll for the
 // rest of the scan.
 
-export type ChipStatus = "pending" | "in_progress" | "completed";
+// PR R — `waiting` is a chip-only status used by the Scan page when stage 3
+// is gated behind the parallel-confirm modal. The server never emits this;
+// the client substitutes it locally while awaiting user confirmation.
+export type ChipStatus = "pending" | "in_progress" | "completed" | "waiting";
 
 export interface ScanProgressChipStage {
   id: string;
   label: string;
   status: ChipStatus;
+  /** PR R Item 3 — optional sub-text rendered after the main label.
+   *  Example: "(3/10)" or "Found 7 listings". The chip stays in its
+   *  current status; this is purely a label-augmenting field. */
+  detail?: string | null;
+  /** PR R Item 1 — optional inline node rendered directly under the
+   *  chip's row. Used to attach the InlineParallelPicker visually to
+   *  the chip 2 row. The node is rendered AFTER the chip's label row,
+   *  inside the same chip block, so it animates in with the chip. */
+  inlineSlot?: React.ReactNode;
 }
 
 interface ScanProgressChipsProps {
@@ -63,12 +75,14 @@ export function ScanProgressChips({
       aria-live="polite"
     >
       {stages.map((stage) => (
-        <Chip
-          key={stage.id}
-          stage={stage}
-          autoScrollEnabled={autoScrollEnabled}
-          onBeforeAutoScroll={onBeforeAutoScroll}
-        />
+        <div key={stage.id} className="flex flex-col gap-2">
+          <Chip
+            stage={stage}
+            autoScrollEnabled={autoScrollEnabled}
+            onBeforeAutoScroll={onBeforeAutoScroll}
+          />
+          {stage.inlineSlot}
+        </div>
       ))}
     </div>
   );
@@ -84,7 +98,7 @@ const Chip = forwardRef<HTMLDivElement, ChipProps>(function Chip(
   { stage, autoScrollEnabled, onBeforeAutoScroll },
   _outerRef,
 ) {
-  const { status, label } = stage;
+  const { status, label, detail } = stage;
   const ref = useRef<HTMLDivElement | null>(null);
   const mountedAutoScrolledRef = useRef(false);
 
@@ -135,13 +149,18 @@ const Chip = forwardRef<HTMLDivElement, ChipProps>(function Chip(
           ? "bg-white text-ink border-slate-200"
           : status === "in_progress"
             ? "bg-white text-ink border-slate-200"
-            : "bg-slate-50 text-slate-400 border-slate-200",
+            : status === "waiting"
+              ? "bg-amber-50 text-amber-900 border-amber-200"
+              : "bg-slate-50 text-slate-400 border-slate-200",
       )}
       data-testid={`scan-progress-chip-${stage.id}`}
       data-status={status}
     >
       <ChipIcon status={status} />
-      <span>{label}</span>
+      <span data-testid={`scan-progress-chip-${stage.id}-label`}>
+        {label}
+        {detail ? ` ${detail}` : ""}
+      </span>
     </div>
   );
 });
@@ -161,6 +180,15 @@ function ChipIcon({ status }: { status: ChipStatus }) {
   }
   if (status === "in_progress") {
     return <Loader2 className="h-4 w-4 animate-spin text-slate-500" />;
+  }
+  if (status === "waiting") {
+    // PR R Item 2 — distinct neutral pill; static (no spinner) so the
+    // user reads it as "blocked on you" rather than "still working".
+    return (
+      <span className="flex h-4 w-4 items-center justify-center">
+        <span className="h-2 w-2 rounded-full bg-amber-500" />
+      </span>
+    );
   }
   return (
     <span className="flex h-4 w-4 items-center justify-center">
