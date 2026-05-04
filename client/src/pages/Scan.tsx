@@ -31,6 +31,7 @@ import { isLikelyBlurry } from "@shared/sharpness";
 import {
   ScanProgressChips,
   DEFAULT_SCAN_STAGES,
+  SCAN_STAGE_LABELS,
   type ScanProgressChipStage,
   type ChipStatus,
 } from "@/components/ScanProgressChips";
@@ -155,25 +156,113 @@ export default function Scan() {
   const [backCameraSignal, setBackCameraSignal] = useState<number>(0);
   const [frontCameraSignal, setFrontCameraSignal] = useState<number>(0);
   const [analyzing, setAnalyzing] = useState<boolean>(false);
-  // PR H — chip-stack progress for the single-card scan flow. Initialized
-  // with all stages pending; the streaming analyze route updates each
-  // stage's status as the server hits its milestones. Reset on every
-  // analyze invocation.
+  // PR H + PR P — chip-stack progress for the single-card scan flow.
+  // PR P changed the pre-PR-P "render 4 pending chips up front" model to
+  // a progressive reveal: chips mount only as their stage's first event
+  // (`in_progress`) arrives. Reset to an empty array on every analyze
+  // invocation so each scan starts with no chips visible.
   const [progressStages, setProgressStages] = useState<ScanProgressChipStage[]>(
-    () => DEFAULT_SCAN_STAGES.map((s) => ({ ...s })),
+    [],
   );
-  const resetProgressStages = () =>
-    setProgressStages(DEFAULT_SCAN_STAGES.map((s) => ({ ...s })));
-  const updateStageStatus = (id: string, status: ChipStatus) => {
-    setProgressStages((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, status } : s)),
-    );
+  const resetProgressStages = () => setProgressStages([]);
+  // Apply the stage event from the server stream. If a chip with this
+  // id doesn't exist yet, append a fresh one in the incoming status —
+  // this is what makes the chips appear one-at-a-time as `in_progress`
+  // events fire. Existing chips just get their status updated, so the
+  // in_progress → completed transition reuses the same chip (and the
+  // same DOM ref — important so the auto-scroll mount-time effect
+  // doesn't re-fire on completion).
+  const applyStageEvent = (id: string, status: ChipStatus) => {
+    setProgressStages((prev) => {
+      const idx = prev.findIndex((s) => s.id === id);
+      if (idx >= 0) {
+        const next = prev.slice();
+        next[idx] = { ...next[idx], status };
+        return next;
+      }
+      const label = SCAN_STAGE_LABELS[id] ?? id;
+      return [...prev, { id, label, status }];
+    });
   };
+  // Legacy non-streaming fallback: on success, mint the full 4-stage
+  // list in `completed` so the user still sees the work finished. This
+  // path runs when the streaming sibling isn't available; chips appear
+  // in one batch rather than progressively, which is acceptable for
+  // the rare fallback case.
   const completeAllStages = () => {
-    setProgressStages((prev) =>
-      prev.map((s) => ({ ...s, status: "completed" as const })),
+    setProgressStages(
+      DEFAULT_SCAN_STAGES.map((s) => ({ ...s, status: "completed" as const })),
     );
   };
+
+  // PR P — auto-scroll guard. When chips mount they call
+  // `scrollIntoView({ block: 'nearest' })` so the active chip stays
+  // visible if the page has scrolled past it. The first time the user
+  // takes a manual scroll action during a scan, we flip the guard and
+  // suppress further auto-scrolls for the rest of THIS scan. The flag
+  // is reset at the start of every analyze invocation.
+  const [userScrolledManually, setUserScrolledManually] = useState(false);
+  // Programmatic scroll flag — set true just before each
+  // chip.scrollIntoView call, cleared ~600ms later. The user-scroll
+  // detector below ignores any scroll events that fire while this is
+  // true, so the smooth-scroll animation triggered by us doesn't trip
+  // the manual-scroll guard. We listen for `wheel`, `touchmove`, and
+  // keyboard scroll keys (PageDown/Space/Arrows) AS WELL as the
+  // scroll event so user input that hasn't yet caused a scroll
+  // (e.g. a wheel tick during a still-in-flight programmatic scroll)
+  // still reliably flips the guard.
+  const programmaticScrollRef = useRef(false);
+  const programmaticScrollTimerRef = useRef<number | null>(null);
+  const handleBeforeAutoScroll = () => {
+    programmaticScrollRef.current = true;
+    if (programmaticScrollTimerRef.current != null) {
+      window.clearTimeout(programmaticScrollTimerRef.current);
+    }
+    programmaticScrollTimerRef.current = window.setTimeout(() => {
+      programmaticScrollRef.current = false;
+      programmaticScrollTimerRef.current = null;
+    }, 600);
+  };
+  useEffect(() => {
+    if (!analyzing) return;
+    const flagManual = () => {
+      // Wheel / touch / keyboard events ARE always user-initiated, so
+      // ignore the programmaticScrollRef gate here.
+      setUserScrolledManually(true);
+    };
+    const onScroll = () => {
+      if (programmaticScrollRef.current) return;
+      setUserScrolledManually(true);
+    };
+    const SCROLL_KEYS = new Set([
+      "PageDown",
+      "PageUp",
+      "ArrowDown",
+      "ArrowUp",
+      "Home",
+      "End",
+      " ",
+      "Spacebar",
+    ]);
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (SCROLL_KEYS.has(e.key)) setUserScrolledManually(true);
+    };
+    window.addEventListener("wheel", flagManual, { passive: true });
+    window.addEventListener("touchmove", flagManual, { passive: true });
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      window.removeEventListener("wheel", flagManual);
+      window.removeEventListener("touchmove", flagManual);
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("scroll", onScroll);
+      if (programmaticScrollTimerRef.current != null) {
+        window.clearTimeout(programmaticScrollTimerRef.current);
+        programmaticScrollTimerRef.current = null;
+      }
+      programmaticScrollRef.current = false;
+    };
+  }, [analyzing]);
 
   // RAW (default) ↔ GRADED toggle. Persisted across visits so users that
   // primarily scan slabs don't have to flip the switch every time. Default
@@ -368,6 +457,10 @@ export default function Scan() {
       // fall back to the legacy non-streaming route and tick all chips
       // green when its JSON response lands.
       resetProgressStages();
+      // PR P — auto-scroll guard resets per-scan. The user must
+      // manually scroll DURING this scan to suppress auto-scroll; a
+      // prior scan's manual-scroll does not carry over.
+      setUserScrolledManually(false);
       let result: any = null;
       let httpStatus = 200;
       let usedStreaming = false;
@@ -389,7 +482,7 @@ export default function Scan() {
           let captured: { status: number; body: any } | null = null;
           await consumeSseStream(streamResp.body, (event) => {
             if (event?.type === "stage" && typeof event.stage === "string") {
-              updateStageStatus(event.stage, event.status as ChipStatus);
+              applyStageEvent(event.stage, event.status as ChipStatus);
             } else if (event?.type === "result") {
               captured = {
                 status: typeof event.status === "number" ? event.status : 200,
@@ -661,7 +754,7 @@ export default function Scan() {
             >
               {analyzing ? (
                 <>
-                  <RotateCw className="w-5 h-5 animate-spin" /> Analyzing…
+                  <RotateCw className="w-5 h-5 animate-spin" /> Processing
                 </>
               ) : (
                 <>
@@ -676,7 +769,11 @@ export default function Scan() {
             )}
             {analyzing && (
               <div className="mt-4">
-                <ScanProgressChips stages={progressStages} />
+                <ScanProgressChips
+                  stages={progressStages}
+                  autoScrollEnabled={!userScrolledManually}
+                  onBeforeAutoScroll={handleBeforeAutoScroll}
+                />
               </div>
             )}
           </div>

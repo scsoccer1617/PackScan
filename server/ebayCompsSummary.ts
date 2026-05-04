@@ -82,6 +82,16 @@ export interface CompsSummaryOptions {
    * filter the legitimate target listings out).
    */
   excludeParallels?: boolean;
+  /**
+   * PR P: optional abort signal so callers that pre-fire the summary
+   * (e.g. dualSideOCR.ts kicking off the lookup as soon as parallel
+   * detection lands) can cancel the in-flight Browse fetch when the
+   * identity later changes (search-verify gate corrects player/year/
+   * cardNumber and the pre-fired query goes stale). When the signal
+   * aborts before the cache write happens, no cache entry is written
+   * — a fresh call with the corrected identity will run normally.
+   */
+  signal?: AbortSignal;
 }
 
 interface CacheEntry {
@@ -260,10 +270,27 @@ export async function getCompsSummary(
         'X-EBAY-C-MARKETPLACE-ID': 'EBAY_US',
       },
       timeout: 20000,
+      // PR P: pre-fire callers pass an AbortSignal so the in-flight
+      // Browse fetch can be cancelled when search-verify later
+      // corrects identity. axios honors signal in its config.
+      signal: opts?.signal,
     });
     const items: any[] = resp.data?.itemSummaries ?? [];
     result = computeSummary(items, query, opts);
   } catch (err: any) {
+    // PR P: aborts come back as ERR_CANCELED / CanceledError. Don't
+    // log those at warn (they're expected when a pre-fired identity
+    // is invalidated) and don't write the empty placeholder to cache
+    // — a follow-up call with the corrected identity must hit eBay
+    // for real, not read this canceled-empty result.
+    if (
+      err?.code === 'ERR_CANCELED'
+      || err?.name === 'CanceledError'
+      || err?.name === 'AbortError'
+      || opts?.signal?.aborted
+    ) {
+      throw err;
+    }
     console.warn('[ebayCompsSummary] fetch failed:', err?.response?.data || err?.message || err);
     result = {
       mean: null,

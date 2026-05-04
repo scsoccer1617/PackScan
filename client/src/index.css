@@ -244,3 +244,29 @@
     }
   }
 }
+
+/* PR P — single-card scan progress chip mount animation. Subtle 150ms
+   fade + 4px Y translate so progressively-revealed chips don't pop in.
+   Matches the existing transition vocabulary (durations 200–500ms,
+   slate/ink palette). prefers-reduced-motion is honored — users with
+   that setting see the chip mount in place with no animation. */
+@layer utilities {
+  @keyframes scan-chip-mount-kf {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  .scan-chip-mount {
+    animation: scan-chip-mount-kf 150ms ease-out both;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .scan-chip-mount {
+      animation: none;
+    }
+  }
+}
