@@ -32,12 +32,17 @@ interface Props {
    *  ⇒ "no parallel / treat as base". The caller is responsible for
    *  threading this onto the cardData and unblocking stage 3. */
   onSave: (parallel: string) => void;
+  /** PR V hotfix — fired when the user dismisses via the built-in
+   *  close X or ESC. Mirrors saving an empty (base) value so the
+   *  chip-3 gate is always released. */
+  onDismiss?: () => void;
 }
 
 export default function StreamingManualParallelDialog({
   open,
   cardDescription,
   onSave,
+  onDismiss,
 }: Props) {
   const [freetext, setFreetext] = useState("");
 
@@ -53,13 +58,26 @@ export default function StreamingManualParallelDialog({
   };
 
   return (
-    <Sheet open={open}>
+    <Sheet
+      open={open}
+      onOpenChange={(next) => {
+        // PR V hotfix — X / ESC dismissal routes through here. Treat
+        // it like saving an empty parallel (base card) so the
+        // chip-3 gate ALWAYS resolves. Without this, the dialog
+        // closes visually but `manualModalOpen` and the resolver
+        // ref stay stale, and the analyze flow hangs forever
+        // waiting for confirmation.
+        if (!next) (onDismiss ?? (() => onSave('')))();
+      }}
+    >
       <SheetContent
         side="bottom"
         className="max-h-[90dvh] flex flex-col rounded-t-2xl"
-        onInteractOutside={() => {
-          /* indefinite block — outside taps do nothing while stage 3
-             waits on this confirmation. */
+        onInteractOutside={(e) => {
+          // Outside taps stay no-ops; only X/ESC routes into the
+          // dismiss path so we never silently lose the user's
+          // in-progress text.
+          e.preventDefault();
         }}
         data-testid="streaming-manual-parallel-dialog"
       >
