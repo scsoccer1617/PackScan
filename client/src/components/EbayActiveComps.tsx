@@ -62,6 +62,30 @@ interface EbayActiveCompsProps {
    */
   initialComps?: { query: string; active: ActiveListing[] } | null;
   /**
+   * PR W: pre-fired CompsSummary (mean + ≤10 BIN listings + query). When
+   * present and the live query parts still match `compsQuery`, we render
+   * its mean as the hero price, its query as the "Browse on eBay" URL,
+   * and its listings as the Price tab — no mount-time fetch. This is
+   * the same pool the server computed for chip 3, so the chip and the
+   * result page agree.
+   *
+   * Pre-PR-W the result page ALWAYS re-fetched /api/ebay/comps/summary
+   * on mount, which uses a different eBay code path than chip 3
+   * (pickerSearch=best-match vs getCompsSummary=newlyListed/BIN-only).
+   * The two pools could and did disagree, leaving chip 3 green but the
+   * hero price + URL blank for parallel scans (the 5 IDs in PR W).
+   * Null = pre-fire timed out / aborted / identity incomplete; we fall
+   * back to the legacy mount-time fetch.
+   */
+  initialSummary?: {
+    mean: number | null;
+    median: number | null;
+    count: number;
+    query: string;
+    currency: string;
+    listings: ActiveListing[];
+  } | null;
+  /**
    * BR-2: the exact query parts the server hashed eBay against. We compare
    * this to the live `cardData`-derived parts on every render; if they
    * diverge (e.g. user picked a different parallel, edited the card) we
@@ -145,6 +169,7 @@ export default function EbayActiveComps({
   cardData,
   onAverage,
   initialComps,
+  initialSummary,
   compsQuery,
 }: EbayActiveCompsProps) {
   const liveParts = buildQueryParts(cardData);
@@ -175,16 +200,35 @@ export default function EbayActiveComps({
   const embeddedAuthoritative =
     !!initialComps && serverKey !== null && serverKey === liveKey;
 
+  // PR W: pre-fired summary fast-path. When the server already computed
+  // /summary against the same identity tuple (chip 3's pool) and the
+  // live query parts still match, render its listings/query/mean
+  // directly — no mount-time fetch. Same `embeddedAuthoritative` gate
+  // as BR-2: liveKey === serverKey.
+  const summaryAuthoritative =
+    !!initialSummary && serverKey !== null && serverKey === liveKey;
+
   // PR K: BR-2 fast-path becomes display-only — it lets us paint *some*
   // listings on first frame while the summary fetch is in flight. The
   // mean and the *canonical* listings still come from the summary
   // response so the Price tab and the hero share one pool.
-  const [loading, setLoading] = useState(true);
+  // PR W: when initialSummary is authoritative, use ITS listings and
+  // query as the initial state (canonical pool already computed by the
+  // server) and skip loading entirely.
+  const [loading, setLoading] = useState(!summaryAuthoritative);
   const [listings, setListings] = useState<ActiveListing[]>(
-    embeddedAuthoritative && initialComps ? initialComps.active : [],
+    summaryAuthoritative && initialSummary
+      ? initialSummary.listings
+      : embeddedAuthoritative && initialComps
+        ? initialComps.active
+        : [],
   );
   const [query, setQuery] = useState(
-    embeddedAuthoritative && initialComps ? initialComps.query : "",
+    summaryAuthoritative && initialSummary
+      ? initialSummary.query
+      : embeddedAuthoritative && initialComps
+        ? initialComps.query
+        : "",
   );
   const [error, setError] = useState<string | null>(null);
 
@@ -198,6 +242,28 @@ export default function EbayActiveComps({
       setQuery("");
       setError(null);
       onAverage?.({ average: 0, median: null, mean: null, query: "", count: 0 });
+      return;
+    }
+
+    // PR W: short-circuit when the server's pre-fired summary covers
+    // this exact identity. Bubble the mean + query up so the hero shows
+    // price and the "Browse on eBay" URL, and skip the redundant
+    // mount-time fetch that previously masked these for parallel scans.
+    if (summaryAuthoritative && initialSummary) {
+      console.log(
+        `[holo-ebay] summary fast-path: count=${initialSummary.count} mean=${initialSummary.mean} query="${initialSummary.query}"`,
+      );
+      setLoading(false);
+      setListings(initialSummary.listings);
+      setQuery(initialSummary.query || "");
+      setError(null);
+      onAverage?.({
+        average: initialSummary.mean ?? 0,
+        median: initialSummary.median,
+        mean: initialSummary.mean,
+        query: initialSummary.query || "",
+        count: initialSummary.count,
+      });
       return;
     }
 
@@ -260,9 +326,13 @@ export default function EbayActiveComps({
     };
     // Re-fetch whenever any field that flows into the query changes —
     // critically `foilType`, which is the picker's output. The liveKey
-    // dependency captures all of them in a single string.
+    // dependency captures all of them in a single string. PR W:
+    // summaryAuthoritative is also part of the gate; when the user
+    // picks a different parallel post-mount, liveKey diverges from
+    // serverKey, summaryAuthoritative flips to false, and the legacy
+    // mount-time fetch fires.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [liveKey, serverKey]);
+  }, [liveKey, serverKey, summaryAuthoritative]);
 
   return (
     <Card>

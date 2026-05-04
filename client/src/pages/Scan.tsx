@@ -1066,6 +1066,22 @@ export default function Scan() {
       const streamingYes =
         manualAnsweredInStream ||
         (streamingAnswered && confirmedVariantRef.current !== null);
+      // PR W: trace the eBay payload received from the server so we can
+      // tell at-a-glance whether the result page will render a price +
+      // URL (summary present + count > 0) or fall back to the legacy
+      // mount-time fetch (summary null).
+      console.log('[holo-ebay] result received:', {
+        hasComps: !!result.data?.comps,
+        compsActiveCount: Array.isArray(result.data?.comps?.active)
+          ? result.data.comps.active.length
+          : 0,
+        hasSummary: !!result.data?.summary,
+        summaryCount: result.data?.summary?.count ?? null,
+        summaryMean: result.data?.summary?.mean ?? null,
+        summaryQuery: result.data?.summary?.query ?? null,
+        compsQuery: result.data?.compsQuery ?? null,
+        foilType: result.data?.foilType ?? null,
+      });
       setAll({
         frontImage,
         backImage,
@@ -1079,6 +1095,10 @@ export default function Scan() {
         // identity), timed out at 1500ms, or errored — EbayActiveComps then
         // falls back to its mount-time fetch.
         initialComps: result.data?.comps ?? null,
+        // PR W: pre-fired CompsSummary so EbayActiveComps renders price +
+        // "Browse on eBay" URL from the server-computed pool instead of
+        // re-fetching through a different eBay code path on mount.
+        initialSummary: result.data?.summary ?? null,
         compsQuery: result.data?.compsQuery ?? null,
         streamingConfirmAnswered: streamingAnswered,
         parallelConfirmedInStream: streamingAnswered ? streamingYes : null,

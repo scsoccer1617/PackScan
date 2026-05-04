@@ -1517,6 +1517,7 @@ export default function ScanResult() {
               // first paint with no network round-trip. On parallel pick /
               // edit / mismatch / null, it falls back to the legacy fetch.
               initialComps={flow.initialComps}
+              initialSummary={flow.initialSummary}
               compsQuery={flow.compsQuery}
               onAverage={({ average, query, count }) =>
                 setPriceInfo({
