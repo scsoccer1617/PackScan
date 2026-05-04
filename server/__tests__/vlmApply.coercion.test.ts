@@ -10,7 +10,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { normalizeSetValue, isBaseCollection, applyGeminiToCombined } from '../vlmApply';
+import { normalizeSetValue, isBaseCollection, applyGeminiToCombined, normalizeSport } from '../vlmApply';
 
 let failed = 0;
 function check(name: string, fn: () => void) {
@@ -122,6 +122,26 @@ check('does not clobber existing subset descriptor', () => {
   // gemini.subset takes precedence at the bottom of applyGeminiToCombined,
   // and the gate refuses to overwrite an existing _geminiSubset.
   assert.equal(combined._geminiSubset, 'Team Leaders');
+});
+
+// ── normalizeSport ───────────────────────────────────────────────────────
+
+check('normalizeSport maps lowercase known sport to canonical case', () => {
+  assert.equal(normalizeSport('baseball'), 'Baseball');
+});
+check('normalizeSport maps UPPERCASE known sport to canonical case', () => {
+  assert.equal(normalizeSport('FOOTBALL'), 'Football');
+});
+check('normalizeSport falls back to sentence-case for unknown sport', () => {
+  assert.equal(normalizeSport('Cricket'), 'Cricket');
+  assert.equal(normalizeSport('cricket'), 'Cricket');
+});
+check('normalizeSport returns empty for empty/whitespace input', () => {
+  assert.equal(normalizeSport(''), '');
+  assert.equal(normalizeSport('   '), '');
+});
+check('normalizeSport trims surrounding whitespace', () => {
+  assert.equal(normalizeSport('  Hockey  '), 'Hockey');
 });
 
 if (failed > 0) {
