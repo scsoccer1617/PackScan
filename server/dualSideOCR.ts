@@ -707,6 +707,37 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
       }
     }
 
+    // ── VLM-empty-identity provenance flag ───────────────────────────────
+    // Distinguishes "Gemini supplied the core identity fields" from "the
+    // legacy combiner / CardDB surname-salvage loop fabricated values that
+    // happen to look complete." The bulk confidence gate has no other way
+    // to tell these apart — `analysis.brand|year|cardNumber|player` look
+    // identical regardless of provenance — so without this flag a fully-
+    // fabricated row passes auto_save with composite=100 (see the
+    // bulk-39/40 audit: Cal Ripken → 2026 Ultra #11, Canseco → 1997 Topps
+    // #246, Valenzuela → 1987 Topps #580 Krukow). The user's stated
+    // preference: "I would rather have an empty card row that goes to
+    // review than a confidently wrong row with a $0.99 eBay price slapped
+    // on it." Computed AFTER the overlay so partial Gemini results
+    // (multi-player subsets where players[] is populated but `player`
+    // string is null, etc.) still resolve correctly.
+    const vlmSuppliedAllIdentity =
+      !!geminiResult
+      && typeof geminiResult.year === 'number'
+      && Number.isFinite(geminiResult.year)
+      && !!geminiResult.brand?.trim()
+      && !!geminiResult.cardNumber?.toString().trim()
+      && (
+        !!geminiResult.player?.trim()
+        || (Array.isArray(geminiResult.players)
+          && geminiResult.players.some(
+            (p: any) => p?.firstName?.trim() || p?.lastName?.trim(),
+          ))
+      );
+    if (!vlmSuppliedAllIdentity) {
+      (combinedResult as any)._vlmEmptyIdentity = true;
+    }
+
     // ── BR-2: kick off eBay comps in parallel with the rest of the
     // analyze finalisation (ensureRequiredFields, audit logging, scanLogger
     // flush). Today the client fires this AFTER mounting /result and
