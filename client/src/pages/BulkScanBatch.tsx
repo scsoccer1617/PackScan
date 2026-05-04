@@ -79,22 +79,41 @@ interface BatchResponse {
   phase1Done?: boolean;
 }
 
-// Human-friendly labels for the flags the confidence gate emits.
+// Action-oriented labels for the flags the confidence gate emits — wording
+// tells the dealer WHAT TO DO to self-correct, not just what's wrong.
 const REASON_LABELS: Record<string, string> = {
-  missing_player_name: "Player name missing",
-  variation_ambiguous: "Ambiguous variation",
-  collection_ambiguous: "Ambiguous collection",
-  card_number_low_confidence: "Card number unsure",
-  low_scp_match: "Low SportsCardsPro match",
-  no_scp_match: "No SportsCardsPro match",
-  unpaired_trailing_page: "Unpaired page",
-  pair_classifier_same_side_front: "Both pages look like fronts",
-  pair_classifier_same_side_back: "Both pages look like backs",
-  pair_unpaired_trailing_page: "Unpaired page",
+  // Identity / OCR
+  vlm_empty_identity: "Couldn't read card — try a sharper photo",
+  player_name_missing: "Add player name",
+  missing_player_name: "Add player name", // legacy alias
+  card_number_missing: "Add card number",
+  card_number_low_confidence: "Verify card number",
+  brand_missing: "Add brand",
+  year_missing: "Add year",
+  variation_ambiguous: "Pick the correct parallel/variation",
+  collection_ambiguous: "Pick the correct set",
+
+  // Pricing
+  low_scp_match: "Verify card details — weak price match",
+  no_scp_match: "Verify card details — no price match found",
+  card_db_uncorroborated: "Verify card — not found in database",
+
+  // Pairing
+  pair_classifier_same_side_front: "Both pages look like fronts — re-pair",
+  pair_classifier_same_side_back: "Both pages look like backs — re-pair",
+  pair_classifier_unknown: "Confirm front/back order",
+  pair_unpaired_trailing_page: "Missing matching front/back — re-scan",
+  unpaired_trailing_page: "Missing matching front/back — re-scan", // legacy alias
+
+  // Operational
+  quota_exhausted: "Daily scan limit reached — try again tomorrow",
 };
 
 function reasonLabel(r: string): string {
   if (REASON_LABELS[r]) return REASON_LABELS[r];
+  if (r.startsWith("sheet_append_failed")) {
+    return "Couldn't save to spreadsheet — check connection and retry";
+  }
   // Best-effort humanize for anything new.
   return r.replace(/[_:]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
