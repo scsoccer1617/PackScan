@@ -98,8 +98,15 @@ const Chip = forwardRef<HTMLDivElement, ChipProps>(function Chip(
     const node = ref.current;
     if (!node || typeof node.scrollIntoView !== "function") return;
     try {
+      // PR Q — flip the programmatic-scroll guard BEFORE calling
+      // scrollIntoView (used to be after) so the very first scroll
+      // event the smooth animation fires lands inside the suppression
+      // window. block: 'center' (not 'nearest') so the page actively
+      // tracks DOWN as new chips reveal — 'nearest' becomes a no-op
+      // when the chip is technically still in viewport above the
+      // fold, which is the iOS Safari regression we saw on PR P.
       onBeforeAutoScroll?.();
-      node.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      node.scrollIntoView({ behavior: "smooth", block: "center" });
     } catch {
       // Older browsers may throw on the options object — fall back to
       // the no-arg form so the chip is at least scrolled into the

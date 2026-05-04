@@ -41,6 +41,18 @@ export interface StageEvent {
   stage: StageId;
   status: StageStatus;
   label: string;
+  /** PR Q — optional payload attached to certain stage transitions so
+   *  the client can surface intermediate UI BEFORE the final result
+   *  event arrives. Currently set only on
+   *  `detecting_parallel` → `completed` to render the inline parallel
+   *  picker as soon as stage 2 lands. Shape is intentionally narrow:
+   *  the client only needs the detected variant identity and an
+   *  optional confidence indicator. */
+  data?: {
+    variant?: string | null;
+    foilType?: string | null;
+    confidence?: number | null;
+  };
 }
 
 const STAGE_LABELS: Record<StageId, string> = {
@@ -52,13 +64,20 @@ const STAGE_LABELS: Record<StageId, string> = {
 
 export type StageEmitter = (event: StageEvent) => void;
 
-function emitStage(req: any, stage: StageId, status: StageStatus): void {
+function emitStage(
+  req: any,
+  stage: StageId,
+  status: StageStatus,
+  data?: StageEvent['data'],
+): void {
   const fn: StageEmitter | undefined = typeof req?.onStage === 'function'
     ? req.onStage
     : undefined;
   if (!fn) return;
   try {
-    fn({ stage, status, label: STAGE_LABELS[stage] });
+    const event: StageEvent = { stage, status, label: STAGE_LABELS[stage] };
+    if (data) event.data = data;
+    fn(event);
   } catch (err) {
     // Never let the emitter break the analyze pipeline.
     console.warn('[stage-event] emitter threw (ignored):', err);
@@ -759,7 +778,23 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
     // there is no parallel to detect.
     emitStage(req, 'analyzing_card', 'completed');
     emitStage(req, 'detecting_parallel', 'in_progress');
-    emitStage(req, 'detecting_parallel', 'completed');
+    // PR Q — attach the detected variant identity to the completed
+    // event so the client can render the inline parallel picker
+    // before stages 3/4 fire. The full picker UI on /result is
+    // unaffected; this is a pre-result preview only.
+    {
+      const variantStr =
+        ((combinedResult as any).variant ?? '').toString().trim() || null;
+      const foilStr =
+        ((combinedResult as any).foilType ?? '').toString().trim() || null;
+      emitStage(req, 'detecting_parallel', 'completed', {
+        variant: variantStr,
+        foilType: foilStr,
+        confidence: typeof (combinedResult as any).confidence === 'number'
+          ? (combinedResult as any).confidence
+          : null,
+      });
+    }
 
     // ── VLM-empty-identity provenance flag ───────────────────────────────
     // Distinguishes "Gemini supplied the core identity fields" from "the
