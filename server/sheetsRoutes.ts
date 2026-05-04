@@ -173,6 +173,10 @@ export function registerSheetRoutes(app: Express) {
       frontImageUrl: z.string().optional().nullable(),
       backImageUrl: z.string().optional().nullable(),
       ebaySearchUrl: z.string().optional().nullable(),
+      // Variant-detection flag forwarded from the analyze response. The
+      // server appended schema accepts 'Yes' / 'No' / '' / null so older
+      // clients that don't forward the field stay valid.
+      potentialVariant: z.enum(['Yes', 'No', '']).nullish(),
       _scanTracking: scanTrackingSchema.optional(),
     }),
   });
@@ -269,6 +273,7 @@ export function registerSheetRoutes(app: Express) {
         frontImageUrl: absolutize(frontStored),
         backImageUrl: absolutize(backStored),
         ebaySearchUrl: ebayUrl,
+        potentialVariant: c.potentialVariant ?? null,
       }, parsed.sheetId);
 
       // Best-effort log to user_scans. The sheet write is the user's primary

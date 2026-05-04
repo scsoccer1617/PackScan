@@ -19,6 +19,7 @@ export const SHEET_HEADERS = [
   // sheet reader maps by position). Populated from GRADED-mode scans;
   // RAW-mode rows write empty strings so existing rows stay readable.
   'Graded', 'Grading company', 'Grade', 'Grade qualifier', 'Cert #',
+  'Potential Variant',
 ];
 
 export class NotConnectedError extends Error {
@@ -304,6 +305,9 @@ export interface CardRowInput {
   numericalGrade?: number | string | null;
   gradeQualifier?: string | null;
   certificationNumber?: string | null;
+  // Variant-detection flag derived from the active eBay listing titles in
+  // dualSideOCR.ts. 'Yes' / 'No' / '' (blank when no listings to scan).
+  potentialVariant?: 'Yes' | 'No' | '' | null;
 }
 
 function fmtBool(b: boolean | null | undefined) { return b ? 'Yes' : 'No'; }
@@ -388,6 +392,7 @@ export function buildRow(input: CardRowInput): (string | number)[] {
       : '',
     input.gradeQualifier ?? '',
     input.certificationNumber ?? '',
+    input.potentialVariant ?? '',
   ];
 }
 
@@ -432,6 +437,9 @@ export interface SheetCardRow {
   numericalGrade: number | null;
   gradeQualifier: string | null;
   certificationNumber: string | null;
+  // Append-only column 24 — variant-detection flag pulled from active
+  // eBay titles. Legacy rows that pre-date the column parse to null.
+  potentialVariant: 'Yes' | 'No' | '' | null;
 }
 
 function parseBool(v: string | undefined): boolean {
@@ -547,6 +555,11 @@ function parseSheetRow(
     })(),
     gradeQualifier: get(22) || null,
     certificationNumber: get(23) || null,
+    potentialVariant: (() => {
+      const v = get(24);
+      if (v === 'Yes' || v === 'No') return v;
+      return null;
+    })(),
   };
 }
 

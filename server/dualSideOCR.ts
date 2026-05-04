@@ -1263,6 +1263,11 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
         : variantDetection.isPotentialVariant
           ? 'Yes'
           : 'No';
+    // Surface the flag on the combined result so downstream callers (the
+    // analyze response → /api/sheets/append, and the bulk processor's
+    // CardRowInput build) can read `card.potentialVariant` without
+    // recomputing. The field is spread into the response payload below.
+    (finalResult as any).potentialVariant = potentialVariantForLog;
 
     // Append a scan-log row to the configured Sheet (no-op when the
     // sink is disabled or unconfigured — see scanLogger.ts). Fire-and-
