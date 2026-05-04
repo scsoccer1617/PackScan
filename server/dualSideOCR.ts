@@ -889,6 +889,75 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
           }
         })()
       : Promise.resolve(null);
+
+    // ── PR P: pre-fire /ebay/comps/summary on parallel-detected ──────
+    // Stage 2 ("Detecting parallel") just landed on combinedResult, so
+    // the identity tuple (player, year, brand, set, cardNumber,
+    // parallel) is fully formed. The single-scan UI's Price tab fires
+    // `/api/ebay/comps/summary?...` from EbayActiveComps's mount-time
+    // effect AFTER the user navigates to /result; that fetch reads
+    // through the same in-process cache `getCompsSummary` writes here,
+    // so kicking off the call now warms the cache and the post-mount
+    // call is a hit (no extra eBay round-trip on /result).
+    //
+    // The pre-fire query mirrors the routes.ts summary handler so the
+    // cache key the client will look up matches what we wrote. If the
+    // search-verify gate later corrects identity (rare — only fires on
+    // low-confidence Gemini results), we abort the in-flight pre-fire
+    // and re-fire with the corrected identity below, before the
+    // pipeline emits stage 4 ("Getting price") completed.
+    const preFireController = ebayIdentity ? new AbortController() : null;
+    let preFireQuerySig: string | null = null;
+    let preFirePromise: Promise<unknown> | null = null;
+    if (ebayIdentity && preFireController) {
+      try {
+        const { getCompsSummary } = await import('./ebayCompsSummary.js');
+        // Build the picker query the same way the /summary route does
+        // — same args the client will send through EbayActiveComps.
+        const summaryQuery = buildPickerQuery({
+          year: ebayIdentity.year,
+          brand: ebayIdentity.brand,
+          set: ebayIdentity.set,
+          cardNumber: ebayIdentity.cardNumber,
+          player: ebayIdentity.player,
+          subset: subsetForQuery,
+          parallel: ebayIdentity.parallel,
+          excludeParallels: !ebayIdentity.parallel && !ebayIdentity.gradeKeyword,
+          gradeKeyword: ebayIdentity.gradeKeyword || undefined,
+        });
+        const lastNameForSummary = ebayIdentity.player.split(/\s+/).pop() ?? null;
+        const summaryOpts = {
+          requireCardNumber: ebayIdentity.cardNumber,
+          requirePlayerLastName: lastNameForSummary,
+          requireGrade: ebayIdentity.gradeKeyword || null,
+          excludeParallels: !ebayIdentity.parallel && !ebayIdentity.gradeKeyword,
+          signal: preFireController.signal,
+        };
+        // Sig is purely a "did identity change?" check — not a cache
+        // key. We compare against the post-search-verify identity to
+        // decide whether to abort + re-fire.
+        preFireQuerySig = `${summaryQuery}||${summaryOpts.requireCardNumber}||${summaryOpts.requirePlayerLastName ?? ''}||${summaryOpts.requireGrade ?? ''}||${summaryOpts.excludeParallels ? '1' : '0'}`;
+        console.log('[ebay-prefire] kicking off summary pre-fire:', summaryQuery);
+        preFirePromise = getCompsSummary(summaryQuery, summaryOpts).catch((err: any) => {
+          // Aborts are expected when search-verify changes identity.
+          // Other errors are non-fatal — the post-mount client call
+          // will still hit /summary directly.
+          if (
+            err?.code === 'ERR_CANCELED'
+            || err?.name === 'CanceledError'
+            || err?.name === 'AbortError'
+          ) {
+            console.log('[ebay-prefire] aborted (identity changed post-verify)');
+            return null;
+          }
+          console.warn('[ebay-prefire] failed (non-fatal):', err?.message || err);
+          return null;
+        });
+      } catch (err: any) {
+        console.warn('[ebay-prefire] setup failed (non-fatal):', err?.message || err);
+      }
+    }
+
     let ebayQuerySnapshot = ebayIdentity
       ? {
           year: ebayIdentity.year,
@@ -1255,6 +1324,59 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
         console.error('[searchVerify] failed:', err?.message ?? err);
         // Intentionally swallow — the un-corrected zero-match result
         // still ships to the client.
+      }
+    }
+
+    // ── PR P: reconcile pre-fired summary against post-verify identity ─
+    // The pre-fire above kicked off a /ebay/comps/summary call with the
+    // pre-search-verify identity. If search-verify mutated brand / year
+    // / set / cardNumber, the pre-fired result is for a different card
+    // — abort it and re-fire so the warm-cache entry the client reads
+    // post-mount matches what `ebayQuerySnapshot` says it should be.
+    if (preFireController && ebayIdentity && ebayQuerySnapshot) {
+      try {
+        const finalSubsetForQuery = ebayQuerySnapshot.useSubsetInComps
+          ? ebayQuerySnapshot.subset
+          : '';
+        const finalQuery = buildPickerQuery({
+          year: ebayQuerySnapshot.year,
+          brand: ebayQuerySnapshot.brand,
+          set: ebayQuerySnapshot.set,
+          cardNumber: ebayQuerySnapshot.cardNumber,
+          player: ebayQuerySnapshot.player,
+          subset: finalSubsetForQuery,
+          parallel: ebayQuerySnapshot.parallel,
+          excludeParallels: !ebayQuerySnapshot.parallel && !ebayIdentity.gradeKeyword,
+          gradeKeyword: ebayIdentity.gradeKeyword || undefined,
+        });
+        const finalLast = ebayQuerySnapshot.player.split(/\s+/).pop() ?? null;
+        const finalSig = `${finalQuery}||${ebayQuerySnapshot.cardNumber}||${finalLast ?? ''}||${ebayIdentity.gradeKeyword || ''}||${(!ebayQuerySnapshot.parallel && !ebayIdentity.gradeKeyword) ? '1' : '0'}`;
+        if (preFireQuerySig && finalSig !== preFireQuerySig) {
+          console.log('[ebay-prefire] identity changed post-verify — aborting + re-firing');
+          preFireController.abort();
+          // Drop the prior promise (already swallowed its abort error).
+          preFirePromise = null;
+          // Re-fire with the corrected identity so the post-mount
+          // client call still gets a warm cache hit.
+          try {
+            const { getCompsSummary } = await import('./ebayCompsSummary.js');
+            preFirePromise = getCompsSummary(finalQuery, {
+              requireCardNumber: ebayQuerySnapshot.cardNumber,
+              requirePlayerLastName: finalLast,
+              requireGrade: ebayIdentity.gradeKeyword || null,
+              excludeParallels: !ebayQuerySnapshot.parallel && !ebayIdentity.gradeKeyword,
+            }).catch((err: any) => {
+              console.warn('[ebay-prefire] re-fire failed (non-fatal):', err?.message || err);
+              return null;
+            });
+          } catch (err: any) {
+            console.warn('[ebay-prefire] re-fire setup failed (non-fatal):', err?.message || err);
+          }
+        }
+      } catch (err: any) {
+        // Reconciliation is best-effort — never break the analyze
+        // pipeline because we couldn't decide whether to re-fire.
+        console.warn('[ebay-prefire] reconcile failed (non-fatal):', err?.message || err);
       }
     }
 
