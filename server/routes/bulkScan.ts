@@ -947,7 +947,7 @@ async function repriceItem(
     requireCardNumber: cardNumber,
     requirePlayerLastName: isMultiPlayer ? null : lastName,
   });
-  const averagePrice = summary.median ?? 0;
+  const averagePrice = summary.mean ?? 0;
 
   // Persist new comps onto the analysisResult snapshot. The append path
   // (PR #199 protected) is unchanged — this only mutates the DB jsonb.

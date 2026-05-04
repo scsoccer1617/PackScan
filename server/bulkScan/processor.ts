@@ -946,7 +946,7 @@ async function processItem(
     if (active.length === 0 && (analysis as any)._noActiveListings === true) {
       analysis.estimatedValue = null as any;
     } else {
-      analysis.estimatedValue = summary.median ?? null as any;
+      analysis.estimatedValue = summary.mean ?? null as any;
     }
     analysis.ebayResults = active;
     // Outbound "View on eBay" link for the Sheet row. We deliberately do
