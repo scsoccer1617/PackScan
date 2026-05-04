@@ -22,6 +22,8 @@ import {
   itemPrice,
   computeSummary,
   ensureBinFilter,
+  appendBaseScanNegatives,
+  buildBrowseQuery,
 } from '../ebayCompsSummary';
 
 let failed = 0;
@@ -196,6 +198,98 @@ check('ensureBinFilter: empty / null input → empty string', () => {
   assert.equal(ensureBinFilter(''), '');
   assert.equal(ensureBinFilter(null), '');
   assert.equal(ensureBinFilter(undefined), '');
+});
+
+// ── PR M: buildBrowseQuery + appendBaseScanNegatives ──────────────────────
+
+const PR_M_TOKENS = ['-PSA', '-BGS', '-SGC', '-CGC', '-graded', '-lot', '-set'];
+
+check('buildBrowseQuery: includes the 7 PR M negatives when excludeParallels is undefined (default)', () => {
+  const q = buildBrowseQuery('2026 Topps Series One #1 Judge');
+  for (const tok of PR_M_TOKENS) assert.ok(q.includes(tok), `missing ${tok} in ${q}`);
+});
+
+check('buildBrowseQuery: includes the 7 PR M negatives when excludeParallels is true', () => {
+  const q = buildBrowseQuery('q', { excludeParallels: true });
+  for (const tok of PR_M_TOKENS) assert.ok(q.includes(tok), `missing ${tok} in ${q}`);
+});
+
+check('buildBrowseQuery: omits PR M negatives when excludeParallels === false', () => {
+  const q = buildBrowseQuery('q', { excludeParallels: false });
+  for (const tok of PR_M_TOKENS) assert.ok(!q.includes(tok), `unexpected ${tok} in ${q}`);
+  // Sanity: the raw query is preserved verbatim (no chain at all).
+  assert.equal(q, 'q');
+});
+
+check('buildBrowseQuery: preserves pre-PR-M base negatives alongside the new tokens', () => {
+  const q = buildBrowseQuery('q');
+  // Spot-check a couple of pre-PR-M tokens to make sure we didn't drop them.
+  assert.ok(q.includes('-autograph'));
+  assert.ok(q.includes('-refractor'));
+  assert.ok(q.includes('-parallel'));
+});
+
+check('buildBrowseQuery: empty input returns empty string', () => {
+  assert.equal(buildBrowseQuery(''), '');
+  assert.equal(buildBrowseQuery('   '), '');
+});
+
+check('appendBaseScanNegatives: appends all 7 tokens to _nkw', () => {
+  const url = 'https://www.ebay.com/sch/i.html?_nkw=2026+Topps+Series+One&_sop=10&LH_BIN=1';
+  const out = appendBaseScanNegatives(url);
+  for (const tok of PR_M_TOKENS) {
+    assert.ok(out.includes(encodeURIComponent(tok).replace(/%20/g, '+')) || out.includes(tok),
+      `missing ${tok} in ${out}`);
+  }
+  // Other params untouched and order preserved.
+  assert.ok(out.includes('_sop=10'));
+  assert.ok(out.includes('LH_BIN=1'));
+  assert.ok(out.startsWith('https://www.ebay.com/sch/i.html?_nkw='));
+});
+
+check('appendBaseScanNegatives: idempotent — running twice equals running once', () => {
+  const url = 'https://www.ebay.com/sch/i.html?_nkw=foo&_sop=10';
+  const once = appendBaseScanNegatives(url);
+  const twice = appendBaseScanNegatives(once);
+  assert.equal(twice, once);
+});
+
+check('appendBaseScanNegatives: idempotent vs already-encoded space (%20)', () => {
+  // If a prior pass encoded as %20, the second pass must not re-add tokens.
+  const seeded =
+    'https://www.ebay.com/sch/i.html?_nkw=foo%20-PSA%20-BGS%20-SGC%20-CGC%20-graded%20-lot%20-set';
+  const out = appendBaseScanNegatives(seeded);
+  // No duplicate appends — every token must appear exactly once in _nkw.
+  const nkw = out.split('?')[1].split('&').find((p) => p.startsWith('_nkw='))!;
+  for (const tok of PR_M_TOKENS) {
+    const re = new RegExp(tok.replace(/[-]/g, '\\-'), 'g');
+    const matches = nkw.match(re) || [];
+    assert.equal(matches.length, 1, `${tok} appears ${matches.length} times in ${nkw}`);
+  }
+});
+
+check('appendBaseScanNegatives: empty / null / undefined → empty string', () => {
+  assert.equal(appendBaseScanNegatives(''), '');
+  assert.equal(appendBaseScanNegatives(null), '');
+  assert.equal(appendBaseScanNegatives(undefined), '');
+});
+
+check('appendBaseScanNegatives: URL with no query string returned unchanged', () => {
+  // No _nkw to mutate — leave the URL alone.
+  const url = 'https://www.ebay.com/sch/i.html';
+  assert.equal(appendBaseScanNegatives(url), url);
+});
+
+check('appendBaseScanNegatives: URL with query but no _nkw returned unchanged', () => {
+  const url = 'https://www.ebay.com/sch/i.html?_sop=10&LH_BIN=1';
+  assert.equal(appendBaseScanNegatives(url), url);
+});
+
+check('appendBaseScanNegatives: preserves hash fragment', () => {
+  const url = 'https://www.ebay.com/sch/i.html?_nkw=foo&_sop=10#anchor';
+  const out = appendBaseScanNegatives(url);
+  assert.ok(out.endsWith('#anchor'));
+  assert.ok(out.includes('-PSA'));
 });
 
 if (failed > 0) {

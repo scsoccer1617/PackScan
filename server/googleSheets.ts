@@ -4,7 +4,7 @@ import { eq, and, desc } from 'drizzle-orm';
 import { db } from '../db';
 import { users, userSheets, type User, type UserSheet } from '../shared/schema';
 import { withSheetsWriteGuard } from './sheetsRateLimit';
-import { ensureBinFilter } from './ebayCompsSummary';
+import { appendBaseScanNegatives, ensureBinFilter } from './ebayCompsSummary';
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_OAUTH_CLIENT_ID;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
@@ -390,7 +390,18 @@ export function buildRow(input: CardRowInput): (string | number)[] {
     // computed against. Idempotent — no-op if the URL already carries
     // LH_BIN. The protected URL builder in server/ebayService.ts is
     // untouched; this transform happens at the cell write boundary.
-    safeCellValue(ensureBinFilter(input.ebaySearchUrl)),
+    // PR M: when the row is a BASE scan (no parallel/foil, not graded,
+    // not autographed — the same gate ebayCompsSummary uses for
+    // `excludeParallels !== false`), also append the 7 base-scan
+    // negatives so the click-through pool matches the picker pool.
+    safeCellValue(((): string => {
+      const url = ensureBinFilter(input.ebaySearchUrl);
+      const isBaseScan =
+        !((input.foilType ?? '').toString().trim()) &&
+        !input.isGraded &&
+        !input.isAutographed;
+      return isBaseScan ? appendBaseScanNegatives(url) : url;
+    })()),
     // Graded-card columns. Empty strings on RAW scans so the cells stay
     // visually blank in the sheet rather than showing "No" everywhere.
     input.isGraded ? 'Yes' : '',

@@ -132,7 +132,38 @@ export function itemPrice(item: any): number {
 const BASE_NEGATIVE_KEYWORDS =
   '-autograph -refractor -xfractor -rainbow -mojo -holo -relic ' +
   '-memorabilia -"game-used" -"game used" -patch -jersey -auto ' +
-  '-autographed -autographs -autos -signed -parallel';
+  '-autographed -autographs -autos -signed -parallel ' +
+  // PR M: graded slabs + multi-card / set-fill noise. Users reported
+  // PSA/BGS/SGC/CGC slabs, "lot of N" listings, and "complete your
+  // set" listings inflating the mean and cluttering the Price tab on
+  // base-card scans. Only applied when excludeParallels !== false —
+  // graded/parallel scans want their actual variant.
+  '-PSA -BGS -SGC -CGC -graded -lot -set';
+
+/**
+ * PR M: the 7 negatives added on top of the pre-PR-M base chain. Kept
+ * as a separate constant so the URL post-process (which has to mutate
+ * `_nkw` in an already-built URL) can append exactly the same tokens.
+ */
+const PR_M_BASE_NEGATIVES = ['-PSA', '-BGS', '-SGC', '-CGC', '-graded', '-lot', '-set'];
+
+/**
+ * PR K / PR M: build the Browse `q` string. When `excludeParallels` is
+ * true (the default — base-card scans), the base negative-keyword chain
+ * is concatenated onto the raw query. When false (the caller scanned a
+ * known parallel/auto/relic), the raw query is returned unchanged.
+ *
+ * Exported for unit testing — production code calls `getCompsSummary`.
+ */
+export function buildBrowseQuery(
+  rawQuery: string,
+  opts?: CompsSummaryOptions,
+): string {
+  const baseQuery = (rawQuery || '').replace(/\s{2,}/g, ' ').trim();
+  if (!baseQuery) return '';
+  const excludeParallels = opts?.excludeParallels !== false;
+  return excludeParallels ? `${baseQuery} ${BASE_NEGATIVE_KEYWORDS}` : baseQuery;
+}
 
 /**
  * Map a raw Browse `itemSummary` to the listing shape the UI renders.
@@ -169,14 +200,7 @@ export async function getCompsSummary(
     };
   }
 
-  // PR K: append the base-card negative chain into the Browse `q` so
-  // the small (10-listing) pool isn't burned by unrelated parallels.
-  // Default is "exclude" — callers scanning a known parallel pass
-  // `excludeParallels: false` to keep the parallel-matching listings.
-  const excludeParallels = opts?.excludeParallels !== false;
-  const query = excludeParallels
-    ? `${baseQuery} ${BASE_NEGATIVE_KEYWORDS}`
-    : baseQuery;
+  const query = buildBrowseQuery(baseQuery, opts);
 
   const key = cacheKey(query, opts);
   const cached = cache.get(key);
@@ -277,6 +301,58 @@ export function ensureBinFilter(url: string | null | undefined): string {
   if (!url) return '';
   if (/[?&]LH_BIN=/i.test(url)) return url;
   return url.includes('?') ? `${url}&LH_BIN=1` : `${url}?LH_BIN=1`;
+}
+
+/**
+ * PR M: append the 7 base-scan negatives (`-PSA -BGS -SGC -CGC -graded
+ * -lot -set`) to the `_nkw` query param of an eBay search URL so the
+ * "View on eBay" click-through pool matches the picker pool.
+ *
+ * Only call this for BASE scans (caller's responsibility — same gate as
+ * `excludeParallels !== false`). Graded/parallel scans must NOT pass
+ * their URLs through this transform; they want their actual variant.
+ *
+ * Idempotent: each token is only appended if not already present in
+ * `_nkw`. Running twice produces the same URL as running once. Tokens
+ * are joined to the existing `_nkw` value with `+` (eBay accepts both
+ * `+` and `%20` as the space encoding). Safe on URLs with or without
+ * an existing query string; if the URL has no `_nkw` param at all
+ * (unexpected for an eBay search URL) the URL is returned unchanged.
+ */
+export function appendBaseScanNegatives(url: string | null | undefined): string {
+  if (!url) return '';
+  const qIdx = url.indexOf('?');
+  if (qIdx < 0) return url;
+  const head = url.slice(0, qIdx);
+  const queryAndHash = url.slice(qIdx + 1);
+  const hashIdx = queryAndHash.indexOf('#');
+  const queryStr = hashIdx >= 0 ? queryAndHash.slice(0, hashIdx) : queryAndHash;
+  const hash = hashIdx >= 0 ? queryAndHash.slice(hashIdx) : '';
+  const params = queryStr.split('&');
+  let touched = false;
+  for (let i = 0; i < params.length; i += 1) {
+    const eq = params[i].indexOf('=');
+    if (eq < 0) continue;
+    const name = params[i].slice(0, eq);
+    if (name !== '_nkw') continue;
+    const rawValue = params[i].slice(eq + 1);
+    // eBay accepts both `+` and `%20` for spaces in `_nkw`. Normalize
+    // when checking for presence so the idempotency guard catches
+    // tokens already encoded either way.
+    const decoded = rawValue.replace(/\+/g, ' ');
+    let nextValue = rawValue;
+    for (const tok of PR_M_BASE_NEGATIVES) {
+      if (decoded.toLowerCase().includes(tok.toLowerCase())) continue;
+      nextValue = `${nextValue}+${encodeURIComponent(tok).replace(/%20/g, '+')}`;
+    }
+    if (nextValue !== rawValue) {
+      params[i] = `${name}=${nextValue}`;
+      touched = true;
+    }
+    break;
+  }
+  if (!touched) return url;
+  return `${head}?${params.join('&')}${hash}`;
 }
 
 /** Test/debug helper: drop the cache. Not exported on the wire. */
