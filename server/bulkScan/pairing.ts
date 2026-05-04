@@ -51,7 +51,7 @@ export interface DuplexFile {
   createdTime: string;
 }
 
-const EPSON_NAME_RE = /^(.+?)\((\d+)\)\.(jpe?g|png)$/i;
+export const EPSON_NAME_RE = /^(.+?)\((\d+)\)\.(jpe?g|png)$/i;
 
 export function groupFilesByDuplexBatch<F extends DuplexFile>(files: F[]): (F | null)[] {
   if (files.length === 0) return [];
@@ -136,24 +136,34 @@ export interface PairedScan<FileT> {
 /**
  * Pair pages using the position-based rule with classifier verification.
  *
- * Default rule: odd-indexed page (1, 3, 5, …) is the back of its pair;
- * the following even-indexed page is the front. We re-check each pair
- * against the classifier and apply two corrections:
+ * Default rule (Brother iPrint&Scan): odd-indexed page (1, 3, 5, …) is the
+ * back of its pair; the following even-indexed page is the front.
  *
- *   1. If the classifier says both pages are the same side (e.g. both
- *      look like backs), keep the position assignment but add a
- *      'classifier_disagrees' warning so review surfaces it.
- *   2. If positions N and N+1 were assigned (back, front) but the
- *      classifier is confident the order is actually (front, back), swap
- *      them inside the pair (front/back labels don't affect Drive file
- *      selection order downstream — just which side goes into which slot
- *      of the dual analyzer).
+ * Epson exception: when BOTH pages of the pair carry Epson-style filenames
+ * (`<prefix>(N).<ext>`), the user's Epson convention is the opposite —
+ * odd=front, even=back — so the position default is inverted to
+ * `(left=front, right=back)`. The classifier-override branches below are
+ * symmetric against whichever default applied, so the same verdict
+ * combinations produce correct outcomes either way.
+ *
+ * Corrections applied (independent of which default):
+ *
+ *   1. If the classifier confidently disagrees with the position default
+ *      (i.e. it says front is actually on the side we labelled back, and
+ *      vice versa), swap with a `swapped_by_classifier` warning.
+ *   2. If both pages classify as the same side, keep the position
+ *      assignment and flag `classifier_same_side_*` for review.
+ *   3. If at least one side is ambiguous, keep the position assignment
+ *      and flag `classifier_unknown` — the Gemini `frontImageIndex`
+ *      recovery path in `processor.ts` may still flip it.
  *
  * An odd number of pages leaves the final page paired with null and
  * flagged 'unpaired_trailing_page' — the processor will send it to
  * review as back-only so the dealer can complete it.
  */
-export function pairPages<FileT>(pages: ScanPage<FileT>[]): PairedScan<FileT>[] {
+export function pairPages<FileT extends { name?: string }>(
+  pages: ScanPage<FileT>[],
+): PairedScan<FileT>[] {
   const pairs: PairedScan<FileT>[] = [];
   for (let i = 0; i < pages.length; i += 2) {
     const left = pages[i];
@@ -170,23 +180,48 @@ export function pairPages<FileT>(pages: ScanPage<FileT>[]): PairedScan<FileT>[] 
       continue;
     }
 
+    // Detect Epson-style naming on BOTH pages. When both match, the user's
+    // scanner produces (1)=front, (2)=back — invert the position default.
+    // Mixed naming (one Epson, one not) falls back to the Brother default
+    // because we can't safely assume Epson convention applies.
+    const bothEpson =
+      typeof left.file.name === 'string' &&
+      typeof right.file.name === 'string' &&
+      EPSON_NAME_RE.test(left.file.name) &&
+      EPSON_NAME_RE.test(right.file.name);
+
     const warnings: string[] = [];
-    let back: ScanPage<FileT> = left;
-    let front: ScanPage<FileT> = right;
+    // Position-based default: Brother → (left=back, right=front);
+    // Epson → (left=front, right=back).
+    let back: ScanPage<FileT> = bothEpson ? right : left;
+    let front: ScanPage<FileT> = bothEpson ? left : right;
 
     const leftVerdict = left.classification.verdict;
     const rightVerdict = right.classification.verdict;
 
-    // Case A: classifier says the pair is reversed (front on the left,
-    // back on the right). Swap to honour the classifier — the Brother
-    // scanner occasionally feeds a sheet in the opposite direction when
-    // the first card in the stack is backwards.
-    if (leftVerdict === 'front' && rightVerdict === 'back') {
-      back = right;
-      front = left;
+    // Classifier verdict that DISAGREES with the position default → swap.
+    //   Brother default: (left=back, right=front). Disagreement looks like
+    //     leftVerdict='front' && rightVerdict='back'.
+    //   Epson default:   (left=front, right=back). Disagreement looks like
+    //     leftVerdict='back' && rightVerdict='front'.
+    const positionDisagreesBrother =
+      !bothEpson && leftVerdict === 'front' && rightVerdict === 'back';
+    const positionDisagreesEpson =
+      bothEpson && leftVerdict === 'back' && rightVerdict === 'front';
+    const positionAgreesBrother =
+      !bothEpson && leftVerdict === 'back' && rightVerdict === 'front';
+    const positionAgreesEpson =
+      bothEpson && leftVerdict === 'front' && rightVerdict === 'back';
+
+    if (positionDisagreesBrother || positionDisagreesEpson) {
+      // Swap: classifier says the pair is reversed relative to the
+      // position default. Flip back/front inside the pair.
+      const oldBack = back;
+      back = front;
+      front = oldBack;
       warnings.push('swapped_by_classifier');
-    } else if (leftVerdict === 'back' && rightVerdict === 'front') {
-      // Happy path — position and classifier agree. No warning.
+    } else if (positionAgreesBrother || positionAgreesEpson) {
+      // Happy path — position default and classifier agree. No warning.
     } else if (leftVerdict === rightVerdict && leftVerdict !== 'unknown') {
       // Both pages look like the same side. Two consecutive backs /
       // fronts usually means either a one-sided card in the stack or
