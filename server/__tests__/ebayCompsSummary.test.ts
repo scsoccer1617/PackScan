@@ -200,23 +200,65 @@ check('ensureBinFilter: empty / null input → empty string', () => {
   assert.equal(ensureBinFilter(undefined), '');
 });
 
-// ── PR M: buildBrowseQuery + appendBaseScanNegatives ──────────────────────
+// ── PR M / PR N: buildBrowseQuery + appendBaseScanNegatives ──────────────
 
-const PR_M_TOKENS = ['-PSA', '-BGS', '-SGC', '-CGC', '-graded', '-lot', '-set'];
+// PR N replaces PR M's bare `-set` token with three multi-word phrase
+// exclusions. The other 6 PR M tokens are unchanged.
+const PR_M_KEPT_TOKENS = ['-PSA', '-BGS', '-SGC', '-CGC', '-graded', '-lot'];
+const PR_N_PHRASES = ['-"complete your set"', '-"complete set"', '-"set break"'];
+const ALL_BASE_TOKENS = [...PR_M_KEPT_TOKENS, ...PR_N_PHRASES];
 
-check('buildBrowseQuery: includes the 7 PR M negatives when excludeParallels is undefined (default)', () => {
+check('buildBrowseQuery: includes the 6 kept PR M negatives when excludeParallels is undefined (default)', () => {
   const q = buildBrowseQuery('2026 Topps Series One #1 Judge');
-  for (const tok of PR_M_TOKENS) assert.ok(q.includes(tok), `missing ${tok} in ${q}`);
+  for (const tok of PR_M_KEPT_TOKENS) assert.ok(q.includes(tok), `missing ${tok} in ${q}`);
 });
 
-check('buildBrowseQuery: includes the 7 PR M negatives when excludeParallels is true', () => {
+check('buildBrowseQuery: includes the 6 kept PR M negatives when excludeParallels is true', () => {
   const q = buildBrowseQuery('q', { excludeParallels: true });
-  for (const tok of PR_M_TOKENS) assert.ok(q.includes(tok), `missing ${tok} in ${q}`);
+  for (const tok of PR_M_KEPT_TOKENS) assert.ok(q.includes(tok), `missing ${tok} in ${q}`);
 });
 
-check('buildBrowseQuery: omits PR M negatives when excludeParallels === false', () => {
+check('buildBrowseQuery: includes the 3 PR N phrase exclusions', () => {
+  const q = buildBrowseQuery('q');
+  for (const phrase of PR_N_PHRASES) {
+    assert.ok(q.includes(phrase), `missing ${phrase} in ${q}`);
+  }
+});
+
+check('buildBrowseQuery: PR N — does NOT contain the standalone `-set` token (PR M regression fix)', () => {
+  // PR M's broad `-set` filtered out legitimate "Base Set" listings.
+  // PR N replaced it with surgical phrases. The query must not contain
+  // a bare `-set` token any more.
+  const q = buildBrowseQuery('q');
+  // A bare `-set` would appear as the substring `-set ` (followed by a
+  // space) or at end-of-string. Both `-"set break"` (PR N phrase) and
+  // legitimate substrings like `-set"` survive — only the standalone
+  // hyphen-set with whitespace boundaries should be absent.
+  assert.equal(/(^|\s)-set(\s|$)/.test(q), false, `bare -set token still in ${q}`);
+});
+
+check('buildBrowseQuery: PR N regression — query for a Base Set scan does NOT exclude the word "set"', () => {
+  // A user scanning a "1992 Topps Base Set #156 Kenny Lofton" card
+  // should produce a query whose negatives target only spam phrases.
+  // The Browse `q` must still be willing to MATCH "Base Set" listings
+  // (Browse does NOT auto-exclude words inside negative phrases when
+  // those phrases are quoted multi-word). We assert the query does not
+  // contain a bare `-set` and that the legitimate "Base Set" string
+  // appears nowhere in the negative chain.
+  const q = buildBrowseQuery('1992 Topps Base Set #156 Kenny Lofton');
+  // The literal "Base Set" from the raw query is in `q` (positive part).
+  assert.ok(q.includes('Base Set'), 'positive query should preserve "Base Set"');
+  // No bare `-set` exclusion would clash with "Base Set" matching.
+  assert.equal(/(^|\s)-set(\s|$)/.test(q), false, 'bare -set must not appear');
+  // The PR N spam phrases are present.
+  for (const phrase of PR_N_PHRASES) {
+    assert.ok(q.includes(phrase), `missing ${phrase} in ${q}`);
+  }
+});
+
+check('buildBrowseQuery: omits all base negatives when excludeParallels === false', () => {
   const q = buildBrowseQuery('q', { excludeParallels: false });
-  for (const tok of PR_M_TOKENS) assert.ok(!q.includes(tok), `unexpected ${tok} in ${q}`);
+  for (const tok of ALL_BASE_TOKENS) assert.ok(!q.includes(tok), `unexpected ${tok} in ${q}`);
   // Sanity: the raw query is preserved verbatim (no chain at all).
   assert.equal(q, 'q');
 });
@@ -234,17 +276,61 @@ check('buildBrowseQuery: empty input returns empty string', () => {
   assert.equal(buildBrowseQuery('   '), '');
 });
 
-check('appendBaseScanNegatives: appends all 7 tokens to _nkw', () => {
+check('appendBaseScanNegatives: appends all kept PR M tokens + PR N phrases to _nkw', () => {
   const url = 'https://www.ebay.com/sch/i.html?_nkw=2026+Topps+Series+One&_sop=10&LH_BIN=1';
   const out = appendBaseScanNegatives(url);
-  for (const tok of PR_M_TOKENS) {
-    assert.ok(out.includes(encodeURIComponent(tok).replace(/%20/g, '+')) || out.includes(tok),
-      `missing ${tok} in ${out}`);
+  for (const tok of ALL_BASE_TOKENS) {
+    const enc = encodeURIComponent(tok).replace(/%20/g, '+');
+    assert.ok(
+      out.includes(enc) || out.includes(tok),
+      `missing ${tok} (encoded: ${enc}) in ${out}`,
+    );
   }
   // Other params untouched and order preserved.
   assert.ok(out.includes('_sop=10'));
   assert.ok(out.includes('LH_BIN=1'));
   assert.ok(out.startsWith('https://www.ebay.com/sch/i.html?_nkw='));
+});
+
+check('appendBaseScanNegatives: PR N — does NOT add a bare `-set` token to _nkw', () => {
+  const url = 'https://www.ebay.com/sch/i.html?_nkw=2026+Topps+Series+One';
+  const out = appendBaseScanNegatives(url);
+  const nkw = out.split('?')[1].split('&').find((p) => p.startsWith('_nkw='))!;
+  // After splitting on `+`, no fragment should equal `-set` (the bare
+  // PR M token). Note `-%22set+break%22` is split into `-%22set` and
+  // `break%22` by `+`-split, but that's fine — neither equals `-set`.
+  const fragments = nkw.split('+');
+  assert.equal(fragments.includes('-set'), false, `bare -set fragment in ${nkw}`);
+});
+
+check('appendBaseScanNegatives: PR N — strips legacy bare `-set` from a #269-era URL and adds new phrases', () => {
+  // A URL written by the previous PR (#269) would already contain `+-set`
+  // somewhere in `_nkw`. PR N's helper must strip that token (so the URL
+  // converges to the new chain) AND append the three phrase exclusions.
+  const seeded =
+    'https://www.ebay.com/sch/i.html?_nkw=2026+Topps+-PSA+-BGS+-SGC+-CGC+-graded+-lot+-set&_sop=10';
+  const out = appendBaseScanNegatives(seeded);
+  const nkw = out.split('?')[1].split('&').find((p) => p.startsWith('_nkw='))!;
+
+  // Bare -set must be gone.
+  const fragments = nkw.split('+');
+  assert.equal(fragments.includes('-set'), false, `bare -set still in ${nkw}`);
+
+  // The 6 kept PR M tokens are still there exactly once each.
+  for (const tok of PR_M_KEPT_TOKENS) {
+    const enc = encodeURIComponent(tok).replace(/%20/g, '+');
+    const matches = nkw.split(enc).length - 1;
+    assert.equal(matches, 1, `${tok} appears ${matches} times in ${nkw}`);
+  }
+
+  // The 3 new phrase exclusions are appended (encoded form).
+  for (const phrase of PR_N_PHRASES) {
+    const enc = encodeURIComponent(phrase).replace(/%20/g, '+');
+    assert.ok(nkw.includes(enc), `missing ${phrase} (encoded: ${enc}) in ${nkw}`);
+  }
+
+  // Other params untouched.
+  assert.ok(out.includes('_sop=10'));
 });
 
 check('appendBaseScanNegatives: idempotent — running twice equals running once', () => {
@@ -254,15 +340,24 @@ check('appendBaseScanNegatives: idempotent — running twice equals running once
   assert.equal(twice, once);
 });
 
-check('appendBaseScanNegatives: idempotent vs already-encoded space (%20)', () => {
-  // If a prior pass encoded as %20, the second pass must not re-add tokens.
+check('appendBaseScanNegatives: idempotent against the legacy #269-era URL after one converge', () => {
+  // First pass: strip legacy -set, add PR N phrases. Second pass: same.
   const seeded =
-    'https://www.ebay.com/sch/i.html?_nkw=foo%20-PSA%20-BGS%20-SGC%20-CGC%20-graded%20-lot%20-set';
+    'https://www.ebay.com/sch/i.html?_nkw=foo+-PSA+-BGS+-SGC+-CGC+-graded+-lot+-set';
+  const once = appendBaseScanNegatives(seeded);
+  const twice = appendBaseScanNegatives(once);
+  assert.equal(twice, once);
+});
+
+check('appendBaseScanNegatives: idempotent vs already-encoded space (%20)', () => {
+  // Pre-existing %20-encoded chain — second pass must not re-add tokens.
+  const seeded =
+    'https://www.ebay.com/sch/i.html?_nkw=foo%20-PSA%20-BGS%20-SGC%20-CGC%20-graded%20-lot';
   const out = appendBaseScanNegatives(seeded);
-  // No duplicate appends — every token must appear exactly once in _nkw.
   const nkw = out.split('?')[1].split('&').find((p) => p.startsWith('_nkw='))!;
-  for (const tok of PR_M_TOKENS) {
-    const re = new RegExp(tok.replace(/[-]/g, '\\-'), 'g');
+  for (const tok of PR_M_KEPT_TOKENS) {
+    // tok is e.g. `-PSA` → look for both `+-PSA` and `%20-PSA` count.
+    const re = new RegExp(`(\\+|%20)${tok.replace(/[-]/g, '\\-')}(?=\\+|%20|$)`, 'gi');
     const matches = nkw.match(re) || [];
     assert.equal(matches.length, 1, `${tok} appears ${matches.length} times in ${nkw}`);
   }
