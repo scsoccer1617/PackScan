@@ -167,6 +167,9 @@ export function registerSheetRoutes(app: Express) {
       foilType: z.string().optional().nullable(),
       subset: z.string().optional().nullable(),
       averagePrice: z.union([z.number(), z.string()]).optional().nullable(),
+      // When true the picker ran but returned zero active listings —
+      // column P is written as "No active listings" instead of blank.
+      noActiveListings: z.boolean().optional().nullable(),
       frontImageUrl: z.string().optional().nullable(),
       backImageUrl: z.string().optional().nullable(),
       ebaySearchUrl: z.string().optional().nullable(),
@@ -262,6 +265,7 @@ export function registerSheetRoutes(app: Express) {
         isNumbered: c.isNumbered ?? false,
         foilType: c.foilType ?? null,
         averagePrice: c.averagePrice ?? null,
+        noActiveListings: !!c.noActiveListings,
         frontImageUrl: absolutize(frontStored),
         backImageUrl: absolutize(backStored),
         ebaySearchUrl: ebayUrl,

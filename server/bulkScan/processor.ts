@@ -1050,6 +1050,7 @@ async function processItem(
       isNumbered: !!analysis.isNumbered,
       foilType: analysis.foilType || null,
       averagePrice: typeof analysis.estimatedValue === 'number' ? analysis.estimatedValue : null,
+      noActiveListings: !!embeddedComps && (embeddedComps.active?.length ?? 0) === 0,
       frontImageUrl: null,
       backImageUrl: null,
       ebaySearchUrl: typeof analysis.ebaySearchUrl === 'string' ? analysis.ebaySearchUrl : null,

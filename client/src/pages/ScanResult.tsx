@@ -1164,6 +1164,7 @@ export default function ScanResult() {
               backImage={backImage}
               scanTracking={scanTracking}
               initialDetected={initialDetected ?? undefined}
+              noActiveListings={!!priceInfo && priceInfo.count === 0}
             />
           </div>
         </div>

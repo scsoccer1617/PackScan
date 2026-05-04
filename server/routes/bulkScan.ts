@@ -965,6 +965,7 @@ async function repriceItem(
     ambiguous: false,
   };
   try {
+    const noActiveListings = active.length === 0;
     sheetUpdate = await updateAvgPriceForRow(
       userId,
       {
@@ -977,6 +978,7 @@ async function repriceItem(
         player: buildSheetPlayerCell(playersArr, playerName),
       },
       averagePrice,
+      { noActiveListings },
     );
     if (sheetUpdate.updated === 0 && playersArr.length > 1) {
       // Multi-player rows may have been saved as just the primary "First
@@ -985,6 +987,7 @@ async function repriceItem(
         userId,
         { year: yearStr, brand, cardNumber, player: playerName },
         averagePrice,
+        { noActiveListings },
       );
     }
   } catch (err: any) {
