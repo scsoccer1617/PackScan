@@ -10,17 +10,20 @@ const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
 
 // Column order mirrors the on-screen "Card Information" panel so the sheet
 // reads the same way the app does. Keep buildRow() in lock-step.
+//
+// Append-only EXCEPT for the one-time reorder in PR J (Potential Variant
+// moved from end → before Variant). Future additions remain append-only;
+// the sheet reader still maps by position, so any new column has to land
+// at the tail and the migrate helper has to clear the old slot.
 export const SHEET_HEADERS = [
   'Date scanned', 'Sport', 'Player', 'Year', 'Brand', 'Card #', 'CMP code',
-  'Set', 'Collection', 'Parallel', 'Serial #', 'Variant',
+  'Set', 'Collection', 'Parallel', 'Serial #',
+  'Potential Variant', 'Variant',
   'Rookie', 'Auto', 'Numbered',
   'Average eBay price', 'Front image link', 'Back image link', 'eBay search URL',
-  // Graded-card columns (append-only — never reorder existing entries, the
-  // sheet reader maps by position). Populated from GRADED-mode scans;
-  // RAW-mode rows write empty strings so existing rows stay readable.
   'Graded', 'Grading company', 'Grade', 'Grade qualifier', 'Cert #',
-  'Potential Variant',
 ];
+
 
 export class NotConnectedError extends Error {
   constructor() { super('User has not connected a Google account.'); }
@@ -358,7 +361,9 @@ export function buildRow(input: CardRowInput): (string | number)[] {
   } else {
     playerCell = (input.player ?? '').toString();
   }
-  // Order MUST match SHEET_HEADERS exactly.
+  // Order MUST match SHEET_HEADERS exactly. PR J: Potential Variant lives
+  // immediately before Variant (indices 11/12) so the two related columns
+  // sit side-by-side in the sheet.
   return [
     dateScanned,
     input.sport ?? '',
@@ -371,6 +376,7 @@ export function buildRow(input: CardRowInput): (string | number)[] {
     input.collection ?? '',
     input.foilType ?? '',
     input.serialNumber ?? '',
+    input.potentialVariant ?? '',
     input.variation ?? '',
     fmtBool(input.isRookieCard),
     fmtBool(input.isAutographed),
@@ -392,7 +398,6 @@ export function buildRow(input: CardRowInput): (string | number)[] {
       : '',
     input.gradeQualifier ?? '',
     input.certificationNumber ?? '',
-    input.potentialVariant ?? '',
   ];
 }
 
@@ -431,14 +436,15 @@ export interface SheetCardRow {
   frontImage: string | null;
   backImage: string | null;
   ebaySearchUrl: string | null;
-  // Graded-card columns (append-only, columns 19–23).
+  // Graded-card columns (positions 20–24 post-PR J).
   isGraded: boolean;
   gradingCompany: string | null;
   numericalGrade: number | null;
   gradeQualifier: string | null;
   certificationNumber: string | null;
-  // Append-only column 24 — variant-detection flag pulled from active
-  // eBay titles. Legacy rows that pre-date the column parse to null.
+  // Variant-detection flag pulled from active eBay titles. Lives at
+  // column 11 (immediately before "Variant") since PR J. Legacy rows
+  // that pre-date the column parse to null.
   potentialVariant: 'Yes' | 'No' | '' | null;
 }
 
@@ -468,17 +474,22 @@ function parsePlayerName(raw: string): { first: string; last: string } {
  * Parse one sheet row (the shape Google returns — a string[] aligned to
  * SHEET_HEADERS) into the card shape the UI expects. Returns null for
  * rows that are entirely empty so the caller can filter them out.
+ *
+ * Exported for tests so the column-index lockstep with SHEET_HEADERS /
+ * buildRow can be asserted directly.
  */
-function parseSheetRow(
+export function parseSheetRow(
   values: unknown[],
   rowIndex: number,
   sheetId: string,
 ): SheetCardRow | null {
-  // Column order mirrors SHEET_HEADERS exactly:
+  // Column order mirrors SHEET_HEADERS exactly (post-PR J):
   //   0 Date scanned, 1 Sport, 2 Player, 3 Year, 4 Brand, 5 Card #, 6 CMP,
-  //   7 Set, 8 Collection, 9 Parallel, 10 Serial #, 11 Variant,
-  //   12 Rookie, 13 Auto, 14 Numbered,
-  //   15 Avg eBay price, 16 Front link, 17 Back link, 18 eBay search URL.
+  //   7 Set, 8 Collection, 9 Parallel, 10 Serial #,
+  //   11 Potential Variant, 12 Variant,
+  //   13 Rookie, 14 Auto, 15 Numbered,
+  //   16 Avg eBay price, 17 Front link, 18 Back link, 19 eBay search URL,
+  //   20 Graded, 21 Grading company, 22 Grade, 23 Grade qualifier, 24 Cert #.
   // With valueRenderOption=UNFORMATTED_VALUE the API returns native types
   // (numbers stay numbers, booleans stay booleans), so coerce to string at
   // the column boundary for the columns that expect text.
@@ -518,7 +529,7 @@ function parseSheetRow(
   // number for cells that were written numerically, but legacy rows
   // written as "$1.61" strings still need to parse. parseFloat handles
   // both "1.61" and "1.61" after the strip.
-  const priceRaw = get(15).replace(/^\$/, '').replace(/,/g, '');
+  const priceRaw = get(16).replace(/^\$/, '').replace(/,/g, '');
   const estimatedValue = priceRaw && !isNaN(Number(priceRaw)) ? Number(priceRaw).toFixed(2) : null;
   return {
     id: `${sheetId}-${rowIndex}`,
@@ -533,30 +544,30 @@ function parseSheetRow(
     set: get(7) || null,
     cardNumber: get(5) || null,
     cmpNumber: get(6) || null,
-    variant: get(11) || null,
+    variant: get(12) || null,
     serialNumber: get(10) || null,
     foilType: get(9) || null,
-    isRookieCard: parseBool(get(12)),
-    isAutographed: parseBool(get(13)),
-    isNumbered: parseBool(get(14)),
+    isRookieCard: parseBool(get(13)),
+    isAutographed: parseBool(get(14)),
+    isNumbered: parseBool(get(15)),
     estimatedValue,
-    frontImage: get(16) || null,
-    backImage: get(17) || null,
-    ebaySearchUrl: get(18) || null,
-    // Graded columns 19..23. Older rows that pre-date these columns simply
+    frontImage: get(17) || null,
+    backImage: get(18) || null,
+    ebaySearchUrl: get(19) || null,
+    // Graded columns 20..24. Older rows that pre-date these columns simply
     // return empty strings here, which parse to false / null cleanly.
-    isGraded: parseBool(get(19)),
-    gradingCompany: get(20) || null,
+    isGraded: parseBool(get(20)),
+    gradingCompany: get(21) || null,
     numericalGrade: (() => {
-      const raw = get(21);
+      const raw = get(22);
       if (!raw) return null;
       const n = Number(raw);
       return Number.isFinite(n) ? n : null;
     })(),
-    gradeQualifier: get(22) || null,
-    certificationNumber: get(23) || null,
+    gradeQualifier: get(23) || null,
+    certificationNumber: get(24) || null,
     potentialVariant: (() => {
-      const v = get(24);
+      const v = get(11);
       if (v === 'Yes' || v === 'No') return v;
       return null;
     })(),
@@ -891,7 +902,10 @@ export async function updateAvgPriceForRow(
   }
 
   const rowIndex = matches[0];
-  const priceColumn = String.fromCharCode(65 + PRICE_COLUMN_INDEX); // 'P'
+  // PR J shifted the price column one slot right (P → Q) because Potential
+  // Variant moved in front of Variant. PRICE_COLUMN_INDEX is derived from
+  // SHEET_HEADERS so this stays correct without a hardcoded letter.
+  const priceColumn = String.fromCharCode(65 + PRICE_COLUMN_INDEX);
   // When the picker explicitly returned zero active listings, prefer the
   // sentinel string over writing 0/blank — gives the user a "we tried and
   // found nothing" signal vs the legacy "not yet priced" empty cell.
@@ -979,9 +993,13 @@ export async function rebuildEbayUrlsForUser(
     errors: [],
     sample: [],
   };
-  // Column S = index 18 (eBay URL). We accumulate one row per data row in
-  // the same order, with a single-cell array per entry, so a single
-  // values.update against `S2:S<n>` rewrites only that column.
+  // eBay URL column. Derived from SHEET_HEADERS so the reorder in PR J
+  // (eBay URL moved from S → T) doesn't strand this backfill on the
+  // wrong column. We accumulate one row per data row in the same order,
+  // with a single-cell array per entry, so a single values.update
+  // against `<col>2:<col><n>` rewrites only that column.
+  const ebayUrlColumnIndex = SHEET_HEADERS.indexOf('eBay search URL');
+  const ebayUrlColumn = String.fromCharCode(65 + ebayUrlColumnIndex);
   const newColumn: Array<[string]> = [];
   for (let i = 1; i < values.length; i++) {
     const rowIndex = i + 1; // 1-based for sheets ranges
@@ -1018,7 +1036,7 @@ export async function rebuildEbayUrlsForUser(
     const lastRow = newColumn.length + 1; // header is row 1
     await sheets.spreadsheets.values.update({
       spreadsheetId: sheet.googleSheetId,
-      range: `S2:S${lastRow}`,
+      range: `${ebayUrlColumn}2:${ebayUrlColumn}${lastRow}`,
       valueInputOption: 'RAW',
       requestBody: { values: newColumn },
     });
