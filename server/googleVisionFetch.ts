@@ -15,12 +15,24 @@ let _visionClient: ImageAnnotatorClient | null = null;
 // adding the length makes front vs. back images always distinct cache entries.
 const _ocrCache = new Map<string, { fullText: string; textAnnotations: any[] }>();
 
+// Parallel cache for foil-detection annotations (label + image properties)
+// populated when batchExtractTextFromImages() is invoked with foil features
+// requested for an image. visualFoilDetector.detectFoilFromImage() consults
+// this cache before issuing its own Vision call so that text + foil share a
+// single annotateImage round-trip.
+const _foilAnnotationCache = new Map<string, { labelAnnotations: any[]; imagePropertiesAnnotation: any }>();
+
 function _cacheKey(base64: string): string {
   return base64.substring(0, 100) + '_' + base64.length;
 }
 
 export function clearOcrCache(): void {
   _ocrCache.clear();
+  _foilAnnotationCache.clear();
+}
+
+export function getCachedFoilAnnotations(base64Image: string): { labelAnnotations: any[]; imagePropertiesAnnotation: any } | undefined {
+  return _foilAnnotationCache.get(_cacheKey(base64Image));
 }
 
 function getVisionClient(): ImageAnnotatorClient {
@@ -312,19 +324,27 @@ export async function extractTextFromImage(base64Image: string): Promise<{ fullT
  * for a typical front+back dual-image scan, saving 200-400 ms.
  */
 export async function batchExtractTextFromImages(
-  images: { base64: string; label: string }[]
+  images: { base64: string; label: string; includeFoilFeatures?: boolean }[]
 ): Promise<void> {
   if (images.length === 0) return;
 
   const client = getVisionClient();
 
-  const requests = images.map(({ base64 }) => ({
-    image: { content: base64 },
-    features: [{ type: 'DOCUMENT_TEXT_DETECTION' as const }],
-    imageContext: { languageHints: ['en'] },
-  }));
+  const requests = images.map(({ base64, includeFoilFeatures }) => {
+    const features: any[] = [{ type: 'DOCUMENT_TEXT_DETECTION' as const }];
+    if (includeFoilFeatures) {
+      features.push({ type: 'LABEL_DETECTION' as const, maxResults: 30 });
+      features.push({ type: 'IMAGE_PROPERTIES' as const });
+    }
+    return {
+      image: { content: base64 },
+      features,
+      imageContext: { languageHints: ['en'] },
+    };
+  });
 
-  console.log(`Batch Vision API call: ${images.length} image(s) in one request...`);
+  const foilCount = images.filter(i => i.includeFoilFeatures).length;
+  console.log(`Batch Vision API call: ${images.length} image(s), ${foilCount} with foil features, in one request...`);
   const [batchResult] = await client.batchAnnotateImages({ requests });
   console.log('Batch Vision API response received');
 
@@ -345,6 +365,14 @@ export async function batchExtractTextFromImages(
 
     console.log(`  [${img.label}] ${textAnnotations.length} annotations extracted`);
     _ocrCache.set(_cacheKey(img.base64), { fullText, textAnnotations });
+
+    if (img.includeFoilFeatures) {
+      _foilAnnotationCache.set(_cacheKey(img.base64), {
+        labelAnnotations: result.labelAnnotations || [],
+        imagePropertiesAnnotation: result.imagePropertiesAnnotation || null,
+      });
+      console.log(`  [${img.label}] foil features cached (${(result.labelAnnotations || []).length} labels)`);
+    }
   });
 }
 
