@@ -34,6 +34,13 @@ interface Props {
   cardDescription?: string;
   onYes: () => void;
   onNo: () => void;
+  /** PR V hotfix — invoked when the user dismisses the modal via the
+   *  built-in Radix close X button or the ESC key. Without this, those
+   *  dismissal paths would leave `confirmModalOpen` stuck true and
+   *  hang the chip-3 gate forever (the gate's resolve fn is never
+   *  called, so eBay/pricing never run and the user is stranded on a
+   *  silent screen). Treat dismissal as the equivalent of clicking No. */
+  onDismiss?: () => void;
 }
 
 export default function StreamingParallelConfirmDialog({
@@ -42,15 +49,29 @@ export default function StreamingParallelConfirmDialog({
   cardDescription,
   onYes,
   onNo,
+  onDismiss,
 }: Props) {
   const trimmed = (geminiParallel ?? "").trim();
   return (
-    <Sheet open={open}>
+    <Sheet
+      open={open}
+      onOpenChange={(next) => {
+        // Radix calls this with `false` on X-click, ESC, and (when
+        // enabled) outside-tap. We force-close paths into onDismiss so
+        // the gate-resolve fn always fires.
+        if (!next) (onDismiss ?? onNo)();
+      }}
+    >
       <SheetContent
         side="bottom"
         className="max-h-[90dvh] flex flex-col rounded-t-2xl"
-        onInteractOutside={() => {
-          /* indefinite block — outside taps do nothing */
+        onInteractOutside={(e) => {
+          // Outside taps should NOT dismiss; Radix would otherwise
+          // close the dialog and we'd lose the user's confirm
+          // opportunity. Preventing default keeps the modal open until
+          // they explicitly click Yes or No (or press ESC / X, which
+          // route through onOpenChange above).
+          e.preventDefault();
         }}
         data-testid="streaming-parallel-confirm-dialog"
       >

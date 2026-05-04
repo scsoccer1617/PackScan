@@ -892,7 +892,44 @@ export default function Scan() {
           // Yes/No modal, the gate is held open until they save the
           // manual modal). One await covers both flows.
           if (confirmModalOpenRef.current || manualModalOpenRef.current) {
-            await waitForConfirmRef.current();
+            // PR V hotfix — defensive client-side timeout. The gate
+            // now resolves on every legit dismissal path (Yes / No /
+            // Save / X / ESC), but if a future change introduces
+            // another untracked dismissal route the user gets stuck
+            // forever on a silent screen. 60s ceiling: long enough
+            // that real users typing into the manual-entry input
+            // never trip it, short enough that a regression doesn't
+            // hang the whole flow.
+            const GATE_TIMEOUT_MS = 60_000;
+            const gatePromise = waitForConfirmRef.current();
+            const timeoutPromise = new Promise<'__timeout__'>((resolve) =>
+              setTimeout(() => resolve('__timeout__'), GATE_TIMEOUT_MS),
+            );
+            const winner = await Promise.race([
+              gatePromise.then(() => '__resolved__' as const),
+              timeoutPromise,
+            ]);
+            if (winner === '__timeout__') {
+              console.error(
+                '[holo-gate] timeout — gate never resolved, forcing base-card fallback',
+              );
+              // Force-release whichever modal is hung so the rest of
+              // the flow proceeds with whatever data we have.
+              if (confirmModalOpenRef.current) {
+                setConfirmModalOpen(false);
+                confirmModalOpenRef.current = false;
+                setConfirmedVariant(null);
+                confirmedVariantRef.current = null;
+              }
+              if (manualModalOpenRef.current) {
+                setManualModalOpen(false);
+                manualModalOpenRef.current = false;
+                setManualEnteredVariant('');
+                manualEnteredVariantRef.current = '';
+              }
+              releaseChip3Gate();
+              resolveConfirmGate();
+            }
           }
           // Apply the user's final decision to the result payload
           // so /result downstream (eBay re-fetch, save row) reflects
@@ -1277,6 +1314,7 @@ export default function Scan() {
             geminiParallel={inlineParallel?.variant ?? null}
             cardDescription={describeFields(scanInfoFields)}
             onYes={() => {
+              console.log('[holo-gate] confirm:yes — releasing chip 3');
               setConfirmedVariant(inlineParallel?.variant ?? null);
               confirmedVariantRef.current = inlineParallel?.variant ?? null;
               setConfirmModalOpen(false);
@@ -1285,6 +1323,7 @@ export default function Scan() {
               resolveConfirmGate();
             }}
             onNo={() => {
+              console.log('[holo-gate] confirm:no — opening manual entry');
               setConfirmedVariant(null);
               confirmedVariantRef.current = null;
               setConfirmModalOpen(false);
@@ -1304,11 +1343,36 @@ export default function Scan() {
               setManualModalOpen(true);
               manualModalOpenRef.current = true;
             }}
+            onDismiss={() => {
+              // PR V hotfix — X-button or ESC dismissal of the
+              // Yes/No dialog. Treat as "base card, no parallel" and
+              // release the chip-3 gate immediately (no manual-entry
+              // sidetrack — the user already chose to back out).
+              // Without this, confirmModalOpen stays stale-true and
+              // the analyze flow hangs forever waiting on
+              // confirmResolveRef.current.
+              console.warn('[holo-gate] confirm:dismissed — treating as base, releasing chip 3');
+              setConfirmedVariant(null);
+              confirmedVariantRef.current = null;
+              setConfirmModalOpen(false);
+              confirmModalOpenRef.current = false;
+              setInlineParallel((prev) =>
+                prev ? { ...prev, variant: null } : prev,
+              );
+              // Mirror onSave('') from the manual modal so downstream
+              // logic treats this as an explicit base-card save and
+              // skips the legacy result-page picker.
+              setManualEnteredVariant('');
+              manualEnteredVariantRef.current = '';
+              releaseChip3Gate();
+              resolveConfirmGate();
+            }}
           />
           <StreamingManualParallelDialog
             open={manualModalOpen}
             cardDescription={describeFields(scanInfoFields)}
             onSave={(parallel) => {
+              console.log('[holo-gate] manual:save — releasing chip 3');
               const trimmed = parallel.trim().slice(0, 100);
               setManualEnteredVariant(trimmed);
               manualEnteredVariantRef.current = trimmed;
@@ -1328,6 +1392,21 @@ export default function Scan() {
               // Now that the user has confirmed a value, unblock
               // stage 3 + resolve the analyze flow's gate so eBay
               // can run with the correct query.
+              releaseChip3Gate();
+              resolveConfirmGate();
+            }}
+            onDismiss={() => {
+              // PR V hotfix — dismissed via X / ESC. Save as base
+              // (empty string) so the gate releases and downstream
+              // dedupe treats this as "user already answered."
+              console.warn('[holo-gate] manual:dismissed — saving as base, releasing chip 3');
+              setManualEnteredVariant('');
+              manualEnteredVariantRef.current = '';
+              setManualModalOpen(false);
+              manualModalOpenRef.current = false;
+              setInlineParallel((prev) =>
+                prev ? { ...prev, variant: null } : prev,
+              );
               releaseChip3Gate();
               resolveConfirmGate();
             }}
