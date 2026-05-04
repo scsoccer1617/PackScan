@@ -1027,26 +1027,29 @@ export default function ScanResult() {
 
   const tone = holoGrade ? gradeTone(holoGrade.overall) : null;
 
-  // Formatted avg label for the hero subtitle. Source is the Active
-  // eBay listings on the Price tab (PR #165), so a single "Avg" label
-  // covers it — no asking/sold disambiguation when there's one source.
+  // Formatted price label for the hero subtitle. PR G: the source is
+  // /api/ebay/comps/summary — MEDIAN over a wider (limit=100, BIN-only,
+  // shipping folded in) Browse pool. The label says "Median" and shows
+  // the pool size (n=NN) so the user can judge confidence at a glance.
   //
-  // Three terminal states:
-  //   1. `priceInfo === null`            → still loading; render nothing.
-  //   2. `count === 0`                   → comps came back empty. Render
-  //      "No active listings" instead of leaving the price area blank
-  //      (PR #250 design directive — silent omission misled dealers
-  //      into thinking the lookup was still pending).
-  //   3. `averageValue > 0`              → render "Avg $X.XX".
-  // averageValue=0 with count>0 (every listing genuinely $0) is treated
-  // the same as "no listings" for the dealer — the avg conveys nothing.
+  // Terminal states:
+  //   1. `priceInfo === null`     → still loading; render nothing.
+  //   2. `count === 0`            → comps came back empty. Render
+  //      "No active listings" (PR #250 design directive — silent
+  //      omission misled dealers into thinking the lookup was pending).
+  //   3. `count === 1`            → a single listing. Render
+  //      "From $X.XX" since "median of one" is misleading.
+  //   4. `averageValue > 0`       → render "Median $X.XX (n=NN)".
+  // averageValue=0 with count>0 is treated the same as "no listings".
   const heroPriceLabel: string | null = (() => {
     if (!priceInfo) return null;
     if (priceInfo.count > 0 && priceInfo.averageValue > 0) {
-      return `Avg ${new Intl.NumberFormat('en-US', {
+      const formatted = new Intl.NumberFormat('en-US', {
         style: 'currency',
         currency: 'USD',
-      }).format(priceInfo.averageValue)}`;
+      }).format(priceInfo.averageValue);
+      if (priceInfo.count === 1) return `From ${formatted}`;
+      return `Median ${formatted} (n=${priceInfo.count})`;
     }
     return 'No active listings';
   })();
@@ -1418,10 +1421,12 @@ export default function ScanResult() {
               compsQuery={flow.compsQuery}
               onAverage={({ average, query, count }) =>
                 setPriceInfo({
+                  // PR G: `average` is now the MEDIAN over a wider
+                  // (limit=100, BIN-only, shipping folded in) Browse
+                  // pool — same value the bulk auto-save and reprice
+                  // paths consume. The field name stays `averageValue`
+                  // for AddToSheet payload compatibility.
                   averageValue: average,
-                  // Active-only data source — the hero header label is
-                  // just "Avg" now, but we keep the dataType field so
-                  // the existing AddToSheet payload doesn't shift shape.
                   dataType: 'current',
                   searchUrl: query
                     ? `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(query)}&LH_BIN=1`

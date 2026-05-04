@@ -919,9 +919,24 @@ async function processItem(
     : null;
   if (embeddedComps) {
     const active = embeddedComps.active || [];
-    const averageValue = active.length > 0
-      ? active.reduce((sum, l) => sum + (Number(l.price) || 0), 0) / active.length
-      : 0;
+    // PR G: canonical price = median of wider Browse pool, not local
+    // mean of ≤5. Reuses the same buildPickerQuery + precision filters
+    // as the picker; cached 60s in the helper.
+    const { buildPickerQuery } = await import('../ebayPickerSearch.js');
+    const { getCompsSummary } = await import('../ebayCompsSummary.js');
+    const summaryQuery = buildPickerQuery({
+      year: analysis.year,
+      brand: analysis.brand,
+      set: (analysis as any).set,
+      cardNumber: analysis.cardNumber,
+      player: [analysis.playerFirstName, analysis.playerLastName].filter(Boolean).join(' ').trim(),
+      parallel: analysis.foilType,
+      excludeParallels: !analysis.foilType,
+    });
+    const summary = await getCompsSummary(summaryQuery, {
+      requireCardNumber: analysis.cardNumber,
+      requirePlayerLastName: analysis.playerLastName,
+    });
     // PR #250: preserve null estimatedValue when there are zero active
     // listings AND dualSideOCR flagged the result with `_noActiveListings`.
     // The Sheet column already renders `null`/empty as a blank cell
@@ -931,7 +946,7 @@ async function processItem(
     if (active.length === 0 && (analysis as any)._noActiveListings === true) {
       analysis.estimatedValue = null as any;
     } else {
-      analysis.estimatedValue = averageValue;
+      analysis.estimatedValue = summary.median ?? null as any;
     }
     analysis.ebayResults = active;
     // Outbound "View on eBay" link for the Sheet row. We deliberately do
@@ -968,7 +983,7 @@ async function processItem(
       subsetForUrl,
     ) : `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(embeddedComps.query)}&_sacat=213&_sop=10`;
     console.log(
-      `[bulkScan] eBay comps item ${item.id}: ${active.length} active results, avg=$${averageValue.toFixed(2)} for "${embeddedComps.query}" (embedded)`,
+      `[bulkScan] eBay comps item ${item.id}: ${active.length} listings, median=${summary.median != null ? `$${summary.median.toFixed(2)}` : 'null'} (n=${summary.count}) for "${embeddedComps.query}" (embedded)`,
     );
     if (pairKey && timings) {
       // PR C5 ebayMs semantics: this is the analyze handler's

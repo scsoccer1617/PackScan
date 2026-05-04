@@ -39,11 +39,20 @@ interface CompsResponse {
 interface EbayActiveCompsProps {
   cardData: Partial<CardFormValues>;
   /**
-   * Bubble the computed average + the search query up so ScanResult can
-   * render an "Avg $X.XX" line in the persistent hero header. Fires on
-   * every successful (or empty) response.
+   * Bubble the canonical comp-price metric + the search query up so
+   * ScanResult can render the hero subtitle. PR G: `average` is the
+   * MEDIAN over the wider Browse pool (limit=100, BIN-only, shipping
+   * folded in) returned by /api/ebay/comps/summary — NOT the local
+   * mean over the displayed listings. Mean is forwarded too for
+   * diagnostics. Fires on every successful (or empty) response.
    */
-  onAverage?: (info: { average: number; query: string; count: number }) => void;
+  onAverage?: (info: {
+    average: number;
+    median: number | null;
+    mean: number | null;
+    query: string;
+    count: number;
+  }) => void;
   /**
    * BR-2: when the analyze handler had time + identity to fire eBay in
    * parallel with combineCardResults, the response carries the top-N
@@ -184,27 +193,7 @@ export default function EbayActiveComps({
       setListings([]);
       setQuery("");
       setError(null);
-      onAverage?.({ average: 0, query: "", count: 0 });
-      return;
-    }
-
-    // BR-2 fast-path: server already returned comps for the exact same
-    // identity tuple. Surface the average to the hero and skip the
-    // network round trip.
-    if (initialComps && serverKey !== null && serverKey === liveKey) {
-      const active = initialComps.active;
-      setListings(active);
-      setQuery(initialComps.query || "");
-      setError(null);
-      setLoading(false);
-      const avg = active.length
-        ? active.reduce((sum, i) => sum + (i.price || 0), 0) / active.length
-        : 0;
-      onAverage?.({
-        average: avg,
-        query: initialComps.query || "",
-        count: active.length,
-      });
+      onAverage?.({ average: 0, median: null, mean: null, query: "", count: 0 });
       return;
     }
 
@@ -225,22 +214,54 @@ export default function EbayActiveComps({
     if (useSubsetInComps && compsQuery?.subset) {
       params.set("subset", compsQuery.subset);
     }
-    params.set("limit", "10");
 
-    fetch(`/api/ebay/comps?${params.toString()}`)
-      .then(async (r) => {
-        if (!r.ok) throw new Error(`comps ${r.status}`);
-        return (await r.json()) as CompsResponse;
-      })
-      .then((data) => {
+    // PR G: the hero subtitle reads MEDIAN from /api/ebay/comps/summary
+    // (wider pool of 100 BIN-only listings) — single source of truth
+    // shared with bulk auto-save and the reprice path. The displayed
+    // listings strip below still comes from /api/ebay/comps (top-N
+    // ranked picker output). The two endpoints share the same query +
+    // precision filters by design; they only diverge on pool size.
+    const summaryParams = new URLSearchParams(params);
+    const compsParams = new URLSearchParams(params);
+    compsParams.set("limit", "10");
+
+    const compsPromise =
+      initialComps && serverKey !== null && serverKey === liveKey
+        ? Promise.resolve({
+            query: initialComps.query || "",
+            active: initialComps.active,
+          } as CompsResponse)
+        : fetch(`/api/ebay/comps?${compsParams.toString()}`).then(async (r) => {
+            if (!r.ok) throw new Error(`comps ${r.status}`);
+            return (await r.json()) as CompsResponse;
+          });
+    const summaryPromise = fetch(
+      `/api/ebay/comps/summary?${summaryParams.toString()}`,
+    ).then(async (r) => {
+      if (!r.ok) throw new Error(`summary ${r.status}`);
+      return (await r.json()) as {
+        median: number | null;
+        mean: number | null;
+        count: number;
+        query: string;
+      };
+    });
+
+    Promise.all([compsPromise, summaryPromise])
+      .then(([compsData, summaryData]) => {
         if (cancelled) return;
-        const active = Array.isArray(data.active) ? data.active : [];
+        const active = Array.isArray(compsData.active) ? compsData.active : [];
         setListings(active);
-        setQuery(data.query || "");
-        const avg = active.length
-          ? active.reduce((sum, i) => sum + (i.price || 0), 0) / active.length
-          : 0;
-        onAverage?.({ average: avg, query: data.query || "", count: active.length });
+        setQuery(compsData.query || summaryData.query || "");
+        const median = summaryData.median;
+        const mean = summaryData.mean;
+        onAverage?.({
+          average: median ?? 0,
+          median,
+          mean,
+          query: compsData.query || summaryData.query || "",
+          count: summaryData.count,
+        });
         setLoading(false);
       })
       .catch((err) => {
@@ -248,7 +269,7 @@ export default function EbayActiveComps({
         console.warn("[EbayActiveComps] fetch failed:", err?.message || err);
         setError("Couldn't load eBay listings.");
         setListings([]);
-        onAverage?.({ average: 0, query: "", count: 0 });
+        onAverage?.({ average: 0, median: null, mean: null, query: "", count: 0 });
         setLoading(false);
       });
 
