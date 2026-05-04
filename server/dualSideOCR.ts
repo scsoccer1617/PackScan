@@ -1277,6 +1277,24 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
           ? geminiResultLog.geminiModel.trim()
           : null;
 
+      // Burst-picked sharpness scores from the client. Logged into the
+      // free-text Indicators column rather than as new sheet columns so
+      // the Sheet schema (SHEET_HEADERS in googleSheets.ts) stays stable.
+      // Format keeps both sides on a single line for grep-ability:
+      //   frontSharpness=83.42 backSharpness=14.10
+      // Missing values are omitted rather than written as 'n/a' so a
+      // future reader doesn't have to special-case the literal.
+      try {
+        const fs = parseFloat((req.body as any)?.frontSharpness);
+        const bs = parseFloat((req.body as any)?.backSharpness);
+        const parts: string[] = [];
+        if (Number.isFinite(fs)) parts.push(`frontSharpness=${fs.toFixed(2)}`);
+        if (Number.isFinite(bs)) parts.push(`backSharpness=${bs.toFixed(2)}`);
+        if (parts.length > 0) scanLog.addIndicator(parts.join(' '));
+      } catch {
+        // Non-fatal — sharpness logging is diagnostic only.
+      }
+
       if (visualFoilResult) {
         for (const line of (visualFoilResult.indicators ?? [])) {
           scanLog.addIndicator(line);

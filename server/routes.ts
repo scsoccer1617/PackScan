@@ -2352,15 +2352,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const n = typeof raw === 'number' ? raw : Number(raw);
         return Number.isFinite(n) ? n : null;
       })();
-      if (clientLighting || clientBlurScore != null) {
+      // Burst-picked sharpness from the in-camera 3-frame pick. Decoupled
+      // from clientBlurScore (which is the live-preview 64x64 pre-shutter
+      // sample) — these scores are computed off the actual saved frame's
+      // 480x480 center crop, so they can be compared apples-to-apples
+      // across scans for threshold tuning. Both nullable: not all client
+      // builds emit them, and the flash-on capture path skips the burst.
+      const parseSharpness = (raw: unknown): number | null => {
+        if (raw == null || raw === '') return null;
+        const n = typeof raw === 'number' ? raw : Number(raw);
+        return Number.isFinite(n) ? n : null;
+      };
+      const frontSharpness = parseSharpness((req.body as any)?.frontSharpness);
+      const backSharpness = parseSharpness((req.body as any)?.backSharpness);
+      if (clientLighting || clientBlurScore != null || frontSharpness != null || backSharpness != null) {
         console.log(
           `[scan-quality] clientLighting=${clientLighting || 'unknown'}`,
           `clientBlurScore=${clientBlurScore ?? 'n/a'}`,
+          `frontSharpness=${frontSharpness != null ? frontSharpness.toFixed(2) : 'n/a'}`,
+          `backSharpness=${backSharpness != null ? backSharpness.toFixed(2) : 'n/a'}`,
           `mode=${isGradedMode ? 'graded' : 'raw'}`,
         );
       }
       if (clientLighting) (cardData as any).clientLighting = clientLighting;
       if (clientBlurScore != null) (cardData as any).clientBlurScore = clientBlurScore;
+      // Surface burst-picked sharpness on the response payload so the
+      // result page can render a "this scan came from a soft photo"
+      // hint without re-computing.
+      if (frontSharpness != null) (cardData as any).frontSharpness = frontSharpness;
+      if (backSharpness != null) (cardData as any).backSharpness = backSharpness;
 
       // Patch the scan_grades row with the OCR-derived identification so
       // Home's Recent Scans carousel renders the player's name instead of
