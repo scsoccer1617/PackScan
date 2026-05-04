@@ -1527,6 +1527,65 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // PR G — Single source of truth for the canonical comp-price metric.
+  //
+  // Pre-PR-G the UI hero averaged ≤10 listings (EbayActiveComps), the
+  // Sheet bulk auto-save averaged ≤5 (bulkScan/processor), and the
+  // reprice path averaged ≤5 (routes/bulkScan) — three different numbers
+  // for the same card. This endpoint hits eBay Browse directly with
+  // limit=100 (BIN-only, shipping folded in), applies the same precision
+  // filters the picker uses (card # + last name in title), and returns
+  // the MEDIAN over the wider pool. Median is robust to the long-tail
+  // outliers that skew small-pool means.
+  //
+  // Mean is returned alongside for diagnostics / backwards compat. The
+  // existing `/api/ebay/comps` endpoint above is preserved for the
+  // listings strip the UI displays — this is purely an additive endpoint
+  // for the price metric.
+  app.get(`${apiPrefix}/ebay/comps/summary`, async (req, res) => {
+    try {
+      const { buildPickerQuery } = await import('./ebayPickerSearch.js');
+      const { getCompsSummary } = await import('./ebayCompsSummary.js');
+      const { year, brand, set, cardNumber, player, parallel, subset, gradeKeyword, query: rawQuery } = req.query;
+      const parallelStr = typeof parallel === 'string' ? parallel : undefined;
+      const subsetStr = typeof subset === 'string' ? subset : undefined;
+      const gradeKeywordStr = typeof gradeKeyword === 'string' && gradeKeyword.trim()
+        ? gradeKeyword.trim()
+        : undefined;
+      const query = (typeof rawQuery === 'string' && rawQuery.trim())
+        ? rawQuery.trim()
+        : buildPickerQuery({
+            year: typeof year === 'string' ? year : undefined,
+            brand: typeof brand === 'string' ? brand : undefined,
+            set: typeof set === 'string' ? set : undefined,
+            cardNumber: typeof cardNumber === 'string' ? cardNumber : undefined,
+            player: typeof player === 'string' ? player : undefined,
+            subset: subsetStr,
+            parallel: parallelStr,
+            excludeParallels: !parallelStr && !gradeKeywordStr,
+            gradeKeyword: gradeKeywordStr,
+          });
+      const playerStr = typeof player === 'string' ? player : undefined;
+      const lastName = playerStr ? playerStr.trim().split(/\s+/).pop() ?? null : null;
+      const summary = await getCompsSummary(query, {
+        requireCardNumber: typeof cardNumber === 'string' ? cardNumber : undefined,
+        requirePlayerLastName: lastName,
+        requireGrade: gradeKeywordStr,
+      });
+      return res.json(summary);
+    } catch (err: any) {
+      console.error('[ebay/comps/summary] failed:', err?.message || err);
+      return res.status(500).json({
+        median: null,
+        mean: null,
+        count: 0,
+        query: '',
+        currency: 'USD',
+        error: 'eBay comps summary lookup failed',
+      });
+    }
+  });
+
   // ── Voice Lookup: transcribe + extract structured card fields ─────────────
   // Public endpoint — user speaks a card ("2025 Topps Series One Nolan
   // Arenado card number 193 pink green polka dots"), we send the audio to

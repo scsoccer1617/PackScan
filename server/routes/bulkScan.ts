@@ -938,9 +938,16 @@ async function repriceItem(
   });
 
   const active = result.active || [];
-  const averagePrice = active.length > 0
-    ? active.reduce((sum, l) => sum + (Number(l.price) || 0), 0) / active.length
-    : 0;
+  // PR G: canonical price for the Sheet column P is the median of the
+  // wider Browse pool (limit=100, BIN-only, shipping folded in), not
+  // the mean of the top-5 picker output. The active[] above still feeds
+  // the comps panel display in the UI.
+  const { getCompsSummary } = await import('../ebayCompsSummary.js');
+  const summary = await getCompsSummary(query, {
+    requireCardNumber: cardNumber,
+    requirePlayerLastName: isMultiPlayer ? null : lastName,
+  });
+  const averagePrice = summary.median ?? 0;
 
   // Persist new comps onto the analysisResult snapshot. The append path
   // (PR #199 protected) is unchanged — this only mutates the DB jsonb.
