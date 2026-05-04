@@ -68,6 +68,12 @@ interface Props {
    *  Empty string ⇒ "no parallel / base". The parent persists this onto
    *  cardData.foilType. */
   onConfirm: (parallel: string) => void;
+  /** PR S Item 3 — when true, skip the Yes/No "confirm" stage entirely
+   *  and open straight to the freetext input. Used after the streaming
+   *  parallel-confirm modal answered "No" — re-prompting Yes/No would
+   *  ask the same question twice, so we go directly to manual entry.
+   *  Defaults to false (legacy behavior preserved). */
+  startInFreetext?: boolean;
 }
 
 type Stage = "confirm" | "freetext";
@@ -77,17 +83,25 @@ export default function GeminiParallelPickerSheet({
   geminiParallel,
   cardDescription,
   onConfirm,
+  startInFreetext = false,
 }: Props) {
-  const initialStage: Stage = geminiParallel && geminiParallel.trim() ? "confirm" : "freetext";
+  const initialStage: Stage =
+    startInFreetext || !(geminiParallel && geminiParallel.trim())
+      ? "freetext"
+      : "confirm";
   const [stage, setStage] = useState<Stage>(initialStage);
   const [freetext, setFreetext] = useState<string>("");
 
   useEffect(() => {
     if (open) {
-      setStage(geminiParallel && geminiParallel.trim() ? "confirm" : "freetext");
+      setStage(
+        startInFreetext || !(geminiParallel && geminiParallel.trim())
+          ? "freetext"
+          : "confirm",
+      );
       setFreetext("");
     }
-  }, [open, geminiParallel]);
+  }, [open, geminiParallel, startInFreetext]);
 
   const handleYes = () => {
     onConfirm((geminiParallel ?? "").trim());

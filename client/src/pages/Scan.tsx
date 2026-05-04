@@ -104,11 +104,17 @@ export function ebayProgressLabel(
 
 // Build a one-line identity preview from the streaming header fields.
 // Used as the modal description.
+//
+// PR S Item 2 — locked format is `Year · Brand · Set · Collection · #
+// · Player` (Set + Collection are two separate fields). Empty slots
+// are dropped from the joined string so the description stays tight
+// when a field is missing.
 export function describeFields(fields: ScanInfoHeaderFields): string {
   const parts = [
     fields.year != null ? String(fields.year).trim() : "",
     (fields.brand ?? "").toString().trim(),
     (fields.set ?? "").toString().trim(),
+    (fields.collection ?? "").toString().trim(),
     fields.cardNumber
       ? String(fields.cardNumber).startsWith("#")
         ? String(fields.cardNumber)
@@ -731,6 +737,7 @@ export default function Scan() {
                   year: d.year ?? prev.year ?? null,
                   brand: d.brand ?? prev.brand ?? null,
                   set: d.set ?? prev.set ?? null,
+                  collection: d.collection ?? prev.collection ?? null,
                   cardNumber: d.cardNumber ?? prev.cardNumber ?? null,
                   player: d.player ?? prev.player ?? null,
                 }));
@@ -897,6 +904,21 @@ export default function Scan() {
       reset();
       scanIdRef.current = null;
       userScanIdRef.current = null;
+      // PR S Item 3 — capture the streaming-modal decision so the
+      // result page knows whether to skip the legacy
+      // GeminiParallelPickerSheet "Yes/No" stage entirely. Three cases:
+      //   - confirmedVariantRef.current === undefined → modal never
+      //     fired (base card / stream error / fallback path). Result
+      //     page falls back to the legacy flow.
+      //   - confirmedVariantRef.current is a string → user said Yes
+      //     (parallel confirmed). Skip the modal; downstream just uses
+      //     the confirmed parallel.
+      //   - confirmedVariantRef.current === null → user said No
+      //     (parallel was wrong). Skip the Yes/No prompt and jump
+      //     straight to the "Type a parallel" freetext input.
+      const streamingAnswered = confirmedVariantRef.current !== undefined;
+      const streamingYes =
+        streamingAnswered && confirmedVariantRef.current !== null;
       setAll({
         frontImage,
         backImage,
@@ -911,6 +933,8 @@ export default function Scan() {
         // falls back to its mount-time fetch.
         initialComps: result.data?.comps ?? null,
         compsQuery: result.data?.compsQuery ?? null,
+        streamingConfirmAnswered: streamingAnswered,
+        parallelConfirmedInStream: streamingAnswered ? streamingYes : null,
       });
       // Recent Scans (Home), Collection, and Stats all read from
       // /api/scan-grades. The shared queryClient uses staleTime: Infinity,

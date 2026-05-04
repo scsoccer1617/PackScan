@@ -87,6 +87,77 @@ function playerName(c: Partial<CardFormValues> | null): string {
 }
 
 /**
+ * PR S Item 2 — pure helper for the result-page identity line. Locked
+ * format is `Year · Brand · Set · Collection · # · Player`; empty
+ * fields are dropped so the line stays tight. Set + Collection are
+ * two separate fields in the data model and must render as two
+ * distinct slots (the bug shown in IMG_5309 was that Collection was
+ * being substituted for Set; with this helper we surface both).
+ *
+ * Exported for tests.
+ */
+export function buildResultHeaderDescription(
+  c: Partial<CardFormValues> | null | undefined,
+  /** Optional override for the player display string; useful when the
+   *  caller already builds a multi-player roster (e.g. `playerName()`
+   *  that renders "Bench / Yastrzemski") and we don't want to
+   *  recompute it from the raw fields. */
+  playerOverride?: string,
+): string {
+  if (!c) return "";
+  const setValue = (c as { set?: string | null }).set ?? null;
+  const playerStr =
+    typeof playerOverride === "string" && playerOverride.trim()
+      ? playerOverride.trim()
+      : [c.playerFirstName, c.playerLastName]
+          .filter(Boolean)
+          .join(" ")
+          .trim();
+  return [
+    c.year,
+    c.brand,
+    setValue,
+    c.collection,
+    c.cardNumber ? `#${c.cardNumber}` : undefined,
+    playerStr || undefined,
+  ]
+    .map((v) => (v == null ? "" : String(v).trim()))
+    .filter((s) => s.length > 0)
+    .join(" · ");
+}
+
+/**
+ * PR S Item 3 — pure decision helper for "given the streaming-modal
+ * outcome, what should the result page do?". Lifted out of
+ * runPostScanFlow so the dedupe behavior is unit-testable without
+ * spinning up the rest of the page.
+ *
+ *   - "skipToPricing"    → user already confirmed Yes mid-scan; jump
+ *                          straight to pricing, no further modal.
+ *   - "openFreetext"     → user said No mid-scan; open the
+ *                          GeminiParallelPickerSheet directly into
+ *                          its freetext input.
+ *   - "fallback"         → no streaming modal answered (base card,
+ *                          stream error, etc.) — let the legacy flow
+ *                          decide.
+ *
+ * Exported for tests.
+ */
+export type StreamingPostScanDecision =
+  | "skipToPricing"
+  | "openFreetext"
+  | "fallback";
+export function decideStreamingPostScan(args: {
+  streamingConfirmAnswered: boolean;
+  parallelConfirmedInStream: boolean | null;
+}): StreamingPostScanDecision {
+  if (!args.streamingConfirmAnswered) return "fallback";
+  if (args.parallelConfirmedInStream === true) return "skipToPricing";
+  if (args.parallelConfirmedInStream === false) return "openFreetext";
+  return "fallback";
+}
+
+/**
  * Project a CardFormValues blob down to the ScanFieldSnapshot shape used
  * by the user-scans logger. We only carry fields the scan-result screen
  * has visibility into; CardFormValues fields not present here (e.g.
@@ -127,6 +198,13 @@ export default function ScanResult() {
   // includes a `_gemini` payload, regardless of whether Gemini emitted a
   // parallel — the dealer can confirm Yes / No or freetext-type a name.
   const [showGeminiPicker, setShowGeminiPicker] = useState(false);
+  // PR S Item 3 — when true, the GeminiParallelPickerSheet skips its
+  // Yes/No "confirm" stage entirely and opens straight to the
+  // freetext input. Used after the streaming parallel-confirm modal
+  // answered "No" so we don't re-prompt the user with the same
+  // question they just answered.
+  const [geminiPickerStartInFreetext, setGeminiPickerStartInFreetext] =
+    useState(false);
   const [showParallelConfirm, setShowParallelConfirm] = useState(false);
   // Two-step "No" flow: when the user disagrees with the detected
   // colour we ask whether the card is a parallel at all, instead of
@@ -439,6 +517,27 @@ export default function ScanResult() {
     // Falling straight through to pricing treats the card as base; if
     // the user disagrees they can still type a parallel via the Card
     // info Edit button on the result screen.
+    // PR S Item 3 — dedupe with the streaming parallel-confirm modal.
+    // See decideStreamingPostScan() docstring for the three branches.
+    if (!parallelDecidedRef.current) {
+      const decision = decideStreamingPostScan({
+        streamingConfirmAnswered: flow.streamingConfirmAnswered,
+        parallelConfirmedInStream: flow.parallelConfirmedInStream,
+      });
+      if (decision === "skipToPricing") {
+        parallelDecidedRef.current = true;
+        setIsCheckingParallels(false);
+        setShowPriceResults(true);
+        return;
+      }
+      if (decision === "openFreetext") {
+        setGeminiPickerStartInFreetext(true);
+        setIsCheckingParallels(false);
+        setShowGeminiPicker(true);
+        return;
+      }
+    }
+
     const geminiPayload = (data as any)._gemini;
     if (geminiPayload && !parallelDecidedRef.current) {
       const geminiParallelRaw = (geminiPayload?.parallel?.name ?? null) as string | null;
@@ -868,6 +967,10 @@ export default function ScanResult() {
     if (!cardData) return;
     parallelDecidedRef.current = true;
     setShowGeminiPicker(false);
+    // PR S Item 3 — reset the freetext-skip latch so a future picker
+    // open (e.g. user edits the card and retriggers runPostScanFlow)
+    // starts in its default Yes/No stage, not stuck in freetext.
+    setGeminiPickerStartInFreetext(false);
     const updated: Partial<CardFormValues> = {
       ...cardData,
       foilType: parallel,
@@ -1015,15 +1118,16 @@ export default function ScanResult() {
     );
   }
 
-  const cardDescription = [
-    cardData.year,
-    cardData.brand,
-    cardData.collection,
-    cardData.cardNumber ? `#${cardData.cardNumber}` : undefined,
+  // PR S Item 2 — see buildResultHeaderDescription docstring for the
+  // locked Set/Collection format. Helper lives at module scope so the
+  // test suite can exercise it without rendering React. We pass
+  // playerName(cardData) explicitly so multi-player rosters render
+  // verbatim (Bench/Yastrzemski) rather than falling back to the
+  // first/last fields.
+  const cardDescription = buildResultHeaderDescription(
+    cardData,
     playerName(cardData),
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  );
 
   const tone = holoGrade ? gradeTone(holoGrade.overall) : null;
 
@@ -1277,6 +1381,7 @@ export default function ScanResult() {
           parallel: cardData.foilType ?? null,
         }}
         onConfirm={handleGeminiPickerConfirm}
+        startInFreetext={geminiPickerStartInFreetext}
       />
       <ParallelPickerSheet
         open={showParallelPicker}
