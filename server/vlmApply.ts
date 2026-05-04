@@ -252,6 +252,12 @@ export function applyGeminiToCombined(
       // Only fill the side channel when empty — never clobber an existing
       // subset descriptor coming from `gemini.subset`.
       (combined as any)._geminiSubset = normalizedSet;
+      // PR #252: tag provenance. The fallback path is the demonstrably less
+      // grounded source (a salvage of a non-whitelisted Gemini.set), and is
+      // the path PR #252's drop rule disables for single-player cards. The
+      // direct-`gemini.subset` write below overwrites this tag when both
+      // sources fire on the same scan.
+      (combined as any)._geminiSubsetSource = 'vlmApply-fallback';
     }
   }
   // Era guard: forbid impossible attributions ("Big League" pre-2018) and
@@ -377,6 +383,10 @@ export function applyGeminiToCombined(
   // pre-PR query shape exactly (subset === null branch is a no-op).
   if (typeof gemini.subset === 'string' && gemini.subset.trim()) {
     (combined as any)._geminiSubset = gemini.subset.trim();
+    // PR #252: dedicated `gemini.subset` field is the whitelisted/trusted
+    // path. Tag is read by `decideSubsetDrop` to keep subset for
+    // single-player cards that came through this branch.
+    (combined as any)._geminiSubsetSource = 'gemini-direct';
   }
 
   if ((!combined.set || combined.set.trim() === '') && combined.brand && combined.brand.trim() !== '') {

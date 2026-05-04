@@ -66,6 +66,14 @@ interface EbayActiveCompsProps {
     cardNumber: string;
     player: string;
     parallel: string;
+    /** PR #252: subset descriptor as emitted by Gemini (e.g. "Team
+     *  Leaders", "MVP"). Empty for non-subset cards. */
+    subset?: string;
+    /** PR #252: server-side decision about whether subset participates in
+     *  the `/api/ebay/comps` re-fetch. When false, this component drops
+     *  subset from both the BR-2 partsKey AND the URLSearchParams so the
+     *  re-fetch produces the same comps the bulk picker did. */
+    useSubsetInComps?: boolean;
   } | null;
 }
 
@@ -95,6 +103,15 @@ function formatPrice(price: number, currency: string = "USD") {
 // BR-2: stable string key for both the live cardData parts and the server's
 // embedded compsQuery. We use this to decide whether the embedded comps are
 // still authoritative (match → use them) or stale (mismatch → refetch).
+//
+// PR #252: subset participates in the key only when the server's per-scan
+// `useSubsetInComps` decision is true AND the server actually had a subset
+// to forward. Otherwise we leave it out of the key entirely on both sides
+// — the live UI can't mutate subset (no input for it), so including
+// `compsQuery.subset` on both halves of the compare just guarantees match
+// when the server kept subset, and excluding it on both halves does the
+// same when the server dropped it. This is what makes the BR-2 fast-path
+// stay aligned with the picker's actual query shape.
 function partsKey(p: {
   year: number | string;
   brand: string;
@@ -102,6 +119,7 @@ function partsKey(p: {
   cardNumber: string;
   player: string;
   parallel: string;
+  subset?: string;
 }) {
   return [
     p.year != null ? String(p.year) : "",
@@ -110,6 +128,7 @@ function partsKey(p: {
     p.cardNumber || "",
     p.player || "",
     p.parallel || "",
+    p.subset || "",
   ].join("|");
 }
 
@@ -120,7 +139,16 @@ export default function EbayActiveComps({
   compsQuery,
 }: EbayActiveCompsProps) {
   const liveParts = buildQueryParts(cardData);
-  const liveKey = partsKey(liveParts);
+  // PR #252: subset is server-decided per scan. The live cardData has no
+  // subset field, so we mirror the server's value into both halves of the
+  // BR-2 compare when `useSubsetInComps` is true. When false (drop fired),
+  // both halves see empty subset and the compare ignores it. Either way
+  // the live re-fetch URL below uses the same `useSubsetInComps` rule.
+  const useSubsetInComps =
+    !!compsQuery && compsQuery.useSubsetInComps !== false;
+  const subsetForKey =
+    useSubsetInComps && compsQuery?.subset ? compsQuery.subset : "";
+  const liveKey = partsKey({ ...liveParts, subset: subsetForKey });
   const serverKey = compsQuery
     ? partsKey({
         year: compsQuery.year,
@@ -129,6 +157,7 @@ export default function EbayActiveComps({
         cardNumber: compsQuery.cardNumber,
         player: compsQuery.player,
         parallel: compsQuery.parallel,
+        subset: subsetForKey,
       })
     : null;
   // BR-2 fast-path: server already fired the same query; render and skip
@@ -189,6 +218,13 @@ export default function EbayActiveComps({
     if (liveParts.cardNumber) params.set("cardNumber", liveParts.cardNumber);
     if (liveParts.player) params.set("player", liveParts.player);
     if (liveParts.parallel) params.set("parallel", liveParts.parallel);
+    // PR #252: include subset only when the server's per-scan drop
+    // decision says to. Single source of truth (server) — without this,
+    // the re-fetch query and the bulk picker query diverge on
+    // single-player+fallback subsets (Maddux scenario from `bulk-38-1020`).
+    if (useSubsetInComps && compsQuery?.subset) {
+      params.set("subset", compsQuery.subset);
+    }
     params.set("limit", "10");
 
     fetch(`/api/ebay/comps?${params.toString()}`)
