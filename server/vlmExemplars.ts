@@ -98,5 +98,23 @@ export function getExemplarParts(): ExemplarPart[] {
 
 /** Short text part prepended before the inline exemplar parts. */
 export function getExemplarTextPrefix(): string {
-  return 'Reference exemplars: 54 known parallel patterns from MOLO. Use these images to disambiguate the card\'s parallel/foilType when filling your output.';
+  return [
+    'Reference exemplars: 54 known parallel patterns from MOLO. Use these images to disambiguate the card\'s parallel/foilType when filling your output.',
+    'When the visual match is unambiguous, return the parallel name verbatim from the brand-grouped list below:',
+    'Bowman Chrome parallels: Refractor, Mojo.',
+    'Topps Chrome parallels: X-Fractor, Gold Refractor, Pink Refractor, Sparkle Refractor.',
+    'Prizm parallels: Disco, Red Sparkle, Tie-Dye, Blue Wave, Red Prizm, Silver Prizm, White Sparkle, Pink Ice, Prizmatic, Zebra, Black White Checker, Emergent Green Ice, Green Scope, Neon Green Pulsar.',
+    'Donruss Optic parallels: Purple Shock, Blue Hyper, Red Pandora, Green Hyper, Mythical.',
+    'Optic parallels: Holo (Donruss Optic), Lazer, Blue Glitter.',
+    'Mosaic parallels: Red White Blue (Mosaic), Honeycomb, Genesis, Pink Camo, Color Blast, Visionary.',
+    'Select parallels: Green Shock, Red Yellow, Blue Prizm.',
+    'Donruss parallels: Cracked Ice, Press Proof, Orange Laser.',
+    'Topps parallels: Blue, Diamante, Gold, Holiday Green Leaf, Holo Foil, Holo Foil Pink, Rainbow Foilboard, Silver Cracked Foilboard.',
+    'Heritage parallels: Blue Sparkle.',
+    'Crown Royale parallels: Kaboom.',
+    'Prizm DP parallels: Red Ice.',
+    'Prizm Draft Picks parallels: Gold Cracked Ice.',
+    'Score parallels: Cubic.',
+    'NBA Hoops parallels: Holo Web.',
+  ].join(' ');
 }
