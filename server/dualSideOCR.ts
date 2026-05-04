@@ -479,10 +479,13 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
     // This reduces Vision API round-trips from 4 (2 per image) down to 1.
     clearOcrCache();
     try {
-      const batchImages: { base64: string; label: string }[] = [];
+      const batchImages: { base64: string; label: string; includeFoilFeatures?: boolean }[] = [];
       // Skip front when we already have a cached preliminary OCR result — no
       // need to re-run Vision on an image whose text we already have.
-      if (frontImage && !preliminaryEntry) batchImages.push({ base64: frontImage.buffer.toString('base64'), label: 'front' });
+      // Foil detection later runs only on the front image, so request its
+      // LABEL_DETECTION + IMAGE_PROPERTIES features in this same call to save
+      // a second annotateImage round-trip (~300ms).
+      if (frontImage && !preliminaryEntry) batchImages.push({ base64: frontImage.buffer.toString('base64'), label: 'front', includeFoilFeatures: true });
       if (backImage)  batchImages.push({ base64: backImage.buffer.toString('base64'),  label: 'back'  });
       if (batchImages.length > 0) {
         console.time('vision-batch');

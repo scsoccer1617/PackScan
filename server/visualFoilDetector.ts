@@ -1,5 +1,6 @@
 import { ImageAnnotatorClient } from '@google-cloud/vision';
 import { analyzeRegionalFoilEvidence, hueBucketToColorName, type RegionalFoilEvidence } from './regionalFoilAnalyzer';
+import { getCachedFoilAnnotations } from './googleVisionFetch';
 
 export interface FoilDetectionResult {
   isFoil: boolean;
@@ -223,41 +224,54 @@ export async function detectFoilFromImage(
     : Promise.resolve(null);
   
   try {
-    const clientEmail = process.env.GOOGLE_CLIENT_EMAIL;
-    const privateKey = process.env.GOOGLE_PRIVATE_KEY;
-    
-    if (!clientEmail || !privateKey) {
-      return {
-        isFoil: false,
-        foilType: null,
-        confidence: 0,
-        indicators: ['Missing Google Cloud credentials for visual analysis']
+    // Cache check: if batchExtractTextFromImages() requested foil features
+    // for this image alongside DOCUMENT_TEXT_DETECTION, the labels and image
+    // properties are already available from a single coalesced Vision call.
+    const cachedFoil = getCachedFoilAnnotations(base64Image);
+    let apiResult: { labelAnnotations?: any; imagePropertiesAnnotation?: any };
+
+    if (cachedFoil) {
+      console.log('Foil annotations cache hit — skipping Vision API call');
+      apiResult = {
+        labelAnnotations: cachedFoil.labelAnnotations,
+        imagePropertiesAnnotation: cachedFoil.imagePropertiesAnnotation,
       };
-    }
-    
-    const formattedKey = formatPrivateKey(privateKey);
-    
-    const client = new ImageAnnotatorClient({
-      credentials: {
-        client_email: clientEmail,
-        private_key: formattedKey,
-      },
-    });
+    } else {
+      const clientEmail = process.env.GOOGLE_CLIENT_EMAIL;
+      const privateKey = process.env.GOOGLE_PRIVATE_KEY;
 
-    const request = {
-      image: { content: base64Image },
-      features: [
-        { type: 'LABEL_DETECTION' as const, maxResults: 30 },
-        { type: 'IMAGE_PROPERTIES' as const }
-      ],
-    };
+      if (!clientEmail || !privateKey) {
+        return {
+          isFoil: false,
+          foilType: null,
+          confidence: 0,
+          indicators: ['Missing Google Cloud credentials for visual analysis']
+        };
+      }
 
-    let apiResult;
-    try {
-      [apiResult] = await client.annotateImage(request);
-    } catch (visionError: any) {
-      console.log('Vision API error:', visionError.message);
-      return { isFoil: false, foilType: null, confidence: 0, indicators: ['Visual analysis failed due to image format/decoder error'] };
+      const formattedKey = formatPrivateKey(privateKey);
+
+      const client = new ImageAnnotatorClient({
+        credentials: {
+          client_email: clientEmail,
+          private_key: formattedKey,
+        },
+      });
+
+      const request = {
+        image: { content: base64Image },
+        features: [
+          { type: 'LABEL_DETECTION' as const, maxResults: 30 },
+          { type: 'IMAGE_PROPERTIES' as const }
+        ],
+      };
+
+      try {
+        [apiResult] = await client.annotateImage(request);
+      } catch (visionError: any) {
+        console.log('Vision API error:', visionError.message);
+        return { isFoil: false, foilType: null, confidence: 0, indicators: ['Visual analysis failed due to image format/decoder error'] };
+      }
     }
 
     const indicators: string[] = [];
