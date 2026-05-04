@@ -78,6 +78,11 @@ interface AppendCardPayload {
   isNumbered?: boolean | null;
   foilType?: string | null;
   averagePrice: number | null;
+  // True when the picker ran but returned zero active listings, so the
+  // server writes "No active listings" into column P instead of leaving
+  // the cell blank. Distinguishes "we tried and found nothing" from
+  // "not yet priced."
+  noActiveListings?: boolean;
   frontImageUrl?: string;
   backImageUrl?: string;
   ebaySearchUrl?: string;
@@ -107,6 +112,12 @@ interface Props {
   scanTracking?: ScanTracking;
   /** Snapshot of fields as the scanner originally returned them. */
   initialDetected?: ScanFieldSnapshot;
+  /**
+   * True when the eBay picker ran but returned zero active listings.
+   * Forwarded to the server so column P writes "No active listings"
+   * instead of being left blank.
+   */
+  noActiveListings?: boolean;
 }
 
 function buildAppendPayload(
@@ -117,6 +128,7 @@ function buildAppendPayload(
   backImage?: string,
   scanTracking?: ScanTracking,
   initialDetected?: ScanFieldSnapshot,
+  noActiveListings?: boolean,
 ): AppendCardPayload {
   return {
     sport: cardData.sport ?? null,
@@ -142,6 +154,7 @@ function buildAppendPayload(
     isNumbered: cardData.isNumbered ?? null,
     foilType: cardData.foilType ?? null,
     averagePrice: averageValue || null,
+    noActiveListings: !!noActiveListings,
     // Forward the captured images as-is — the server will persist any
     // "data:" URIs to /uploads and write the resulting hosted URL into the
     // sheet. Real http(s) URLs pass through unchanged.
@@ -154,7 +167,7 @@ function buildAppendPayload(
   };
 }
 
-export default function AddToSheetButton({ cardData, averageValue, searchUrl, frontImage, backImage, compact = false, scanTracking, initialDetected }: Props) {
+export default function AddToSheetButton({ cardData, averageValue, searchUrl, frontImage, backImage, compact = false, scanTracking, initialDetected, noActiveListings }: Props) {
   const { user } = useAuth();
   const { toast } = useToast();
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -189,7 +202,7 @@ export default function AddToSheetButton({ cardData, averageValue, searchUrl, fr
   const append = useMutation({
     mutationFn: async () => {
       if (!cardData) throw new Error('No card data');
-      const card = buildAppendPayload(cardData, averageValue, searchUrl, frontImage, backImage, scanTracking, initialDetected);
+      const card = buildAppendPayload(cardData, averageValue, searchUrl, frontImage, backImage, scanTracking, initialDetected, noActiveListings);
       const body = { sheetId: selectedSheet?.id, card };
       return apiRequest<{ ok: boolean; sheet: UserSheet; sheetUrl: string }>(
         { url: '/api/sheets/append', method: 'POST', body: JSON.stringify(body) }
@@ -227,7 +240,7 @@ export default function AddToSheetButton({ cardData, averageValue, searchUrl, fr
       try { parsed = JSON.parse(msg).error || msg; } catch {}
       const isNotConnected = parsed.includes('Connect Google') || msg.includes('GOOGLE_NOT_CONNECTED');
       if (isNotConnected && cardData) {
-        const card = buildAppendPayload(cardData, averageValue, searchUrl, frontImage, backImage, scanTracking, initialDetected);
+        const card = buildAppendPayload(cardData, averageValue, searchUrl, frontImage, backImage, scanTracking, initialDetected, noActiveListings);
         startConnectAndAdd(card);
         return;
       }

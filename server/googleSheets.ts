@@ -84,6 +84,13 @@ async function createSheetWithHeader(
 // formatting target.
 const PRICE_COLUMN_INDEX = SHEET_HEADERS.indexOf('Average eBay price');
 
+// Literal sentinel written into column P when the picker pipeline ran but
+// returned zero active listings. Distinguishes "we tried and found nothing"
+// from a blank "not yet priced" cell. Readers (parseSheetRow,
+// updateAvgPriceForRow) treat this string the same as empty for numeric
+// purposes — Number() is NaN, so estimatedValue parses to null.
+export const NO_ACTIVE_LISTINGS_LABEL = 'No active listings';
+
 // Apply a USD currency number format to the price column starting at row 2
 // (row index 1, skipping the header). Idempotent — calling it repeatedly on
 // the same sheet just re-asserts the same format. Best-effort: any failure
@@ -279,6 +286,14 @@ export interface CardRowInput {
   isNumbered?: boolean | null;
   foilType?: string | null;
   averagePrice?: number | string | null;
+  /**
+   * When true the picker ran but returned zero active eBay listings, so
+   * column P is written as the literal string "No active listings" instead
+   * of being left blank. Lets users distinguish "we tried and found
+   * nothing" from "not yet priced." Forward-only — existing empty rows are
+   * not backfilled.
+   */
+  noActiveListings?: boolean | null;
   frontImageUrl?: string | null;
   backImageUrl?: string | null;
   ebaySearchUrl?: string | null;
@@ -310,8 +325,14 @@ export function buildRow(input: CardRowInput): (string | number)[] {
   // column-level currency format ("$1.61") renders correctly. Strings like
   // "1.61" would otherwise survive USER_ENTERED parsing but defeat sorting
   // when mixed with edge cases. Falls back to '' for unknown / empty.
+  // The "no active listings" flag takes priority — if the picker ran and
+  // came back empty, write the sentinel string regardless of any averaged
+  // 0 the caller may have computed. Otherwise fall back to the numeric
+  // average (or blank when no signal is supplied).
   let price: string | number = '';
-  if (input.averagePrice != null && input.averagePrice !== '') {
+  if (input.noActiveListings) {
+    price = NO_ACTIVE_LISTINGS_LABEL;
+  } else if (input.averagePrice != null && input.averagePrice !== '') {
     const n = typeof input.averagePrice === 'number'
       ? input.averagePrice
       : Number(input.averagePrice);
@@ -810,6 +831,7 @@ export async function updateAvgPriceForRow(
   userId: number,
   match: PriceUpdateMatch,
   newAveragePrice: number,
+  options: { noActiveListings?: boolean } = {},
 ): Promise<{ updated: number; rowIndex: number | null; ambiguous: boolean }> {
   const sheet = await getActiveSheet(userId);
   if (!sheet) throw new NotConnectedError();
@@ -857,12 +879,23 @@ export async function updateAvgPriceForRow(
 
   const rowIndex = matches[0];
   const priceColumn = String.fromCharCode(65 + PRICE_COLUMN_INDEX); // 'P'
+  // When the picker explicitly returned zero active listings, prefer the
+  // sentinel string over writing 0/blank — gives the user a "we tried and
+  // found nothing" signal vs the legacy "not yet priced" empty cell.
+  let cellValue: string | number;
+  if (options.noActiveListings) {
+    cellValue = NO_ACTIVE_LISTINGS_LABEL;
+  } else if (Number.isFinite(newAveragePrice)) {
+    cellValue = newAveragePrice;
+  } else {
+    cellValue = '';
+  }
   await withSheetsWriteGuard(userId, 'updateAvgPriceForRow', () =>
     sheets.spreadsheets.values.update({
       spreadsheetId: sheet.googleSheetId,
       range: `${priceColumn}${rowIndex}`,
       valueInputOption: 'USER_ENTERED',
-      requestBody: { values: [[Number.isFinite(newAveragePrice) ? newAveragePrice : '']] },
+      requestBody: { values: [[cellValue]] },
     }),
   );
   invalidateSheetRowsCache(userId, sheet.googleSheetId);

@@ -335,11 +335,18 @@ async function appendRow(ctx: ScanContext, final: ScanLogFinal, indicators: stri
     final.ebayQuery ?? '',
     final.ebayResultCount != null ? String(final.ebayResultCount) : '',
     final.ebayPickedTitle ?? '',
+    // When the picker ran but came back empty (ebayResultCount === 0)
+    // we surface the same "No active listings" sentinel the user sheet
+    // writes into column P, so the diagnostic sink stays consistent
+    // with the user-visible row. Mid-pipeline failures (timeout, identity
+    // missing) leave ebayResultCount null and keep the cell blank.
     final.ebayPickedPrice != null
       ? typeof final.ebayPickedPrice === 'number'
         ? final.ebayPickedPrice.toFixed(2)
         : String(final.ebayPickedPrice)
-      : '',
+      : final.ebayResultCount === 0
+        ? 'No active listings'
+        : '',
     // PotentialVariant — empty string both when caller sent "" / null
     // (no comps to evaluate) and when nothing was set at all.
     final.potentialVariant ?? '',

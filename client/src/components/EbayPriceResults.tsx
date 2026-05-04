@@ -702,6 +702,7 @@ export default function EbayPriceResults({ cardData, frontImage, backImage, onCa
           searchUrl={searchUrl || undefined}
           frontImage={frontImage}
           backImage={backImage}
+          noActiveListings={dataType === 'current' && results.length === 0}
         />
       )}
 
