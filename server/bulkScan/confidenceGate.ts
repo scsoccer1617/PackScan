@@ -81,6 +81,15 @@ export function evaluateConfidence(input: ConfidenceGateInput): ConfidenceGateOu
   if (!hasCardNumber) reasons.push('card_number_missing');
   if (!hasBrand) reasons.push('brand_missing');
   if (!hasYear) reasons.push('year_missing');
+  // Provenance gate: when Gemini didn't supply the core identity fields,
+  // route to review even if the post-overlay analysis looks complete. The
+  // populated values are coming from legacy OCR / CardDB surname-salvage
+  // and have been observed to fabricate confidently-wrong identities (see
+  // bulk-39/40 audit: 1992 Fleer Ultra Ripken → 2026 Ultra #11; 1989 Topps
+  // #401 Canseco → 1997 Topps #246; 1987 Topps #555 Valenzuela → 1987
+  // Topps #580 Krukow). `_vlmEmptyIdentity` is set in dualSideOCR.ts
+  // after the Gemini overlay runs.
+  if (analysis?._vlmEmptyIdentity) reasons.push('vlm_empty_identity');
 
   // Pairing warnings. Identification-blocking ones force review;
   // informational ones (swapped_by_classifier) don't.
@@ -117,6 +126,7 @@ export function evaluateConfidence(input: ConfidenceGateInput): ConfidenceGateOu
   if (variationAmbiguous) composite -= 10;
   if (collectionAmbiguous) composite -= 10;
   if (cardDbAvailable && !cardDbCorroborated) composite -= 10;
+  if (analysis?._vlmEmptyIdentity) composite -= 30;
   if (pairingWarnings.length > 0) composite -= 5;
   composite = Math.max(0, Math.min(100, composite));
 
