@@ -13,8 +13,18 @@ import { and, eq, sql, inArray } from 'drizzle-orm';
 import { logUserScan, type ScanFieldValues } from './userScans';
 import { startScanLog } from './scanLogger';
 import { detectPotentialVariant } from './variantDetection';
-import { analyzeCardBuffersWithGemini, type GeminiCardResult, VLM_INFO } from './vlmGemini';
+import {
+  analyzeCardBuffersWithGemini,
+  analyzeCardBuffersWithGeminiStream,
+  type GeminiCardResult,
+  VLM_INFO,
+} from './vlmGemini';
 import { applyGeminiToCombined } from './vlmApply';
+import {
+  diffStage1Fields,
+  tryParsePartialJsonWithSafety,
+  type Stage1FieldSnapshot,
+} from './partialJson';
 import { isCardDbLookupEnabled } from './featureFlags';
 import { pickerSearch, buildPickerQuery, isMultiPlayerSubset, type PickerListing } from './ebayPickerSearch';
 import { verifyIdentificationWithSearch } from './vlmSearchVerify';
@@ -643,24 +653,98 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
     // We require BOTH front and back images to fire Gemini. Single-side
     // scans fall back to legacy-only because the prompt is built around
     // dual-image input.
+    // PR U — stage-1 streaming. Switch to generateContentStream so we can
+    // emit a per-field `analyzing_card:progress` SSE event the moment each
+    // identity field (year, brand, set, collection, cardNumber, player)
+    // finishes streaming from Gemini, instead of waiting for the whole
+    // call to land. Same prompt, same model (gemini-3-flash-preview), same
+    // post-processor — `finalizeGeminiText` runs on the fully accumulated
+    // text and produces a byte-identical GeminiCardResult to the
+    // non-streaming path. Bulk and other non-SSE callers still get the
+    // single final result.
+    //
+    // The streaming partial parses use the shared tryParsePartialJson +
+    // diffStage1Fields helpers from ./partialJson. We track the snapshot
+    // of fields already emitted and only fire a stage event when a field
+    // is NEW or CHANGED, so the wire never carries the same value twice.
+    //
+    // If the streaming call fails (unlikely; the SDK call is identical
+    // beyond the response shape), we fall back to the non-streaming
+    // analyzeCardBuffersWithGemini below — preserves the pre-PR
+    // behaviour for the rest of the pipeline.
     const geminiPromise: Promise<GeminiCardResult | null> =
       (frontImage && backImage && process.env.GEMINI_API_KEY)
         ? (async () => {
+            const emittedSnapshot: Stage1FieldSnapshot = {};
+            let lastBytesSeen = 0;
+            const onPartialText = (accumulated: string) => {
+              // Only attempt a parse once we have meaningfully more bytes
+              // than the last successful emit, to avoid hammering the
+              // partial parser on every tiny chunk.
+              if (accumulated.length - lastBytesSeen < 24) return;
+              const trimmed = accumulated.replace(/^```(?:json)?\s*/i, '').trim();
+              const open = trimmed.indexOf('{');
+              if (open < 0) return;
+              const safe = tryParsePartialJsonWithSafety(trimmed.slice(open));
+              if (!safe) return;
+              lastBytesSeen = accumulated.length;
+              const { changed, next } = diffStage1Fields(
+                safe.parsed,
+                emittedSnapshot,
+                safe.terminated,
+              );
+              const keys = Object.keys(changed);
+              if (keys.length === 0) return;
+              // Mutate the snapshot in place so subsequent diffs only
+              // emit truly-new fields. (Object.assign returns the target.)
+              Object.assign(emittedSnapshot, next);
+              // Emit ONE progress event per field that newly completed.
+              // The chip stays in `in_progress`; the field payload flows
+              // straight to the streaming ScanInfoHeader.
+              for (const k of keys) {
+                emitStage(req, 'analyzing_card', 'progress', {
+                  [k]: changed[k as keyof typeof changed],
+                } as any);
+              }
+            };
             try {
               console.time('gemini-vlm');
-              const result = await analyzeCardBuffersWithGemini(
+              const result = await analyzeCardBuffersWithGeminiStream(
                 frontImage.buffer,
                 backImage.buffer,
                 {
                   frontMime: frontImage.mimetype || 'image/jpeg',
                   backMime: backImage.mimetype || 'image/jpeg',
+                  onPartialText,
                 },
               );
               console.timeEnd('gemini-vlm');
               return result;
-            } catch (err: any) {
-              console.warn('[vlm-gemini] analysis failed (non-fatal, falling back to legacy OCR):', err?.message || err);
-              return null;
+            } catch (streamErr: any) {
+              // Streaming failed mid-call. Try once with the non-streaming
+              // path so the user still gets a result, just without the
+              // per-field progress events.
+              console.warn(
+                '[vlm-gemini.stream] failed (falling back to non-streaming):',
+                streamErr?.message || streamErr,
+              );
+              try {
+                const result = await analyzeCardBuffersWithGemini(
+                  frontImage.buffer,
+                  backImage.buffer,
+                  {
+                    frontMime: frontImage.mimetype || 'image/jpeg',
+                    backMime: backImage.mimetype || 'image/jpeg',
+                  },
+                );
+                return result;
+              } catch (err: any) {
+                console.warn(
+                  '[vlm-gemini] analysis failed (non-fatal, falling back to legacy OCR):',
+                  err?.message || err,
+                );
+                return null;
+              }
             }
           })()
         : Promise.resolve(null);
