@@ -133,19 +133,49 @@ const BASE_NEGATIVE_KEYWORDS =
   '-autograph -refractor -xfractor -rainbow -mojo -holo -relic ' +
   '-memorabilia -"game-used" -"game used" -patch -jersey -auto ' +
   '-autographed -autographs -autos -signed -parallel ' +
-  // PR M: graded slabs + multi-card / set-fill noise. Users reported
-  // PSA/BGS/SGC/CGC slabs, "lot of N" listings, and "complete your
-  // set" listings inflating the mean and cluttering the Price tab on
-  // base-card scans. Only applied when excludeParallels !== false —
-  // graded/parallel scans want their actual variant.
-  '-PSA -BGS -SGC -CGC -graded -lot -set';
+  // PR M: graded slabs + multi-card lots. Users reported PSA/BGS/SGC/
+  // CGC slabs and "lot of N" listings inflating the mean and
+  // cluttering the Price tab on base-card scans. Only applied when
+  // excludeParallels !== false — graded/parallel scans want their
+  // actual variant.
+  '-PSA -BGS -SGC -CGC -graded -lot ' +
+  // PR N: surgical "set" exclusions. PR M's single-word `-set` token
+  // was too broad — it filtered out legitimate "Base Set" listings
+  // (e.g. "1992 Topps Base Set #156 Kenny Lofton"), which is the very
+  // pool a base-card scan wants. Replaced with three multi-word
+  // phrases that target only the seller-spam patterns:
+  //   - "complete your set" — sellers offering single cards as set-fillers
+  //   - "complete set"      — sellers selling complete sets (multi-card listings)
+  //   - "set break"         — group breaks / box breaks
+  '-"complete your set" -"complete set" -"set break"';
 
 /**
- * PR M: the 7 negatives added on top of the pre-PR-M base chain. Kept
- * as a separate constant so the URL post-process (which has to mutate
- * `_nkw` in an already-built URL) can append exactly the same tokens.
+ * PR M / PR N: the base-scan negatives layered on top of the pre-PR-M
+ * chain. Kept as a separate list so the URL post-process (which has to
+ * mutate `_nkw` in an already-built URL) appends exactly the same
+ * tokens. PR N replaces PR M's single-word `-set` with three surgical
+ * multi-word phrases (see BASE_NEGATIVE_KEYWORDS comment).
  */
-const PR_M_BASE_NEGATIVES = ['-PSA', '-BGS', '-SGC', '-CGC', '-graded', '-lot', '-set'];
+const PR_M_BASE_NEGATIVES = [
+  '-PSA',
+  '-BGS',
+  '-SGC',
+  '-CGC',
+  '-graded',
+  '-lot',
+  '-"complete your set"',
+  '-"complete set"',
+  '-"set break"',
+];
+
+/**
+ * PR N: tokens to STRIP from `_nkw` on the way through (carryover from
+ * PR M's overly-broad chain). Running PR N's helper on a #269-era URL
+ * with `+-set` in `_nkw` should drop the bare `-set` token, then add
+ * the three surgical phrases. Bare hyphen prefix only — the substring
+ * match is strict to avoid eating tokens like `-"set break"`.
+ */
+const PR_N_TOKENS_TO_STRIP = ['-set'];
 
 /**
  * PR K / PR M: build the Browse `q` string. When `excludeParallels` is
@@ -304,9 +334,11 @@ export function ensureBinFilter(url: string | null | undefined): string {
 }
 
 /**
- * PR M: append the 7 base-scan negatives (`-PSA -BGS -SGC -CGC -graded
- * -lot -set`) to the `_nkw` query param of an eBay search URL so the
- * "View on eBay" click-through pool matches the picker pool.
+ * PR M / PR N: append the base-scan negatives to the `_nkw` query
+ * param of an eBay search URL so the "View on eBay" click-through pool
+ * matches the picker pool. PR N additionally STRIPS PR M's overly-
+ * broad bare `-set` token from `_nkw` (see PR_N_TOKENS_TO_STRIP) so
+ * URLs persisted by a #269-era write converge to the new chain.
  *
  * Only call this for BASE scans (caller's responsibility — same gate as
  * `excludeParallels !== false`). Graded/parallel scans must NOT pass
@@ -315,9 +347,11 @@ export function ensureBinFilter(url: string | null | undefined): string {
  * Idempotent: each token is only appended if not already present in
  * `_nkw`. Running twice produces the same URL as running once. Tokens
  * are joined to the existing `_nkw` value with `+` (eBay accepts both
- * `+` and `%20` as the space encoding). Safe on URLs with or without
- * an existing query string; if the URL has no `_nkw` param at all
- * (unexpected for an eBay search URL) the URL is returned unchanged.
+ * `+` and `%20` as the space encoding). Quoted multi-word phrases use
+ * `%22` for the quote characters and `+` for inner spaces. Safe on
+ * URLs with or without an existing query string; if the URL has no
+ * `_nkw` param at all (unexpected for an eBay search URL) the URL is
+ * returned unchanged.
  */
 export function appendBaseScanNegatives(url: string | null | undefined): string {
   if (!url) return '';
@@ -336,13 +370,48 @@ export function appendBaseScanNegatives(url: string | null | undefined): string 
     const name = params[i].slice(0, eq);
     if (name !== '_nkw') continue;
     const rawValue = params[i].slice(eq + 1);
-    // eBay accepts both `+` and `%20` for spaces in `_nkw`. Normalize
-    // when checking for presence so the idempotency guard catches
-    // tokens already encoded either way.
-    const decoded = rawValue.replace(/\+/g, ' ');
     let nextValue = rawValue;
+
+    // PR N: strip carryover PR M tokens (currently just bare `-set`)
+    // before considering what to append. Match either the `+`-joined
+    // or `%20`-joined form, with optional trailing separator. The
+    // trailing-separator clause keeps the rest of `_nkw` well-formed
+    // when the stripped token wasn't the last entry.
+    for (const stripTok of PR_N_TOKENS_TO_STRIP) {
+      const encoded = encodeURIComponent(stripTok).replace(/%20/g, '+');
+      // `+-set` (mid-string) → ``
+      const midPlus = new RegExp(`\\+${escapeRe(encoded)}(?=$|\\+)`, 'gi');
+      // `%20-set` (mid-string, %20-encoded form) → ``
+      const midPct = new RegExp(`%20${escapeRe(encoded)}(?=$|%20)`, 'gi');
+      // Leading occurrence (token is the very first thing in _nkw,
+      // unlikely but defensive): drop the trailing separator instead.
+      const leadPlus = new RegExp(`^${escapeRe(encoded)}\\+`, 'gi');
+      const leadPct = new RegExp(`^${escapeRe(encoded)}%20`, 'gi');
+      // Bare token at end with no neighbors.
+      const onlyTok = new RegExp(`^${escapeRe(encoded)}$`, 'gi');
+      nextValue = nextValue
+        .replace(midPlus, '')
+        .replace(midPct, '')
+        .replace(leadPlus, '')
+        .replace(leadPct, '')
+        .replace(onlyTok, '');
+    }
+
+    // eBay accepts both `+` and `%20` for spaces in `_nkw`, and
+    // `%22` for the quote characters around a phrase. Normalize when
+    // checking for presence so the idempotency guard catches tokens
+    // already encoded either way (e.g. `+-"complete+set"` or
+    // `%20-%22complete%20set%22`). decodeURIComponent throws on
+    // malformed escapes — fall back to the raw spaces-normalized form
+    // if that ever happens.
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(nextValue.replace(/\+/g, ' ')).toLowerCase();
+    } catch {
+      decoded = nextValue.replace(/\+/g, ' ').toLowerCase();
+    }
     for (const tok of PR_M_BASE_NEGATIVES) {
-      if (decoded.toLowerCase().includes(tok.toLowerCase())) continue;
+      if (decoded.includes(tok.toLowerCase())) continue;
       nextValue = `${nextValue}+${encodeURIComponent(tok).replace(/%20/g, '+')}`;
     }
     if (nextValue !== rawValue) {
@@ -353,6 +422,10 @@ export function appendBaseScanNegatives(url: string | null | undefined): string 
   }
   if (!touched) return url;
   return `${head}?${params.join('&')}${hash}`;
+}
+
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 /** Test/debug helper: drop the cache. Not exported on the wire. */
