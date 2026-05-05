@@ -403,6 +403,132 @@ export function registerBulkScanRoutes(app: Express): void {
     return res.json({ ok: true });
   });
 
+  // ── Review: re-price preview using edited fields (PR Y) ────────────────
+  // Runs the picker pipeline against the dealer's CURRENT (potentially
+  // edited) field values for an in-review item, returns the resulting
+  // comps summary + rebuilt eBay search URL. Does NOT touch the DB
+  // analysisResult, does NOT write to the sheet — pure preview/preview-
+  // before-save path. The /save endpoint accepts `estimatedValue` so the
+  // client can take the mean returned here and submit it as part of
+  // Save's payload.
+  //
+  // Use case: the user lands in review, edits Year/Set/Variant, and
+  // either (a) clicks Save (UI auto-runs this then immediately /save), or
+  // (b) clicks "Analyze & Price" to see fresh comps without committing.
+  // Either way the picker query is rebuilt from the edited identity using
+  // PR X's normalize helpers (`normalizeSetForEbay`, `formatYearForEbay`)
+  // so Series Two→2 and YYYY-YY year normalization apply the same way
+  // they do on the analyze pipeline.
+  app.post('/api/bulk-scan/review/:itemId/reprice', requireAuth, async (req: Request, res: Response) => {
+    const userId = (req.user as any)?.id as number | undefined;
+    if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+    const itemId = parseInt(req.params.itemId, 10);
+    if (!Number.isFinite(itemId)) return res.status(400).json({ error: 'Invalid item id' });
+    const [item] = await db
+      .select()
+      .from(scanBatchItems)
+      .where(eq(scanBatchItems.id, itemId))
+      .limit(1);
+    if (!item) return res.status(404).json({ error: 'Item not found' });
+    const [batch] = await db
+      .select()
+      .from(scanBatches)
+      .where(and(eq(scanBatches.id, item.batchId), eq(scanBatches.userId, userId)))
+      .limit(1);
+    if (!batch) return res.status(404).json({ error: 'Batch not found' });
+
+    // Merge the dealer's edits over the analyzer snapshot so any field
+    // the dealer didn't touch falls through verbatim. Mirrors the merge
+    // logic in /save so the preview pool matches the row a subsequent
+    // Save would write.
+    const incoming = (req.body || {}) as Record<string, any>;
+    const snapshot = (item.analysisResult || {}) as Record<string, any>;
+    const merged = { ...snapshot, ...incoming };
+
+    const playerFirst = (merged.playerFirstName ?? '').toString().trim();
+    const playerLast = (merged.playerLastName ?? '').toString().trim();
+    const playerName = [playerFirst, playerLast].filter(Boolean).join(' ').trim();
+    const cardNumber = (merged.cardNumber ?? '').toString().trim();
+    const brand = (merged.brand ?? '').toString().trim();
+    const yearRaw = merged.year;
+    const yearStr = yearRaw != null && yearRaw !== '' ? String(yearRaw).trim() : '';
+    const subset = (merged._gemini && typeof merged._gemini.subset === 'string')
+      ? merged._gemini.subset.trim()
+      : '';
+    const playersArr = Array.isArray(merged.players) ? merged.players : [];
+    const parallel = (merged.foilType ?? merged.variant ?? '').toString().trim();
+    const setName = (merged.set ?? '').toString().trim();
+    const sportRaw = (merged.sport ?? '').toString().trim();
+    const yearPrintedRaw = (merged.yearPrintedRaw ?? '').toString().trim();
+    const collection = (merged.collection ?? '').toString().trim();
+
+    if (!cardNumber || !brand || !yearStr || (!playerName && !subset)) {
+      return res.status(422).json({ error: 'incomplete_identity' });
+    }
+
+    const player = playerName || subset;
+    const isMultiPlayer = playersArr.length > 1 || isMultiPlayerSubset(subset);
+
+    // PR X helpers wired in: same normalization the analyze pipeline and
+    // /api/ebay/comps/summary use. Keeps the preview pool identical to
+    // what auto-save would have priced.
+    const query = buildPickerQuery({
+      year: formatYearForEbay({ year: yearStr, sport: sportRaw, yearPrintedRaw }) || yearStr,
+      brand,
+      set: normalizeSetForEbay(setName),
+      cardNumber,
+      player,
+      subset: playerName ? subset : '',
+      parallel,
+      excludeParallels: !parallel,
+    });
+    const lastName = player.split(/\s+/).pop() ?? null;
+
+    const { getCompsSummary } = await import('../ebayCompsSummary.js');
+    let summary;
+    try {
+      summary = await getCompsSummary(query, {
+        requireCardNumber: cardNumber,
+        requirePlayerLastName: isMultiPlayer ? null : lastName,
+      });
+    } catch (err: any) {
+      console.error(`[bulkScan/route] /reprice picker failed item=${itemId}:`, err?.message || err);
+      return res.status(502).json({ error: err?.message || 'picker_failed' });
+    }
+
+    // Build the same outbound "View on eBay" URL the /save path will
+    // commit. Returning it here lets the UI render an up-to-date click
+    // target alongside the preview price without a second round trip.
+    const yearNumeric = Number.parseInt(yearStr, 10);
+    const ebaySearchUrl = brand
+      ? getEbaySearchUrl(
+          player,
+          cardNumber,
+          brand,
+          Number.isFinite(yearNumeric) ? yearNumeric : 0,
+          collection,
+          '',
+          !!merged.isNumbered,
+          parallel,
+          (merged.serialNumber ?? '').toString(),
+          (merged.variant ?? '').toString(),
+          setName,
+          undefined,
+          !!merged.isAutographed,
+          false,
+          subset,
+        )
+      : null;
+
+    return res.json({
+      ok: true,
+      itemId,
+      summary,
+      ebaySearchUrl,
+      query,
+    });
+  });
+
   // ── Reprocess one item ───────────────────────────────────────────────
   // Drop a batch item so its files re-discover on the next sync.
   //
