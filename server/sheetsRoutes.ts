@@ -6,6 +6,7 @@ import {
   renameSheet, unlinkSheet, appendCardRow, countRowsForSheet, NotConnectedError,
 } from './googleSheets';
 import { getEbaySearchUrl } from './ebayService';
+import { formatYearForSheet } from './ebaySetNormalize';
 import { storage } from './storage';
 import { logUserScan, updateUserScan, type ScanFieldValues } from './userScans';
 import type { UserScanAction } from '@shared/schema';
@@ -137,6 +138,10 @@ export function registerSheetRoutes(app: Express) {
     card: z.object({
       sport: z.string().optional().nullable(),
       year: z.union([z.number(), z.string()]).optional().nullable(),
+      // PR X: verbatim printed YYYY-YY (e.g. "2024-25"). Forwarded
+      // here so the Sheet's Year cell can render the season range
+      // for season sports rather than just the integer start year.
+      yearPrintedRaw: z.string().optional().nullable(),
       brand: z.string().optional().nullable(),
       collection: z.string().optional().nullable(),
       set: z.string().optional().nullable(),
@@ -252,9 +257,19 @@ export function registerSheetRoutes(app: Express) {
       ) : (c.ebaySearchUrl || '');
       const frontStored = await persistDataUriIfNeeded(c.frontImageUrl, 'front');
       const backStored = await persistDataUriIfNeeded(c.backImageUrl, 'back');
+      // PR X: render the Year cell as YYYY-YY for season sports /
+      // printed-range cards, fall through to the integer year (or
+      // empty) otherwise. Sheet readers are humans — this matches
+      // what they see on the result page header so the row reads the
+      // same as the scan UI.
+      const yearForSheet = formatYearForSheet({
+        year: c.year ?? null,
+        sport: c.sport ?? null,
+        yearPrintedRaw: (c as any).yearPrintedRaw ?? null,
+      });
       const result = await appendCardRow(userId, {
         sport: c.sport ?? null,
-        year: c.year ?? null,
+        year: yearForSheet || (c.year ?? null),
         brand: c.brand ?? null,
         collection: c.collection ?? null,
         set: c.set ?? null,

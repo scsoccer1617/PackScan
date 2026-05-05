@@ -123,6 +123,11 @@ function buildQueryParts(cardData: Partial<CardFormValues>) {
     cardNumber: cardData.cardNumber || "",
     player: playerName,
     parallel: cardData.foilType || "",
+    // PR X: forwarded to the server's eBay query normalizer so the
+    // re-fetch lands on the same `getCompsSummary` cache key as the
+    // pre-fire (which has access to sport + the printed YYYY-YY range).
+    sport: ((cardData as any).sport ?? "") as string,
+    yearPrintedRaw: ((cardData as any).yearPrintedRaw ?? "") as string,
   };
 }
 
@@ -277,6 +282,10 @@ export default function EbayActiveComps({
     if (liveParts.cardNumber) params.set("cardNumber", liveParts.cardNumber);
     if (liveParts.player) params.set("player", liveParts.player);
     if (liveParts.parallel) params.set("parallel", liveParts.parallel);
+    // PR X: forward sport + yearPrintedRaw so the server normalizer
+    // produces the same query (and same cache key) the pre-fire used.
+    if (liveParts.sport) params.set("sport", liveParts.sport);
+    if (liveParts.yearPrintedRaw) params.set("yearPrintedRaw", liveParts.yearPrintedRaw);
     // PR #252: include subset only when the server's per-scan drop
     // decision says to. Single source of truth (server) — without this,
     // the re-fetch query and the bulk picker query diverge on

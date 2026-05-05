@@ -796,6 +796,12 @@ export default function Scan() {
                     ? { cardNumber: d.cardNumber }
                     : {}),
                   ...(d.player !== undefined ? { player: d.player } : {}),
+                  // PR X: feed sport + yearPrintedRaw so the header can
+                  // switch the year slot to YYYY-YY for season sports.
+                  ...(d.sport !== undefined ? { sport: d.sport } : {}),
+                  ...(d.yearPrintedRaw !== undefined
+                    ? { yearPrintedRaw: d.yearPrintedRaw }
+                    : {}),
                 }));
                 return;
               }
@@ -818,6 +824,12 @@ export default function Scan() {
                   collection: d.collection ?? prev.collection ?? null,
                   cardNumber: d.cardNumber ?? prev.cardNumber ?? null,
                   player: d.player ?? prev.player ?? null,
+                  // PR X: backstop for the streaming progress events —
+                  // also set sport/yearPrintedRaw on `:completed` so the
+                  // header still flips to YYYY-YY when a per-field
+                  // progress event was missed.
+                  sport: d.sport ?? prev.sport ?? null,
+                  yearPrintedRaw: d.yearPrintedRaw ?? prev.yearPrintedRaw ?? null,
                 }));
               }
               // PR Q — surface the inline parallel picker as soon as

@@ -26,6 +26,7 @@ import { searchCardValues, getEbaySearchUrl, clearEbayCache } from './ebayServic
 import { holoOverallToPsaInt, psaKeyword } from './holo/psaGrade';
 import { z } from 'zod';
 import { handleDualSideCardAnalysis } from './dualSideOCR';
+import { normalizeSetForEbay, formatYearForEbay } from './ebaySetNormalize';
 import { extractTextFromImage, analyzeSportsCardImage } from './googleVisionFetch';
 import { importCardsCSV, importVariationsCSV, lookupCard, enrichVoiceFields } from './cardDatabaseService';
 import { cardDatabase, cardVariations, csvSyncLog } from '../shared/schema';
@@ -1400,18 +1401,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get(`${apiPrefix}/ebay/comps`, async (req, res) => {
     try {
       const { pickerSearch, buildPickerQuery } = await import('./ebayPickerSearch.js');
-      const { year, brand, set, cardNumber, player, parallel, subset, gradeKeyword, query: rawQuery, limit } = req.query;
+      const { year, brand, set, cardNumber, player, parallel, subset, gradeKeyword, sport, yearPrintedRaw, query: rawQuery, limit } = req.query;
       const parallelStr = typeof parallel === 'string' ? parallel : undefined;
       const subsetStr = typeof subset === 'string' ? subset : undefined;
       const gradeKeywordStr = typeof gradeKeyword === 'string' && gradeKeyword.trim()
         ? gradeKeyword.trim()
         : undefined;
+      // PR X: query-only normalization for "Series Two/One" → "Series 2/1"
+      // and YYYY-YY year emission for season sports / printed ranges.
+      const yearForEbay = formatYearForEbay({
+        year: typeof year === 'string' ? year : undefined,
+        sport: typeof sport === 'string' ? sport : undefined,
+        yearPrintedRaw: typeof yearPrintedRaw === 'string' ? yearPrintedRaw : undefined,
+      });
+      const setForEbay = normalizeSetForEbay(typeof set === 'string' ? set : '');
       const query = (typeof rawQuery === 'string' && rawQuery.trim())
         ? rawQuery.trim()
         : buildPickerQuery({
-            year: typeof year === 'string' ? year : undefined,
+            year: yearForEbay || (typeof year === 'string' ? year : undefined),
             brand: typeof brand === 'string' ? brand : undefined,
-            set: typeof set === 'string' ? set : undefined,
+            set: setForEbay || (typeof set === 'string' ? set : undefined),
             cardNumber: typeof cardNumber === 'string' ? cardNumber : undefined,
             player: typeof player === 'string' ? player : undefined,
             subset: subsetStr,
@@ -1475,19 +1484,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { buildPickerQuery } = await import('./ebayPickerSearch.js');
       const { getCompsSummary } = await import('./ebayCompsSummary.js');
-      const { year, brand, set, cardNumber, player, parallel, subset, gradeKeyword, query: rawQuery } = req.query;
+      const { year, brand, set, cardNumber, player, parallel, subset, gradeKeyword, sport, yearPrintedRaw, query: rawQuery } = req.query;
       const parallelStr = typeof parallel === 'string' ? parallel : undefined;
       const subsetStr = typeof subset === 'string' ? subset : undefined;
       const gradeKeywordStr = typeof gradeKeyword === 'string' && gradeKeyword.trim()
         ? gradeKeyword.trim()
         : undefined;
       const excludeParallels = !parallelStr && !gradeKeywordStr;
+      // PR X: same query-only normalization as /ebay/comps so the
+      // pre-fired (in dualSideOCR) and client-fetched summaries hit the
+      // same `getCompsSummary` cache key.
+      const yearForEbay = formatYearForEbay({
+        year: typeof year === 'string' ? year : undefined,
+        sport: typeof sport === 'string' ? sport : undefined,
+        yearPrintedRaw: typeof yearPrintedRaw === 'string' ? yearPrintedRaw : undefined,
+      });
+      const setForEbay = normalizeSetForEbay(typeof set === 'string' ? set : '');
       const query = (typeof rawQuery === 'string' && rawQuery.trim())
         ? rawQuery.trim()
         : buildPickerQuery({
-            year: typeof year === 'string' ? year : undefined,
+            year: yearForEbay || (typeof year === 'string' ? year : undefined),
             brand: typeof brand === 'string' ? brand : undefined,
-            set: typeof set === 'string' ? set : undefined,
+            set: setForEbay || (typeof set === 'string' ? set : undefined),
             cardNumber: typeof cardNumber === 'string' ? cardNumber : undefined,
             player: typeof player === 'string' ? player : undefined,
             subset: subsetStr,

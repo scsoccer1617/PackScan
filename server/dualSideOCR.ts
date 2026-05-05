@@ -27,6 +27,7 @@ import {
 } from './partialJson';
 import { isCardDbLookupEnabled } from './featureFlags';
 import { pickerSearch, buildPickerQuery, isMultiPlayerSubset, type PickerListing } from './ebayPickerSearch';
+import { normalizeSetForEbay, formatYearForEbay } from './ebaySetNormalize';
 import { verifyIdentificationWithSearch } from './vlmSearchVerify';
 import { filterUnsafeCorrections, isMaterialSetChange } from './vlmSearchVerifyApply';
 import { decideSearchVerifyGate, computeAveragePrice } from './searchVerifyGate';
@@ -75,6 +76,14 @@ export interface StageEvent {
     collection?: string | null;
     cardNumber?: string | null;
     player?: string | null;
+    /** PR X — verbatim printed YYYY-YY range emitted by Gemini (e.g.
+     *  "2024-25") so the streaming ScanInfoHeader can render the season
+     *  range immediately on `analyzing_card:completed`. */
+    yearPrintedRaw?: string | null;
+    /** PR X — sport ("Basketball", "Hockey", "Baseball", …). Pairs
+     *  with `year`/`yearPrintedRaw` for the client's `displayYear()`
+     *  helper. */
+    sport?: string | null;
     found?: number;
     target?: number;
   };
@@ -140,6 +149,13 @@ interface EbayQueryIdentity {
    *  the grade keyword and requires it in titles so avg price reflects
    *  same-grade comps only. Empty for raw scans. */
   gradeKeyword: string;
+  /** PR X: sport (Basketball / Hockey / Baseball / Football / …) — drives
+   *  YYYY-YY season-format selection in the eBay query and Sheet write. */
+  sport: string;
+  /** PR X: verbatim printed year string from the back legal strip
+   *  (e.g. "© 2024-25 PANINI"). Forwarded into the year formatter so the
+   *  query matches what sellers list ("2024-25 Panini Prizm…"). */
+  yearPrintedRaw: string;
 }
 
 // Embedded comps shape carried in the analyze response under data.comps.
@@ -211,6 +227,8 @@ export function extractIdentityForEbay(combined: any): EbayQueryIdentity | null 
     gradeKeyword: combined?.isGraded
       ? buildGradeKeyword(combined?.gradingCompany, combined?.numericalGrade)
       : '',
+    sport: (combined?.sport ?? '').toString().trim(),
+    yearPrintedRaw: (combined?.yearPrintedRaw ?? '').toString().trim(),
   };
 }
 
@@ -912,7 +930,16 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
           ((combinedResult as any).cardNumber ?? '').toString().trim() ||
           null,
         player: playerStr || null,
-      });
+        // PR X: forward the printed YYYY-YY range + sport so the
+        // streaming ScanInfoHeader can render the season-range form
+        // (e.g. "2024-25") for season sports the moment stage 1 lands,
+        // matching what the result page already shows via displayYear().
+        yearPrintedRaw:
+          ((combinedResult as any).yearPrintedRaw ?? '').toString().trim() ||
+          null,
+        sport:
+          ((combinedResult as any).sport ?? '').toString().trim() || null,
+      } as any);
     }
     emitStage(req, 'detecting_parallel', 'in_progress');
     // PR Q — attach the detected variant identity to the completed
@@ -1010,9 +1037,18 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
       ? (async () => {
           try {
             const query = buildPickerQuery({
-              year: ebayIdentity.year,
+              // PR X: format year as YYYY-YY for season sports / printed
+              // ranges, fall through to the integer otherwise.
+              year: formatYearForEbay({
+                year: ebayIdentity.year,
+                sport: ebayIdentity.sport,
+                yearPrintedRaw: ebayIdentity.yearPrintedRaw,
+              }),
               brand: ebayIdentity.brand,
-              set: ebayIdentity.set,
+              // PR X: rewrite "Series Two/One" → "Series 2/1" for the
+              // eBay query only. The combined result, sheet, and UI keep
+              // the literal printed string.
+              set: normalizeSetForEbay(ebayIdentity.set),
               cardNumber: ebayIdentity.cardNumber,
               player: ebayIdentity.player,
               subset: subsetForQuery,
@@ -1087,9 +1123,17 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
         // Build the picker query the same way the /summary route does
         // — same args the client will send through EbayActiveComps.
         const summaryQuery = buildPickerQuery({
-          year: ebayIdentity.year,
+          // PR X: same query-only normalization as the analyze branch
+          // above; pre-fire and post-mount client fetch share the same
+          // 60s `getCompsSummary` cache, so both sides must agree on
+          // the eBay-format set/year tokens.
+          year: formatYearForEbay({
+            year: ebayIdentity.year,
+            sport: ebayIdentity.sport,
+            yearPrintedRaw: ebayIdentity.yearPrintedRaw,
+          }),
           brand: ebayIdentity.brand,
-          set: ebayIdentity.set,
+          set: normalizeSetForEbay(ebayIdentity.set),
           cardNumber: ebayIdentity.cardNumber,
           player: ebayIdentity.player,
           subset: subsetForQuery,
@@ -1466,9 +1510,13 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
                   (finalResult as any)._searchRetryDroppedSubset = ebayIdentity.subset || '';
                 }
                 const retryQuery = buildPickerQuery({
-                  year: correctedYear,
+                  year: formatYearForEbay({
+                    year: correctedYear,
+                    sport: ebayIdentity.sport,
+                    yearPrintedRaw: ebayIdentity.yearPrintedRaw,
+                  }),
                   brand: correctedBrand,
-                  set: correctedSet ? String(correctedSet) : '',
+                  set: normalizeSetForEbay(correctedSet ? String(correctedSet) : ''),
                   cardNumber: correctedCardNumber,
                   player: ebayIdentity.player,
                   subset: retrySubset,
@@ -1548,9 +1596,13 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
           ? ebayQuerySnapshot.subset
           : '';
         const finalQuery = buildPickerQuery({
-          year: ebayQuerySnapshot.year,
+          year: formatYearForEbay({
+            year: ebayQuerySnapshot.year,
+            sport: ebayIdentity.sport,
+            yearPrintedRaw: ebayIdentity.yearPrintedRaw,
+          }),
           brand: ebayQuerySnapshot.brand,
-          set: ebayQuerySnapshot.set,
+          set: normalizeSetForEbay(ebayQuerySnapshot.set),
           cardNumber: ebayQuerySnapshot.cardNumber,
           player: ebayQuerySnapshot.player,
           subset: finalSubsetForQuery,

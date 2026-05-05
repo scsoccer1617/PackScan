@@ -116,6 +116,14 @@ export const STAGE1_FIELD_KEYS = [
   'collection',
   'cardNumber',
   'player',
+  // PR X: surface the verbatim printed year ("2024-25") to the client
+  // so the streaming ScanInfoHeader can render YYYY-YY for season
+  // sports as soon as Gemini emits it. Not displayed standalone — the
+  // header pairs it with `year` + `sport` (via displayYear).
+  'yearPrintedRaw',
+  // PR X: needed alongside yearPrintedRaw so displayYear() on the
+  // client knows whether to render the season range or the integer.
+  'sport',
 ] as const;
 
 export type Stage1FieldKey = (typeof STAGE1_FIELD_KEYS)[number];
@@ -127,6 +135,8 @@ export interface Stage1FieldSnapshot {
   collection?: string | null;
   cardNumber?: string | null;
   player?: string | null;
+  yearPrintedRaw?: string | null;
+  sport?: string | null;
 }
 
 /**
@@ -193,7 +203,7 @@ export function diffStage1Fields(
 
   // String fields. Empty / whitespace-only are skipped — we wait for
   // the model to emit a real value.
-  for (const key of ['brand', 'set', 'collection', 'cardNumber'] as const) {
+  for (const key of ['brand', 'set', 'collection', 'cardNumber', 'yearPrintedRaw', 'sport'] as const) {
     if (key in parsed) {
       const v = parsed[key];
       if (typeof v === 'string' && v.trim()) {
