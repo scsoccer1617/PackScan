@@ -46,6 +46,7 @@ import { getEbaySearchUrl } from '../ebayService';
 import { applyTopps2026ImprintOverride } from '../yearOverrides';
 import { getScanQuota, incrementScanCount } from '../scanQuota';
 import { logUserScan, type ScanFieldValues } from '../userScans';
+import { isAdminUser, shouldAutoSaveCard } from '../lib/adminUser';
 // p-queue is ESM-only; pull it via a typed `as any` to keep typecheck quiet
 // without changing tsconfig module resolution.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -319,6 +320,12 @@ export async function runBatch(batchId: number): Promise<void> {
     const initialQuota = await getScanQuota(batch.userId);
     let remaining = initialQuota.limit > 0 ? initialQuota.remaining : Number.POSITIVE_INFINITY;
     let quotaHit = false;
+    // PR AB: Admin (Daniel) bulk scans must always land in the review queue
+    // regardless of confidence — the dealer doesn't trust auto-sync and wants
+    // to confirm every card before sheet write. External users keep the
+    // existing confidence-gate behavior. Computed once per batch to avoid
+    // an extra DB round-trip per item.
+    const reviewerIsAdmin = await isAdminUser(batch.userId);
 
     // C3: Process pending items 4-wide via PQueue. processItem is dominated
     // by I/O (Drive download, Google Vision, Gemini Flash, SCP, CardDB,
@@ -395,7 +402,7 @@ export async function runBatch(batchId: number): Promise<void> {
         timings.recordPairUpdate(pairKey, { startedAt: Date.now() });
         const tPair = Date.now();
         try {
-          const outcome = await processItem(batch, item, timings, pairKey, sheetsQueue);
+          const outcome = await processItem(batch, item, timings, pairKey, sheetsQueue, reviewerIsAdmin);
           timings.recordPairUpdate(pairKey, { totalProcessMs: Date.now() - tPair });
           await incrementScanCount(batch.userId);
           await withCounterLock(async () => {
@@ -722,6 +729,7 @@ async function processItem(
   timings?: BatchTimingsRecorder,
   pairKey?: string,
   sheetsQueue?: SheetsAppendQueue,
+  reviewerIsAdmin: boolean = false,
 ): Promise<'auto_save' | 'review'> {
   await db.update(scanBatchItems).set({ status: 'processing' }).where(eq(scanBatchItems.id, item.id));
 
@@ -1020,8 +1028,15 @@ async function processItem(
     cardDbCorroborated,
   });
 
-  const reviewReasons = gate.reasons;
-  const shouldAutoSave = gate.verdict === 'auto_save' && !batch.dryRun;
+  // PR AB: Admin bulk scans always go to review (mandatory confirm-before-sync).
+  const reviewReasons = reviewerIsAdmin && gate.reasons.length === 0
+    ? ['admin_mandatory_review']
+    : gate.reasons;
+  const shouldAutoSave = shouldAutoSaveCard({
+    reviewerIsAdmin,
+    gateVerdict: gate.verdict,
+    dryRun: !!batch.dryRun,
+  });
 
   if (shouldAutoSave) {
     const card: CardRowInput = {
