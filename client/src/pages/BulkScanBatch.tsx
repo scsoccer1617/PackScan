@@ -39,6 +39,11 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { postScanCorrections } from "@/lib/scanCorrections";
 import { cn } from "@/lib/utils";
 import type { Player } from "@shared/players";
+import {
+  computeConfirmationDiff,
+  logScanConfirmation,
+  type PredictedFields,
+} from "@/lib/scanConfirmation";
 
 type ItemStatus = "pending" | "processing" | "auto_saved" | "review" | "skipped" | "failed";
 
@@ -745,53 +750,86 @@ function ReviewCard({
       return;
     }
     const edits = buildEdits();
-    // PR Z: log every (predicted → corrected) field diff for ML training.
-    // Fire-and-forget — never blocks save, never throws. Empty diff is a
-    // no-op (postScanCorrections short-circuits on the client).
-    void postScanCorrections({
-      scanId: `bulk-${item.batchId}-${item.id}`,
-      source: "bulk_review",
-      original: {
-        player: seededPlayerText,
-        year: snapshot.year,
-        brand: snapshot.brand,
-        set: snapshot.set,
-        collection: snapshot.collection,
-        cardNumber: snapshot.cardNumber,
-        parallel: snapshot.variant,
-        team: snapshot.team,
-        manufacturer: snapshot.manufacturer,
-        rookie: !!snapshot.isRookieCard,
-        autograph: !!snapshot.isAutographed,
-        memorabilia: !!snapshot.isMemorabilia,
-        serialNumber: snapshot.serialNumber,
-        foilType: snapshot.foilType,
-      },
-      edited: {
-        player,
-        year,
-        brand,
-        set: setName,
-        collection,
-        cardNumber,
-        parallel: variant,
-        team: snapshot.team,
-        manufacturer: snapshot.manufacturer,
-        rookie: isRookieCard,
-        autograph: isAutographed,
-        memorabilia: snapshot.isMemorabilia,
-        serialNumber,
-        foilType,
-      },
-      frontImageUrl: item.frontFileId
-        ? `/api/bulk-scan/items/${item.id}/image/front`
-        : null,
-      backImageUrl: item.backFileId
-        ? `/api/bulk-scan/items/${item.id}/image/back`
-        : null,
-      originalConfidence:
-        item.confidenceScore != null ? Number(item.confidenceScore) : null,
-    });
+    // PR Z + PR AA hybrid: every Save logs ONE event for ML training.
+    // - Empty diff (analyzer was correct, dealer just clicked Save) →
+    //   POST /api/scan-confirmations (PR AA, positive label).
+    // - Non-empty diff (dealer corrected one or more fields) →
+    //   POST /api/scan-corrections (PR Z, per-field corrections).
+    // Both calls are fire-and-forget; they never block save, never throw.
+    const original: PredictedFields = {
+      player: seededPlayerText,
+      year: typeof snapshot.year === "number" ? snapshot.year : (snapshot.year ?? null),
+      brand: snapshot.brand ?? null,
+      set: snapshot.set ?? null,
+      collection: snapshot.collection ?? null,
+      cardNumber: snapshot.cardNumber ?? null,
+      variant: snapshot.variant ?? null,
+      potentialVariant: snapshot.potentialVariant ?? null,
+    };
+    const editedFields: PredictedFields = {
+      player: [edits.playerFirstName, edits.playerLastName].filter(Boolean).join(" "),
+      year: edits.year ?? null,
+      brand: edits.brand ?? null,
+      set: edits.set ?? null,
+      collection: edits.collection ?? null,
+      cardNumber: edits.cardNumber ?? null,
+      variant: edits.variant ?? null,
+      potentialVariant: snapshot.potentialVariant ?? null,
+    };
+    if (computeConfirmationDiff(original, editedFields).length === 0) {
+      void logScanConfirmation({
+        scanId: `bulk-${item.batchId}-${item.id}`,
+        source: "bulk_review",
+        predicted: original,
+        originalConfidence:
+          item.confidenceScore != null ? Number(item.confidenceScore) : null,
+      });
+    } else {
+      void postScanCorrections({
+        scanId: `bulk-${item.batchId}-${item.id}`,
+        source: "bulk_review",
+        original: {
+          player: seededPlayerText,
+          year: snapshot.year,
+          brand: snapshot.brand,
+          set: snapshot.set,
+          collection: snapshot.collection,
+          cardNumber: snapshot.cardNumber,
+          parallel: snapshot.variant,
+          team: snapshot.team,
+          manufacturer: snapshot.manufacturer,
+          rookie: !!snapshot.isRookieCard,
+          autograph: !!snapshot.isAutographed,
+          memorabilia: !!snapshot.isMemorabilia,
+          serialNumber: snapshot.serialNumber,
+          foilType: snapshot.foilType,
+        },
+        edited: {
+          player,
+          year,
+          brand,
+          set: setName,
+          collection,
+          cardNumber,
+          parallel: variant,
+          team: snapshot.team,
+          manufacturer: snapshot.manufacturer,
+          rookie: isRookieCard,
+          autograph: isAutographed,
+          memorabilia: snapshot.isMemorabilia,
+          serialNumber,
+          foilType,
+        },
+        frontImageUrl: item.frontFileId
+          ? `/api/bulk-scan/items/${item.id}/image/front`
+          : null,
+        backImageUrl: item.backFileId
+          ? `/api/bulk-scan/items/${item.id}/image/back`
+          : null,
+        originalConfidence:
+          item.confidenceScore != null ? Number(item.confidenceScore) : null,
+      });
+    }
     repriceMutation.mutate(edits, {
       onSuccess: (data) => {
         // Pass the fresh mean as estimatedValue so /save writes column P

@@ -40,6 +40,11 @@ import { Camera, Check, Loader2, ScanLine, ScanSearch, Sparkles, ThumbsDown, Thu
 import { postScanCorrections } from "@/lib/scanCorrections";
 import { cn } from "@/lib/utils";
 import type { CardFormValues } from "@shared/schema";
+import {
+  computeConfirmationDiff,
+  logScanConfirmation,
+  type PredictedFields,
+} from "@/lib/scanConfirmation";
 import { joinPlayerNames, type Player } from "@shared/players";
 import {
   extractSerialLimit,
@@ -1433,7 +1438,48 @@ export default function ScanResult() {
             backImage={backImage}
             onSaveCardInfo={handleSaveCardInfo}
             feedback={feedback}
-            onConfirm={() => setFeedback('confirmed')}
+            onConfirm={() => {
+              setFeedback('confirmed');
+              // PR AA — log a positive ("model right, human verified")
+              // label whenever the dealer confirms with zero edits
+              // against the analyzer's frozen snapshot. If they edited
+              // any compared field after the scan landed, this falls
+              // through silently and PR Z's /api/scan-corrections owns
+              // the negative-label path.
+              if (initialDetected) {
+                const original: PredictedFields = {
+                  player: [initialDetected.playerFirstName, initialDetected.playerLastName]
+                    .filter(Boolean).join(" "),
+                  year: initialDetected.year ?? null,
+                  brand: initialDetected.brand ?? null,
+                  set: initialDetected.set ?? null,
+                  collection: initialDetected.collection ?? null,
+                  cardNumber: initialDetected.cardNumber ?? null,
+                  variant: initialDetected.variant ?? null,
+                  potentialVariant: null,
+                };
+                const current: PredictedFields = {
+                  player: [cardData.playerFirstName, cardData.playerLastName]
+                    .filter(Boolean).join(" "),
+                  year: cardData.year ?? null,
+                  brand: cardData.brand ?? null,
+                  set: (cardData as { set?: string | null }).set ?? null,
+                  collection: cardData.collection ?? null,
+                  cardNumber: cardData.cardNumber ?? null,
+                  variant: cardData.variant ?? null,
+                  potentialVariant: null,
+                };
+                if (computeConfirmationDiff(original, current).length === 0) {
+                  void logScanConfirmation({
+                    scanId: flow.userScanId
+                      ? `scan-${flow.userScanId}`
+                      : `scan-${Date.now()}`,
+                    source: "single_scan",
+                    predicted: original,
+                  });
+                }
+              }
+            }}
             onDecline={() => setFeedback('declined_edited')}
           />
         </TabsContent>

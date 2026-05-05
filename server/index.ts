@@ -17,6 +17,7 @@ import { registerSheetRoutes } from "./sheetsRoutes";
 import { registerObjectStorageRoutes } from "./replit_integrations/object_storage";
 import { registerBulkScanRoutes } from "./routes/bulkScan";
 import { registerScanCorrectionsRoutes } from "./routes/scanCorrections";
+import { registerScanConfirmationsRoutes } from "./routes/scanConfirmations";
 import { resumeRunningBatches } from "./bulkScan/processor";
 
 const app = express();
@@ -122,6 +123,7 @@ app.use((req, res, next) => {
   registerObjectStorageRoutes(app);
   registerBulkScanRoutes(app);
   registerScanCorrectionsRoutes(app);
+  registerScanConfirmationsRoutes(app);
   const server = await registerRoutes(app);
 
   // Re-queue any bulk-scan batch that was mid-flight when the previous
