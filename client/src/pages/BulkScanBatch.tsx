@@ -114,7 +114,21 @@ const REASON_LABELS: Record<string, string> = {
 
   // Operational
   quota_exhausted: "Daily scan limit reached — try again tomorrow",
+
+  // Admin policy — not a confidence flag. Rendered with a distinct
+  // (info-blue) chip so the dealer can scan a queue and see at a glance
+  // why each card is in review.
+  admin_mandatory_review: "Admin review required",
 };
+
+// "mandatory_review" reasons get an info-blue chip; everything else is the
+// existing low-confidence (orange/amber) chip. Keeps the visual signal
+// distinct so the dealer doesn't confuse "must review" with "low score".
+const MANDATORY_REVIEW_REASONS = new Set<string>(["admin_mandatory_review"]);
+
+function reasonVariant(r: string): "mandatory_review" | "low_confidence" {
+  return MANDATORY_REVIEW_REASONS.has(r) ? "mandatory_review" : "low_confidence";
+}
 
 function reasonLabel(r: string): string {
   if (REASON_LABELS[r]) return REASON_LABELS[r];
@@ -460,7 +474,7 @@ export default function BulkScanBatch() {
                 type="button"
                 onClick={() => setReviewCursor((c) => Math.max(0, c - 1))}
                 disabled={reviewCursor === 0}
-                className="flex-1 h-10 rounded-xl border border-card-border bg-card text-xs font-medium hover-elevate disabled:opacity-40 disabled:cursor-not-allowed"
+                className="flex-1 h-11 rounded-xl border border-card-border bg-card text-sm font-medium hover-elevate disabled:opacity-40 disabled:cursor-not-allowed"
                 data-testid="button-review-prev"
               >
                 Previous
@@ -473,7 +487,7 @@ export default function BulkScanBatch() {
                   )
                 }
                 disabled={reviewCursor >= reviewItems.length - 1}
-                className="flex-1 h-10 rounded-xl border border-card-border bg-card text-xs font-medium hover-elevate disabled:opacity-40 disabled:cursor-not-allowed"
+                className="flex-1 h-11 rounded-xl border border-card-border bg-card text-sm font-medium hover-elevate disabled:opacity-40 disabled:cursor-not-allowed"
                 data-testid="button-review-next"
               >
                 Next
@@ -636,6 +650,43 @@ function ReviewCard({
     setIsRookieCard(!!snapshot.isRookieCard);
     setIsAutographed(!!snapshot.isAutographed);
     setIsNumbered(!!snapshot.isNumbered);
+    // PR AC: seed `repricedSummary` from the persisted snapshot so the
+    // "Avg $X · N listings · View on eBay" strip renders the moment a
+    // review card opens. Without this, the panel stays hidden until the
+    // dealer triggers a reprice round-trip — confusing because the
+    // snapshot ALREADY has a price + listings the user saw at scan time.
+    const snapshotComps = (snapshot as any).comps;
+    const snapshotActive: Array<{ title?: string; price?: number | null; url?: string }> =
+      Array.isArray(snapshotComps?.active) ? snapshotComps.active : [];
+    const snapshotMean =
+      typeof snapshot.estimatedValue === "number" && Number.isFinite(snapshot.estimatedValue)
+        ? snapshot.estimatedValue
+        : null;
+    const snapshotEbayUrl =
+      typeof snapshot.ebaySearchUrl === "string" ? snapshot.ebaySearchUrl : null;
+    const snapshotQuery: string =
+      typeof snapshotComps?.query === "string" ? snapshotComps.query : "";
+    if (snapshotMean !== null && (snapshotActive.length > 0 || snapshotQuery)) {
+      setRepricedSummary({
+        ok: true,
+        itemId: item.id,
+        summary: {
+          mean: snapshotMean,
+          median: null,
+          count: snapshotActive.length,
+          query: snapshotQuery,
+          listings: snapshotActive.map((l) => ({
+            title: typeof l.title === "string" ? l.title : "",
+            price: typeof l.price === "number" ? l.price : 0,
+            url: typeof l.url === "string" ? l.url : "",
+          })),
+        },
+        ebaySearchUrl: snapshotEbayUrl,
+        query: snapshotQuery,
+      });
+    } else {
+      setRepricedSummary(null);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [item.id]);
 
@@ -830,6 +881,36 @@ function ReviewCard({
           item.confidenceScore != null ? Number(item.confidenceScore) : null,
       });
     }
+    // PR AC: gate reprice on whether the dealer actually edited an
+    // identity field that participates in the eBay query. If the
+    // snapshot is unchanged (dealer just clicked Save to confirm), reuse
+    // the snapshot's `estimatedValue` and skip the round-trip — no
+    // listings-strip flash, no spurious eBay calls.
+    const norm = (v: unknown): string =>
+      v === null || v === undefined ? "" : String(v).trim().toLowerCase();
+    const snapshotPlayerText = [snapshot.playerFirstName, snapshot.playerLastName]
+      .filter(Boolean)
+      .join(" ");
+    const editedPlayerText = [edits.playerFirstName, edits.playerLastName]
+      .filter(Boolean)
+      .join(" ");
+    const identityChanged =
+      norm(edits.year) !== norm(snapshot.year) ||
+      norm(edits.brand) !== norm(snapshot.brand) ||
+      norm(edits.set) !== norm(snapshot.set) ||
+      norm(edits.cardNumber) !== norm(snapshot.cardNumber) ||
+      norm(editedPlayerText) !== norm(snapshotPlayerText) ||
+      norm(edits.variant) !== norm(snapshot.variant) ||
+      norm(edits.foilType) !== norm(snapshot.foilType) ||
+      norm((edits as any).subset) !== norm((snapshot as any).subset);
+    const snapshotHasPrice =
+      typeof snapshot.estimatedValue === "number" &&
+      Number.isFinite(snapshot.estimatedValue);
+    const needsReprice = identityChanged || !snapshotHasPrice;
+    if (!needsReprice) {
+      onSave({ ...edits, estimatedValue: snapshot.estimatedValue });
+      return;
+    }
     repriceMutation.mutate(edits, {
       onSuccess: (data) => {
         // Pass the fresh mean as estimatedValue so /save writes column P
@@ -848,7 +929,20 @@ function ReviewCard({
   };
 
   const score = item.confidenceScore ? Math.round(Number(item.confidenceScore)) : null;
-  const reasons = item.reviewReasons ?? [];
+  // PR AC Bug 2b client-side belt-and-suspenders: suppress the
+  // contradictory "Couldn't read card" chip when the persisted snapshot
+  // already has all four identity fields populated. The server flag is
+  // set BEFORE legacy OCR / CardDB enrichment fills missing fields, so
+  // it can stay `true` even when the final analysis is complete.
+  const hasAllIdentity =
+    !!(snapshot.playerFirstName || snapshot.playerLastName) &&
+    !!snapshot.year &&
+    !!snapshot.brand &&
+    !!snapshot.cardNumber;
+  const rawReasons = item.reviewReasons ?? [];
+  const reasons = hasAllIdentity
+    ? rawReasons.filter((r) => r !== "vlm_empty_identity")
+    : rawReasons;
 
   return (
     <div
@@ -882,20 +976,36 @@ function ReviewCard({
         )}
       </div>
 
-      {/* Reasons */}
+      {/* Reasons — split into two visually distinct chip rows so a dealer
+          can scan the queue and instantly see which cards are mandatory
+          (admin policy, blue) vs. which are low-confidence (amber). */}
       {reasons.length > 0 && (
-        <div className="rounded-xl bg-foil-violet/5 border border-foil-violet/15 px-3 py-2 flex items-start gap-2">
-          <Info className="w-3.5 h-3.5 text-foil-violet mt-0.5 shrink-0" />
-          <div className="text-[11px] text-slate-700 space-y-0.5">
-            {reasons.slice(0, 4).map((r) => (
-              <div key={r}>{reasonLabel(r)}</div>
-            ))}
-            {reasons.length > 4 && (
-              <div className="text-muted-foreground">
-                +{reasons.length - 4} more
-              </div>
-            )}
-          </div>
+        <div className="flex flex-wrap gap-1.5">
+          {reasons.slice(0, 6).map((r) => {
+            const variant = reasonVariant(r);
+            const cls =
+              variant === "mandatory_review"
+                ? "bg-blue-100 border-blue-200 text-blue-800"
+                : "bg-foil-amber/10 border-foil-amber/30 text-foil-amber";
+            return (
+              <span
+                key={r}
+                className={cn(
+                  "text-[11px] font-medium rounded-full border px-2 py-0.5 inline-flex items-center gap-1",
+                  cls,
+                )}
+                data-testid={`chip-reason-${r}`}
+              >
+                <Info className="w-3 h-3 shrink-0" />
+                {reasonLabel(r)}
+              </span>
+            );
+          })}
+          {reasons.length > 6 && (
+            <span className="text-[11px] text-muted-foreground self-center">
+              +{reasons.length - 6} more
+            </span>
+          )}
         </div>
       )}
 
@@ -1019,7 +1129,7 @@ function ReviewCard({
           className="rounded-xl bg-emerald-50 border border-emerald-200 px-3 py-2 text-[12px] text-emerald-900 flex items-center justify-between gap-2"
           data-testid="text-review-reprice-preview"
         >
-          <div className="min-w-0">
+          <div className="min-w-0 flex items-center gap-2">
             {repricedSummary.summary.count > 0 ? (
               <>
                 <span className="font-semibold">
@@ -1032,6 +1142,15 @@ function ReviewCard({
               </>
             ) : (
               <span className="text-emerald-700">No active listings</span>
+            )}
+            {repriceMutation.isPending && (
+              <span
+                className="inline-flex items-center gap-1 text-emerald-700"
+                data-testid="text-review-reprice-pending"
+              >
+                <Loader2 className="w-3 h-3 animate-spin" />
+                Refreshing eBay…
+              </span>
             )}
           </div>
           {repricedSummary.ebaySearchUrl && (
@@ -1102,13 +1221,13 @@ function ReviewCard({
           type="button"
           onClick={onSkip}
           disabled={saving || skipping || repriceMutation.isPending}
-          className="h-11 px-3 rounded-xl border border-card-border bg-card text-xs font-medium hover-elevate disabled:opacity-50 flex items-center gap-1.5"
+          className="flex-1 h-11 px-3 rounded-xl border border-card-border bg-card text-sm font-medium hover-elevate disabled:opacity-50 flex items-center justify-center gap-1.5"
           data-testid="button-review-skip"
         >
           {skipping ? (
-            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            <Loader2 className="w-4 h-4 animate-spin" />
           ) : (
-            <SkipForward className="w-3.5 h-3.5" />
+            <SkipForward className="w-4 h-4" />
           )}
           Skip
         </button>
