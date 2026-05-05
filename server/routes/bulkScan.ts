@@ -16,7 +16,7 @@
 // The UI layer (PR B) will poll GET /batches/:id for live progress.
 
 import type { Express, Request, Response } from 'express';
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { db } from '@db';
 import { scanBatches, scanBatchItems } from '@shared/schema';
 import { requireAuth } from '../auth';
@@ -26,7 +26,7 @@ import {
   getOrInitFolders,
   setUserFolders,
 } from '../bulkScan/processor';
-import { getFolderName, fetchThumbnail, listInboxAllFiles } from '../bulkScan/driveClient';
+import { getFolderName, fetchThumbnail, listInboxAllFiles, moveFile } from '../bulkScan/driveClient';
 import { appendCardRow, updateAvgPriceForRow } from '../googleSheets';
 import { getEbaySearchUrl } from '../ebayService';
 import {
@@ -91,6 +91,18 @@ export function registerBulkScanRoutes(app: Express): void {
   });
 
   // ── List batches ────────────────────────────────────────────────────────
+  // Returns the recent batch list with a live `reviewQueueCount` recomputed
+  // from `scan_batch_items.status='review'`. The stored counter on
+  // `scan_batches.reviewQueueCount` was wrong on PR AB batches: the
+  // processor's flushCounters runs `if (outcome === 'review') reviews++`,
+  // and admin items with `admin_mandatory_review` *do* take the review
+  // branch, but older batches that finished before this PR shipped never had
+  // their stored counter recomputed and would render "0 REVIEW" forever.
+  // Recompute on every list to make the dashboard self-healing.
+  //
+  // Also surfaces `savedNotMovedCount` per batch — items that are auto_saved
+  // (or admin-saved via the review flow) but whose Drive files never made
+  // it out of the inbox. Drives the "Move to Processed" backfill button.
   app.get('/api/bulk-scan/batches', requireAuth, async (req: Request, res: Response) => {
     const userId = (req.user as any)?.id as number | undefined;
     if (!userId) return res.status(401).json({ error: 'Not authenticated' });
@@ -100,7 +112,34 @@ export function registerBulkScanRoutes(app: Express): void {
       .where(eq(scanBatches.userId, userId))
       .orderBy(desc(scanBatches.createdAt))
       .limit(50);
-    return res.json({ batches: rows });
+    if (rows.length === 0) return res.json({ batches: [] });
+    const batchIds = rows.map(r => r.id);
+    const counts = await db
+      .select({
+        batchId: scanBatchItems.batchId,
+        status: scanBatchItems.status,
+        movedAt: scanBatchItems.movedAt,
+        n: sql<number>`count(*)::int`,
+      })
+      .from(scanBatchItems)
+      .where(inArray(scanBatchItems.batchId, batchIds))
+      .groupBy(scanBatchItems.batchId, scanBatchItems.status, scanBatchItems.movedAt);
+    const reviewByBatch = new Map<number, number>();
+    const savedNotMovedByBatch = new Map<number, number>();
+    for (const c of counts) {
+      if (c.status === 'review') {
+        reviewByBatch.set(c.batchId, (reviewByBatch.get(c.batchId) ?? 0) + c.n);
+      }
+      if (c.status === 'auto_saved' && c.movedAt == null) {
+        savedNotMovedByBatch.set(c.batchId, (savedNotMovedByBatch.get(c.batchId) ?? 0) + c.n);
+      }
+    }
+    const batches = rows.map(r => ({
+      ...r,
+      reviewQueueCount: reviewByBatch.get(r.id) ?? 0,
+      savedNotMovedCount: savedNotMovedByBatch.get(r.id) ?? 0,
+    }));
+    return res.json({ batches });
   });
 
   // ── Batch detail ────────────────────────────────────────────────────────
@@ -344,6 +383,40 @@ export function registerBulkScanRoutes(app: Express): void {
       console.error('[bulkScan/route] user_scans log failed (non-fatal):', logErr);
     }
 
+    // PR AD: per-item Drive move on review-Save. With PR AB routing every
+    // admin scan to mandatory review, the processor's per-item move loop
+    // never fires for admin batches — files would otherwise sit in the inbox
+    // forever. Move both sides from the batch's inbox to its processed
+    // folder right after the Sheet write succeeded. Best-effort: a Drive
+    // failure must NOT roll back the Sheet write (the row is already
+    // committed and re-running would double-write).
+    let moved = false;
+    if (batch.sourceFolderId && batch.processedFolderId) {
+      const fromId = batch.sourceFolderId;
+      const toId = batch.processedFolderId;
+      const moves: Promise<unknown>[] = [];
+      if (item.frontFileId) {
+        moves.push(
+          moveFile(userId, item.frontFileId, fromId, toId).catch(err => {
+            console.warn(`[bulkScan/route] /save move front file failed item=${itemId}: ${err?.message || err}`);
+            throw err;
+          }),
+        );
+      }
+      if (item.backFileId) {
+        moves.push(
+          moveFile(userId, item.backFileId, fromId, toId).catch(err => {
+            console.warn(`[bulkScan/route] /save move back file failed item=${itemId}: ${err?.message || err}`);
+            throw err;
+          }),
+        );
+      }
+      if (moves.length > 0) {
+        const results = await Promise.allSettled(moves);
+        moved = results.every(r => r.status === 'fulfilled');
+      }
+    }
+
     await db
       .update(scanBatchItems)
       .set({
@@ -351,6 +424,7 @@ export function registerBulkScanRoutes(app: Express): void {
         analysisResult: merged,
         reviewReasons: null,
         processedAt: new Date(),
+        ...(moved ? { movedAt: new Date() } : {}),
       })
       .where(eq(scanBatchItems.id, itemId));
 
@@ -364,7 +438,84 @@ export function registerBulkScanRoutes(app: Express): void {
       .set({ reviewQueueCount: remaining.length })
       .where(eq(scanBatches.id, item.batchId));
 
-    return res.json({ ok: true });
+    return res.json({ ok: true, moved });
+  });
+
+  // ── Backfill: move saved-but-not-moved files to processed (PR AD) ───────
+  // Stuck-batch cleanup endpoint. Targets the case where items reached
+  // 'auto_saved' (either via the processor's auto-save path or via this
+  // route's /save handler) but their Drive files never made it to the
+  // processed folder — admin batches before PR AD never moved at all
+  // because PR AB routes everything through review, so the processor's
+  // per-item move loop never ran.
+  //
+  // For each item with status='auto_saved' AND movedAt IS NULL, attempts
+  // moveFile for both sides. Returns a summary so the UI toast can report
+  // {moved, failed, skipped}. Best-effort per item — one Drive failure
+  // does not stop the rest of the batch.
+  app.post('/api/bulk-scan/batches/:batchId/move-saved-to-processed', requireAuth, async (req: Request, res: Response) => {
+    const userId = (req.user as any)?.id as number | undefined;
+    if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+    const batchId = parseInt(req.params.batchId, 10);
+    if (!Number.isFinite(batchId)) return res.status(400).json({ error: 'Invalid batch id' });
+    const [batch] = await db
+      .select()
+      .from(scanBatches)
+      .where(and(eq(scanBatches.id, batchId), eq(scanBatches.userId, userId)))
+      .limit(1);
+    if (!batch) return res.status(404).json({ error: 'Batch not found' });
+    if (!batch.sourceFolderId || !batch.processedFolderId) {
+      return res.status(409).json({
+        error: 'folders_not_configured',
+        message: 'This batch is missing inbox or processed folder ids — nothing to move.',
+      });
+    }
+    const fromId = batch.sourceFolderId;
+    const toId = batch.processedFolderId;
+    const items = await db
+      .select()
+      .from(scanBatchItems)
+      .where(
+        and(
+          eq(scanBatchItems.batchId, batchId),
+          eq(scanBatchItems.status, 'auto_saved'),
+          isNull(scanBatchItems.movedAt),
+        ),
+      );
+    let moved = 0;
+    let failed = 0;
+    let skipped = 0;
+    for (const item of items) {
+      const moves: Promise<unknown>[] = [];
+      if (item.frontFileId) {
+        moves.push(moveFile(userId, item.frontFileId, fromId, toId));
+      }
+      if (item.backFileId) {
+        moves.push(moveFile(userId, item.backFileId, fromId, toId));
+      }
+      if (moves.length === 0) { skipped++; continue; }
+      const results = await Promise.allSettled(moves);
+      const allOk = results.every(r => r.status === 'fulfilled');
+      if (allOk) {
+        moved++;
+        await db
+          .update(scanBatchItems)
+          .set({ movedAt: new Date() })
+          .where(eq(scanBatchItems.id, item.id));
+      } else {
+        failed++;
+        for (const r of results) {
+          if (r.status === 'rejected') {
+            console.warn(`[bulkScan/route] /move-saved-to-processed item=${item.id}: ${(r.reason as any)?.message || r.reason}`);
+          }
+        }
+      }
+    }
+    console.log(
+      `[bulkScan/route] /batches/${batchId}/move-saved-to-processed user=${userId} ` +
+        `moved=${moved} failed=${failed} skipped=${skipped} (of ${items.length} candidates)`,
+    );
+    return res.json({ moved, failed, skipped });
   });
 
   // ── Review: skip a reviewed item ────────────────────────────────────────

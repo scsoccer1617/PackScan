@@ -688,6 +688,11 @@ export const scanBatchItems = pgTable("scan_batch_items", {
   errorMessage: text("error_message"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   processedAt: timestamp("processed_at"),
+  // Set after the per-item Drive move on review-Save (or backfill) succeeds.
+  // Null means: status reached 'auto_saved' or 'saved' but the inbox→processed
+  // move was skipped (review path) or failed. The /move-saved-to-processed
+  // backfill endpoint targets exactly these rows.
+  movedAt: timestamp("moved_at"),
 }, (table) => [
   index("scan_batch_items_batch_idx").on(table.batchId),
   index("scan_batch_items_status_idx").on(table.status),
