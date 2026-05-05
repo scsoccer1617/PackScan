@@ -59,6 +59,7 @@ export interface ScanTracking {
 interface AppendCardPayload {
   sport?: string | null;
   year?: number | string | null;
+  yearPrintedRaw?: string | null;
   brand?: string | null;
   collection?: string | null;
   set?: string | null;
@@ -134,6 +135,10 @@ function buildAppendPayload(
   return {
     sport: cardData.sport ?? null,
     year: cardData.year ?? null,
+    // PR X: forward the verbatim printed YYYY-YY range so the server's
+    // formatYearForSheet() can render the season range in the Sheet
+    // Year cell (matches what the result page header shows).
+    yearPrintedRaw: (cardData as { yearPrintedRaw?: string | null }).yearPrintedRaw ?? null,
     brand: cardData.brand ?? null,
     collection: cardData.collection ?? null,
     set: cardData.set ?? null,

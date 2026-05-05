@@ -34,6 +34,7 @@ import {
   buildPickerQuery,
   isMultiPlayerSubset,
 } from '../ebayPickerSearch';
+import { normalizeSetForEbay, formatYearForEbay, formatYearForSheet } from '../ebaySetNormalize';
 import { logUserScan, diffScanFields, type ScanFieldValues } from '../userScans';
 
 /**
@@ -269,9 +270,17 @@ export function registerBulkScanRoutes(app: Express): void {
     merged.ebaySearchUrl = rebuiltEbayUrl;
 
     try {
+      // PR X: format the Year cell as YYYY-YY for season sports / printed
+      // ranges so the bulk review-save row matches what the analyze
+      // pipeline writes for single-card scans.
+      const yearForSheet = formatYearForSheet({
+        year: yearNumeric,
+        sport: merged.sport ?? null,
+        yearPrintedRaw: merged.yearPrintedRaw ?? null,
+      });
       await appendCardRow(userId, {
         sport: merged.sport || null,
-        year: yearNumeric,
+        year: yearForSheet || yearNumeric,
         brand: merged.brand || null,
         collection: merged.collection || null,
         set: merged.set || null,
@@ -913,10 +922,15 @@ async function repriceItem(
   const player = playerName || subset;
   const isMultiPlayer = playersArr.length > 1 || isMultiPlayerSubset(subset);
 
+  const sportRaw = (analysis.sport ?? '').toString().trim();
+  const yearPrintedRaw = (analysis.yearPrintedRaw ?? '').toString().trim();
+  // PR X: query-only normalization for the bulk reprice path. Same
+  // helpers as the analyze pipeline so the picker query that drives
+  // reprice matches the one that produced the original price.
   const query = buildPickerQuery({
-    year: yearStr,
+    year: formatYearForEbay({ year: yearStr, sport: sportRaw, yearPrintedRaw }) || yearStr,
     brand,
-    set: setName,
+    set: normalizeSetForEbay(setName),
     cardNumber,
     player,
     subset: playerName ? subset : '',

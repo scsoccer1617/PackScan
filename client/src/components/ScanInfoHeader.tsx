@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { cn } from "@/lib/utils";
+import { displayYear } from "@/lib/seasonYear";
 
 // PR R Item 4 — streaming card-info header. Renders a result-style
 // identity line above the chip stack while the scan is in flight.
@@ -37,6 +38,12 @@ export interface ScanInfoHeaderFields {
   collection?: string | null;
   cardNumber?: string | null;
   player?: string | null;
+  // PR X: passed through from the streaming `analyzing_card` events so
+  // the header can render YYYY-YY for season sports (Basketball,
+  // Hockey) the moment Gemini's stage-1 lands. Parallels the same
+  // fields used by the result page's `displayYear()` call.
+  sport?: string | null;
+  yearPrintedRaw?: string | null;
 }
 
 interface ScanInfoHeaderProps {
@@ -123,12 +130,21 @@ export function ScanInfoHeader({
   revealStaggerMs: _ignoredStagger,
   forceReducedMotion: _ignoredReducedMotion,
 }: ScanInfoHeaderProps) {
-  const { year, brand, set, collection, cardNumber, player } = fields;
+  const { year, brand, set, collection, cardNumber, player, sport, yearPrintedRaw } = fields;
   const cardNumDisplay = useMemo(() => {
     if (cardNumber == null) return null;
     const s = String(cardNumber);
     return s.startsWith("#") ? s : `#${cardNumber}`;
   }, [cardNumber]);
+  // PR X: prefer the season-range form when the sport / printed range
+  // calls for it (matches what the result page renders). Falls back to
+  // the integer when displayYear can't form a range — empty year still
+  // shows the skeleton because we pass through `null`.
+  const yearDisplay = useMemo<string | number | null>(() => {
+    if (year == null || year === "") return null;
+    const formatted = displayYear(year, sport ?? null, yearPrintedRaw ?? null);
+    return formatted ?? year;
+  }, [year, sport, yearPrintedRaw]);
 
   // PR U — pure reactive rendering. Each field renders skeleton until
   // its slot has a value, then renders the value with the standard
@@ -163,7 +179,7 @@ export function ScanInfoHeader({
             Player · Year · Brand · Set · Collection · #. */}
         {renderField("player", player, "w-32", "scan-info-header-player")}{" "}
         <span className="text-slate-400">·</span>{" "}
-        {renderField("year", year, "w-10", "scan-info-header-year")}{" "}
+        {renderField("year", yearDisplay, "w-10", "scan-info-header-year")}{" "}
         {renderField("brand", brand, "w-16", "scan-info-header-brand")}{" "}
         <span className="text-slate-400">·</span>{" "}
         {renderField("set", set, "w-20", "scan-info-header-set")}{" "}
