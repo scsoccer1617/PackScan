@@ -23,13 +23,13 @@ import {
   Inbox,
   ListChecks,
   Settings as SettingsIcon,
-  Beaker,
   FileSpreadsheet,
   ExternalLink,
   HelpCircle,
   ChevronDown,
   FileQuestion,
   Trash2,
+  FolderOutput,
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
@@ -50,6 +50,10 @@ interface ScanBatch {
   dryRun: boolean;
   createdAt: string;
   completedAt: string | null;
+  // Items that auto-saved but whose Drive files never made it to the
+  // processed folder. Drives the per-batch "Move to Processed" backfill
+  // button (PR AD).
+  savedNotMovedCount?: number;
 }
 interface BatchesResponse {
   batches: ScanBatch[];
@@ -121,7 +125,6 @@ interface InboxDiagnosticResponse {
 export default function BulkScan() {
   const { user } = useAuth();
   const { toast } = useToast();
-  const [dryRun, setDryRun] = useState(false);
 
   // Folder config (required before Sync can kick off).
   const { data: foldersData } = useQuery<FoldersResponse>({
@@ -169,11 +172,11 @@ export default function BulkScan() {
       apiRequest<{ batch: ScanBatch }>({
         url: "/api/bulk-scan/sync",
         method: "POST",
-        body: { dryRun },
+        body: {},
       }),
     onSuccess: (data) => {
       toast({
-        title: dryRun ? "Dry-run batch started" : "Batch started",
+        title: "Batch started",
         description: `Holo is processing ${data.batch.fileCount || "your"} scan${
           data.batch.fileCount === 1 ? "" : "s"
         }.`,
@@ -342,23 +345,8 @@ export default function BulkScan() {
             high-confidence hits straight to your active sheet.
           </p>
 
-          {/* Dry-run toggle + Sync */}
+          {/* Sync */}
           <div className="mt-4 flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setDryRun((v) => !v)}
-              className={cn(
-                "h-10 px-3 rounded-xl text-xs font-medium border flex items-center gap-1.5 transition",
-                dryRun
-                  ? "bg-white/15 border-white/30 text-white"
-                  : "bg-transparent border-white/25 text-white/70",
-              )}
-              data-testid="button-toggle-dry-run"
-              aria-pressed={dryRun}
-            >
-              <Beaker className="w-3.5 h-3.5" />
-              Dry-run
-            </button>
             <button
               type="button"
               onClick={() => syncMutation.mutate()}
@@ -382,12 +370,6 @@ export default function BulkScan() {
               )}
             </button>
           </div>
-
-          {dryRun && (
-            <p className="text-[11px] text-white/70 mt-2">
-              Dry-run processes scans but doesn't write to your sheet or move files.
-            </p>
-          )}
         </div>
       </section>
 
@@ -968,6 +950,48 @@ function BatchCard({ batch }: { batch: ScanBatch }) {
   // rows that just got dropped underneath it. Hide the button entirely
   // for those rather than render a guaranteed-409 click target.
   const canDelete = batch.status !== 'running';
+  // PR AD: per-batch backfill — admin batches before this PR never moved
+  // their saved files out of the inbox, since PR AB routes everything to
+  // review and the processor's per-item move loop only fires on the
+  // auto-save branch. Show this button when the batch has ≥1 saved item
+  // whose movedAt is still null.
+  const savedNotMoved = batch.savedNotMovedCount ?? 0;
+  const moveSavedMutation = useMutation({
+    mutationFn: async () =>
+      apiRequest<{ moved: number; failed: number; skipped: number }>({
+        url: `/api/bulk-scan/batches/${batch.id}/move-saved-to-processed`,
+        method: 'POST',
+      }),
+    onSuccess: (data) => {
+      const parts: string[] = [];
+      if (data.moved > 0) parts.push(`${data.moved} moved`);
+      if (data.failed > 0) parts.push(`${data.failed} failed`);
+      if (data.skipped > 0) parts.push(`${data.skipped} skipped`);
+      toast({
+        title: `Batch #${batch.id}: ${parts.join(', ') || 'nothing to move'}`,
+        description:
+          data.failed > 0
+            ? 'Check Drive folder permissions if any moves failed.'
+            : undefined,
+        variant: data.failed > 0 ? 'destructive' : undefined,
+      });
+      queryClient.invalidateQueries({ queryKey: ['/api/bulk-scan/batches'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/bulk-scan/inbox-diagnostic'] });
+    },
+    onError: (err: any) => {
+      const raw = String(err?.message || '').replace(/^\d+:\s*/, '');
+      let msg = raw;
+      try {
+        msg = JSON.parse(raw).message || JSON.parse(raw).error || raw;
+      } catch {}
+      toast({ title: "Couldn't move files", description: msg, variant: 'destructive' });
+    },
+  });
+  const handleMoveSaved = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    moveSavedMutation.mutate();
+  };
   const deleteMutation = useMutation({
     mutationFn: async () =>
       apiRequest<{ ok: true }>({
@@ -1062,6 +1086,23 @@ function BatchCard({ batch }: { batch: ScanBatch }) {
               <ListChecks className="w-3 h-3" /> {batch.reviewQueueCount} to
               review
             </div>
+          )}
+          {savedNotMoved > 0 && (
+            <button
+              type="button"
+              onClick={handleMoveSaved}
+              disabled={moveSavedMutation.isPending}
+              className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-foil-violet hover:text-foil-violet/80 hover-elevate rounded-md px-1.5 py-0.5 disabled:opacity-50"
+              data-testid={`button-move-saved-${batch.id}`}
+              title={`Move ${savedNotMoved} saved file${savedNotMoved === 1 ? '' : 's'} to processed folder`}
+            >
+              {moveSavedMutation.isPending ? (
+                <Loader2 className="w-3 h-3 animate-spin" />
+              ) : (
+                <FolderOutput className="w-3 h-3" />
+              )}
+              Move {savedNotMoved} to Processed
+            </button>
           )}
         </div>
         <div className="flex flex-col items-end gap-2 shrink-0">

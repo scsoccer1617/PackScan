@@ -1195,6 +1195,32 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
     combinedResult._engine = combinedResult._engine ?? 'ocr';
     const finalResult = ensureRequiredFields(combinedResult);
 
+    // PR AD: reconcile `_vlmEmptyIdentity` against the FINAL post-overlay,
+    // post-CardDB-enrichment result. The flag was set right after the
+    // Gemini overlay (line ~991 above) when Gemini alone hadn't supplied
+    // every identity field, but downstream passes (CardDB lookups,
+    // ensureRequiredFields, OCR fallbacks) often fill the gaps. Without
+    // this reconcile, the bulk confidenceGate sees `vlm_empty_identity`
+    // and routes the card to review even when all four (player, year,
+    // brand, cardNumber) are now populated from the merged result. When
+    // extraction truly failed end-to-end, the flag stays true.
+    const fr = finalResult as any;
+    const playerPopulated =
+      !!(fr.playerFirstName?.toString().trim() || fr.playerLastName?.toString().trim())
+      || (Array.isArray(fr.players)
+        && fr.players.some(
+          (p: any) => p?.firstName?.toString().trim() || p?.lastName?.toString().trim(),
+        ));
+    const yearPopulated =
+      typeof fr.year === 'number'
+        ? Number.isFinite(fr.year)
+        : !!(fr.year && Number.parseInt(String(fr.year), 10));
+    const brandPopulated = !!fr.brand?.toString().trim();
+    const cardNumberPopulated = !!fr.cardNumber?.toString().trim();
+    if (playerPopulated && yearPopulated && brandPopulated && cardNumberPopulated) {
+      fr._vlmEmptyIdentity = false;
+    }
+
     console.log(
       `[Engine] ocr-first END — brand=${finalResult.brand} year=${finalResult.year} #${finalResult.cardNumber} player="${finalResult.playerFirstName ?? ''} ${finalResult.playerLastName ?? ''}" foil=${finalResult.foilType || 'none'}`
     );
