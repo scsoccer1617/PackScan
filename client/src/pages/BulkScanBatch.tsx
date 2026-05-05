@@ -903,7 +903,12 @@ function ReviewCard({
           context next to the editable fields. Pulls via the proxy endpoint
           which authenticates against the user's Drive. Falls back to a
           placeholder div if the file can't be loaded. */}
-      <CardImageStrip itemId={item.id} hasFront={!!item.frontFileId} hasBack={!!item.backFileId} />
+      <CardImageStrip
+        itemId={item.id}
+        hasFront={!!item.frontFileId}
+        hasBack={!!item.backFileId}
+        isGraded={!!snapshot.isGraded}
+      />
 
       {/* Editable fields — mirrors every column written to Google Sheets so
           a dealer can save a fully-shaped row from review without bouncing
@@ -1121,10 +1126,12 @@ function CardImageStrip({
   itemId,
   hasFront,
   hasBack,
+  isGraded,
 }: {
   itemId: number;
   hasFront: boolean;
   hasBack: boolean;
+  isGraded?: boolean;
 }) {
   if (!hasFront && !hasBack) return null;
   return (
@@ -1133,12 +1140,14 @@ function CardImageStrip({
         side="front"
         itemId={itemId}
         present={hasFront}
+        isGraded={isGraded}
         testId={`review-image-front-${itemId}`}
       />
       <CardImage
         side="back"
         itemId={itemId}
         present={hasBack}
+        isGraded={isGraded}
         testId={`review-image-back-${itemId}`}
       />
     </div>
@@ -1149,11 +1158,13 @@ function CardImage({
   side,
   itemId,
   present,
+  isGraded,
   testId,
 }: {
   side: "front" | "back";
   itemId: number;
   present: boolean;
+  isGraded?: boolean;
   testId?: string;
 }) {
   const [errored, setErrored] = useState(false);
@@ -1162,9 +1173,20 @@ function CardImage({
   useEffect(() => {
     setErrored(false);
   }, [itemId]);
+  // PR AG — graded slabs include a top label section (PSA/BGS/SGC bar with
+  // grader/year/player/grade) that must remain visible. The aspect ratio
+  // for graded slabs is taller than raw cards, so we widen the container
+  // a bit (2.6/3.7) and keep object-contain. Background slate makes any
+  // letterboxing look intentional rather than broken.
+  const aspectClass = isGraded ? "aspect-[2.6/3.7]" : "aspect-[2/3]";
+  const bgClass = isGraded ? "bg-slate-100" : "bg-muted/50";
   return (
     <div
-      className="relative aspect-[2/3] rounded-xl bg-muted/50 border border-card-border overflow-hidden"
+      className={cn(
+        "relative rounded-xl border border-card-border overflow-hidden",
+        aspectClass,
+        bgClass,
+      )}
       data-testid={testId}
     >
       {present && !errored ? (
