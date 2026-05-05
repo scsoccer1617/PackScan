@@ -32,6 +32,7 @@ import {
   Info,
   ListChecks,
   Trash2,
+  RefreshCw,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -540,6 +541,27 @@ export default function BulkScanBatch() {
 
 // ── Review card ───────────────────────────────────────────────────────────
 
+/**
+ * Re-price preview shape returned by POST /api/bulk-scan/review/:itemId/reprice.
+ * Mirrors `CompsSummary` from server/ebayCompsSummary.ts plus the rebuilt
+ * outbound URL. Used to update the visible price/listings when the dealer
+ * clicks Save or "Analyze & Price" — the freshly-priced mean is then passed
+ * back in the /save payload as `estimatedValue` so the Sheet column matches.
+ */
+interface RepriceResponse {
+  ok: true;
+  itemId: number;
+  summary: {
+    mean: number | null;
+    median: number | null;
+    count: number;
+    query: string;
+    listings: Array<{ title: string; price: number; url: string }>;
+  };
+  ebaySearchUrl: string | null;
+  query: string;
+}
+
 function ReviewCard({
   item,
   onSave,
@@ -611,13 +633,43 @@ function ReviewCard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [item.id]);
 
-  const handleSave = () => {
+  // PR Y: review-flow re-price. Save auto-runs this with the edited
+  // identity, then immediately commits the row carrying the fresh mean.
+  // The "Analyze & Price" button calls the same path but stops at the
+  // preview — useful when the dealer wants to inspect the new comps
+  // before deciding to save.
+  const { toast: rcToast } = useToast();
+  const [repricedSummary, setRepricedSummary] = useState<RepriceResponse | null>(null);
+  const repriceMutation = useMutation({
+    mutationFn: async (edits: Record<string, any>): Promise<RepriceResponse> =>
+      apiRequest({
+        url: `/api/bulk-scan/review/${item.id}/reprice`,
+        method: "POST",
+        body: edits,
+      }),
+    onSuccess: (data) => {
+      setRepricedSummary(data);
+      // Reflect the fresh mean in the editable price field so the dealer
+      // sees what's about to be written. Trust the user — they can still
+      // manually overwrite this before Save.
+      const mean = data?.summary?.mean;
+      if (typeof mean === "number" && Number.isFinite(mean)) {
+        setEstimatedValue(mean.toFixed(2));
+      } else if (data?.summary?.count === 0) {
+        setEstimatedValue("0.00");
+      }
+    },
+    onError: (err: any) => {
+      const msg = String(err?.message || "").replace(/^\d+:\s*/, "");
+      rcToast({ title: "Re-price failed", description: msg, variant: "destructive" });
+    },
+  });
+
+  // Build the edited-identity payload for either /reprice or /save.
+  // Single source of truth — save and analyze both run against the same
+  // shape so the preview pool matches what /save persists.
+  const buildEdits = (overrides?: Record<string, any>): Record<string, any> => {
     const trimmed = player.trim();
-    // If the dealer left the player text unchanged AND the snapshot has a
-    // multi-player array, forward the array verbatim so /api/bulk-scan/
-    // review/:itemId/save can rebuild the joined Sheet cell. Legacy
-    // first/last mirror primaryPlayer for back-compat with existing
-    // server merge logic.
     const dealerEditedPlayer = trimmed !== seededPlayerText.trim();
     const playersToForward: Player[] | undefined = !dealerEditedPlayer && snapshotPlayers && snapshotPlayers.length > 1
       ? snapshotPlayers
@@ -626,7 +678,7 @@ function ReviewCard({
     const last = rest.join(" ");
     const parsedYear = year ? Number(year) : null;
     const parsedValue = estimatedValue ? Number(estimatedValue) : null;
-    onSave({
+    return {
       playerFirstName: playersToForward
         ? (playersToForward[0]?.firstName || null)
         : (first || null),
@@ -648,6 +700,64 @@ function ReviewCard({
       isRookieCard,
       isAutographed,
       isNumbered,
+      ...(overrides || {}),
+    };
+  };
+
+  /**
+   * Inline validation — empty required fields can't produce a usable
+   * picker query, and we'd rather surface the gap immediately than burn
+   * an eBay round-trip to learn it. Mirrors the server's
+   * `incomplete_identity` 422 path so the UX stays consistent if the
+   * server check fires anyway.
+   */
+  const validateRequired = (): string | null => {
+    if (!brand.trim()) return "Brand is required";
+    if (!year.trim() || !Number.isFinite(Number(year))) return "Year is required";
+    if (!cardNumber.trim()) return "Card # is required";
+    if (!player.trim() && (!snapshotPlayers || snapshotPlayers.length === 0)) {
+      return "Player is required";
+    }
+    return null;
+  };
+
+  const handleAnalyze = () => {
+    const err = validateRequired();
+    if (err) {
+      rcToast({ title: "Cannot analyze", description: err, variant: "destructive" });
+      return;
+    }
+    repriceMutation.mutate(buildEdits());
+  };
+
+  // PR Y: Save now auto-runs re-price first, then commits the row with
+  // the FRESH mean. This collapses the old two-click flow (Analyze &
+  // Price → wait → Save) into a single button. The button label
+  // sequences "Re-pricing…" → "Saving…" so the dealer sees both steps.
+  // Re-price uses the edited identity (Year/Set/etc as the dealer typed
+  // them), so a stale auto-extracted price never lands in the sheet
+  // when the dealer corrected the year or variant first.
+  const handleSave = () => {
+    const err = validateRequired();
+    if (err) {
+      rcToast({ title: "Cannot save", description: err, variant: "destructive" });
+      return;
+    }
+    const edits = buildEdits();
+    repriceMutation.mutate(edits, {
+      onSuccess: (data) => {
+        // Pass the fresh mean as estimatedValue so /save writes column P
+        // with the same number the user just saw in the preview. Empty
+        // pool → 0 so the sheet renders the "No active listings" sentinel
+        // (PR E) instead of carrying the stale snapshot price forward.
+        const mean = data?.summary?.mean;
+        const fresh = typeof mean === "number" && Number.isFinite(mean) ? mean : 0;
+        onSave({ ...edits, estimatedValue: fresh });
+      },
+      onError: () => {
+        // Re-price failure already toasted by mutation onError. Don't
+        // commit a partial row — leave the dealer in place to retry.
+      },
     });
   };
 
@@ -813,29 +923,99 @@ function ReviewCard({
         />
       </div>
 
+      {/* PR Y: re-price preview readout. Renders only after the dealer
+          clicks Analyze & Price so we don't shadow the snapshot price
+          the user already sees in the editable Avg Price field. Empty
+          pool (count=0) is surfaced explicitly — PR E's sheet sentinel
+          will write "No active listings" when this row saves. */}
+      {repricedSummary && (
+        <div
+          className="rounded-xl bg-emerald-50 border border-emerald-200 px-3 py-2 text-[12px] text-emerald-900 flex items-center justify-between gap-2"
+          data-testid="text-review-reprice-preview"
+        >
+          <div className="min-w-0">
+            {repricedSummary.summary.count > 0 ? (
+              <>
+                <span className="font-semibold">
+                  ${(repricedSummary.summary.mean ?? 0).toFixed(2)}
+                </span>{" "}
+                <span className="text-emerald-700">
+                  · {repricedSummary.summary.count} listing
+                  {repricedSummary.summary.count === 1 ? "" : "s"}
+                </span>
+              </>
+            ) : (
+              <span className="text-emerald-700">No active listings</span>
+            )}
+          </div>
+          {repricedSummary.ebaySearchUrl && (
+            <a
+              href={repricedSummary.ebaySearchUrl}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="text-[11px] text-emerald-800 underline shrink-0"
+              data-testid="link-review-reprice-ebay"
+            >
+              View on eBay
+            </a>
+          )}
+        </div>
+      )}
+
       {/* Actions */}
+      {/* PR Y: Save (primary) auto-runs re-price → save in one click using
+          the dealer's edited identity. Analyze & Price (secondary) runs
+          re-price only and stops at the preview so the dealer can sanity-
+          check the new pool before committing. Both share the same
+          mutation; the button-level loading state distinguishes which
+          path is in flight. */}
       <div className="flex gap-2 pt-1">
         <button
           type="button"
           onClick={handleSave}
-          disabled={saving || skipping}
+          disabled={saving || skipping || repriceMutation.isPending}
           className={cn(
             "flex-1 h-11 rounded-xl font-display font-semibold text-sm flex items-center justify-center gap-1.5 transition",
             "bg-foil-violet text-white hover-elevate disabled:opacity-50",
           )}
           data-testid="button-review-save"
         >
-          {saving ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
+          {repriceMutation.isPending && !saving ? (
+            <>
+              <Loader2 className="w-4 h-4 animate-spin" />
+              Re-pricing…
+            </>
+          ) : saving ? (
+            <>
+              <Loader2 className="w-4 h-4 animate-spin" />
+              Saving…
+            </>
           ) : (
-            <Save className="w-4 h-4" />
+            <>
+              <Save className="w-4 h-4" />
+              Save to sheet
+            </>
           )}
-          Save to sheet
+        </button>
+        <button
+          type="button"
+          onClick={handleAnalyze}
+          disabled={saving || skipping || repriceMutation.isPending}
+          className="h-11 px-3 rounded-xl border border-card-border bg-card text-xs font-medium hover-elevate disabled:opacity-50 flex items-center gap-1.5"
+          data-testid="button-review-analyze"
+          title="Re-price using current edits (preview only — does not save)"
+        >
+          {repriceMutation.isPending && !saving ? (
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          ) : (
+            <RefreshCw className="w-3.5 h-3.5" />
+          )}
+          Analyze & Price
         </button>
         <button
           type="button"
           onClick={onSkip}
-          disabled={saving || skipping}
+          disabled={saving || skipping || repriceMutation.isPending}
           className="h-11 px-3 rounded-xl border border-card-border bg-card text-xs font-medium hover-elevate disabled:opacity-50 flex items-center gap-1.5"
           data-testid="button-review-skip"
         >
