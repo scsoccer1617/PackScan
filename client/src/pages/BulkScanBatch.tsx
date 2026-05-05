@@ -562,11 +562,41 @@ interface RepriceResponse {
     median: number | null;
     count: number;
     query: string;
-    listings: Array<{ title: string; price: number; url: string }>;
+    listings: Array<RepriceListing>;
   };
+  // PR AE (Bug 3a): top-level listings array — same pool as
+  // summary.listings, the ≤10 newest BIN comps the mean was computed
+  // from. The dealer-visible reprice strip renders these so initial
+  // scan and re-analyze produce identical listings + identical mean.
+  listings: Array<RepriceListing>;
+  pickerActive?: Array<RepriceListing>;
   ebaySearchUrl: string | null;
   query: string;
 }
+
+interface RepriceListing {
+  title: string;
+  price: number;
+  currency?: string;
+  url: string;
+  imageUrl?: string;
+  condition?: string;
+}
+
+// PR AE: title-based detector for graded slabs. Mirrors the negatives
+// PICKER_EXCLUSION_CHAIN now appends server-side; this is a belt-and-
+// suspenders visual flag in case eBay's keyword match still lets a
+// PSA/BGS/SGC/CGC/graded/slabbed listing through into the rendered pool.
+const GRADED_TITLE_RE = /\b(PSA|BGS|SGC|CGC|graded|slabbed)\b/i;
+function isGradedTitle(title: string): boolean {
+  return GRADED_TITLE_RE.test(title || "");
+}
+
+// PR AE: "Fresh" badge window — 30s after a successful reprice we render
+// a small green chip on the listings strip so the dealer knows the comps
+// they're staring at came from a *just-now* fetch (bypassCache: true on
+// the server) rather than a 60s-cached pool from before their edits.
+const FRESH_BADGE_MS = 30_000;
 
 function ReviewCard({
   item,
@@ -646,6 +676,20 @@ function ReviewCard({
   // before deciding to save.
   const { toast: rcToast } = useToast();
   const [repricedSummary, setRepricedSummary] = useState<RepriceResponse | null>(null);
+  // PR AE: timestamp of the most recent successful reprice. Drives the
+  // "Fresh" chip on the listings strip — within FRESH_BADGE_MS we render
+  // it so the dealer knows the displayed pool is post-edit (bypassCache).
+  const [lastReprisedAt, setLastReprisedAt] = useState<number | null>(null);
+  const [freshNow, setFreshNow] = useState(false);
+  useEffect(() => {
+    if (lastReprisedAt == null) {
+      setFreshNow(false);
+      return;
+    }
+    setFreshNow(true);
+    const tid = window.setTimeout(() => setFreshNow(false), FRESH_BADGE_MS);
+    return () => window.clearTimeout(tid);
+  }, [lastReprisedAt]);
   const repriceMutation = useMutation({
     mutationFn: async (edits: Record<string, any>): Promise<RepriceResponse> =>
       apiRequest({
@@ -655,6 +699,7 @@ function ReviewCard({
       }),
     onSuccess: (data) => {
       setRepricedSummary(data);
+      setLastReprisedAt(Date.now());
       // Reflect the fresh mean in the editable price field so the dealer
       // sees what's about to be written. Trust the user — they can still
       // manually overwrite this before Save.
@@ -1016,34 +1061,91 @@ function ReviewCard({
           will write "No active listings" when this row saves. */}
       {repricedSummary && (
         <div
-          className="rounded-xl bg-emerald-50 border border-emerald-200 px-3 py-2 text-[12px] text-emerald-900 flex items-center justify-between gap-2"
+          className="rounded-xl bg-emerald-50 border border-emerald-200 px-3 py-2 text-[12px] text-emerald-900 flex flex-col gap-2"
           data-testid="text-review-reprice-preview"
         >
-          <div className="min-w-0">
-            {repricedSummary.summary.count > 0 ? (
-              <>
-                <span className="font-semibold">
-                  ${(repricedSummary.summary.mean ?? 0).toFixed(2)}
-                </span>{" "}
-                <span className="text-emerald-700">
-                  · {repricedSummary.summary.count} listing
-                  {repricedSummary.summary.count === 1 ? "" : "s"}
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0 flex items-center gap-2">
+              {repricedSummary.summary.count > 0 ? (
+                <>
+                  <span className="font-semibold">
+                    ${(repricedSummary.summary.mean ?? 0).toFixed(2)}
+                  </span>{" "}
+                  <span className="text-emerald-700">
+                    · {repricedSummary.summary.count} listing
+                    {repricedSummary.summary.count === 1 ? "" : "s"}
+                  </span>
+                </>
+              ) : (
+                <span className="text-emerald-700">No active listings</span>
+              )}
+              {/* PR AE: Fresh badge — bypassCache=true on this reprice, so
+                  for FRESH_BADGE_MS the dealer knows these comps came
+                  from a just-now Browse fetch, not the 60s cache. */}
+              {freshNow && (
+                <span
+                  className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-600 text-white"
+                  data-testid="badge-reprice-fresh"
+                >
+                  Fresh
                 </span>
-              </>
-            ) : (
-              <span className="text-emerald-700">No active listings</span>
+              )}
+            </div>
+            {repricedSummary.ebaySearchUrl && (
+              <a
+                href={repricedSummary.ebaySearchUrl}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="text-[11px] text-emerald-800 underline shrink-0"
+                data-testid="link-review-reprice-ebay"
+              >
+                View on eBay
+              </a>
             )}
           </div>
-          {repricedSummary.ebaySearchUrl && (
-            <a
-              href={repricedSummary.ebaySearchUrl}
-              target="_blank"
-              rel="noreferrer noopener"
-              className="text-[11px] text-emerald-800 underline shrink-0"
-              data-testid="link-review-reprice-ebay"
+
+          {/* PR AE (Bug 3a): per-listing strip — same scored pool that
+              drove the mean above. Belt-and-suspenders Graded chip on
+              any title that still mentions PSA/BGS/SGC/CGC/graded/
+              slabbed (the server-side PICKER_EXCLUSION_CHAIN now
+              negates those, but eBay's keyword match is fuzzy). */}
+          {Array.isArray(repricedSummary.listings) && repricedSummary.listings.length > 0 && (
+            <ul
+              className="flex flex-col gap-1 border-t border-emerald-200 pt-2"
+              data-testid="list-reprice-listings"
             >
-              View on eBay
-            </a>
+              {repricedSummary.listings.slice(0, 5).map((listing, idx) => {
+                const graded = isGradedTitle(listing.title);
+                return (
+                  <li
+                    key={`${listing.url}-${idx}`}
+                    className="flex items-center justify-between gap-2 text-[11px]"
+                    data-testid={`reprice-listing-${idx}`}
+                  >
+                    <a
+                      href={listing.url}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                      className="truncate text-emerald-900 hover:underline flex-1 min-w-0"
+                      title={listing.title}
+                    >
+                      {listing.title}
+                    </a>
+                    {graded && (
+                      <span
+                        className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-800 border border-amber-200 shrink-0"
+                        data-testid={`badge-reprice-graded-${idx}`}
+                      >
+                        Graded
+                      </span>
+                    )}
+                    <span className="font-semibold tabular-nums shrink-0">
+                      ${(listing.price ?? 0).toFixed(2)}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
           )}
         </div>
       )}

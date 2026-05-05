@@ -269,6 +269,7 @@ const PICKER_EXCLUSION_CHAIN = [
   '-parallel', '-refractor', '-xfractor',
   '-rainbow', '-mojo', '-holo', '-relic', '-memorabilia',
   '-"game-used"', '-"game used"', '-patch', '-jersey',
+  '-PSA', '-BGS', '-SGC', '-CGC', '-graded', '-slabbed',
 ].join(' ');
 
 /**
