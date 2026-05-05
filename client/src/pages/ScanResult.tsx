@@ -1751,22 +1751,40 @@ function DetailsTab({
               { src: backImage, label: "Back" },
             ]
               .filter((i) => !!i.src)
-              .map((i) => (
-                <div
-                  key={i.label}
-                  className="aspect-[3/4] rounded-xl overflow-hidden bg-slate-100 relative"
-                >
-                  <img
-                    src={i.src}
-                    alt={i.label}
-                    className="w-full h-full object-cover"
-                  />
-                  <span className="absolute bottom-2 left-2 text-[10px] text-white bg-black/50 rounded px-1.5 py-0.5 flex items-center gap-1">
-                    <Camera className="w-3 h-3" />
-                    {i.label}
-                  </span>
-                </div>
-              ))}
+              .map((i) => {
+                // PR AG — graded slabs need to show the full image including
+                // the top label section (PSA/BGS/SGC bar with grader/year/
+                // player/grade). Raw cards keep the existing object-cover
+                // crop which is tuned for card body. For graded we letterbox
+                // (object-contain + slab-friendly aspect) so the label stays
+                // visible — slate background makes the empty bars look
+                // intentional rather than broken.
+                const isGraded = !!cardData.isGraded;
+                return (
+                  <div
+                    key={i.label}
+                    className={cn(
+                      "rounded-xl overflow-hidden relative",
+                      isGraded
+                        ? "aspect-[2.6/3.7] bg-slate-100"
+                        : "aspect-[3/4] bg-slate-100",
+                    )}
+                  >
+                    <img
+                      src={i.src}
+                      alt={i.label}
+                      className={cn(
+                        "w-full h-full",
+                        isGraded ? "object-contain" : "object-cover",
+                      )}
+                    />
+                    <span className="absolute bottom-2 left-2 text-[10px] text-white bg-black/50 rounded px-1.5 py-0.5 flex items-center gap-1">
+                      <Camera className="w-3 h-3" />
+                      {i.label}
+                    </span>
+                  </div>
+                );
+              })}
           </div>
         </div>
       )}
