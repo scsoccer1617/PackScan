@@ -37,6 +37,7 @@ import CollectionPickerSheet, {
   type CollectionCandidate,
 } from "@/components/CollectionPickerSheet";
 import { Camera, Check, Loader2, ScanLine, ScanSearch, Sparkles, ThumbsDown, ThumbsUp, X } from "lucide-react";
+import { postScanCorrections } from "@/lib/scanCorrections";
 import { cn } from "@/lib/utils";
 import type { CardFormValues } from "@shared/schema";
 import { joinPlayerNames, type Player } from "@shared/players";
@@ -1077,33 +1078,45 @@ export default function ScanResult() {
     // Build the merged card in one shot so the effect sees a stable
     // reference change exactly once.
     const next: Partial<CardFormValues> = { ...before, ...patch };
-    const fieldsToLog: (keyof CardFormValues)[] = [
-      "cardNumber", "playerFirstName", "playerLastName", "year", "brand",
-      "collection", "set", "foilType", "variant", "serialNumber",
-    ];
-    for (const f of fieldsToLog) {
-      const oldVal = (before as any)[f] ?? null;
-      const newVal = (next as any)[f] ?? null;
-      if (String(oldVal ?? "") !== String(newVal ?? "")) {
-        try {
-          fetch("/api/scan-corrections", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              field: f,
-              detected: oldVal,
-              corrected: newVal,
-              brand: next.brand,
-              year: next.year,
-              collection: next.collection,
-              set: (next as any).set,
-              playerFirstName: next.playerFirstName,
-              playerLastName: next.playerLastName,
-            }),
-          }).catch(() => {});
-        } catch {}
-      }
-    }
+    // PR Z: log every (predicted → corrected) field diff for ML training.
+    // Fire-and-forget — never blocks save, never throws. Empty diff is a
+    // no-op (postScanCorrections short-circuits on the client). One POST
+    // per save instead of one per field.
+    const playerJoin = (first?: unknown, last?: unknown) =>
+      [first, last]
+        .filter((s): s is string => typeof s === "string" && !!s.trim())
+        .map((s) => s.trim())
+        .join(" ");
+    const beforeForDiff = {
+      player: playerJoin((before as any).playerFirstName, (before as any).playerLastName),
+      year: (before as any).year,
+      brand: (before as any).brand,
+      set: (before as any).set,
+      collection: (before as any).collection,
+      cardNumber: (before as any).cardNumber,
+      parallel: (before as any).variant,
+      serialNumber: (before as any).serialNumber,
+      foilType: (before as any).foilType,
+    };
+    const afterForDiff = {
+      player: playerJoin((next as any).playerFirstName, (next as any).playerLastName),
+      year: (next as any).year,
+      brand: (next as any).brand,
+      set: (next as any).set,
+      collection: (next as any).collection,
+      cardNumber: (next as any).cardNumber,
+      parallel: (next as any).variant,
+      serialNumber: (next as any).serialNumber,
+      foilType: (next as any).foilType,
+    };
+    void postScanCorrections({
+      scanId: flow.userScanId != null ? String(flow.userScanId) : "",
+      source: "single_scan",
+      original: beforeForDiff,
+      edited: afterForDiff,
+      frontImageUrl: frontImage || null,
+      backImageUrl: backImage || null,
+    });
     // Reset the priceInfo so the hero subtitle doesn't flash a stale avg
     // price while the re-priced query is in flight.
     setPriceInfo(null);
