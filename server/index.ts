@@ -16,6 +16,7 @@ import { setupAuth } from "./auth";
 import { registerSheetRoutes } from "./sheetsRoutes";
 import { registerObjectStorageRoutes } from "./replit_integrations/object_storage";
 import { registerBulkScanRoutes } from "./routes/bulkScan";
+import { registerScanCorrectionsRoutes } from "./routes/scanCorrections";
 import { registerScanConfirmationsRoutes } from "./routes/scanConfirmations";
 import { resumeRunningBatches } from "./bulkScan/processor";
 
@@ -121,6 +122,7 @@ app.use((req, res, next) => {
   registerSheetRoutes(app);
   registerObjectStorageRoutes(app);
   registerBulkScanRoutes(app);
+  registerScanCorrectionsRoutes(app);
   registerScanConfirmationsRoutes(app);
   const server = await registerRoutes(app);
 

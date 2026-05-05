@@ -36,6 +36,7 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { postScanCorrections } from "@/lib/scanCorrections";
 import { cn } from "@/lib/utils";
 import type { Player } from "@shared/players";
 import {
@@ -749,11 +750,12 @@ function ReviewCard({
       return;
     }
     const edits = buildEdits();
-    // PR AA — diff edited form values against the analyzer snapshot.
-    // Empty diff means "model was right, dealer just confirmed" → log
-    // a positive label. Non-empty diff means dealer corrected something
-    // — PR Z's /api/scan-corrections handles that path; we deliberately
-    // don't fire it here so PR AA can merge independently.
+    // PR Z + PR AA hybrid: every Save logs ONE event for ML training.
+    // - Empty diff (analyzer was correct, dealer just clicked Save) →
+    //   POST /api/scan-confirmations (PR AA, positive label).
+    // - Non-empty diff (dealer corrected one or more fields) →
+    //   POST /api/scan-corrections (PR Z, per-field corrections).
+    // Both calls are fire-and-forget; they never block save, never throw.
     const original: PredictedFields = {
       player: seededPlayerText,
       year: typeof snapshot.year === "number" ? snapshot.year : (snapshot.year ?? null),
@@ -779,6 +781,51 @@ function ReviewCard({
         scanId: `bulk-${item.batchId}-${item.id}`,
         source: "bulk_review",
         predicted: original,
+        originalConfidence:
+          item.confidenceScore != null ? Number(item.confidenceScore) : null,
+      });
+    } else {
+      void postScanCorrections({
+        scanId: `bulk-${item.batchId}-${item.id}`,
+        source: "bulk_review",
+        original: {
+          player: seededPlayerText,
+          year: snapshot.year,
+          brand: snapshot.brand,
+          set: snapshot.set,
+          collection: snapshot.collection,
+          cardNumber: snapshot.cardNumber,
+          parallel: snapshot.variant,
+          team: snapshot.team,
+          manufacturer: snapshot.manufacturer,
+          rookie: !!snapshot.isRookieCard,
+          autograph: !!snapshot.isAutographed,
+          memorabilia: !!snapshot.isMemorabilia,
+          serialNumber: snapshot.serialNumber,
+          foilType: snapshot.foilType,
+        },
+        edited: {
+          player,
+          year,
+          brand,
+          set: setName,
+          collection,
+          cardNumber,
+          parallel: variant,
+          team: snapshot.team,
+          manufacturer: snapshot.manufacturer,
+          rookie: isRookieCard,
+          autograph: isAutographed,
+          memorabilia: snapshot.isMemorabilia,
+          serialNumber,
+          foilType,
+        },
+        frontImageUrl: item.frontFileId
+          ? `/api/bulk-scan/items/${item.id}/image/front`
+          : null,
+        backImageUrl: item.backFileId
+          ? `/api/bulk-scan/items/${item.id}/image/back`
+          : null,
         originalConfidence:
           item.confidenceScore != null ? Number(item.confidenceScore) : null,
       });
