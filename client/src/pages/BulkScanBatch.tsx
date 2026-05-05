@@ -114,6 +114,9 @@ const REASON_LABELS: Record<string, string> = {
 
   // Operational
   quota_exhausted: "Daily scan limit reached — try again tomorrow",
+
+  // PR AF: front/back swap auto-correction
+  front_back_auto_corrected: "Auto-flipped — verify front/back",
 };
 
 function reasonLabel(r: string): string {
@@ -883,16 +886,24 @@ function ReviewCard({
       </div>
 
       {/* Reasons */}
-      {reasons.length > 0 && (
+      {reasons.includes('front_back_auto_corrected') && (
+        <div className="rounded-xl bg-foil-amber/10 border border-foil-amber/30 px-3 py-2 flex items-start gap-2">
+          <Info className="w-3.5 h-3.5 text-foil-amber mt-0.5 shrink-0" />
+          <div className="text-[11px] text-foil-amber font-medium">
+            {reasonLabel('front_back_auto_corrected')}
+          </div>
+        </div>
+      )}
+      {reasons.filter((r) => r !== 'front_back_auto_corrected').length > 0 && (
         <div className="rounded-xl bg-foil-violet/5 border border-foil-violet/15 px-3 py-2 flex items-start gap-2">
           <Info className="w-3.5 h-3.5 text-foil-violet mt-0.5 shrink-0" />
           <div className="text-[11px] text-slate-700 space-y-0.5">
-            {reasons.slice(0, 4).map((r) => (
+            {reasons.filter((r) => r !== 'front_back_auto_corrected').slice(0, 4).map((r) => (
               <div key={r}>{reasonLabel(r)}</div>
             ))}
-            {reasons.length > 4 && (
+            {reasons.filter((r) => r !== 'front_back_auto_corrected').length > 4 && (
               <div className="text-muted-foreground">
-                +{reasons.length - 4} more
+                +{reasons.filter((r) => r !== 'front_back_auto_corrected').length - 4} more
               </div>
             )}
           </div>

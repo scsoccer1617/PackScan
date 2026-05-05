@@ -850,11 +850,14 @@ async function processItem(
   let resolvedBackFileName = item.backFileName;
   let resolvedReasons: string[] = priorReasons;
   let swapApplied = false;
-  if (classifierWasUncertain && geminiFrontIdx === 1) {
-    // The mock-request to handleDualSideCardAnalysis passed exifFront
-    // (built from item.frontFileId) as the FIRST image, so frontImageIndex
-    // refers to that ordering. Index 1 → the file we labelled `frontFileId`
-    // is actually the back; swap.
+  if (geminiFrontIdx === 1) {
+    // PR AF: Gemini's frontImageIndex is authoritative whenever it disagrees
+    // with the persisted ordering, regardless of classifier confidence. The
+    // OCR-text pair classifier is a heuristic that was observed to be
+    // confident-but-wrong on cards like 1968 Topps Clemente #374 and 1988
+    // O-Pee-Chee Whitaker, suppressing Gemini's correct dual-side override.
+    // Every swap routes to manual review via `front_back_auto_corrected`
+    // below so the dealer always confirms before save.
     console.log(
       `[bulkScan] item ${item.id}: front/back swap from Gemini frontImageIndex=1 (priorReasons=${priorReasons.join(',') || 'none'})`,
     );
@@ -1029,10 +1032,16 @@ async function processItem(
   });
 
   // PR AB: Admin bulk scans always go to review (mandatory confirm-before-sync).
-  const reviewReasons = reviewerIsAdmin && gate.reasons.length === 0
+  // PR AF: when Gemini's frontImageIndex triggered a front/back swap, append
+  // `front_back_auto_corrected` and force review so the dealer always
+  // confirms the flip before the row is synced.
+  const baseReasons = reviewerIsAdmin && gate.reasons.length === 0
     ? ['admin_mandatory_review']
     : gate.reasons;
-  const shouldAutoSave = shouldAutoSaveCard({
+  const reviewReasons = swapApplied
+    ? [...baseReasons, 'front_back_auto_corrected']
+    : baseReasons;
+  const shouldAutoSave = !swapApplied && shouldAutoSaveCard({
     reviewerIsAdmin,
     gateVerdict: gate.verdict,
     dryRun: !!batch.dryRun,
