@@ -484,13 +484,41 @@ export function registerBulkScanRoutes(app: Express): void {
     });
     const lastName = player.split(/\s+/).pop() ?? null;
 
+    // PR AE (Bug 3a): reprice was calling only getCompsSummary, returning
+    // summary without the listings array. The initial-scan path runs both
+    // summary AND a top-N pickerSearch and surfaces both, so the dealer
+    // saw the same mean but a different (or empty) listings strip on
+    // re-analyze. Mirror initial-scan: fire pickerSearch alongside the
+    // summary and return both. `bypassCache: true` on the summary so an
+    // edited identity always pulls a fresh Browse pool — the 60s cache
+    // would otherwise serve stale comps keyed on the pre-edit query.
     const { getCompsSummary } = await import('../ebayCompsSummary.js');
+    const { pickerSearch } = await import('../ebayPickerSearch.js');
     let summary;
+    let pickerResult: { active: Array<any>; query: string } = { active: [], query };
     try {
-      summary = await getCompsSummary(query, {
-        requireCardNumber: cardNumber,
-        requirePlayerLastName: isMultiPlayer ? null : lastName,
-      });
+      const [summaryRes, pickerRes] = await Promise.all([
+        getCompsSummary(query, {
+          requireCardNumber: cardNumber,
+          requirePlayerLastName: isMultiPlayer ? null : lastName,
+          bypassCache: true,
+        }),
+        pickerSearch(query, {
+          limit: 5,
+          requireCardNumber: cardNumber,
+          requirePlayerLastName: isMultiPlayer ? null : lastName,
+          brand,
+          set: setName,
+          year: yearStr,
+          playerFirstName: playerFirst,
+          scannedParallel: parallel || null,
+        }).catch((err: any) => {
+          console.warn(`[bulkScan/route] /reprice pickerSearch failed item=${itemId}:`, err?.message || err);
+          return { query, active: [], sold: [], soldAvailable: false } as any;
+        }),
+      ]);
+      summary = summaryRes;
+      pickerResult = pickerRes;
     } catch (err: any) {
       console.error(`[bulkScan/route] /reprice picker failed item=${itemId}:`, err?.message || err);
       return res.status(502).json({ error: err?.message || 'picker_failed' });
@@ -520,10 +548,19 @@ export function registerBulkScanRoutes(app: Express): void {
         )
       : null;
 
+    // PR AE: surface listings alongside summary so the client can render
+    // the EbayActiveComps panel (price strip + per-row chips) without
+    // a second round-trip. We return summary.listings — the same ≤10 BIN
+    // pool the mean was computed from — so the strip and the displayed
+    // price come from the same scored pool. Also include the picker
+    // top-5 (same query, same precision filters) for parity with the
+    // initial-scan analyze handler that runs both.
     return res.json({
       ok: true,
       itemId,
       summary,
+      listings: Array.isArray(summary?.listings) ? summary.listings : [],
+      pickerActive: Array.isArray(pickerResult?.active) ? pickerResult.active : [],
       ebaySearchUrl,
       query,
     });

@@ -92,6 +92,15 @@ export interface CompsSummaryOptions {
    * — a fresh call with the corrected identity will run normally.
    */
   signal?: AbortSignal;
+  /**
+   * PR AE: when true, skip the 60s in-memory cache for this call. Used by
+   * the reprice route so an edited identity always pulls a fresh Browse
+   * pool — a dealer who corrected the year and re-runs Analyze must not
+   * see the stale-cached pool from the original (incorrect) identity.
+   * The successful response is still written to cache so subsequent
+   * non-bypass callers (BR-2 fast-path, ScanResult mount) reuse it.
+   */
+  bypassCache?: boolean;
 }
 
 interface CacheEntry {
@@ -243,9 +252,11 @@ export async function getCompsSummary(
   const query = buildBrowseQuery(baseQuery, opts);
 
   const key = cacheKey(query, opts);
-  const cached = cache.get(key);
-  if (cached && cached.expiresAt > Date.now()) {
-    return cached.result;
+  if (!opts?.bypassCache) {
+    const cached = cache.get(key);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.result;
+    }
   }
 
   let result: CompsSummary;
