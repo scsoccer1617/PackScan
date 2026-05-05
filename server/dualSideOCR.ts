@@ -1861,6 +1861,34 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
 
     emitStage(req, 'getting_price', 'completed');
 
+    // PR W: bind the pre-fired /summary result to the response so the
+    // client renders price + "Browse on eBay" URL from the SAME pool
+    // the server already computed instead of firing a redundant
+    // mount-time fetch (which uses a DIFFERENT eBay code path:
+    // pickerSearch=best-match, getCompsSummary=newlyListed/BIN-only —
+    // these can disagree, leaving the chip green but the price blank).
+    // Awaited with a 1500ms cap so a slow/hung Browse call cannot
+    // hold up the response; null falls back to the legacy mount-time
+    // fetch.
+    let embeddedSummary: any = null;
+    if (preFirePromise) {
+      try {
+        embeddedSummary = await Promise.race([
+          preFirePromise,
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500)),
+        ]);
+        const summaryCount = embeddedSummary?.count ?? 0;
+        const summaryMean = embeddedSummary?.mean ?? null;
+        console.log(
+          `[holo-ebay] summary bound to response: count=${summaryCount} mean=${summaryMean} query="${embeddedSummary?.query || ''}"`,
+        );
+      } catch (err: any) {
+        console.warn('[holo-ebay] summary await failed (non-fatal):', err?.message || err);
+      }
+    } else {
+      console.log('[holo-ebay] no pre-fire promise (identity incomplete) — client will mount-fetch');
+    }
+
     return res.json({
       success: true,
       data: {
@@ -1871,6 +1899,12 @@ export async function handleDualSideCardAnalysis(req: MulterRequest, res: Respon
         // was incomplete or the call timed out / errored — client falls
         // back to its existing mount-time fetch in that case.
         comps: embeddedComps,
+        // PR W: pre-fired CompsSummary (mean + ≤10 BIN listings + query)
+        // so the result page renders price + URL without a redundant
+        // fetch. Null = pre-fire timed out / aborted / identity
+        // incomplete — client falls back to mount-time
+        // /api/ebay/comps/summary.
+        summary: embeddedSummary,
         // The exact query parts the server hashed eBay against. Client
         // compares this to the live `cardData` (post any picker/edit
         // changes) and refetches via React Query when they diverge.

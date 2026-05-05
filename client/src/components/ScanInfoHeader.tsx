@@ -56,14 +56,15 @@ interface ScanInfoHeaderProps {
 }
 
 // Field render order. Pure constant so tests can import it directly
-// to assert sequencing.
+// to assert sequencing. PR W: Player promoted to slot 1 — see render
+// comment below for rationale.
 export const SCAN_INFO_HEADER_FIELD_ORDER = [
+  "player",
   "year",
   "brand",
   "set",
   "collection",
   "cardNumber",
-  "player",
 ] as const;
 export type ScanInfoHeaderFieldKey =
   (typeof SCAN_INFO_HEADER_FIELD_ORDER)[number];
@@ -151,9 +152,17 @@ export function ScanInfoHeader({
       )}
     >
       <p className="text-[11px] uppercase tracking-wider font-semibold text-slate-500 mb-1">
-        Identifying card
+        Card Info
       </p>
       <p className="font-display text-base font-semibold leading-snug">
+        {/* PR W: Player first. Stage-1 stream order is determined by
+            Gemini's JSON emit order, which is unpredictable; pinning
+            Player to the position-1 slot here means the user always
+            sees the most identifying field first regardless of which
+            order the server fills the others in. Display order:
+            Player · Year · Brand · Set · Collection · #. */}
+        {renderField("player", player, "w-32", "scan-info-header-player")}{" "}
+        <span className="text-slate-400">·</span>{" "}
         {renderField("year", year, "w-10", "scan-info-header-year")}{" "}
         {renderField("brand", brand, "w-16", "scan-info-header-brand")}{" "}
         <span className="text-slate-400">·</span>{" "}
@@ -171,9 +180,7 @@ export function ScanInfoHeader({
           cardNumDisplay,
           "w-12",
           "scan-info-header-card-number",
-        )}{" "}
-        <span className="text-slate-400">·</span>{" "}
-        {renderField("player", player, "w-32", "scan-info-header-player")}
+        )}
       </p>
     </div>
   );

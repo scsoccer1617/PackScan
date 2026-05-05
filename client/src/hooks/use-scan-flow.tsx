@@ -22,6 +22,18 @@ export interface InitialCompsPayload {
   query: string;
   active: ActiveListing[];
 }
+// PR W: pre-fired CompsSummary shipped in the analyze response so the
+// result page renders price + "Browse on eBay" URL from the SAME pool
+// the server computed for chip 3, rather than firing a redundant
+// mount-time fetch through a different eBay code path.
+export interface InitialSummaryPayload {
+  mean: number | null;
+  median: number | null;
+  count: number;
+  query: string;
+  currency: string;
+  listings: ActiveListing[];
+}
 export interface CompsQuerySnapshot {
   year: number | string;
   brand: string;
@@ -57,6 +69,11 @@ export interface ScanFlowState {
    *  on identity-incomplete / timeout / error — client falls back to its
    *  mount-time fetch. */
   initialComps: InitialCompsPayload | null;
+  /** PR W: pre-fired CompsSummary (mean + ≤10 BIN listings + query). When
+   *  present, EbayActiveComps renders this directly and skips the
+   *  mount-time fetch — guarantees the displayed pool matches what the
+   *  server already computed for chip 3. */
+  initialSummary: InitialSummaryPayload | null;
   /** BR-2: exact query the server hashed eBay against. Compared against
    *  live cardData query parts to decide whether to refetch. */
   compsQuery: CompsQuerySnapshot | null;
@@ -82,6 +99,7 @@ const EMPTY: ScanFlowState = {
   holoGrade: null,
   userScanId: null,
   initialComps: null,
+  initialSummary: null,
   compsQuery: null,
   streamingConfirmAnswered: false,
   parallelConfirmedInStream: null,
