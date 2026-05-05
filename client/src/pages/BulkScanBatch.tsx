@@ -38,6 +38,11 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { cn } from "@/lib/utils";
 import type { Player } from "@shared/players";
+import {
+  computeConfirmationDiff,
+  logScanConfirmation,
+  type PredictedFields,
+} from "@/lib/scanConfirmation";
 
 type ItemStatus = "pending" | "processing" | "auto_saved" | "review" | "skipped" | "failed";
 
@@ -744,6 +749,40 @@ function ReviewCard({
       return;
     }
     const edits = buildEdits();
+    // PR AA — diff edited form values against the analyzer snapshot.
+    // Empty diff means "model was right, dealer just confirmed" → log
+    // a positive label. Non-empty diff means dealer corrected something
+    // — PR Z's /api/scan-corrections handles that path; we deliberately
+    // don't fire it here so PR AA can merge independently.
+    const original: PredictedFields = {
+      player: seededPlayerText,
+      year: typeof snapshot.year === "number" ? snapshot.year : (snapshot.year ?? null),
+      brand: snapshot.brand ?? null,
+      set: snapshot.set ?? null,
+      collection: snapshot.collection ?? null,
+      cardNumber: snapshot.cardNumber ?? null,
+      variant: snapshot.variant ?? null,
+      potentialVariant: snapshot.potentialVariant ?? null,
+    };
+    const editedFields: PredictedFields = {
+      player: [edits.playerFirstName, edits.playerLastName].filter(Boolean).join(" "),
+      year: edits.year ?? null,
+      brand: edits.brand ?? null,
+      set: edits.set ?? null,
+      collection: edits.collection ?? null,
+      cardNumber: edits.cardNumber ?? null,
+      variant: edits.variant ?? null,
+      potentialVariant: snapshot.potentialVariant ?? null,
+    };
+    if (computeConfirmationDiff(original, editedFields).length === 0) {
+      void logScanConfirmation({
+        scanId: `bulk-${item.batchId}-${item.id}`,
+        source: "bulk_review",
+        predicted: original,
+        originalConfidence:
+          item.confidenceScore != null ? Number(item.confidenceScore) : null,
+      });
+    }
     repriceMutation.mutate(edits, {
       onSuccess: (data) => {
         // Pass the fresh mean as estimatedValue so /save writes column P
